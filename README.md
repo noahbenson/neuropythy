@@ -2,7 +2,7 @@
 A neuroscience library for Python, intended to complement the existing nibabel library.
 
 ## Author ##########################################################################################
-Noah C. Benson <nben@nyu.edu>
+Noah C. Benson &lt;<nben@nyu.edu>&gt;
 
 ## Dependencies ####################################################################################
 
