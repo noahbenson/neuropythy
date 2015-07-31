@@ -100,7 +100,7 @@ class HarmonicEdgePotential:
         D0 = self.D0
         # calculate the total potential
         D = np.sqrt(np.sum((X0[:, E[0]] - X0[:, E[1]]) ** 2, 0))
-        return np.sum(0.5 * self.coefficient * (D - D0) ** 2)
+        return 0.5 * self.coefficient * np.sum((D - D0) ** 2)
     def grad(self, X):
         E = self.mesh.edges
         X0 = self.mesh.coordinates
@@ -133,12 +133,69 @@ class HarmonicAnglePotential:
         F = mesh.faces
         d = X0.shape[0]
         n = X0.shape[1]
-        m = F.shape[1] * 3
+        m0 = F.shape[1]
+        m = m0 * F.shape[0]
         # some relevant values we want to keep track of...
         self.mesh = mesh
         self.coefficient = self.constant / m
         self.X0 = X0
-        self.T0 = 0 #here
+        self.T0 = CorticalMesh.calculate_face_angles(F, X0)
+        # we need a summation matrix...
+        self.sumMatrix = sp.sparse.dok_matrix((n, m), dtype=np.float32)
+        for i in range(m0):
+            for j in range(F.shape[0]):
+                self.sum_matrix[F[j,i], j*m0 + i]
+        # and a constant hessian matrix...
+    def __call__(self, X):
+        T = CorticalMesh.calculate_face_angles(self.mesh.faces, X)
+        return 0.5 * self.coefficient * np.sum((T - self.T0) ** 2)
+    def grad(self, X):
+        F = self.mesh.faces
+        X0 = self.mesh.coordinates
+        T0 = self.T0
+        T = CorticalMesh.calculate_face_angles(F, X)
+        sinT = np.sin(T)
+        cosT = np.cos(T)
+        Xf = np.array([X[:,F[0]], X[:,F[1]], X[:,F[2]]])
+        sides = [Xf[1] - Xf[0], Xf[2] - Xf[1], Xf[0] - Xf[2]]
+        side_norms = map(
+            lambda side: np.sqrt((side**2).sum(0)),
+            sides)
+        normed_sides = map(
+            lambda side, norms: side / np.repeat([norms], X.shape[0], 0),
+            sides,
+            side_norms)
+        dT = T - T0
+        # below, g<m>[<n>] is the gradient for the angle centered at m for the vertex n
+        g0 = 2.0 * self.coefficient * [
+            0,
+            dT[0]/(side_norms[0] * sinT[0]) * (normed_sides[2] - normed_sides[0]*cosT[0]),
+            dT[0]/(side_norms[2] * sinT[0]) * (normed_sides[0] - normed_sides[2]*cosT[0])]
+        g0[0] = g0[1] + g0[2]
+        g0 = np.array(map(lambda el: el.flatten(), g0))
+
+        g1 = 2.0 * self.coefficient * [
+            dT[1]/(side_norms[0] * sinT[1]) * (normed_sides[1] - normed_sides[0]*cosT[1]),
+            0,
+            dT[1]/(side_norms[1] * sinT[1]) * (normed_sides[0] - normed_sides[1]*cosT[1])]
+        g1[1] = g1[0] + g1[2]
+        g1 = np.array(map(lambda el: el.flatten(), g1))
+
+        g2 = 2.0 * self.coefficient * [
+            dT[2]/(side_norms[2] * sinT[2]) * (normed_sides[1] - normed_sides[2]*cosT[2]),
+            dT[2]/(side_norms[1] * sinT[2]) * (normed_sides[2] - normed_sides[1]*cosT[2]),
+            0]
+        g2[2] = g2[0] + g2[1]
+        g2 = np.array(map(lambda el: el.flatten(), g2))
+            
+        # multiply these by the sum_matrix
+        g0 = map(lambda x: np.dot(self.sum_matrix, x), g0)
+        g1 = map(lambda x: np.dot(self.sum_matrix, x), g1)
+        g2 = map(lambda x: np.dot(self.sum_matrix, x), g2)
+        return g0 + g1 + g2
+        
+
+
         
 
 

@@ -11,7 +11,7 @@ import itertools
 import collections
 from pysistence import make_dict
 import pysistence
-import mrvolume
+#import mrvolume
 
 class CorticalMesh:
     '''CorticalMesh is a class that handles properties of the cortical surface mesh. 
