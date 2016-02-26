@@ -504,6 +504,15 @@ class CorticalMesh:
         else:
             self.add_property(name, arg)
 
+    def tangled(self, X=None):
+        if X is None: X = self.coordinates
+        if X.shape[0] > X.shape[1]: X = X.transpose()
+        # we assume that the face lists are in canonical (clockwise *or* counterclockwise) order
+        FX = X[:, self.index[self.faces]]
+        #here
+        
+        
+
     def map_vertices(self, f, merge=None):
         '''mesh.map_vertices(f) yields the result of mapping the function f over all vertices in
            the given mesh. For each vertex, f is called with a dictionary as the argument; the keys

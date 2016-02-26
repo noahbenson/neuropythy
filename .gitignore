@@ -4,3 +4,6 @@
 # This is a backup
 *-backup
 .first-commit-backup
+
+# Ignore hte guild directory
+build
