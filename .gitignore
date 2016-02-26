@@ -5,5 +5,7 @@
 *-backup
 .first-commit-backup
 
-# Ignore hte guild directory
+# Ignore the meta directories
 build
+dist
+*.egg-info

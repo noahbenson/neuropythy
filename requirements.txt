@@ -1,0 +1,5 @@
+numpy >= 1.2.0
+scipy >= 0.7.0
+nibabel >= 1.2.0
+pysistence >= 0.4.0
+
