@@ -321,7 +321,7 @@ class CorticalMesh:
                          lambda mesh,EX: np.sqrt(np.power(EX[0] - EX[1], 2).sum(0))),
 
         'face_angles': (
-            ('faces', 'coordinates'),
+            ('indexed_faces', 'coordinates'),
             lambda mesh,F,X: CorticalMesh.calculate_face_angles(F,X)),
         'face_normals': (
             ('faces', 'coordinates'),
@@ -530,7 +530,7 @@ class CorticalMesh:
                 geo.alignment_matrix_2D(m.index[align_vertex_id], align_axis),
                 mtx2D)
         # just set the coordinate matrix and return
-        m.coordinates = mtx2D
+        m.coordinates = scale * mtx2D
         return m
 
     def add_property(self, name, prop=Ellipsis):
