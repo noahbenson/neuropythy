@@ -1,0 +1,3 @@
+[submodule "lib/nben"]
+	path = lib/nben
+	url = https://github.com/noahbenson/nben
