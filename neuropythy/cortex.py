@@ -5,6 +5,7 @@
 
 import numpy as np
 import scipy as sp
+import neuropythy.geometry as geo
 import nibabel.freesurfer.io as fsio
 import os
 import itertools
@@ -70,8 +71,8 @@ class CorticalMesh:
                     return [
                         lambda idx: [],
                         lambda idx: self.vertex_index.get(idx[0], None),
-                        lambda idx: self.edge_index.get(idx, None),
-                        lambda idx: self.face_index.get(idx, None)
+                        lambda idx: self.edge_index.get(tuple(idx), None),
+                        lambda idx: self.face_index.get(tuple(idx), None)
                         ][len(index)](index)
             elif isinstance(index, np.ndarray):
                 return self[index.tolist()]
@@ -89,7 +90,7 @@ class CorticalMesh:
     @staticmethod
     def calculate_vertex_data(faces, edges, coords, vlab):
         n = coords.shape[1]
-        vertex_idx = {v:i for (v,i) in enumerate(vlab)}
+        vertex_idx = {v:i for (i,v) in enumerate(vlab)}
         d = collections.defaultdict(list)
         for idx in itertools.product(*map(range, edges.shape)):
             d[edges[idx]].append(idx)
@@ -107,10 +108,11 @@ class CorticalMesh:
         idx = {}#sp.sparse.lil_matrix((limit, limit), dtype='int')
         edge_list = [None for i in range(3*faces.size)]
         k = 0
+        rng = range(faces.shape[1])
         for (e,i) in zip(
             zip(np.concatenate((faces[0], faces[1], faces[2])),
                 np.concatenate((faces[1], faces[2], faces[0]))),
-            range(3*faces.shape[1])):
+            np.concatenate((rng, rng, rng))):
             if e not in idx:
                 idx[e] = k
                 idx[e[::-1]] = k
@@ -295,16 +297,28 @@ class CorticalMesh:
         'edge_data': (('faces',), lambda mesh,F: CorticalMesh.calculate_edge_data(F)),
         'edges': (('edge_data',), lambda mesh,ED: ED[0]),
         'edge_index': (('edge_data',), lambda mesh,ED: ED[1]),
+        'indexed_edges': (('edges','vertex_index'), 
+                          lambda mesh,E,VI: np.asarray([[VI[u] for u in E[0]],
+                                                        [VI[v] for v in E[1]]])),
         'edge_face_index': (('edge_data',), lambda mesh,ED: ED[2]),
 
         'face_index': (('faces',), lambda mesh,F: CorticalMesh.calculate_face_data(F)),
+        'indexed_faces': (('faces','vertex_index'), 
+                          lambda mesh,F,VI: np.asarray([[VI[a] for a in F[0]],
+                                                        [VI[b] for b in F[1]],
+                                                        [VI[c] for c in F[2]]])),
 
         'index': (
             ('vertex_index', 'edge_index', 'face_index'),
             lambda mesh, VI, EI, FI: CorticalMesh.calculate_index(VI, EI, FI)),
 
-        'edge_coordinates': (('edges', 'coordinates'), lambda mesh,E,X: X[:,E]),
-        'face_coordinates': (('faces', 'coordinates'), lambda mesh,F,X: X[:,F]),
+        'edge_coordinates': (('indexed_edges', 'coordinates'), 
+                             lambda mesh,E,X: np.asarray([X[:,E[0]], X[:, E[1]]])),
+        'face_coordinates': (('indexed_faces', 'coordinates'),
+                             lambda mesh,F,X: np.asarray([X[:,F[0]], X[:, F[1]], X[:, F[2]]])),
+
+        'edge_lengths': (('edge_coordinates',), 
+                         lambda mesh,EX: np.sqrt(np.power(EX[0] - EX[1], 2).sum(0))),
 
         'face_angles': (
             ('faces', 'coordinates'),
@@ -410,7 +424,9 @@ class CorticalMesh:
            also be specified. For any of these which is true, those elements will be filtered using
            the filt function. For any that is false, the elements will be excluded only if their
            subparts are excluded. For any that is neither true or false, it must be a function, in
-           which case that function is used as a filter in place of the filt function.'''
+           which case that function is used as a filter in place of the filt function.
+           If filt is instead a list of vertex labels, then filter_vertices is not used and instead
+           the given list is used as the initial vertex filter.'''
         vf = filt if filter_vertices is True \
             else filter_vertices if filter_vertices is not False \
             else None
@@ -420,32 +436,102 @@ class CorticalMesh:
         ff = filt if filter_faces is True \
             else filter_faces if filter_faces is not False \
             else None
-        vlist = set(self.vertex_labels)
-        elist = set(map(tuple, self.edges.transpose().tolist()))
-        flist = set(map(tuple, self.faces.transpose().tolist()))
-        if vf is not None: vexcl = set([u for u in vlist if not vf(u)])
-        else:              vexcl = set([])
-        if ef is not None: eexcl = set([e for e in elist if not ef(u)])
-        else:              eexcl = set([])
-        if ff is not None: fexcl = set([u for u in flist if not ff(u)])
-        else:              fexcl = set([])
-        for u in vexcl:
-            eexcl.update(self.vertex_edges(u))
-            fexcl.update(self.vertex_faces(u))
-        for e in eexcl:
-            fexcl.update([self.edge_faces(tuple(self.edges[:,e]))])
-        vincl = vlist - vexcl
-        fincl = flist - fexcl
+        # Find the included vertices:
+        if isinstance(vf, np.ndarray): vincl = vf
+        elif isinstance(vf, list):     vincl = vf
+        elif vf is not None:           vincl = [u for u in self.vertex_labels if vf(u)]
+        else:                          vincl = self.vertex_labels
+        vincl = set(self.index[vincl])
+        # Find the included edges:
+        es = self.indexed_edges
+        edge_idcs = range(self.edges.shape[1])
+        if isinstance(ef, (list, set)):
+            ef = np.asarray(ef)
+        if ef is None:
+            eincl = edge_idcs
+        elif isinstance(ef, np.ndarray): 
+            if len(ef.shape) == 1:
+                eincl = self.index[ef]
+            else:
+                eincl = self.index[ef.T if ef.shape[1] != 2 else ef]
+        else:
+            elst = self.edge_list.T
+            if ef is None: eincl = edge_idcs
+            else:          eincl = [e for e in edge_idcs if ef(tuple(elst[e]))]
+        # filter by vertices
+        eincl = set(map(int, eincl))
+        eincl.intersection_update(
+            np.union1d([], [l for idcs in self.vertex_edges(vincl)
+                              for l in idcs
+                              if es[0,l] in vincl and es[1,l] in vincl]))
+        # Find the included faces
+        face_idcs = range(self.faces.shape[1])
+        fs = self.indexed_faces
+        if isinstance(ff, (list, set)):
+            ff = np.asarray(ff)
+        if ff is None:
+            fincl = face_idcs
+        elif isinstance(ff, np.ndarray): 
+            if len(ff.shape) == 1:
+                fincl = ff.tolist()
+            else:
+                fincl = self.index[ff.T if ff.shape[1] != 3 else ff]
+        else:
+            if ff is None: fincl = face_idcs
+            else:          fincl = [f for f in face_idcs if ff(tuple(self.faces[:,f]))]
+        # filter by vertices
+        fincl = set(map(int, fincl))
+        fincl.intersection_update(
+            np.union1d([], [l for idcs in self.vertex_faces(vincl)
+                              for l in idcs
+                              if fs[0,l] in vincl and fs[1,l] in vincl and fs[2,l] in vincl]))
+        vincl = list(vincl)
+        eincl = list(eincl)
+        fincl = list(fincl)
+        # Make the subsets
         I = self.index[vincl]
         X = self.coordinates[:, I]
         V = self.vertex_labels[I]
-        F = self.faces[:, self.index[fincl]]
+        F = self.faces[:, fincl]
         opts = self.options.copy()
         meta = opts.get('meta_data', {}).copy()
         opts = opts.without('meta_data')
         meta = meta.using(source_mesh=self)
         props = {name: prop[I] for (name,prop) in self.properties.iteritems()}
         return CorticalMesh(X, F, vertex_labels=V, meta_data=meta, properties=props, **opts)
+
+    def orthographic_projection(self, center, radius, 
+                                align_vertex_id=None, align_axis=None, scale=None):
+        '''
+        mesh.orthographic_projection((x,y,z), r) yields a 2D mesh made by projecting the vertices
+        of the 3D mesh onto a 2D map orthographically for all vertices with a minor vector angle 
+        with the given center (x,y,z) that is less than the given radius r. The optional parameters
+        align_vertex_id and align_axis specify that the vertex with the given id (label) be aligned
+        to the given 2D axis in the final map. The optional argument scale may also be specified to
+        scale the resulting map; by default, the norm of the given center is used.
+        '''
+        # start by selecting only the vertices that are close enough to the center:
+        n = len(self.vertex_labels)
+        X = self.coordinates
+        idcs = [i for i in range(n) if geo.vector_angle(center, X[:, i]) < radius]
+        m = self.select(self.vertex_labels[idcs])
+        # now, edit the coordinates so that they are 2D and appropriately centered/scaled
+        if scale is None:
+            scale = np.linalg.norm(center)
+        # align the coordinates to be centered around the center...
+        mtx2D = np.dot(
+            geo.alignment_matrix_3D(center, (0, 0, 1))[0:2, :],
+            m.coordinates)
+        # if there is an alignment option, go ahead wiht it
+        if align_vertex_id is not None:
+            if align_axis is None:
+                align_axis = (1, 0)
+            mtx2D = np.dot(
+                geo.alignment_matrix_2D(m.index[align_vertex_id], align_axis),
+                mtx2D)
+        # just set the coordinate matrix and return
+        m.coordinates = mtx2D
+        return m
 
     def add_property(self, name, prop=Ellipsis):
         '''mesh.add_property(name, prop) adds (or overwrites) the given property with the given name
@@ -503,15 +589,6 @@ class CorticalMesh:
                 return self.property_value(name)
         else:
             self.add_property(name, arg)
-
-    def tangled(self, X=None):
-        if X is None: X = self.coordinates
-        if X.shape[0] > X.shape[1]: X = X.transpose()
-        # we assume that the face lists are in canonical (clockwise *or* counterclockwise) order
-        FX = X[:, self.index[self.faces]]
-        #here
-        
-        
 
     def map_vertices(self, f, merge=None):
         '''mesh.map_vertices(f) yields the result of mapping the function f over all vertices in

@@ -16,4 +16,5 @@ setup(
         'numpy>=1.2',
         'scipy>=0.7',
         'nibabel>=1.2',
-        'pysistence>=0.4'])
+        'pysistence>=0.4',
+        'py4j>=0.9'])
