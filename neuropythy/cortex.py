@@ -6,6 +6,7 @@
 import numpy as np
 import scipy as sp
 import neuropythy.geometry as geo
+from neuropythy.immutable import Immutable
 import nibabel.freesurfer.io as fsio
 import os
 import itertools
@@ -14,7 +15,7 @@ from pysistence import make_dict
 import pysistence
 #import mrvolume
 
-class CorticalMesh:
+class CorticalMesh(Immutable):
     '''CorticalMesh is a class that handles properties of the cortical surface mesh. 
        The cortical mesh representation contains only three pieces of concrete data and many pieces
        of derived data. All derived data is lazily computed when requested then saved. Any changes
@@ -289,96 +290,66 @@ class CorticalMesh:
     __lazy_members = {
         'vertex_data': (
             ('faces', 'edges', 'coordinates', 'vertex_labels'),
-            lambda mesh,F,E,X,L: CorticalMesh.calculate_vertex_data(F, E, X, L)),
-        'vertex_index': (('vertex_data',), lambda mesh,VD: VD[0]),
-        'vertex_edge_index': (('vertex_data',), lambda mesh,VD: VD[1]),
-        'vertex_face_index': (('vertex_data',), lambda mesh,VD: VD[2]),
+            lambda F,E,X,L: CorticalMesh.calculate_vertex_data(F, E, X, L)),
+        'vertex_index': (('vertex_data',), lambda VD: VD[0]),
+        'vertex_edge_index': (('vertex_data',), lambda VD: VD[1]),
+        'vertex_face_index': (('vertex_data',), lambda VD: VD[2]),
 
-        'edge_data': (('faces',), lambda mesh,F: CorticalMesh.calculate_edge_data(F)),
-        'edges': (('edge_data',), lambda mesh,ED: ED[0]),
-        'edge_index': (('edge_data',), lambda mesh,ED: ED[1]),
+        'edge_data': (('faces',), lambda F: CorticalMesh.calculate_edge_data(F)),
+        'edges': (('edge_data',), lambda ED: ED[0]),
+        'edge_index': (('edge_data',), lambda ED: ED[1]),
         'indexed_edges': (('edges','vertex_index'), 
-                          lambda mesh,E,VI: np.asarray([[VI[u] for u in E[0]],
-                                                        [VI[v] for v in E[1]]])),
-        'edge_face_index': (('edge_data',), lambda mesh,ED: ED[2]),
+                          lambda E,VI: np.asarray([[VI[u] for u in E[0]], [VI[v] for v in E[1]]])),
+        'edge_face_index': (('edge_data',), lambda ED: ED[2]),
 
-        'face_index': (('faces',), lambda mesh,F: CorticalMesh.calculate_face_data(F)),
+        'face_index': (('faces',), lambda F: CorticalMesh.calculate_face_data(F)),
         'indexed_faces': (('faces','vertex_index'), 
-                          lambda mesh,F,VI: np.asarray([[VI[a] for a in F[0]],
-                                                        [VI[b] for b in F[1]],
-                                                        [VI[c] for c in F[2]]])),
+                          lambda F,VI: np.asarray([[VI[a] for a in F[0]],
+                                                   [VI[b] for b in F[1]],
+                                                   [VI[c] for c in F[2]]])),
 
         'index': (
             ('vertex_index', 'edge_index', 'face_index'),
-            lambda mesh, VI, EI, FI: CorticalMesh.calculate_index(VI, EI, FI)),
+            lambda VI, EI, FI: CorticalMesh.calculate_index(VI, EI, FI)),
 
         'edge_coordinates': (('indexed_edges', 'coordinates'), 
-                             lambda mesh,E,X: np.asarray([X[:,E[0]], X[:, E[1]]])),
+                             lambda E,X: np.asarray([X[:,E[0]], X[:, E[1]]])),
         'face_coordinates': (('indexed_faces', 'coordinates'),
-                             lambda mesh,F,X: np.asarray([X[:,F[0]], X[:, F[1]], X[:, F[2]]])),
+                             lambda F,X: np.asarray([X[:,F[0]], X[:, F[1]], X[:, F[2]]])),
 
         'edge_lengths': (('edge_coordinates',), 
-                         lambda mesh,EX: np.sqrt(np.power(EX[0] - EX[1], 2).sum(0))),
+                         lambda EX: np.sqrt(np.power(EX[0] - EX[1], 2).sum(0))),
 
         'face_angles': (
             ('indexed_faces', 'coordinates'),
-            lambda mesh,F,X: CorticalMesh.calculate_face_angles(F,X)),
+            lambda F,X: CorticalMesh.calculate_face_angles(F,X)),
         'face_normals': (
-            ('faces', 'coordinates'),
-            lambda mesh,F,X: CorticalMesh.calculate_face_normals(F,X)),
+            ('indexed_faces', 'coordinates'),
+            lambda F,X: CorticalMesh.calculate_face_normals(F,X)),
         'vertex_normals': (
             ('vertex_face_index', 'face_normals'),
-            lambda mesh,VF,FN: CorticalMesh.calculate_vertex_normals(VF, FN)),
+            lambda VF,FN: CorticalMesh.calculate_vertex_normals(VF, FN)),
 
         'meta_data': (
              ('options',),
-             lambda mesh,opts: opts.get('meta_data', {})),
+             lambda opts: opts.get('meta_data', {})),
 
         'spherical_coordinates': (
             ('coordinates',),
-            lambda mesh,X: CorticalMesh.calculate_spherical_coordinates(X))}
-    
-    # This function will clear the lazily-evaluated members when a given value is changed
-    def __update_values(self, name):
-        for (sname, (deps, fn)) in CorticalMesh.__lazy_members.items():
-            if name in deps and sname in self.__dict__:
-                del self.__dict__[sname]
-
-    # This is the most important function, given the encapsulation of this class:
-    def __setattr__(self, name, val):
-        if name in CorticalMesh.__settable_members:
-            fn = CorticalMesh.__settable_members[name]
-            self.__dict__[name] = fn(self, val)
-            self.__update_values(name)
-        elif name in CorticalMesh.__lazy_members:
-            raise ValueError('The member %s is a lazy value and cannot be set' % name)
-        else:
-            raise ValueError('Unrecognized CorticalMesh member: %s' % name)
-
-    # The getattr method makes sure that lazy members are computed when requested
-    def __getattr__(self, name):
-        if name in self.__dict__:
-            return self.__dict__[name]
-        elif name in CorticalMesh.__lazy_members:
-            (deps, fn) = CorticalMesh.__lazy_members[name]
-            tmp = fn(self, *map(lambda x: getattr(self, x), deps))
-            self.__dict__[name] = tmp
-            return tmp
-        else:
-            raise ValueError('Unrecognized member of CorticalMesh: %s' % name)
+            lambda X: CorticalMesh.calculate_spherical_coordinates(X))}
     
         
     ################################################################################################
     # Constructor
 
     def __init__(self, coords, faces, **args):
+        Immutable.__init__(self, CorticalMesh.__settable_members, {}, CorticalMesh.__lazy_members)
         # Setup coordinates
         self.coordinates = coords
-        n = self.coordinates.shape[1]
         # And faces...
         self.faces = faces
         # If vertex labels were provided, make sure to set these
-        self.vertex_labels = args.pop('vertex_labels', range(n))
+        self.vertex_labels = args.pop('vertex_labels', range(self.coordinates.shape[1]))
         # Same with properties
         self.properties = args.pop('properties', make_dict())
         # Finally, set the remaining options...
