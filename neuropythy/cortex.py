@@ -13,7 +13,6 @@ import itertools
 import collections
 from pysistence import make_dict
 import pysistence
-#import mrvolume
 
 class CorticalMesh(Immutable):
     '''CorticalMesh is a class that handles properties of the cortical surface mesh. 
@@ -193,7 +192,7 @@ class CorticalMesh(Immutable):
         theta = np.arctan2(normed[0], normed[1])
         phi = np.arcsin(normed[2])
         return np.array([theta, phi, rho])
-        
+
 
     ################################################################################################
     # Lazy/Static Interface
@@ -337,6 +336,8 @@ class CorticalMesh(Immutable):
         'spherical_coordinates': (
             ('coordinates',),
             lambda X: CorticalMesh.calculate_spherical_coordinates(X))}
+        
+   
     
         
     ################################################################################################
@@ -585,7 +586,7 @@ class CorticalMesh(Immutable):
            is given a True value in the mask and all other vertives are given False values. The
            function f should operate on a dict p which is identical to that passed to the method
            mesh.map_vertices.'''
-        return (np.array(self.map_vertices(f)) == True)
+        return self.vertex_labels[np.array(self.map_vertices(f)) == True]
 
     def option(self, opt):
         '''mesh.option(x) yields the value of the option f in the given mesh. If x is not an option
@@ -694,4 +695,3 @@ def cortex_to_mrvolume(mesh, property):
 
     #here
     return True
-

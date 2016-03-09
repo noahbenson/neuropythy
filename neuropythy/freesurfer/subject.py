@@ -10,9 +10,10 @@ import scipy.spatial as space
 import nibabel.freesurfer.io as fsio
 import nibabel.freesurfer.mghformat as fsmgh
 import os, math
+import itertools
 import pysistence
 from pysistence import make_dict
-from cortex import CorticalMesh
+from neuropythy.cortex import CorticalMesh
 
 # These static functions are just handy
 def spherical_distance(pt0, pt1):
@@ -507,11 +508,11 @@ class Subject:
 ####################################################################################################
 # Some FreeSurfer specific functions
 
-def cortex_to_ribbon_map(sub, k=12, distance=4, hemi=None, sigma=0.35355):
-    '''cortex_to_ribbon_map(sub) yields a dictionary whose keys are the indices of the ribbon voxels
-         for the given FreeSurfer subject sub and whose values are a tuple of both (0) a list of
-         vertex labels associated with the given voxel and (1) a list of the weights associated with
-         each vertex (both in identical order).
+def cortex_to_ribbon_map_smooth(sub, hemi=None, k=12, distance=4, sigma=0.35355):
+    '''cortex_to_ribbon_map_smooth(sub) yields a dictionary whose keys are the indices of the ribbon
+         voxels for the given FreeSurfer subject sub and whose values are a tuple of both (0) a list
+         of vertex labels associated with the given voxel and (1) a list of the weights associated
+         with each vertex (both in identical order).
 
        These associations are determined by finding the k nearest neighbors (of the midgray surface)
        to each voxel then finding the lines from white-to-pial that pass within a certain distance
@@ -625,6 +626,119 @@ def cortex_to_ribbon_map(sub, k=12, distance=4, hemi=None, sigma=0.35355):
             d[wh, i].tolist())
     return res
 
+def _line_voxel_overlap(vx, xs, xe):
+    '''
+    _line_voxel_overlap((i,j,k), xs, xe) yields the fraction of the vector from xs to xe that
+      overlaps with the voxel (i,j,k); i.e., the voxel that starts at (i,j,k) and ends at
+      (i,j,k) + 1.
+    '''
+    # We want to consider the line segment from smaller to larger coordinate:
+    seg = [(x0,x1) if x0 <= x1 else (x1,x0) for (x0,x1) in zip(xs,xe)]
+    # First, figure out intersections of start and end values
+    isect = [(min(seg_end, vox_end), max(seg_start, vox_start))
+             if seg_end >= vox_start and seg_start <= vox_end
+             else None
+             for ((seg_start, seg_end), (vox_start, vox_end)) in zip(seg, [(x,x+1) for x in vx])]
+    # If any of these are None, we can't possibly overlap
+    if None in isect or any(a == b for (a,b) in isect):
+        return 0.0
+    return np.linalg.norm([e - s for (s,e) in isect]) / np.linalg.norm([e - s for (s,e) in zip(xs,xe)])
+
+def cortex_to_ribbon_map_lines(sub, hemi=None):
+    '''
+    cortex_to_ribbon_map_lines(sub) yields a dictionary whose keys are the indices of the ribbon 
+      voxels for the given FreeSurfer subject sub and whose values are a tuple of both (0) a list of
+      vertex labels associated with the given voxel and (1) a list of the weights associated with
+      each vertex (both in identical order).
+
+    These associations are determined by projecting the vectors from the white surface vertices to 
+      the pial surface vertices into the the ribbon and weighting them by the fraction of the vector 
+      that lies in the voxel.
+
+    The following options are accepted:
+      * hemi (default: None) specifies which hemisphere to operate over; this may be 'lh', 'rh', or
+        None (to do both)
+    '''
+    
+    # we can speed things up slightly by doing left and right hemispheres separately
+    if hemi is None:
+        return (cortex_to_ribbon_map_lines(sub, hemi='lh'),
+                cortex_to_ribbon_map_lines(sub, hemi='rh'))
+    if not isinstance(hemi, basestring):
+        raise ValueError('hemi must be a string \'lh\', \'rh\', or None')
+    if hemi.lower() == 'lh' or hemi.lower() == 'left':
+        hemi = sub.LH
+    elif hemi.lower() == 'rh' or hemi.lower() == 'right':
+        hemi = sub.RH
+    else:
+        raise RuntimeError('Unrecognized hemisphere: ' + hemi)
+
+    # first we find the indices of all voxels that are in the ribbon
+    ribdat = hemi.ribbon.get_data()
+    # 1-based indexing is assumed:
+    idcs = map(tuple, np.transpose(ribdat.nonzero()) + 1)
+    # we also need the transformation from surface to voxel
+    tmtx = np.linalg.inv(hemi.ribbon.header.get_vox2ras_tkr())
+    # given that the voxels assume 1-based indexing, this means that the center of each voxel is at
+    # (i,j,k) for integer (i,j,k) > 0; we want the voxels to start and end at integer values with 
+    # respect to the vertex positions, so we subtract 1/2 from the vertex positions, which should
+    # make the range 0-1, for example, cover the vertices in the first voxel
+    txcoord = lambda mtx: np.dot(tmtx[0:3], np.vstack((mtx, np.ones(mtx.shape[1])))) + 1.5
+
+    # Okay; get the transformed coordinates for white and pial surfaces:
+    pialX = txcoord(hemi.pial_surface.coordinates)
+    whiteX = txcoord(hemi.white_surface.coordinates)
+    
+    # make a list of voxels through which each vector passes:
+    min_idx = [min(i) for i in idcs]
+    max_idx = [max(i) for i in idcs]
+    vtx_voxels = [((i,j,k), (id, olap))
+                  for (id, (xs, xe)) in enumerate(zip(whiteX.T, pialX.T))
+                  for i in range(int(math.floor(min(xs[0], xe[0]))), int(math.ceil(max(xs[0], xe[0]))))
+                  for j in range(int(math.floor(min(xs[1], xe[1]))), int(math.ceil(max(xs[1], xe[1]))))
+                  for k in range(int(math.floor(min(xs[2], xe[2]))), int(math.ceil(max(xs[2], xe[2]))))
+                  for olap in [_line_voxel_overlap((i,j,k), xs, xe)]
+                  if olap > 0]
+    
+    # and accumulate these lists... first group by voxel index then sum across these
+    first_fn = lambda x: x[0]
+    vox_byidx = {
+        vox: ([q[0] for q in dat], [q[1] for q in dat])
+        for (vox,xdat) in itertools.groupby(sorted(vtx_voxels, key=first_fn), key=first_fn)
+        for dat in [[q[1] for q in xdat]]}
+    return {
+        idx: (ids, np.array(olaps) / np.sum(olaps))
+        for idx in idcs
+        if idx in vox_byidx
+        for (ids, olaps) in [vox_byidx[idx]]}
+
+def cortex_to_ribbon_map(sub, hemi=None, method='lines', options={}):
+    '''
+    cortex_to_ribbon_map(sub) yields a dictionary whose keys are the indices of the ribbon voxels
+      for the given FreeSurfer subject sub and whose values are a tuple of both (0) a list of vertex
+      labels associated with the given voxel and (1) a list of the weights associated with each
+      vertex (both in identical order).
+
+    The following options may be given:
+      * hemi (default: None) may be 'lh', 'rh', or None; if Nonem then the result is a tuple of the
+        (LH_dict, RH_dict) where LH_dict and RH_dict are the individual results from calling the
+        cortex_to_ribbon_map function with hemi set to 'lh' or 'rh', respectively
+      * method (default: 'lines') may be 'lines' or 'smooth'; the lines method projects the line
+        segments from the white to the pial into the volume and weights each voxel by the length of
+        the line segments contained in them; the smooth method uses Gaussian weights based on
+        distance of the nearby vertices to the voxel center; see cortex_to_ribbon_map_lines and
+        cortex_to_ribbon_map_smooth for more details.
+      * options (default: {}) may be set to a dictionary of options to pass along to the lines or
+        smooth functions
+    '''
+    if method.lower() == 'lines':
+        return cortex_to_ribbon_map_lines(sub, hemi=hemi, **options)
+    elif method.lower() == 'smooth':
+        return cortex_to_ribbon_map_smooth(sub, hemi=hemi, **options)
+    else:
+        raise RuntimeError('Unrecognized method: ' + str(method))
+
+
 def _cortex_to_ribbon_map_into_volume_array(vol, m, dat):
     dat = np.array(dat)
     for k,v in m.items():
@@ -651,7 +765,8 @@ def cortex_to_ribbon(sub, data, map=None, k=12, distance=6, hemi=None, sigma=0.3
         data = (data, None) if hemi == 'lh' else (None, data)
     # start with a duplicate of the left ribbon data
     vol0 = sub.LH.ribbon if hemi is None or hemi == 'lh' else sub.RH.ribbon
-    arr = default * np.ones(vol0.get_data().shape)
+    vol0dims = vol0.get_data().shape
+    arr = default * np.ones(vol0dims) if default != 0 else np.zeros(vol0dims)
     # apply the surface data maps to the volume
     if hemi is None or hemi == 'lh':
         arr = _cortex_to_ribbon_map_into_volume_array(arr, map[0], data[0])

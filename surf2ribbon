@@ -132,7 +132,8 @@ then hemi=`echo $ARG | tr LRH lrh`
      /usr/bin/env python <<EOF
 $PYINTRO
 data = read_surf_file('$SURFACE')
-surf2rib = neuropythy.freesurfer.cortex_to_ribbon_map(sub, k=$K, distance=$DIST, sigma=$SIGMA, hemi='$hemi')
+#surf2rib = neuropythy.freesurfer.cortex_to_ribbon_map(sub, k=$K, distance=$DIST, sigma=$SIGMA, hemi='$hemi')
+surf2rib = neuropythy.freesurfer.cortex_to_ribbon_map(sub, hemi='$hemi')
 vol = neuropythy.freesurfer.cortex_to_ribbon(sub, data, map=surf2rib)
 vol.to_filename('$OUT')
 exit(0)
@@ -142,7 +143,8 @@ else LHSURF="$SURFACE"
      /usr/bin/env python <<EOF
 $PYINTRO
 data = (read_surf_file('$LHSURF'), read_surf_file('$RHSURF'))
-surf2rib = neuropythy.freesurfer.cortex_to_ribbon_map(sub, k=$K, distance=$DIST, sigma=$SIGMA)
+#surf2rib = neuropythy.freesurfer.cortex_to_ribbon_map(sub, k=$K, distance=$DIST, sigma=$SIGMA)
+surf2rib = neuropythy.freesurfer.cortex_to_ribbon_map(sub, hemi=None)
 vol = neuropythy.freesurfer.cortex_to_ribbon(sub, data, map=surf2rib)
 vol.to_filename('$OUT')
 exit(0)
