@@ -47,7 +47,7 @@ do # resolve $SOURCE until the file is no longer a symlink
 done
 DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 # add the neuropythy path and build path on the python path
-[ -d "$DIR/neuropyth" ] && {
+[ -d "$DIR/neuropythy" ] && {
     export PYTHONPATH="$PYTHONPATH:$DIR"
 }
 
