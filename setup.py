@@ -11,7 +11,8 @@ setup(
     author_email='nben@nyu.edu',
     url='https://github.com/noahbenson/neuropythy/',
     license='GPLv3',
-    packages=['neuropythy'],
+    packages=['neuropythy', 'neuropythy.geometry', 
+              'neuropythy.immutable', 'neuropythy.freesurfer'],
     install_requires=[
         'numpy>=1.2',
         'scipy>=0.7',
