@@ -9,13 +9,17 @@ import os
 from math import pi
 from cortex import CorticalMesh
 
-# Java start:
 from py4j.java_gateway import (launch_gateway, JavaGateway, GatewayParameters)
-__java_port = launch_gateway(classpath=os.path.join(os.path.realpath(__file__), '..', 
-                                                    'lib', 'nben', 'target', 'nben-standalone.jar'),
-                             javaopts=['-Xmx2g'],
-                             die_on_exit=True)
-__java = JavaGateway(gateway_parameters=GatewayParameters(port=__java_port))
+
+# Java start:
+__java_port = None
+__java = None
+def init_registration():
+    __java_port = launch_gateway(classpath=os.path.join(os.path.realpath(__file__), '..', 
+                                                        'lib', 'nben', 'target', 'nben-standalone.jar'),
+                                 javaopts=['-Xmx2g'],
+                                 die_on_exit=True)
+    __java = JavaGateway(gateway_parameters=GatewayParameters(port=__java_port))
 
 # These are dictionaries of all the details we have about each of the possible arguments to the
 # mesh_register's field argument:
@@ -160,6 +164,8 @@ def mesh_register(mesh, field, max_steps=25000, max_step_size=0.1, max_pe_change
              ['anchor', 'Gaussian', [1, 10, 50], [[0.0, 0.0], [1.1, 1.1], [2.2, 2.2]]]],
             max_step_size=0.05,
             max_steps=10000)'''
+    if __java is None:
+        init_registration()
     # Sanity checking.
     # First, make sure that the arguments are all okay:
     if not isinstance(mesh, neuropythy.cortex.CorticalMesh):
