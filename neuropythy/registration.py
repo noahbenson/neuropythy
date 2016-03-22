@@ -47,6 +47,33 @@ _parse_field_data_types = {
     'perimeter': {
         'harmonic':      ['newHarmonicAnchorPotential', ['scale', 1.0], ['shape', 2.0], 'F', 'X']}};
 
+def _list_to_java_array(lst):
+    if not hasattr(lst, '__iter__'):
+        return lst
+    try:
+        nda = np.asarray(lst)
+        # for now we handle up to 3d arrays:
+        if len(nda.shape) < 4 and (nda.dtype.kind == 'f' or nda.dtype.kind == 'i'):
+            arr = _java.new_array(_java.jvm.double, *nda.shape)
+            if len(arr.shape) == 1:
+                for i in range(nda.shape[0]):
+                    arr[i] = nda[i]
+            elif len(arr.shape) == 2:
+                for i in range(nda.shape[0]):
+                    for j in range(nda.shape[1]):
+                        arr[i][j] = nda[i,j]
+            else:
+                for i in range(nda.shape[0]):
+                    for j in range(nda.shape[1]):
+                        for k in range(nda.shape[2]):
+                            arr[i][j][k] = nda[i,j,k]
+            return arr
+        else:
+            return lst
+    except:
+        # no error...
+        return lst
+
 def _parse_field_function_argument(argdat, args, faces, coords):
     # first, see if this is an easy one...
     if argdat == 'F':
@@ -54,14 +81,14 @@ def _parse_field_function_argument(argdat, args, faces, coords):
     elif argdat == 'X':
         return coords
     elif isinstance(argdat, (int, long)):
-        return arg[argdat]
+        return _list_to_java_array(arg[argdat])
     # okay, none of those; must be a list with a default arg
     argname = argdat[0]
     argdflt = argdat[1]
     # see if we can find such an arg...
     for i in range(len(args)):
         if isinstance(args[i], basestring) and args[i].lower() == argname.lower():
-            return args[i+1]
+            return _list_to_java_array(args[i+1])
     # did not find the arg; use the default:
     return argdflt
 
