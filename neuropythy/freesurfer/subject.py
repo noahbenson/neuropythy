@@ -151,6 +151,7 @@ class Hemisphere:
         'sphere_surface':     ((), lambda hemi: hemi._load_surface('sphere')),
         'fs_sphere_surface':  ((), lambda hemi: hemi._load_surface('sphere.reg')),
         'sym_sphere_surface': ((), lambda hemi: hemi._load_surface('fsaverage_sym.sphere.reg')),
+        'vertex_count':       (('inflated_surface',), lambda hemi,mesh: len(mesh.vertex_labels)),
         'midgray_surface': (
             ('white_surface', 'pial_surface'),
             lambda hemi,W,P: hemi.__make_surface(
@@ -273,22 +274,35 @@ class Hemisphere:
     # This [private] function and this variable set up automatic properties from the FS directory
     # in order to be auto-loaded, a property must appear in this dictionary:
     _auto_properties = {
-        #'parcellation', ('parcellation',),
-        #'V1', ('V1_label',)
         'sulc':      ('convexity',   lambda f: fsio.read_morph_data(f)),
         'thickness': ('thickness',   lambda f: fsio.read_morph_data(f)),
         'area':      ('vertex_area', lambda f: fsio.read_morph_data(f)),
-        'curv':      ('curvature',   lambda f: fsio.read_morph_data(f))
-        }
+        'curv':      ('curvature',   lambda f: fsio.read_morph_data(f))}
     def __init_properties(self):
         dir = self.directory
-        files = [f for f in os.listdir(dir) if os.path.isfile(os.path.join(dir, f))]
+        files = [f for f in os.listdir(dir) if os.path.isfile(os.path.join(dir, f))]            
         autoprops = Hemisphere._auto_properties
         for file in files:
             if len(file) > 2 and file[0:2].upper() == self.name and file[3:] in autoprops:
                 (name, fn) = autoprops[file[3:]]
                 #self.prop(name, PropertyBox(lambda: fn(os.path.join(dir, file))))
                 self.prop(name, fn(os.path.join(dir, file)))
+        # We also want to auto-add labels:
+        dir = os.path.join(self.subject.directory, 'label')
+        files = [f for f in os.listdir(dir) if os.path.isfile(os.path.join(dir, f))]
+        for file in files:
+            if len(file) > 9 and file[0:2].upper() == self.name and file[-6:] == '.label':
+                if len(file) < 17 or file[-13:-6] != '.thresh':
+                    lbl = set(fsio.read_label(os.path.join(dir, file)))
+                    self.prop(
+                        file[3:-6],
+                        [True if k in lbl else False for k in range(self.vertex_count)])
+                else:
+                    (lbl, sclr) = fsio.read_label(os.path.join(dir, file), read_scalars=True)
+                    lbl = {lbl[i]: i for i in range(len(lbl))}
+                    self.prop(
+                        file[3:-13] + '_threshold',
+                        [sclr[lbl[k]] if k in lbl else None for k in range(self.vertex_count)])
 
     # This method is a convenient way to get the occipital pole coordinates for the various
     # surfaces in a hemisphere...
@@ -340,7 +354,7 @@ class Hemisphere:
         if 'center' not in params:
             params['center'] = sphere.coordinates[:, self.occipital_pole_index]
         elif isinstance(params['center'], int):
-            params['center'] = sphere.coordinates[: params['center']]
+            params['center'] = sphere.coordinates[:, params['center']]
         if 'radius' not in params:
             params['radius'] = math.pi / 3.0
         elif not isinstance(params['radius'], (int, long, float)) or params['radius'] <= 0:
@@ -357,6 +371,7 @@ class Hemisphere:
     def __select_projection_subset(mesh, center, radius):
         # Figure out which vertices and faces to include, yield the indices of each
         # use the spherical coordinates...
+        center = np.asarray(center)
         sc = mesh.spherical_coordinates
         center_sc = [np.arctan2(center[0], center[1]),
                      np.arcsin(center[2] / np.sqrt(sum(center ** 2)))]
