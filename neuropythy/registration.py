@@ -65,7 +65,7 @@ def _parse_field_function_argument(argdat, args, faces, coords):
     # did not find the arg; use the default:
     return argdflt
 
-def _parse_field_argument(instruct):
+def _parse_field_argument(instruct, faces, coords):
     global _java
     if _java is None:
         init_registration()
@@ -188,8 +188,16 @@ def mesh_register(mesh, field, max_steps=25000, max_step_size=0.1, max_pe_change
     if not isinstance(max_pe_change, (float, int, long)) or max_pe_change <= 0 or max_pe_change > 1:
         raise RuntimeError('max_pe_change must be a number x such that 0 < x <= 1')
     # Parse the field argument.
-    faces = mesh.faces.tolist()
-    coords = mesh.coordinates.tolist()
+    faces  = _java.new_array(_java.jvm.int, 3, mesh.faces.shape[1])
+    coords = _java.new_array(_java.jvm.double, 3, mesh.coords.shape[1])
+    for i in range(mesh.faces.shape[1]):
+        faces[0][i] = mesh.faces[0,i]
+        faces[1][i] = mesh.faces[1,i]
+        faces[2][i] = mesh.faces[2,i]
+    for i in range(mesh.coords.shape[1]):
+        coords[0][i] = mesh.coords[0,i]
+        coords[1][i] = mesh.coords[1,i]
+        coords[2][i] = mesh.coords[2,i]
     potential = _parse_field_argument(field, faces, coords)
     # Okay, that's basically all we need to do the minimization...
     minimizer = _java.jvm.nben.mesh.registration.Minimizer(potential, coords)
@@ -269,7 +277,170 @@ class SchiraModel:
             params['shear'][1][0])
     
     def angle_to_cortex(self, theta, rho):
-        return self._java_object.angleToCortex(theta, rho)
+        global _java
+        iterTheta = hasattr(theta, '__iter__')
+        iterRho = hasattr(rho, '__iter__')
+        if iterTheta and iterRho:
+            if len(theta) != len(rho):
+                raise RuntimeError('Arguments theta and rho must be the same length!')
+            theta_arr = _java.new_array(_java.jvm.double, len(theta))
+            rho_arr = _java.new_array(_java.jvm.double, len(rho))
+            for i in range(len(theta)):
+                theta_arr[i] = theta[i]
+                rho_arr[i] = rho[i]
+            return self._java_object.angleToCortex(theta_arr, rho_arr)
+        elif iterTheta:
+            theta_arr = _java.new_array(_java.jvm.double, len(theta))
+            rho_arr = _java.new_array(_java.jvm.double, len(theta))
+            for i in range(len(theta)):
+                theta_arr[i] = theta[i]
+                rho_arr[i] = rho
+            return self._java_object.angleToCortex(theta_arr, rho_arr)
+        elif iterRho:
+            theta_arr = _java.new_array(_java.jvm.double, len(rho))
+            rho_arr = _java.new_array(_java.jvm.double, len(rho))
+            for i in range(len(rho)):
+                theta_arr[i] = theta
+                rho_arr[i] = rho[i]
+            return self._java_object.angleToCortex(theta_arr, rho_arr)
+        else:
+            return self._java_object.angleToCortex(theta, rho)
     def cortex_to_angle(self, x, y):
-        return self._java_object.cortexToAngle(x, y)
+        global _java
+        iterX = hasattr(x, '__iter__')
+        iterY = hasattr(y, '__iter__')
+        if iterX and iterY:
+            if len(x) != len(y):
+                raise RuntimeError('Arguments x and y must be the same length!')
+            x_arr = _java.new_array(_java.jvm.double, len(x))
+            y_arr = _java.new_array(_java.jvm.double, len(y))
+            for i in range(len(x)):
+                x_arr[i] = x[i]
+                y_arr[i] = y[i]
+            return self._java_object.cortexToAngle(x_arr, y_arr)
+        elif iterX:
+            x_arr = _java.new_array(_java.jvm.double, len(x))
+            y_arr = _java.new_array(_java.jvm.double, len(x))
+            for i in range(len(x)):
+                x_arr[i] = x[i]
+                y_arr[i] = y
+            return self._java_object.cortexToAngle(x_arr, y_arr)
+        elif iterY:
+            x_arr = _java.new_array(_java.jvm.double, len(y))
+            y_arr = _java.new_array(_java.jvm.double, len(y))
+            for i in range(len(y)):
+                x_arr[i] = x
+                y_arr[i] = y[i]
+            return self._java_object.cortexToAngle(x_arr, y_arr)
+        else:
+            return self._java_object.cortexToAngle(x, y)
 
+def schira_anchors(mesh, mdl,
+                   polar_angle=None, eccentricity=None,
+                   weight=None, weight_cutoff=None,
+                   shape='Gaussian', suffix=None):
+    '''
+    schira_anchors(mesh, model) is intended for use with the mesh_register function and the 
+    SchiraModel class; it yields a description of the anchor points that tie relevant vertices of
+    the given mesh to points predicted by the given SchiraModel object, model.
+
+    Options:
+      * polar_angle (default None) specifies that the given data should be used in place of the
+        'polar_angle' property values. The given argument must be numeric and the same length as the
+        the number of vertices in the mesh. If None is given, then the property value of the mesh
+        is used; if a list is given and any element is None, then the weight for that vertex is
+        treated as a zero. If the option is a string, then the property value with the same name is
+        used as the polar_angle data.
+      * eccentricity (default None) specifies that the given data should be used in places of the
+        'eccentricity' property values. The eccentricity option is handled virtually identically to
+        the polar_angle option.
+      * weight (default None) specifies that the weight or scale of the data; this is handled
+        generally like the polar_angle and eccentricity options, but may also be 1, indicating that
+        all vertices with polar_angle and eccentricity values defined will be given a weight of 1.
+        If weight is left as None, then the function will check for 'weight',
+        'variance_explained', and 'retinotopy_weight' values and will use the first found (in that
+        order). If none of these is found, then a value of 1 is assumed.
+      * weight_cutoff (default 0) specifies that the weight must be higher than the given value inn
+        order to be included in the fit; vertices with weights below this value have their weights
+        truncated to 0.
+      * shape (default 'Gaussian') specifies the shape of the potential function (see mesh_register)
+      * suffix (default None) specifies any additional arguments that should be appended to the 
+        potential function description list that is produced by this function; i.e., schira_anchors
+        produces a list, and the contents of suffix, if given and not None, are appended to that
+        list (see mesh_register).
+
+    Example:
+    The schira_anchors function is intended for use with mesh_register, as follows:
+    # Define our Schira Model:
+    model = neuropythy.registration.SchiraModel()
+    # Make sure our mesh has polar angle, eccentricity, and weight data:
+    mesh.prop('polar_angle',  polar_angle_vertex_data);
+    mesh.prop('eccentricity', eccentricity_vertex_data);
+    mesh.prop('weight',       variance_explained_vertex_data);
+    # register the mesh using the retinotopy and model:
+    registered_mesh = neuropythy.registration.mesh_register(
+       mesh,
+       ['mesh', schira_anchors(mesh, model, weight_cutoff=0.2)],
+       max_step_size=0.05,
+       max_steps=10000)
+    '''
+    if not isinstance(mdl, SchiraModel):
+        raise RuntimeError('given model is not a SchiraModel instance!')
+    if not isinstance(mesh, CorticalMesh):
+        raise RuntimeError('given mesh is not a CorticalMesh object!')
+    n = len(mesh.vertex_labels)
+    # make sure we have our polar angle/eccen/weight values:
+    if polar_angle is None:
+        polar_angle = mesh.prop('polar_angle')
+        if polar_angle is None:
+            raise RuntimeError('No polar angle data given to schira_anchors!')
+    if isinstance(polar_angle, dict):
+        # a dictionary is okay, we just need to fix it to a list:
+        tmp = polar_angle
+        polar_angle = [tmp[i] if i in tmp else None for i in range(n)]
+    if len(polar_angle) != n:
+        raise RuntimeError('Polar angle data has incorrect length!')
+    # Now Polar Angle...
+    if eccentricity is None:
+        eccentricity = mesh.prop('eccentricity')
+        if eccentricity is None:
+            raise RuntimeError('No eccentricity data given to schira_anchors!')
+    if isinstance(eccentricity, dict):
+        tmp = eccentricity
+        eccentricity = [tmp[i] if i in tmp else None for i in range(n)]
+    if len(eccentricity) != n:
+        raise RuntimeError('Eccentricity data has incorrect length!')
+    # Now Weight...
+    if weight is None:
+        weight = mesh.prop('weight')
+        if weight is None:
+            weight = mesh.prop('variance_explained')
+            if weight is None:
+                weight = mesh.prop('retinotopy_weight')
+                if weight is None:
+                    weight = 1
+    if isinstance(weight, dict):
+        tmp = weight
+        weight = [tmp[i] if i in tmp else None for i in range(n)]
+    if isinstance(weight, Number):
+        weight = [weight for i in range(n)]
+    if len(weight) != n:
+        raise RuntimeError('Weight data has incorrect length!')
+    # let's go through and fix up the weights/polar angles/eccentricities into appropriate lists
+    if weight_cutoff is None:
+        data = [[i, mdl.angle_to_cortex(polar_angle[i], eccentricity[i]), weight[i]]
+                for i in range(n)
+                if (polar_angle[i] is not None and eccentricity[i] is not None 
+                    and weight[i] is not None and weight[i] != 0)]
+    else:
+        data = [[i, mdl.angle_to_cortex(polar_angle[i], eccentricity[i]), weight[i]]
+                for i in range(n)
+                if (polar_angle[i] is not None and eccentricity[i] is not None 
+                    and weight[i] is not None and weight[i] >= weight_cutoff)]
+    # okay, we've partially parsed the data that was given; now we can construct the final list of
+    # instructions:
+    return ['anchors', shape,
+            [d[0] for d in data for k in range(len(d[1]))],
+            [pt for d in data for pt in d[1]],
+            'scale', [d[2] for d in data for k in range(len(d[1]))]
+           ] + ([] if suffix is None else suffix)
