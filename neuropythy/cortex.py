@@ -5,6 +5,7 @@
 
 import numpy as np
 import scipy as sp
+import scipy.spatial as space
 import neuropythy.geometry as geo
 from neuropythy.immutable import Immutable
 import nibabel.freesurfer.io as fsio
@@ -353,6 +354,9 @@ class CorticalMesh(Immutable):
         self.vertex_labels = args.pop('vertex_labels', range(self.coordinates.shape[1]))
         # Same with properties
         self.properties = args.pop('properties', make_dict())
+        # And with hemisphere and subject
+        self.__dict__['hemisphere'] = args.pop('hemisphere', None)
+        self.__dict__['subject'] = args.pop('subject', None)
         # Finally, set the remaining options...
         self.options = args
 
@@ -527,10 +531,22 @@ class CorticalMesh(Immutable):
                 CorticalMesh._check_property(self, name, prop)
                 self.__dict__['properties'] = self.properties.using(**{name: prop})
 
+    def has_property(self, name):
+        '''mesh.has_property(name) yields True if the given mesh contains the property with the
+           given name. Note that this checks the hemisphere properties as well as the mesh
+           properties and should be used preferentially over (name in mesh.properties).'''
+        if name in self.properties:
+            return True
+        elif self.hemisphere is not None:
+            return self.hemisphere.has_property(name)
+        else:
+            return False
+
     def remove_property(self, name):
         '''mesh.remove_property(name) removes the property with the given name from the given mesh.
            The name argument may also be an iterable collection of names, in which case all are
-           removed.'''
+           removed. Note that you cannot remove properties inherited from the Hemisphere object;
+           these must be removed from the Hemisphere.'''
         if hasattr(name, '__iter__'):
             for n in name: self.remove_property(n)
         elif name in self.properties:
@@ -542,8 +558,19 @@ class CorticalMesh(Immutable):
            property is found in the mesh, then None is returned.'''
         if hasattr(name, '__iter__'):
             return map(lambda n: self.property_value(n), name)
+        elif name in self.properties:
+            return self.properties[name]
+        elif self.hemisphere is not None:
+            return self.hemisphere.property_value(name)
+
+    def property_names(self):
+        '''mesh.property_names() yields a set of property names for the given mesh. Note that this
+           lists properties inherited from the hemisphere class, so it should be used preferentially
+           over mesh.properties.keys().'''
+        if self.hemisphere is not None:
+            return set(list(self.properties.keys()) + self.hemisphere.property_names())
         else:
-            return self.properties.get(name, None)
+            return set(self.properties.keys())
             
     def prop(self, name, arg=Ellipsis):
         '''mesh.prop(...) is a generic function for handling mesh properties. It may be called
@@ -561,6 +588,30 @@ class CorticalMesh(Immutable):
                 return self.property_value(name)
         else:
             self.add_property(name, arg)
+    
+    def sample_property(self, from_mesh, property_name, method='nearest', apply=True):
+        '''mesh.sample_property(from_mesh, name) yields a list of property values that have been
+           resampled onto mesh from the property with the given name of the given from_mesh. If
+           the optional apply is set to True (default), the property is added to mesh as well;
+           otherwise it is only returned. Note that this function does not deal with propert 
+           alignment of mesh vertices; for that, the Hemisphere.sample_property method should be
+           used.'''
+        if not isinstance(property_name, basestring):
+            # if this is a list, we can collect these...
+            if hasattr(property_name, '__iter__'):
+                return {p: self.sample_property(from_mesh, p, method=method, apply=apply)
+                        for p in property_name}
+            else:
+                raise VaueError('property_name argument must be a string or list of strings')
+        if not from_mesh.has_property(property_name):
+            raise ValueError('given property ' + property_name + ' is not in from_mesh!')
+        orig_prop = from_mesh.property_value(property_name)
+        (d, nei) = space.cKDTree(from_mesh.coordinates.T).query(self.coordinates.T, k=1, p=2)
+        # sample from these...
+        result = [orig_prop[n] for n in nei]
+        if apply:
+            self.prop(property_name, result)
+        return result
 
     def map_vertices(self, f, merge=None):
         '''mesh.map_vertices(f) yields the result of mapping the function f over all vertices in
