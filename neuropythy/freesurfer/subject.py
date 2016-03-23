@@ -111,6 +111,8 @@ class Hemisphere:
             coords,
             faces,
             properties = self.properties,
+            subject = self.subject,
+            hemisphere = self,
             meta_data = self.meta_data.using(
                 **{'subject': self.subject,
                    'hemisphere': self,
@@ -144,24 +146,28 @@ class Hemisphere:
             return make_dict(**md)
         
     __lazy_members = {
-        'meta_data':          (('options',), lambda hemi,opts: Hemisphere._check_meta_data(opts)),
-        'white_surface':      ((), lambda hemi: hemi._load_surface('white')),
-        'pial_surface':       ((), lambda hemi: hemi._load_surface('pial')),
-        'inflated_surface':   ((), lambda hemi: hemi._load_surface('inflated')),
-        'sphere_surface':     ((), lambda hemi: hemi._load_surface('sphere')),
-        'fs_sphere_surface':  ((), lambda hemi: hemi._load_surface('sphere.reg')),
-        'sym_sphere_surface': ((), lambda hemi: hemi._load_surface('fsaverage_sym.sphere.reg')),
-        'vertex_count':       (('inflated_surface',), lambda hemi,mesh: len(mesh.vertex_labels)),
-        'midgray_surface': (
-            ('white_surface', 'pial_surface'),
-            lambda hemi,W,P: hemi.__make_surface(
-                0.5*(W.coordinates + P.coordinates),
-                W.faces,
-                'midgray')),
-        'occipital_pole_index': (
-            ('inflated_surface',),
-            lambda hemi,mesh: np.argmin(mesh.coordinates[1])),
-        'ribbon':             ((), lambda hemi: hemi._load_ribbon())}
+        'meta_data':           (('options',), lambda hemi,opts: Hemisphere._check_meta_data(opts)),
+        'white_surface':       ((), lambda hemi: hemi._load_surface('white')),
+        'pial_surface':        ((), lambda hemi: hemi._load_surface('pial')),
+        'inflated_surface':    ((), lambda hemi: hemi._load_surface('inflated')),
+        'sphere_surface':      ((), lambda hemi: hemi._load_surface('sphere')),
+        'fs_sphere_surface':   ((), lambda hemi: (hemi._load_surface('sphere.reg') 
+                                                  if hemi.subject.id != 'fsaverage'
+                                                  else hemi.sphere_surface)),
+        'sym_sphere_surface':  ((), lambda hemi: (hemi._load_surface('fsaverage_sym.sphere.reg') 
+                                                  if hemi.subject.id != 'fsaverage_sym' 
+                                                  else hemi.sphere_surface)),
+        'vertex_count':        (('inflated_surface',), lambda hemi,mesh: len(mesh.vertex_labels)),
+        'midgray_surface':     (('white_surface', 'pial_surface'),
+                                lambda hemi,W,P: hemi.__make_surface(
+                                    0.5*(W.coordinates + P.coordinates),
+                                    W.faces,
+                                    'midgray')),
+        'occipital_pole_index': (('inflated_surface',),
+                                 lambda hemi,mesh: np.argmin(mesh.coordinates[1])),
+        'ribbon':             ((), lambda hemi: hemi._load_ribbon()),
+        'handedness':         (('name',), 
+                               lambda hemi,name: 'LH' if name == 'LH' or name == 'RHX' else 'RH')}
     
     # This function will clear the lazily-evaluated members when a given value is changed
     def __update_values(self, name):
@@ -235,6 +241,15 @@ class Hemisphere:
                 Hemisphere._check_property(self, name, prop)
                 self.__dict__['properties'] = self.properties.using(**{name: prop})
 
+    def property_names(self):
+        '''hemi.property_names() yields a set of property names for the given hemi.'''
+        return set(self.properties.keys())
+
+    def has_property(self, name):
+        '''hemi.has_property(name) yields True if the given hemisphere contains the property with
+           the given name and False otherwise.'''
+        return name in self.properties
+
     def remove_property(self, name):
         '''hemi.remove_property(name) removes the property with the given name from the given hemi.
            The name argument may also be an iterable collection of names, in which case all are
@@ -270,6 +285,46 @@ class Hemisphere:
         else:
             self.add_property(name, arg)
 
+    def sample_property(self, from_hemi, property_name,
+                        alignment='automatic', method='nearest', apply=True):
+        '''hemi.sample_property(hem, name) resamples the property with the given name from the
+           given hemisphere hem into the current hemisphere hemi. Two options are allowed: the first
+           is method, which currently must be 'nearest'; the second is alignment, which may be
+           either 'fsaverage', 'fsaverage_sym', or 'automatic'. If automatic is specified, then
+           fsaverage is used when the hemispheres are the same and fsaverage_sym is used when they
+           are not. If the resampling cannot be completed due to, for example, a missing fsaverage
+           or fsaverage_sym alignment file, an error is raised.'''
+        if not isinstance(from_hemi, Hemisphere):
+            raise RuntimeError('given argument must be a Hemisphere object')
+        # make sure we do this for every property if multiple are given:
+        if not isinstance(property_name, basestring):
+            if hasattr(property_name, '__iter__'):
+                return {p: self.sample_property(from_hemi, p,
+                                                alignment=alignment, method=method, apply=apply)
+                        for p in property_name}
+            else:
+                raise ValueError('property_name argument must be a string or a list of strings')
+        # Okay, now we need to get the appropriate alignment meshes...
+        alignment = alignment.lower()
+        if alignment == 'automatic':
+            alignment = 'fsaverage' if from_hemi.handedness == self.handedness else 'fsaverage_sym'
+        elif alignment == 'fsaverage':
+            if from_hemi.handedness != self.handedness:
+                raise ValueError('fsaverage hemisphere alignment requires same-side hemispheres')
+        elif alignment != 'fsaverage_sym':
+            raise ValueError('alignment hemisphere must be fsaverage or fsaverage_sym')
+        # Now, get the appropriate meshes...
+        if alignment == 'fsaverage':
+            mesh_self = self.fs_sphere_surface
+            mesh_from = from_hemi.fs_sphere_surface
+        else:
+            mesh_self = self.sym_sphere_surface
+            mesh_from = self.sym_sphere_surface
+        # Now we can do the resampling
+        resamp = mesh_self.sample_property(mesh_from, property_name, method=method, apply=False)
+        if apply:
+            self.prop(property_name, resamp)
+        return resamp
 
     # This [private] function and this variable set up automatic properties from the FS directory
     # in order to be auto-loaded, a property must appear in this dictionary:
@@ -283,7 +338,7 @@ class Hemisphere:
         files = [f for f in os.listdir(dir) if os.path.isfile(os.path.join(dir, f))]            
         autoprops = Hemisphere._auto_properties
         for file in files:
-            if len(file) > 2 and file[0:2].upper() == self.name and file[3:] in autoprops:
+            if len(file) > 2 and file[0:2].upper() == self.handedness and file[3:] in autoprops:
                 (name, fn) = autoprops[file[3:]]
                 #self.prop(name, PropertyBox(lambda: fn(os.path.join(dir, file))))
                 self.prop(name, fn(os.path.join(dir, file)))
@@ -291,18 +346,18 @@ class Hemisphere:
         dir = os.path.join(self.subject.directory, 'label')
         files = [f for f in os.listdir(dir) if os.path.isfile(os.path.join(dir, f))]
         for file in files:
-            if len(file) > 9 and file[0:2].upper() == self.name and file[-6:] == '.label':
+            if len(file) > 9 and file[0:2].upper() == self.handedness and file[-6:] == '.label':
                 if len(file) < 17 or file[-13:-6] != '.thresh':
                     lbl = set(fsio.read_label(os.path.join(dir, file)))
                     self.prop(
                         file[3:-6],
                         [True if k in lbl else False for k in range(self.vertex_count)])
-                else:
-                    (lbl, sclr) = fsio.read_label(os.path.join(dir, file), read_scalars=True)
-                    lbl = {lbl[i]: i for i in range(len(lbl))}
-                    self.prop(
-                        file[3:-13] + '_threshold',
-                        [sclr[lbl[k]] if k in lbl else None for k in range(self.vertex_count)])
+                #else:
+                #    (lbl, sclr) = fsio.read_label(os.path.join(dir, file), read_scalars=True)
+                #    lbl = {lbl[i]: i for i in range(len(lbl))}
+                #    self.prop(
+                #        file[3:-13] + '_threshold',
+                #        [sclr[lbl[k]] if k in lbl else None for k in range(self.vertex_count)])
 
     # This method is a convenient way to get the occipital pole coordinates for the various
     # surfaces in a hemisphere...
