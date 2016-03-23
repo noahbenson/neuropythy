@@ -333,6 +333,12 @@ class Hemisphere:
         'thickness': ('thickness',   lambda f: fsio.read_morph_data(f)),
         'area':      ('vertex_area', lambda f: fsio.read_morph_data(f)),
         'curv':      ('curvature',   lambda f: fsio.read_morph_data(f))}
+    # properties grabbed out of MGH or MGZ files in the surf directory appear here:
+    _mgh_properties = {
+        'retino_eccen': ('eccentricity',       lambda f: fsmgh.load(f).get_data().flatten()),
+        'retino_angle': ('polar-angle',        lambda f: fsmgh.load(f).get_data().flatten()),
+        'retino_prfsz': ('PRF-size',           lambda f: fsmgh.load(f).get_data().flatten()),
+        'retino_varex': ('variance-explained', lambda f: fsmgh.load(f).get_data().flatten())}
     def __init_properties(self):
         dir = self.directory
         files = [f for f in os.listdir(dir) if os.path.isfile(os.path.join(dir, f))]            
@@ -358,6 +364,15 @@ class Hemisphere:
                 #    self.prop(
                 #        file[3:-13] + '_threshold',
                 #        [sclr[lbl[k]] if k in lbl else None for k in range(self.vertex_count)])
+        # And MGH/MGZ files in surf:
+        dir = os.path.join(self.subject.directory, 'surf')
+        files = [f for f in os.listdir(dir) if os.path.isfile(os.path.join(dir, f))]
+        for f in files:
+            if (f[-4:].lower() == '.mgh' or f[-4:].lower() == '.mgz') and \
+                    f[2] == '.' and f[0:2].upper() == self.handedness and \
+                    f[3:-4] in Hemisphere._mgh_properties:
+                (name, fn) = Hemisphere._mgh_properties[f[3:-4]]
+                self.prop(name, fn(os.path.join(dir, f)))
 
     # This method is a convenient way to get the occipital pole coordinates for the various
     # surfaces in a hemisphere...
