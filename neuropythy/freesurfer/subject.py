@@ -110,14 +110,12 @@ class Hemisphere:
         return CorticalMesh(
             coords,
             faces,
-            properties = self.properties,
             subject = self.subject,
             hemisphere = self,
             meta_data = self.meta_data.using(
                 **{'subject': self.subject,
                    'hemisphere': self,
-                   'name': name}),
-            **self.options)
+                   'name': name}))
     def _load_surface(self, name):
         path = self.subject.surface_path(name, self.name)
         data = fsio.read_geometry(path)
@@ -286,7 +284,8 @@ class Hemisphere:
             self.add_property(name, arg)
 
     def sample_property(self, from_hemi, property_name,
-                        alignment='automatic', method='nearest', apply=True):
+                        alignment='automatic', method='nearest', apply=True,
+                        rename=None):
         '''hemi.sample_property(hem, name) resamples the property with the given name from the
            given hemisphere hem into the current hemisphere hemi. Two options are allowed: the first
            is method, which currently must be 'nearest'; the second is alignment, which may be
@@ -323,22 +322,30 @@ class Hemisphere:
         # Now we can do the resampling
         resamp = mesh_self.sample_property(mesh_from, property_name, method=method, apply=False)
         if apply:
-            self.prop(property_name, resamp)
+            self.prop(property_name if rename is None else rename, resamp)
         return resamp
 
     # This [private] function and this variable set up automatic properties from the FS directory
     # in order to be auto-loaded, a property must appear in this dictionary:
     _auto_properties = {
-        'sulc':      ('convexity',   lambda f: fsio.read_morph_data(f)),
-        'thickness': ('thickness',   lambda f: fsio.read_morph_data(f)),
-        'area':      ('vertex_area', lambda f: fsio.read_morph_data(f)),
-        'curv':      ('curvature',   lambda f: fsio.read_morph_data(f))}
-    # properties grabbed out of MGH or MGZ files in the surf directory appear here:
+        'sulc':      ('convexity',              lambda f: fsio.read_morph_data(f)),
+        'thickness': ('thickness',              lambda f: fsio.read_morph_data(f)),
+        'area':      ('white_surface_area',     lambda f: fsio.read_morph_data(f)),
+        'area.mid':  ('midgray_surface_area',   lambda f: fsio.read_morph_data(f)),
+        'area.pial': ('pial_surface_area',      lambda f: fsio.read_morph_data(f)),
+        'curv':      ('curvature',              lambda f: fsio.read_morph_data(f)),
+
+        'prf_eccen': ('PRF_eccentricity',       lambda f: fsio.read_morph_data(f)),
+        'prf_angle': ('PRF_polar_angle',        lambda f: fsio.read_morph_data(f)),
+        'prf_size':  ('PRF_size',               lambda f: fsio.read_morph_data(f)),
+        'prf_varex': ('PRF_variance_explained', lambda f: fsio.read_morph_data(f)),
+
+        'retinotopy_eccen': ('eccentricity',    lambda f: fsio.read_morph_data(f)),
+        'retinotopy_angle': ('polar_angle',     lambda f: fsio.read_morph_data(f)),
+        'retinotopy_areas': ('visual_area',     lambda f: fsio.read_morph_data(f))}
+    # properties grabbed out of MGH or MGZ files in the sufsio.read_morph_data(f)),
     _mgh_properties = {
-        'retino_eccen': ('eccentricity',       lambda f: fsmgh.load(f).get_data().flatten()),
-        'retino_angle': ('polar-angle',        lambda f: fsmgh.load(f).get_data().flatten()),
-        'retino_prfsz': ('PRF-size',           lambda f: fsmgh.load(f).get_data().flatten()),
-        'retino_varex': ('variance-explained', lambda f: fsmgh.load(f).get_data().flatten())}
+        }
     def __init_properties(self):
         dir = self.directory
         files = [f for f in os.listdir(dir) if os.path.isfile(os.path.join(dir, f))]            
