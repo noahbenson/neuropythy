@@ -14,6 +14,7 @@ import itertools
 import pysistence
 from pysistence import make_dict
 from neuropythy.cortex import CorticalMesh
+from neuropythy.registration import Topology
 
 # These static functions are just handy
 def spherical_distance(pt0, pt1):
@@ -118,21 +119,38 @@ class Hemisphere:
                    'name': name}))
     def _load_surface(self, name):
         path = self.subject.surface_path(name, self.name)
-        data = fsio.read_geometry(path)
-        data[0].setflags(write=False)
-        data[1].setflags(write=False)
-        return self.__make_surface(data[0], data[1], name)
+        if not os.path.exists(path):
+            return None
+        else:
+            data = fsio.read_geometry(path)
+            data[0].setflags(write=False)
+            data[1].setflags(write=False)
+            return self.__make_surface(data[0], data[1], name)
     def _load_sym_surface(self, name):
         path = self.subject.surface_path(name, self.name)
-        data = fsio.read_geometry(path)
-        data[0].setflags(write=False)
-        data[1].setflags(write=False)
-        return self.__make_surface(data[0], data[1], name)
+        if not os.path.exists(path):
+            return None
+        else:
+            data = fsio.read_geometry(path)
+            data[0].setflags(write=False)
+            data[1].setflags(write=False)
+            return self.__make_surface(data[0], data[1], name)
     def _load_ribbon(self):
         path = self.subject.volume_path('ribbon', self.name)
-        data = fsmgh.load(path)
-        # for now, no post-processing, just loading of the MGHImage
-        return data
+        if not os.path.exists(path):
+            return None
+        else:
+            data = fsmgh.load(path)
+            # for now, no post-processing, just loading of the MGHImage
+            return data
+    def _make_topology(self, sphere, fsave, fssym):
+        if sphere is None:
+            return None
+        names = [self.subject.id, 'fsaverage', 'fsaverage_sym'];
+        surfs = [sphere, fsave, fssym]
+        return Topology(
+            sphere.faces, 
+            {names[i]: surfs[i].coordinates.T for i in range(len(names)) if surfs[i] is not None})
     @staticmethod
     def _check_meta_data(opts):
         md = opts.get('meta_data', {})
@@ -144,28 +162,30 @@ class Hemisphere:
             return make_dict(**md)
         
     __lazy_members = {
-        'meta_data':           (('options',), lambda hemi,opts: Hemisphere._check_meta_data(opts)),
-        'white_surface':       ((), lambda hemi: hemi._load_surface('white')),
-        'pial_surface':        ((), lambda hemi: hemi._load_surface('pial')),
-        'inflated_surface':    ((), lambda hemi: hemi._load_surface('inflated')),
-        'sphere_surface':      ((), lambda hemi: hemi._load_surface('sphere')),
-        'fs_sphere_surface':   ((), lambda hemi: (hemi._load_surface('sphere.reg') 
-                                                  if hemi.subject.id != 'fsaverage'
-                                                  else hemi.sphere_surface)),
-        'sym_sphere_surface':  ((), lambda hemi: (hemi._load_surface('fsaverage_sym.sphere.reg') 
-                                                  if hemi.subject.id != 'fsaverage_sym' 
-                                                  else hemi.sphere_surface)),
-        'vertex_count':        (('inflated_surface',), lambda hemi,mesh: len(mesh.vertex_labels)),
-        'midgray_surface':     (('white_surface', 'pial_surface'),
-                                lambda hemi,W,P: hemi.__make_surface(
-                                    0.5*(W.coordinates + P.coordinates),
-                                    W.faces,
-                                    'midgray')),
+        'meta_data':            (('options',), lambda hemi,opts: Hemisphere._check_meta_data(opts)),
+        'white_surface':        ((), lambda hemi: hemi._load_surface('white')),
+        'pial_surface':         ((), lambda hemi: hemi._load_surface('pial')),
+        'inflated_surface':     ((), lambda hemi: hemi._load_surface('inflated')),
+        'sphere_surface':       ((), lambda hemi: hemi._load_surface('sphere')),
+        'fs_sphere_surface':    ((), lambda hemi: (hemi._load_surface('sphere.reg') 
+                                                   if hemi.subject.id != 'fsaverage'
+                                                   else hemi.sphere_surface)),
+        'sym_sphere_surface':   ((), lambda hemi: (hemi._load_surface('fsaverage_sym.sphere.reg') 
+                                                   if hemi.subject.id != 'fsaverage_sym' 
+                                                   else hemi.sphere_surface)),
+        'vertex_count':         (('inflated_surface',), lambda hemi,mesh: len(mesh.vertex_labels)),
+        'midgray_surface':      (('white_surface', 'pial_surface'),
+                                 lambda hemi,W,P: hemi.__make_surface(
+                                     0.5*(W.coordinates + P.coordinates),
+                                     W.faces,
+                                     'midgray')),
         'occipital_pole_index': (('inflated_surface',),
                                  lambda hemi,mesh: np.argmin(mesh.coordinates[1])),
-        'ribbon':             ((), lambda hemi: hemi._load_ribbon()),
-        'handedness':         (('name',), 
-                               lambda hemi,name: 'LH' if name == 'LH' or name == 'RHX' else 'RH')}
+        'ribbon':               ((), lambda hemi: hemi._load_ribbon()),
+        'chirality':            (('name',), 
+                                 lambda hemi,name: 'LH' if name == 'LH' or name == 'RHX' else 'RH'),
+        'registrations':        (('sphere_surface', 'fs_sphere_surface', 'sym_sphere_surface'),
+                                 lambda hemi,sph,fs,sym: hemi._make_topology(sph,fs,sym))}
     
     # This function will clear the lazily-evaluated members when a given value is changed
     def __update_values(self, name):
@@ -283,9 +303,71 @@ class Hemisphere:
         else:
             self.add_property(name, arg)
 
+    def interpolate(self, from_hemi, property_name, 
+                    apply=True, method='automatic', method_options=None,
+                    ignore_values=None, ignore_vertices=None, vertex_subset='all', undef=None):
+        '''
+        hemi.interpolate(from_mesh, prop) yields a list of property values that have been resampled
+        onto the given hemisphere hemi from the property with the given name prop of the given 
+        from_mesh. If the optional apply is set to True (the default) or to a new property name
+        string, the property is added to mesh as well; otherwise it is only returned. Optionally,
+        prop may be a list of numpy array of values the same length as the mesh's vertex list; in
+        this case, the apply option must be a new property name string, otherwise it is treated as
+        False.
+        #here
+
+        Options:
+          * method: Specifies the method of interpolatio. See the "Methods" below. By default, this
+            is 'automatic', which chooses based on the data types of the properties.
+          * method_options: Specifies additional options for the method; see the "Methods" below.
+          * apply: May be True (default) to specify that the new property should be added to the
+            mesh before the method returns; if False, then the interpolated property is returned
+            only. If the parameter prop is a list or numpy array, then instead of True, this option
+            must specify the name of the new property, otherwise it is treated as False.
+          * ignore_values: May specify a single value to ignore when interpolating or a set of
+            values to ignore. All of these values, if interpolated onto a vertex, will be labeled as
+            the undefined value (see option undef). By default this is None, meaning the value None
+            is treated as undefined. To explicitly specify that no value should be considered
+            ignored, this must be set to an empty list or empty set.
+          * ignore_vertices: May specify a list of vertex labels for vertices that should be
+            considered invalid. Note that this restricts vertices in from_mesh, not in mesh.  See
+            also the undef option.
+          * vertex_subset: May specify the subset of vertices over which to interpolate; this should
+            specify vertices in the from_mesh, not in mesh. The default is 'all'.
+          * undef: May specify the value to be used in the return value to indicate that the
+            interpolation for a given vertex was an ignored value. By default this is None.
+
+        Interpolation Types:
+        Interpolation is quite different for different data types that appear in the property value
+        list of the from_mesh. For example, if the values are all strings, then the best that the
+        interpolation function can do is nearest-neighbor. If all of the values are real, however,
+        then trilinear interpolation can be used.
+
+        Methods:
+        All methods have the following features: prior to interpolation, the mesh surface is
+        clustered into topologically adjacent groups of similar interpolation types.
+        '''
+        if not isinstance(property_name, basestring):
+            # if this is a list, we can collect these...
+            if hasattr(property_name, '__iter__'):
+                return {p: self.sample_property(from_mesh, p, method=method, apply=apply)
+                        for p in property_name}
+            else:
+                raise VaueError('property_name argument must be a string or list of strings')
+        if not from_mesh.has_property(property_name):
+            raise ValueError('given property ' + property_name + ' is not in from_mesh!')
+        orig_prop = from_mesh.property_value(property_name)
+        (d, nei) = space.cKDTree(from_mesh.coordinates.T).query(self.coordinates.T, k=1, p=2)
+        # sample from these...
+        result = [orig_prop[n] for n in nei]
+        if apply:
+            self.prop(property_name, result)
+        return result
+
     def sample_property(self, from_hemi, property_name,
                         alignment='automatic', method='nearest', apply=True,
                         rename=None):
+        #here : rename/fix to use topology and registrations
         '''hemi.sample_property(hem, name) resamples the property with the given name from the
            given hemisphere hem into the current hemisphere hemi. Two options are allowed: the first
            is method, which currently must be 'nearest'; the second is alignment, which may be
@@ -306,9 +388,9 @@ class Hemisphere:
         # Okay, now we need to get the appropriate alignment meshes...
         alignment = alignment.lower()
         if alignment == 'automatic':
-            alignment = 'fsaverage' if from_hemi.handedness == self.handedness else 'fsaverage_sym'
+            alignment = 'fsaverage' if from_hemi.chirality == self.chirality else 'fsaverage_sym'
         elif alignment == 'fsaverage':
-            if from_hemi.handedness != self.handedness:
+            if from_hemi.chirality != self.chirality:
                 raise ValueError('fsaverage hemisphere alignment requires same-side hemispheres')
         elif alignment != 'fsaverage_sym':
             raise ValueError('alignment hemisphere must be fsaverage or fsaverage_sym')
@@ -351,7 +433,7 @@ class Hemisphere:
         files = [f for f in os.listdir(dir) if os.path.isfile(os.path.join(dir, f))]            
         autoprops = Hemisphere._auto_properties
         for file in files:
-            if len(file) > 2 and file[0:2].upper() == self.handedness and file[3:] in autoprops:
+            if len(file) > 2 and file[0:2].upper() == self.chirality and file[3:] in autoprops:
                 (name, fn) = autoprops[file[3:]]
                 #self.prop(name, PropertyBox(lambda: fn(os.path.join(dir, file))))
                 self.prop(name, fn(os.path.join(dir, file)))
@@ -359,7 +441,7 @@ class Hemisphere:
         dir = os.path.join(self.subject.directory, 'label')
         files = [f for f in os.listdir(dir) if os.path.isfile(os.path.join(dir, f))]
         for file in files:
-            if len(file) > 9 and file[0:2].upper() == self.handedness and file[-6:] == '.label':
+            if len(file) > 9 and file[0:2].upper() == self.chirality and file[-6:] == '.label':
                 if len(file) < 17 or file[-13:-6] != '.thresh':
                     lbl = set(fsio.read_label(os.path.join(dir, file)))
                     self.prop(
@@ -376,7 +458,7 @@ class Hemisphere:
         files = [f for f in os.listdir(dir) if os.path.isfile(os.path.join(dir, f))]
         for f in files:
             if (f[-4:].lower() == '.mgh' or f[-4:].lower() == '.mgz') and \
-                    f[2] == '.' and f[0:2].upper() == self.handedness and \
+                    f[2] == '.' and f[0:2].upper() == self.chirality and \
                     f[3:-4] in Hemisphere._mgh_properties:
                 (name, fn) = Hemisphere._mgh_properties[f[3:-4]]
                 self.prop(name, fn(os.path.join(dir, f)))

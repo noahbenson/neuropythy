@@ -589,30 +589,6 @@ class CorticalMesh(Immutable):
         else:
             self.add_property(name, arg)
     
-    def sample_property(self, from_mesh, property_name, method='nearest', apply=True):
-        '''mesh.sample_property(from_mesh, name) yields a list of property values that have been
-           resampled onto mesh from the property with the given name of the given from_mesh. If
-           the optional apply is set to True (default), the property is added to mesh as well;
-           otherwise it is only returned. Note that this function does not deal with propert 
-           alignment of mesh vertices; for that, the Hemisphere.sample_property method should be
-           used.'''
-        if not isinstance(property_name, basestring):
-            # if this is a list, we can collect these...
-            if hasattr(property_name, '__iter__'):
-                return {p: self.sample_property(from_mesh, p, method=method, apply=apply)
-                        for p in property_name}
-            else:
-                raise VaueError('property_name argument must be a string or list of strings')
-        if not from_mesh.has_property(property_name):
-            raise ValueError('given property ' + property_name + ' is not in from_mesh!')
-        orig_prop = from_mesh.property_value(property_name)
-        (d, nei) = space.cKDTree(from_mesh.coordinates.T).query(self.coordinates.T, k=1, p=2)
-        # sample from these...
-        result = [orig_prop[n] for n in nei]
-        if apply:
-            self.prop(property_name, result)
-        return result
-
     def map_vertices(self, f, merge=None):
         '''mesh.map_vertices(f) yields the result of mapping the function f over all vertices in
            the given mesh. For each vertex, f is called with a dictionary as the argument; the keys

@@ -12,7 +12,8 @@ setup(
     url='https://github.com/noahbenson/neuropythy/',
     license='GPLv3',
     packages=['neuropythy', 'neuropythy.geometry', 
-              'neuropythy.immutable', 'neuropythy.freesurfer'],
+              'neuropythy.immutable', 'neuropythy.freesurfer',
+              'neuropythy.registration'],
     package_data={'': ['LICENSE.txt', 'lib/nben/target/nben-standalone.jar']},
     install_requires=[
         'numpy>=1.2',
