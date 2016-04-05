@@ -8,7 +8,7 @@ import scipy as sp
 import os
 from numbers import Number
 from math import pi
-from cortex import CorticalMesh
+from neuropythy.cortex import CorticalMesh
 from pysistence import make_dict
 
 from py4j.java_gateway import (launch_gateway, JavaGateway, GatewayParameters)
