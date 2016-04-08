@@ -6,10 +6,12 @@
 import numpy as np
 import scipy as sp
 import os
+import sys
 from numbers import Number
 from math import pi
 from neuropythy.cortex import CorticalMesh
 from pysistence import make_dict
+from array import array
 
 from py4j.java_gateway import (launch_gateway, JavaGateway, GatewayParameters)
 
@@ -22,7 +24,7 @@ def init_registration():
         return
     _java_port = launch_gateway(
         classpath=os.path.join(
-            os.path.dirname(os.path.dirname(os.path.realpath(__file__))),
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__)))),
             'lib', 'nben', 'target', 'nben-standalone.jar'),
         javaopts=['-Xmx2g'],
         die_on_exit=True)
@@ -47,59 +49,26 @@ _parse_field_data_types = {
     'perimeter': {
         'harmonic':      ['newHarmonicAnchorPotential', ['scale', 1.0], ['shape', 2.0], 'F', 'X']}};
 
-def _list_to_java_array(lst):
-    if not hasattr(lst, '__iter__'):
-        return lst
-    try:
-        nda = np.asarray(lst)
-        # for now we handle up to 3d arrays:
-        if len(nda.shape) < 4 and (nda.dtype.kind == 'f' or nda.dtype.kind == 'i'):
-            arr = _java.new_array(_java.jvm.double, *nda.shape)
-            if len(arr.shape) == 1:
-                for i in range(nda.shape[0]):
-                    arr[i] = nda[i]
-            elif len(arr.shape) == 2:
-                for i in range(nda.shape[0]):
-                    for j in range(nda.shape[1]):
-                        arr[i][j] = nda[i,j]
-            else:
-                for i in range(nda.shape[0]):
-                    for j in range(nda.shape[1]):
-                        for k in range(nda.shape[2]):
-                            arr[i][j][k] = nda[i,j,k]
-            return arr
-        else:
-            return lst
-    except:
-        # no error...
-        return lst
-
-def _int_list_to_java_array(lst):
-    if not hasattr(lst, '__iter__'):
-        return lst
-    try:
-        nda = np.asarray(lst)
-        # for now we handle up to 3d arrays:
-        if len(nda.shape) < 4 and (nda.dtype.kind == 'f' or nda.dtype.kind == 'i'):
-            arr = _java.new_array(_java.jvm.int, *nda.shape)
-            if len(arr.shape) == 1:
-                for i in range(nda.shape[0]):
-                    arr[i] = nda[i]
-            elif len(arr.shape) == 2:
-                for i in range(nda.shape[0]):
-                    for j in range(nda.shape[1]):
-                        arr[i][j] = nda[i,j]
-            else:
-                for i in range(nda.shape[0]):
-                    for j in range(nda.shape[1]):
-                        for k in range(nda.shape[2]):
-                            arr[i][j][k] = nda[i,j,k]
-            return arr
-        else:
-            return lst
-    except:
-        # no error...
-        return lst
+def serialize_numpy(m, t):
+    '''
+    serialize_numpy(m, type) converts the numpy array m into a byte stream that can be read by the
+    nben.util.Py4j Java class. The function assumes that the type of the array needn't be encoded
+    in the bytearray itself. The bytearray will begin with an integer, the number of dimensions,
+    followed by that number of integers (the dimension sizes themselves) then the bytes of the
+    array, flattened.
+    The argument type gives the type of the array to be transferred and must be 'i' for integer or
+    'd' for double (or any other string accepted by array.array()).
+    '''
+    # Start with the header: <number of dimensions> <dim1-size> <dim2-size> ...
+    header = array('i', [len(m.shape)] + list(m.shape))
+    # Now, we can do the array itself, just flattened
+    body = array(t, m.flatten().tolist())
+    # Wwap bytes if necessary...
+    if sys.byteorder != 'big':
+        header.byteswap()
+        body.byteswap()
+    # And return the result:
+    return bytearray(header.tostring() + body.tostring())
 
 def _parse_field_function_argument(argdat, args, faces, coords):
     # first, see if this is an easy one...
@@ -400,20 +369,20 @@ def schira_anchors(mesh, mdl,
 
     Options:
       * polar_angle (default None) specifies that the given data should be used in place of the
-        'polar_angle' property values. The given argument must be numeric and the same length as the
-        the number of vertices in the mesh. If None is given, then the property value of the mesh
-        is used; if a list is given and any element is None, then the weight for that vertex is
-        treated as a zero. If the option is a string, then the property value with the same name is
-        used as the polar_angle data.
+        'polar_angle' or 'PRF_polar_angle'  property values. The given argument must be numeric and
+        the same length as the the number of vertices in the mesh. If None is given, then the
+        property value of the mesh is used; if a list is given and any element is None, then the
+        weight for that vertex is treated as a zero. If the option is a string, then the property
+        value with the same name isused as the polar_angle data.
       * eccentricity (default None) specifies that the given data should be used in places of the
-        'eccentricity' property values. The eccentricity option is handled virtually identically to
-        the polar_angle option.
+        'eccentricity' or 'PRF_eccentricity' property values. The eccentricity option is handled 
+        virtually identically to the polar_angle option.
       * weight (default None) specifies that the weight or scale of the data; this is handled
         generally like the polar_angle and eccentricity options, but may also be 1, indicating that
         all vertices with polar_angle and eccentricity values defined will be given a weight of 1.
         If weight is left as None, then the function will check for 'weight',
-        'variance_explained', and 'retinotopy_weight' values and will use the first found (in that
-        order). If none of these is found, then a value of 1 is assumed.
+        'variance_explained', 'PRF_variance_explained', and 'retinotopy_weight' values and will use
+        the first found (in that order). If none of these is found, then a value of 1 is assumed.
       * weight_cutoff (default 0) specifies that the weight must be higher than the given value inn
         order to be included in the fit; vertices with weights below this value have their weights
         truncated to 0.
@@ -444,10 +413,12 @@ def schira_anchors(mesh, mdl,
         raise RuntimeError('given mesh is not a CorticalMesh object!')
     n = len(mesh.vertex_labels)
     # make sure we have our polar angle/eccen/weight values:
+    polar_angle = polar_angle if polar_angle is not None \
+        else mesh.prop('polar_angle') if mesh.has_property('polar_angle') \
+        else mesh.prop('PRF_polar_angle') if mesh.has_property('PRF_polar_angle') \
+        else None
     if polar_angle is None:
-        polar_angle = mesh.prop('polar_angle')
-        if polar_angle is None:
-            raise RuntimeError('No polar angle data given to schira_anchors!')
+        raise RuntimeError('No polar angle data given to schira_anchors!')
     if isinstance(polar_angle, dict):
         # a dictionary is okay, we just need to fix it to a list:
         tmp = polar_angle
@@ -455,24 +426,26 @@ def schira_anchors(mesh, mdl,
     if len(polar_angle) != n:
         raise RuntimeError('Polar angle data has incorrect length!')
     # Now Polar Angle...
+    eccentricity = eccentricity if eccentricity is not None \
+        else mesh.prop('eccentricity') if mesh.hash_property('eccentricity') \
+        else mesh.prop('PRF_eccentricity') if mesh.hash_property('PRF_eccentricity') \
+        else None
     if eccentricity is None:
-        eccentricity = mesh.prop('eccentricity')
-        if eccentricity is None:
-            raise RuntimeError('No eccentricity data given to schira_anchors!')
+        raise RuntimeError('No eccentricity data given to schira_anchors!')
     if isinstance(eccentricity, dict):
         tmp = eccentricity
         eccentricity = [tmp[i] if i in tmp else None for i in range(n)]
     if len(eccentricity) != n:
         raise RuntimeError('Eccentricity data has incorrect length!')
     # Now Weight...
+    weight = weight if weight is not None \
+        else mesh.prop('weight') if mesh.has_property('weight') \
+        else mesh.prop('variance_explained') if mesh.has_property('variance_explained') \
+        else mesh.prop('PRF_variance_explained') if mesh.has_property('PRF_variance_explained') \
+        else mesh.prop('retinotopy_weight') if mesh.has_property('retinotopy_weight') \
+        else None
     if weight is None:
-        weight = mesh.prop('weight')
-        if weight is None:
-            weight = mesh.prop('variance_explained')
-            if weight is None:
-                weight = mesh.prop('retinotopy_weight')
-                if weight is None:
-                    weight = 1
+        weight = 1
     if isinstance(weight, dict):
         tmp = weight
         weight = [tmp[i] if i in tmp else None for i in range(n)]
@@ -499,7 +472,6 @@ def schira_anchors(mesh, mdl,
             'scale', [d[2] for d in data for k in range(len(d[1]))]
            ] + ([] if suffix is None else suffix)
 
-
 # The topology and registration stuff is below:
 class Topology:
     '''
@@ -510,23 +482,20 @@ class Topology:
     access a subject's topologies.
     '''
     def __init__(self, triangles, registrations):
+        if _java is None:
+            init_registration()
         # First: make a java object for the topology:
-        faces  = _java.new_array(_java.jvm.int, 3, triangles.shape[1])
-        for i in range(triangles.shape[1]):
-            faces[0][i] = trianges[0][i]
-            faces[1][i] = trianges[1][i]
-            faces[2][i] = trianges[2][i]
-        #here: _from should be from, but syntax error
-        topo = _java.jvm.nben.geometry.spherical.MeshTopology._from(faces)
+        faces = serialize_numpy(triangles.T, 'i')
+        topo = _java.jvm.nben.geometry.spherical.MeshTopology.fromBytes(faces)
         # Okay, make our registration dictionary
-        d = {k: topo.register(_list_to_java_array(v)) for (k,v) in registrations.iteritems()}
+        d = {k: topo.registerBytes(serialize_numpy(v, 'd')) for (k,v) in registrations.iteritems()}
         # That's all really
         self.__dict__['_java_object'] = topo
         self.__dict__['registrations'] = d
     def __getitem__(self, attribute):
         return self.registrations[attribute]
     def __setitem__(self, attribute, dat):
-        self.registrations[attribute] = _list_to_java_array(dat)
+        self.registrations[attribute] = self._java_object.registerBytes(serialize_numpy(dat, 'd'))
     def keys(self):
         return self.registrations.keys()
     def iterkeys(self):
@@ -552,14 +521,14 @@ class Topology:
             raise RuntimeError('no registration found that links topologies')
         the_key = usable_keys[0]
         # Prep the data into java arrays
-        jmask = _int_list_to_java_array([1 if d is not None else 0 for d in data])
-        jdata = _list_to_java_array([d if d is not None else 0 for d in data])
+        jmask = serialize_numpy(np.asarray([1 if d is not None else 0 for d in data]), 'd')
+        jdata = serialize_numpy(np.asarray([d if d is not None else 0 for d in data]), 'd')
         # okay, next step is to call out to the java...
-        maskres = self._java_object.interpolate(
+        maskres = self._java_object.interpolateBytes(
             fromtopo.registrations[the_key],
             self.registrations[the_key].coordinates,
             order, jdata)
-        datares = self._java_object.interpolate(
+        datares = self._java_object.interpolateBytes(
             fromtopo.registrations[the_key],
             self.registrations[the_key].coordinates,
             order, jmask)

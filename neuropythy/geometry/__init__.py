@@ -95,3 +95,14 @@ def alignment_matrix_2D(u, v):
     around the origin.
     '''
     return rotation_matrix_2D(vector_angle_2D(u, v, direction=True))
+
+def triangle_area(a,b,c):
+    '''
+    triangle_area(a, b, c) yields the area of the triangle whose vertices are given by the points a,
+    b, and c.
+    '''
+    if len(a) == 2:
+        return 0.5*(a[0]*(b[1] - c[1]) + b[0]*(c[1] - a[1]) + c[0]*(a[1] - b[1]))
+    else:
+        mtx = alignment_matrix_3D(np.cross(np.asarray(b) - a, np.asarray(c) - a), [0,0,1])[0:1]
+        return triangle_area(np.dot(mtx, a), np.dot(mtx, b), np.dot(mtx, c))

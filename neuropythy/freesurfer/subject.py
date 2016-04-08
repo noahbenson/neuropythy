@@ -14,7 +14,7 @@ import itertools
 import pysistence
 from pysistence import make_dict
 from neuropythy.cortex import CorticalMesh
-from neuropythy.registration import Topology
+from neuropythy.topology import Topology
 
 # These static functions are just handy
 def spherical_distance(pt0, pt1):
@@ -184,8 +184,12 @@ class Hemisphere:
         'ribbon':               ((), lambda hemi: hemi._load_ribbon()),
         'chirality':            (('name',), 
                                  lambda hemi,name: 'LH' if name == 'LH' or name == 'RHX' else 'RH'),
-        'registrations':        (('sphere_surface', 'fs_sphere_surface', 'sym_sphere_surface'),
-                                 lambda hemi,sph,fs,sym: hemi._make_topology(sph,fs,sym))}
+        'topology':             (('sphere_surface', 'fs_sphere_surface', 'sym_sphere_surface'),
+                                 lambda hemi,sph,fs,sym: Topology(
+                                                            sph.faces,
+                                                            {hemi.subject.id: sph.coordinates,
+                                                             'fsaverage': fs.coordinates,
+                                                             'fsaverage_sym': sym.coordinates}))}
     
     # This function will clear the lazily-evaluated members when a given value is changed
     def __update_values(self, name):
@@ -304,108 +308,68 @@ class Hemisphere:
             self.add_property(name, arg)
 
     def interpolate(self, from_hemi, property_name, 
-                    apply=True, method='automatic', method_options=None,
-                    ignore_values=None, ignore_vertices=None, vertex_subset='all', undef=None):
+                    apply=True, method='automatic', mask=None, null=None, n_jobs=1):
         '''
-        hemi.interpolate(from_mesh, prop) yields a list of property values that have been resampled
+        hemi.interpolate(from_hemi, prop) yields a list of property values that have been resampled
         onto the given hemisphere hemi from the property with the given name prop of the given 
         from_mesh. If the optional apply is set to True (the default) or to a new property name
-        string, the property is added to mesh as well; otherwise it is only returned. Optionally,
+        string, the property is added to hemi as well; otherwise it is only returned. Optionally,
         prop may be a list of numpy array of values the same length as the mesh's vertex list; in
         this case, the apply option must be a new property name string, otherwise it is treated as
-        False.
-        #here
+        False. Note that in order to work, the hemi and from_hemi objects must share a registration
+        such as fsaverage or fsaverage_sym.
 
         Options:
-          * method: Specifies the method of interpolatio. See the "Methods" below. By default, this
-            is 'automatic', which chooses based on the data types of the properties.
-          * method_options: Specifies additional options for the method; see the "Methods" below.
-          * apply: May be True (default) to specify that the new property should be added to the
-            mesh before the method returns; if False, then the interpolated property is returned
-            only. If the parameter prop is a list or numpy array, then instead of True, this option
-            must specify the name of the new property, otherwise it is treated as False.
-          * ignore_values: May specify a single value to ignore when interpolating or a set of
-            values to ignore. All of these values, if interpolated onto a vertex, will be labeled as
-            the undefined value (see option undef). By default this is None, meaning the value None
-            is treated as undefined. To explicitly specify that no value should be considered
-            ignored, this must be set to an empty list or empty set.
-          * ignore_vertices: May specify a list of vertex labels for vertices that should be
-            considered invalid. Note that this restricts vertices in from_mesh, not in mesh.  See
-            also the undef option.
-          * vertex_subset: May specify the subset of vertices over which to interpolate; this should
-            specify vertices in the from_mesh, not in mesh. The default is 'all'.
-          * undef: May specify the value to be used in the return value to indicate that the
-            interpolation for a given vertex was an ignored value. By default this is None.
-
-        Interpolation Types:
-        Interpolation is quite different for different data types that appear in the property value
-        list of the from_mesh. For example, if the values are all strings, then the best that the
-        interpolation function can do is nearest-neighbor. If all of the values are real, however,
-        then trilinear interpolation can be used.
-
-        Methods:
-        All methods have the following features: prior to interpolation, the mesh surface is
-        clustered into topologically adjacent groups of similar interpolation types.
+          * mask (default: None) indicates that the given True/False or 0/1 valued list/array should
+            be used; any point whose nearest neighbor (see below) is in the given mask will, instead
+            of an interpolated value, be set to the null value (see null option).
+          * null (default: None) indicates the value that should be placed in the returned result if
+            either a vertex does not lie in any triangle or a vertex is masked out via the mask
+            option.
+          * smoothing (default: 2) assuming that the method is 'interpolate' or 'automatic', this
+            is the exponent used to smooth the interpolated surface; 1 is pure linear interpolation
+            while 2 represents a slightly smoother version of this. Note that this is not an order
+            of interpolation option.
+          * method (default: 'automatic') specifies what method to use for interpolation. The only
+            currently supported methods are 'automatic' or 'nearest'. The 'nearest' method does not
+            actually perform a nearest-neighbor interpolation but rather assigns to a destination
+            vertex the value of the source vertex whose veronoi-like polygon contains the
+            destination vertex; note that the term 'veronoi-like' is used here because it uses the
+            Voronoi diagram that corresponds to the triangle mesh and not the true delaunay
+            triangulation. The 'automatic' checks every destination vertex and assigns it the
+            'nearest' value if that value would not be a number, otherwise it interpolates linearly
+            within the vertex's source triangle.
+          * n_jobs (default: 1) is passed along to the cKDTree.query method, so may be set to an
+            integer to specify how many processors to use, or may be -1 to specify all processors.
         '''
-        if not isinstance(property_name, basestring):
-            # if this is a list, we can collect these...
-            if hasattr(property_name, '__iter__'):
-                return {p: self.sample_property(from_mesh, p, method=method, apply=apply)
+        if isinstance(property_name, basestring):
+            if not from_hemi.has_property(property_name):
+                raise ValueError('given property ' + property_name + ' is not in from_hemi!')
+            data = from_hemi.prop(property_name)
+        elif type(property_name).__module__ == np.__name__:
+            data = property_name
+            property_name = apply if isinstance(apply, basestring) else None
+        elif hasattr(property_name, '__iter__'):
+            if all(isinstance(s, basestring) for s in property_name):
+                return {p: self.interpolate(from_hemi, p, 
+                                            method=method, mask=mask,
+                                            null=null, n_jobs=n_jobs)
                         for p in property_name}
             else:
-                raise VaueError('property_name argument must be a string or list of strings')
-        if not from_mesh.has_property(property_name):
-            raise ValueError('given property ' + property_name + ' is not in from_mesh!')
-        orig_prop = from_mesh.property_value(property_name)
-        (d, nei) = space.cKDTree(from_mesh.coordinates.T).query(self.coordinates.T, k=1, p=2)
-        # sample from these...
-        result = [orig_prop[n] for n in nei]
-        if apply:
-            self.prop(property_name, result)
-        return result
-
-    def sample_property(self, from_hemi, property_name,
-                        alignment='automatic', method='nearest', apply=True,
-                        rename=None):
-        #here : rename/fix to use topology and registrations
-        '''hemi.sample_property(hem, name) resamples the property with the given name from the
-           given hemisphere hem into the current hemisphere hemi. Two options are allowed: the first
-           is method, which currently must be 'nearest'; the second is alignment, which may be
-           either 'fsaverage', 'fsaverage_sym', or 'automatic'. If automatic is specified, then
-           fsaverage is used when the hemispheres are the same and fsaverage_sym is used when they
-           are not. If the resampling cannot be completed due to, for example, a missing fsaverage
-           or fsaverage_sym alignment file, an error is raised.'''
-        if not isinstance(from_hemi, Hemisphere):
-            raise RuntimeError('given argument must be a Hemisphere object')
-        # make sure we do this for every property if multiple are given:
-        if not isinstance(property_name, basestring):
-            if hasattr(property_name, '__iter__'):
-                return {p: self.sample_property(from_hemi, p,
-                                                alignment=alignment, method=method, apply=apply)
-                        for p in property_name}
-            else:
-                raise ValueError('property_name argument must be a string or a list of strings')
-        # Okay, now we need to get the appropriate alignment meshes...
-        alignment = alignment.lower()
-        if alignment == 'automatic':
-            alignment = 'fsaverage' if from_hemi.chirality == self.chirality else 'fsaverage_sym'
-        elif alignment == 'fsaverage':
-            if from_hemi.chirality != self.chirality:
-                raise ValueError('fsaverage hemisphere alignment requires same-side hemispheres')
-        elif alignment != 'fsaverage_sym':
-            raise ValueError('alignment hemisphere must be fsaverage or fsaverage_sym')
-        # Now, get the appropriate meshes...
-        if alignment == 'fsaverage':
-            mesh_self = self.fs_sphere_surface
-            mesh_from = from_hemi.fs_sphere_surface
+                data = np.asarray(property_name)
+                property_name = apply if isinstance(apply, basestring) else None
         else:
-            mesh_self = self.sym_sphere_surface
-            mesh_from = self.sym_sphere_surface
-        # Now we can do the resampling
-        resamp = mesh_self.sample_property(mesh_from, property_name, method=method, apply=False)
-        if apply:
-            self.prop(property_name if rename is None else rename, resamp)
-        return resamp
+            raise ValueError('property_name is not a string or valid list')
+        # pass data along to the topology object...
+        result = self.topology.interpolate_from(from_hemi.topology, data,
+                                                method=method, mask=mask,
+                                                null=null, n_jobs=n_jobs)
+        if result is not None:
+            if apply is True and property_name is not None:
+                self.prop(property_name, result)
+            elif isinstance(apply, basestring):
+                self.prop(apply, result)
+        return result
 
     # This [private] function and this variable set up automatic properties from the FS directory
     # in order to be auto-loaded, a property must appear in this dictionary:
