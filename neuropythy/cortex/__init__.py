@@ -330,6 +330,9 @@ class CorticalMesh(Immutable):
             ('vertex_face_index', 'face_normals'),
             lambda VF,FN: CorticalMesh.calculate_vertex_normals(VF, FN)),
 
+        'vertex_spatial_hash': (('vertex_coordinates',), lambda X: space.cKDTree(X.T)),
+        'face_spatial_hash': (('face_coordinates',), lambda FX: space.cKDTree(FX.mean(0).T)),
+
         'meta_data': (
              ('options',),
              lambda opts: opts.get('meta_data', {})),
@@ -476,39 +479,6 @@ class CorticalMesh(Immutable):
         props = {name: prop[I] for (name,prop) in self.properties.iteritems()}
         return CorticalMesh(X, F, vertex_labels=V, meta_data=meta, properties=props, **opts)
 
-    def orthographic_projection(self, center, radius, 
-                                align_vertex_id=None, align_axis=None, scale=None):
-        '''
-        mesh.orthographic_projection((x,y,z), r) yields a 2D mesh made by projecting the vertices
-        of the 3D mesh onto a 2D map orthographically for all vertices with a minor vector angle 
-        with the given center (x,y,z) that is less than the given radius r. The optional parameters
-        align_vertex_id and align_axis specify that the vertex with the given id (label) be aligned
-        to the given 2D axis in the final map. The optional argument scale may also be specified to
-        scale the resulting map; by default, the norm of the given center is used.
-        '''
-        # start by selecting only the vertices that are close enough to the center:
-        n = len(self.vertex_labels)
-        X = self.coordinates
-        idcs = [i for i in range(n) if geo.vector_angle(center, X[:, i]) < radius]
-        m = self.select(self.vertex_labels[idcs])
-        # now, edit the coordinates so that they are 2D and appropriately centered/scaled
-        if scale is None:
-            scale = np.linalg.norm(center)
-        # align the coordinates to be centered around the center...
-        mtx2D = np.dot(
-            geo.alignment_matrix_3D(center, (0, 0, 1))[0:2, :],
-            m.coordinates)
-        # if there is an alignment option, go ahead wiht it
-        if align_vertex_id is not None:
-            if align_axis is None:
-                align_axis = (1, 0)
-            mtx2D = np.dot(
-                geo.alignment_matrix_2D(m.index[align_vertex_id], align_axis),
-                mtx2D)
-        # just set the coordinate matrix and return
-        m.coordinates = scale * mtx2D
-        return m
-
     def add_property(self, name, prop=Ellipsis):
         '''mesh.add_property(name, prop) adds (or overwrites) the given property with the given name
            in the given mesh. The name must be a valid dictionary key and the prop argument must be
@@ -614,6 +584,81 @@ class CorticalMesh(Immutable):
            function f should operate on a dict p which is identical to that passed to the method
            mesh.map_vertices.'''
         return self.vertex_labels[np.array(self.map_vertices(f)) == True]
+
+    def reproject(self, X):
+        '''mesh.reproject(X) yields a 2D coordinate matrix Xp with the same number of points as the
+           3D coordinate matrix X such that the points have been projected identically as the
+           projection used to create this 2D mesh. If this is not a mesh created with the
+           CorticalMesh projection function, an error will be raised.'''
+        projection_params = self.option('projection_parameters')
+        if projection_params is None:
+            raise ValueError('the given mesh was not created by projection from another mesh')
+        if 'inverse_function' not in projection_params:
+            raise ValueError('the projection method used has not defined inverse')
+        ffn = projection_params['forward_function']
+        return ffn(X, projection_params)
+    def unproject(self, X):
+        '''mesh.unproject(X) yields a 3D coordinate matrix Xu with the same number of points as the
+           2D coordinate matrix X such that the points have been projected back from the 2D map to
+           the 3D sphere in the opposite fashion as the projection that was used to create this 2D
+           mesh. If this is not a mesh created with the CorticalMesh projection function, an error
+           will be raised. This function is the inverse of reproject.'''
+        projection_params = self.option('projection_parameters')
+        if projection_params is None:
+            raise ValueError('the given mesh was not created by projection from another mesh')
+        if 'inverse_function' not in projection_params:
+            raise ValueError('the projection method used has not defined inverse')
+        ifn = projection_params['inverse_function']
+        return ifn(X, projection_params)
+
+    def unaddress(self, data):
+        '''mesh.unaddress(addr) yields a coordinate matrix of points on the given mesh that are
+           located at the mesh addresses given in addr. The addr matrix should be generated from
+           a mesh.address(points) method call; the two meshes must be topologically equivalent
+           or an error may be raised. The resulting matrix will always be sized 2 or 3 by n unless
+           the address is of a single point, in which case that point is returned.'''
+        # addresses are dictionaries that contain three fields: 'face_id', 'angle_fraction', and 
+        # 'distance_fraction'; these may be numbers or equally sized lists
+        if self.coordinates.shape[0] == 2:
+            # In this case, we unaddress on the sphere, then reproject...
+            smesh = self.meta('source_mesh')
+            if smesh is None: raise ValueError('2D mesh has no source mesh!')
+            return self.reproject(smesh.unaddress(data))
+        if not isinstance(data, dict):
+            raise ValueError('address data must be a dictionary')
+        if 'face_id' not in data: raise ValueError('address must contain face_id')
+        if 'angle_fraction' not in data: raise ValueError('address must contain angle_fraction')
+        if 'distance_fraction' not in data: raise ValueError('address must contain distance_fraction')
+        face_id = data['face_id']
+        angle_fraction = data['angle_fraction']
+        distance_fraction = data['distance_fraction']
+        if all(hasattr(x, '__iter__') for x in (face_id, angle_fraction, distance_fraction)):
+            if len(face_id) != len(angle_fraction) or len(face_id) != len(distance_fraction):
+                raise ValueError('invalid address specification (unmatched lengths)')
+            return np.asarray(
+                [geo.unaddress_triangle(self.face_coordinates[:,:,fid], [t, r])
+                 for (fid,t,r) in zip(face_id, angle_fraction, distance_fraction)]
+                ).T
+        else:
+            return geo.triangle_unaddress(self.face_coordinates[:, :, face_id],
+                                          [angle_fraction, distance_fraction])
+    def address(self, data):
+        '''
+        mesh.address(X) yields a dictionary containing the address or addresses of the point or
+        points given in the vector or coordinate matrix X. Addresses specify a single unique 
+        topological location on the mesh such that deformations of the mesh will address the same
+        points differently. To convert a point from one mesh to another isomorphic mesh, you can
+        address the point in the first mesh then unaddress it in the second mesh. Note that an
+        address may only be obtained from a spherical or 2D mesh.
+        '''
+        if self.coordinates.shape[0] == 2:
+            smesh = self.meta('source_mesh')
+            if smesh is None: raise ValueError('2D mesh has no source mesh!')
+            return smesh.address(self.unproject(data))
+        else:
+            reg = self.meta('registration')
+            if reg is None: raise ValueError('mesh has no registration!')
+            return reg.address(data)
 
     def option(self, opt):
         '''mesh.option(x) yields the value of the option f in the given mesh. If x is not an option

@@ -10,6 +10,8 @@ import scipy as sp
 import scipy.spatial as space
 import os, math
 from pysistence import make_dict
+
+from neuropythy.immutable import Immutable
 import neuropythy.geometry as geo
 
 class Topology:
@@ -22,14 +24,22 @@ class Topology:
     '''
 
     def __init__(self, triangles, registrations):
+        triangles = np.asarray(triangles)
         self.triangles = triangles if triangles.shape[1] == 3 else triangles.T
-        self.registrations = make_dict({name: Registration(self, coords) 
+        self.vertex_count = np.max(triangles.flatten())
+        self.registrations = make_dict({name: Registration(self, np.asarray(coords))
                                         for (name, coords) in registrations.iteritems()})
+    def __repr__(self):
+        return 'Topology(<%d triangles>, <%d vertices>)' % (self.triangles.shape[0],
+                                                            self.vertex_count)
     def register(self, name, coords):
         '''
         topology.register(name, coordinates) adds the given registration to the given topology.
         '''
-        self.registrations = self.registrations.using(name, Registration(coords))
+        coords = np.asarray(coords)
+        self.registrations = self.registrations.using(
+            name,
+            Registration(coords if coords.shape[0] == 3 else coords.T))
         return self
     def interpolate_from(self, topo, data, mask=None, null=None, method='automatic', n_jobs=1):
         '''
@@ -71,7 +81,7 @@ class Topology:
             topo.registrations[reg_name], data,
             mask=mask, null=null, method=method, n_jobs=n_jobs);
 
-class Registration:
+class Registration(Immutable):
     '''
     A Registration object represents a configuration of a topology object. Registrations represent
     various coordinate configurations of a hemisphere; e.g., in FreeSurfer, any given hemisphere has
@@ -82,17 +92,19 @@ class Registration:
     '''
 
     def __init__(self, topology, coordinates):
-        self.topology = topology
-        coordinates = np.array(coordinates)
-        self.coordinates = np.asarray(
-            [x/numpy.linalg.norm(x) 
-             for x in (coordinates if coordinates.shape[1] == 3 else coordinates.T)])
-        # here, we build the spatial has...
-        # We use the centers of the triangles as the points we will search by
-        self.triangle_centers = np.asarray([np.mean(self.coordinates[tri], 0) 
-                                            for tri in topology.triangles])
-        self.triangle_hash = space.cKDTree(self.triangle_centers)
-        self.vertex_hash = space.cKDTree(self.coordinates.T)
+        coordinates = coordinates if coordinates.shape[0] < 4 else coordinates.T
+        Immutable.__init__(self,
+                           {},
+                           {'topology':    topology,
+                            'coordinates': (coordinates / np.sqrt((coordinates ** 2).sum(0))).T},
+                           {'triangle_centers':
+                               (('topology','coordinates'),
+                                lambda topo,x: np.asarray([np.mean(x[tri], 0) for tri in topo.triangles])),
+                            'triangle_hash': (('triangle_centers',), lambda x: space.cKDTree(x)),
+                            'vertex_hash':   (('coordinates',), lambda x: space.cKDTree(x))})
+    def __repr__(self):
+        return 'Registration(<%d triangles>, <%d vertices>)' % (self.topology.triangles.shape[0],
+                                                                self.coordinates.shape[0])
 
 
     # True if the point is in the triangle, otherwise False; tri_no is an index into the triangle
@@ -102,7 +114,29 @@ class Registration:
         bc = np.dot(pt - tri[1], np.cross(tri[1], tri[2] - tri[1]))
         ca = np.dot(pt - tri[2], np.cross(tri[2], tri[0] - tri[2]))
         return (ab >= 0 and bc >= 0 and ca >= 0)
-        
+    
+    def nearest_vertex(self, pt):
+        '''
+        registration.nearest_vertex(pt) yields the id number of the nearest vertex in the given
+        registration to the given point pt. If pt is an (n x dims) matrix of points, an id is given
+        for each column of pt.
+        '''
+        (d,near) = self.vertex_hash.query(pt, k=1)
+        return near
+    def container(self, pt, k=12, n_jobs=1):
+        '''
+        registration.container(pt) yields the id number of the nearest triangle in the given
+        registration to the given point pt. If pt is an (n x dims) matrix of points, an id is given
+        for each column of pt.
+        '''
+        pt = np.asarray(pt)
+        (d, near) = self.triangle_hash.query(pt, k=k) #n_jobs fails?
+        if len(pt.shape) == 1:
+            return next((k for k in near if self._point_in_triangle(k, pt)), None)
+        else:
+            return [next((k for k in near_i if self._point_in_triangle(k, x)), None)
+                    for (x, near_i) in zip(pt, near)]
+
     def interpolate_from(self, reg, data, 
                          smoothing=2, mask=None, null=None, method='automatic', n_jobs=1):
         '''
@@ -150,11 +184,7 @@ class Registration:
         tris = reg.topology.triangles
         data = np.asarray(data)
         ## we only query the nearest check_no triangles; otherwise we don't fine the container
-        (d, near) = reg.triangle_hash.query(self.coordinates, k=check_no) #n_jobs fails?
-        containers = [
-            next((k for k in tri_nos if reg._point_in_triangle(k, x)), None)
-            for (x, tri_nos) in zip(self.coordinates, near)]
-        print len([x for x in containers if x is not None])
+        containers = reg.container(self.coordinates, k=check_no, n_jobs=n_jobs)
         # Okay, now we interpolate for each triangle
         if mask is None:
             return [null if tri_no is None \
@@ -177,4 +207,27 @@ class Registration:
         # and do the interpolation:
         return np.dot([a_area, b_area, c_area], data[tri_vertices]) / (a_area + b_area + c_area)
         
-            
+
+    def address(self, data):
+        '''
+        reg.address(X) yields a dictionary containing the address or addresses of the point or
+        points given in the vector or coordinate matrix X. Addresses specify a single unique 
+        topological location on the mesh such that deformations of the mesh will address the same
+        points differently. To convert a point from one mesh to another isomorphic mesh, you can
+        address the point in the first mesh then unaddress it in the second mesh.
+        '''
+        # we have to have a topology and registration for this to work...
+        data = np.asarray(data)
+        # first, find the triangle containing each point
+        face_id = self.container(data)
+        # next, address them...
+        if len(data.shape) == 1:
+            (t, r) = geo.address_triangle(self.coordinates[self.topology.triangles[:,face_id]].T,
+                                          data)
+        else:
+            (t, r) = np.asarray([geo.address_triangle(self.coordinates[tri], x)
+                                 for (tri,x) in zip(self.topology.triangles[:,face_id].T, data.T)]
+                                ).T
+        # And return the dictionary
+        return {'face_id': self.faces[:,face_id], 'angle_fraction': t, 'distance_fraction': r}
+                

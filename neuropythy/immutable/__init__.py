@@ -68,7 +68,7 @@ class Immutable:
             return self.__dict__[name]
         elif name in self._lazy_vals:
             (deps, fn) = self._lazy_vals[name]
-            tmp = fn(*map(lambda x: getattr(self, x), deps))
+            tmp = fn(*[getattr(self, x) for x in deps])
             self.__dict__[name] = tmp
             return tmp
         elif name in self._const_vals:

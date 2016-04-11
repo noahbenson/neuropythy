@@ -12,9 +12,10 @@ import nibabel.freesurfer.mghformat as fsmgh
 import os, math
 import itertools
 import pysistence
-from pysistence import make_dict
-from neuropythy.cortex import CorticalMesh
-from neuropythy.topology import Topology
+from   pysistence import make_dict
+from   neuropythy.cortex import CorticalMesh
+from   neuropythy.topology import Topology
+import neuropythy.geometry as geo
 
 # These static functions are just handy
 def spherical_distance(pt0, pt1):
@@ -24,22 +25,6 @@ def spherical_distance(pt0, pt1):
     dphi   = pt1[1] - pt0[1]
     a = np.sin(dphi/2)**2 + np.cos(pt0[1]) * np.cos(pt1[1]) * np.sin(dtheta/2)**2
     return 2 * np.arcsin(np.sqrt(a))
-def rotation_matrix(a, b):
-    '''rotation_matrix(a, b) yields the 3x3 matrix that aligns the 3D vector a with the 3D vector
-       b. Both a and b should be in Cartesian coordinates.'''
-    a = a / np.sqrt(sum(np.array(a) ** 2))
-    b = b / np.sqrt(sum(np.array(b) ** 2))
-    if np.sum((a - b) ** 2) < 0.0000001:
-        return np.identity(3)
-    v = np.cross(a, b)
-    vn = np.sqrt(sum(v ** 2))
-    u = np.arccos(np.dot(a, b))
-    A = np.array(
-        [[0.0, -v[2], v[1]],
-         [v[2], 0.0, -v[0]],
-         [-v[1], v[0], 0.0]])
-    return np.identity(3) + A + np.dot(A, A) * (1 - np.dot(a,b)) / (vn * vn)
-    
 
 class PropertyBox(list):
     '''PropertyBox is a simple class for lazily loading properties into a hemisphere or mesh. It
@@ -107,7 +92,7 @@ class Hemisphere:
         'options': lambda m,v: Hemisphere._check_options(m,v)}
 
     # This static variable and these functions explain the dependency hierarchy in cached data
-    def __make_surface(self, coords, faces, name):
+    def __make_surface(self, coords, faces, name, reg=None):
         return CorticalMesh(
             coords,
             faces,
@@ -116,8 +101,9 @@ class Hemisphere:
             meta_data = self.meta_data.using(
                 **{'subject': self.subject,
                    'hemisphere': self,
-                   'name': name}))
-    def _load_surface(self, name):
+                   'name': name,
+                   'registration': reg}))
+    def _load_surface_data(self, name):
         path = self.subject.surface_path(name, self.name)
         if not os.path.exists(path):
             return None
@@ -125,7 +111,10 @@ class Hemisphere:
             data = fsio.read_geometry(path)
             data[0].setflags(write=False)
             data[1].setflags(write=False)
-            return self.__make_surface(data[0], data[1], name)
+            return data
+    def _load_surface(self, name, preloaded=None, reg=None):
+        data = self._load_surface_data(name) if preloaded is None else preloaded
+        return self.__make_surface(data[0], data[1], name, reg=reg)
     def _load_sym_surface(self, name):
         path = self.subject.surface_path(name, self.name)
         if not os.path.exists(path):
@@ -166,14 +155,31 @@ class Hemisphere:
         'white_surface':        ((), lambda hemi: hemi._load_surface('white')),
         'pial_surface':         ((), lambda hemi: hemi._load_surface('pial')),
         'inflated_surface':     ((), lambda hemi: hemi._load_surface('inflated')),
-        'sphere_surface':       ((), lambda hemi: hemi._load_surface('sphere')),
-        'fs_sphere_surface':    ((), lambda hemi: (hemi._load_surface('sphere.reg') 
-                                                   if hemi.subject.id != 'fsaverage'
-                                                   else hemi.sphere_surface)),
-        'sym_sphere_surface':   ((), lambda hemi: (hemi._load_surface('fsaverage_sym.sphere.reg') 
-                                                   if hemi.subject.id != 'fsaverage_sym' 
-                                                   else hemi.sphere_surface)),
-        'vertex_count':         (('inflated_surface',), lambda hemi,mesh: len(mesh.vertex_labels)),
+
+        'sphere_surface_data':  ((), lambda hemi: hemi._load_surface_data('sphere')),
+        'fs_surface_data':      ((), lambda hemi: hemi._load_surface_data('sphere.reg')),
+        'sym_surface_data':     ((), 
+                                 lambda hemi: hemi._load_surface_data('fsaverage_sym.sphere.reg')),
+        'faces':                (('sphere_surface_data',), lambda hemi,dat: dat[1]),
+
+        'sphere_surface':       (('sphere_surface_data','topology'), 
+                                 lambda hemi,dat,topo: \
+                                     hemi._load_surface('sphere', preloaded=dat,
+                                                        reg=topo.registrations[hemi.subject.id])),
+        'fs_sphere_surface':    (('fs_sphere_data','topology'),
+                                 lambda hemi,dat,topo: (
+                                    hemi.sphere_surface if hemi.subject.id == 'fsaverage'
+                                    else None if dat is None
+                                    else hemi._load_surface('sphere.reg', preloaded=dat,
+                                                            reg=topo.registrations['fsaverage']))),
+        'sym_sphere_surface':   (('sym_sphere_data','topology'),
+                                 lambda hemi,dat,topo: (
+                                    hemi.sphere_surface if hemi.subject.id == 'fsaverage_sym'
+                                    else None if dat is None
+                                    else hemi._load_surface('fsaverage_sym.sphere.reg', preloaded=dat,
+                                                            reg=ropo.registrations['fsaverage_sym']))),
+
+        'vertex_count':         (('sphere_surface_data',), lambda hemi,dat: dat[0].shape[1]),
         'midgray_surface':      (('white_surface', 'pial_surface'),
                                  lambda hemi,W,P: hemi.__make_surface(
                                      0.5*(W.coordinates + P.coordinates),
@@ -184,12 +190,11 @@ class Hemisphere:
         'ribbon':               ((), lambda hemi: hemi._load_ribbon()),
         'chirality':            (('name',), 
                                  lambda hemi,name: 'LH' if name == 'LH' or name == 'RHX' else 'RH'),
-        'topology':             (('sphere_surface', 'fs_sphere_surface', 'sym_sphere_surface'),
-                                 lambda hemi,sph,fs,sym: Topology(
-                                                            sph.faces,
-                                                            {hemi.subject.id: sph.coordinates,
-                                                             'fsaverage': fs.coordinates,
-                                                             'fsaverage_sym': sym.coordinates}))}
+        'topology':             (('sphere_surface_data', 'fs_surface_data', 'sym_surface_data'),
+                                 lambda hemi,sph,fs,sym: Topology(sph[1],
+                                                                  {hemi.subject.id: sph[0],
+                                                                   'fsaverage': fs[0],
+                                                                   'fsaverage_sym': sym[0]}))}
     
     # This function will clear the lazily-evaluated members when a given value is changed
     def __update_values(self, name):
@@ -342,6 +347,8 @@ class Hemisphere:
           * n_jobs (default: 1) is passed along to the cKDTree.query method, so may be set to an
             integer to specify how many processors to use, or may be -1 to specify all processors.
         '''
+        if from_hemi.chirality != self.chirality:
+            raise ValueError('hemispheres have opposite chiralities')
         if isinstance(property_name, basestring):
             if not from_hemi.has_property(property_name):
                 raise ValueError('given property ' + property_name + ' is not in from_hemi!')
@@ -390,8 +397,8 @@ class Hemisphere:
         'retinotopy_angle': ('polar_angle',     lambda f: fsio.read_morph_data(f)),
         'retinotopy_areas': ('visual_area',     lambda f: fsio.read_morph_data(f))}
     # properties grabbed out of MGH or MGZ files in the sufsio.read_morph_data(f)),
-    _mgh_properties = {
-        }
+    _mgh_properties = {}
+    # funciton for initializing the auto-loading properties
     def __init_properties(self):
         dir = self.directory
         files = [f for f in os.listdir(dir) if os.path.isfile(os.path.join(dir, f))]            
@@ -439,26 +446,58 @@ class Hemisphere:
 
     # These methods, values, and the projection fn are all related to map projection
     @staticmethod
-    def _orthographic_projection(X, params): return X[[1,2]]
+    def _orthographic_projection(X, params): 
+        X = np.asarray(X)
+        X = X if X.shape[0] < 4 else X.T
+        return X[1:3]
+    @staticmethod
+    def _orthographic_projection_inverse(X, params): 
+        X = np.asarray(X)
+        X = X if X.shape[0] < 4 else X.T
+        r = params['sphere_radius']
+        Xnorm = X / r
+        return np.asarray([r * np.sqrt(1.0 - (Xnorm ** 2).sum(0)), X[0], X[1]])
     @staticmethod
     def _equirectangular_projection(X, params):
-        norms = np.sqrt((X ** 2).sum(0))
-        mu = np.mean(norms)
-        return mu / math.pi * np.array(
-            [np.arctan2(X[0], X[1]),
-             np.arcsin(X[2] / norms)])
+        X = np.asarray(X)
+        X = X if X.shape[0] < 4 else X.T
+        r = params['sphere_radius']
+        return r / math.pi * np.asarray([np.arctan2(X[0], X[1]), np.arcsin(X[2] / r)])
+    @staticmethod
+    def _equirectangular_projection_inverse(X, params):
+        X = np.asarray(X)
+        X = X if X.shape[0] < 4 else X.T
+        r = params['sphere_radius']
+        X = X * math.pi / r
+        return np.asarray([np.cos(X[0]) * r, 
+                           np.sin(X[0]) * r,
+                           np.sin(X[1]) * r])
     @staticmethod
     def _mercator_projection(X, params):
-        norms = np.sqrt((X ** 2).sum(0))
-        mu = np.mean(norms)
-        return mu * np.array(
-            [np.arctan2(X[0], X[1]),
-             np.log(np.tan(0.25 * math.pi + 0.5 * np.arcsin(X[2] / norms)))])
+        X = np.asarray(X)
+        X = X if X.shape[0] < 4 else X.T
+        r = params['sphere_radius']
+        return r * np.asarray([np.arctan2(X[0], X[1]),
+                               np.log(np.tan(0.25 * math.pi + 0.5 * np.arcsin(X[2] / r)))])
+    @staticmethod
+    def _mercator_projection_inverse(X, params):
+        X = np.asarray(X)
+        X = X if X.shape[0] < 4 else X.T
+        r = params['sphere_radius']
+        X = X / r
+        return r * np.asarray([np.cos(X[0]),
+                               np.sin(X[0]),
+                               np.sin(2 * (np.atan(np.exp(X[1])) - 0.25*math.pi))])
     __projection_methods = {
         'orthographic':    lambda X,p: Hemisphere._orthographic_projection(X,p),
         'equirectangular': lambda X,p: Hemisphere._equirectangular_projection(X,p),
         #'mollweide':       lambda X,p: Hemisphere._mollweide_projection(X,p),
         'mercator':        lambda X,p: Hemisphere._mercator_projection(X,p)}
+    __projection_methods_inverse = {
+        'orthographic':    lambda X,p: Hemisphere._orthographic_projection_inverse(X,p),
+        'equirectangular': lambda X,p: Hemisphere._equirectangular_projection_inverse(X,p),
+        #'mollweide':       lambda X,p: None,
+        'mercator':        lambda X,p: Hemisphere._mercator_projection_inverse(X,p)}
     def __interpret_projection_params(self, params):
         # Figure out which spherical surface we're using...
         if 'surface' not in params or params['surface'].lower() == 'native':
@@ -505,9 +544,18 @@ class Hemisphere:
             params['mesh'],
             params['center'],
             params['radius'])
-        projfn = Hemisphere.__projection_methods[params['method']]
-        R = rotation_matrix(params['center'], [100.0, 0.0, 0.0])
-        submesh.coordinates = projfn(np.dot(R, submesh.coordinates), params)
+        params['sphere_radius'] = np.mean(np.sqrt((submesh.coordinates ** 2).sum(0)))
+        FR = geo.alignment_matrix_3D(params['center'], [1.0, 0.0, 0.0])
+        IR = geo.alignment_matrix_3D([1.0, 0.0, 0.0], params['center'])
+        fwdprojfn = Hemisphere.__projection_methods[params['method']]
+        invprojfn = Hemisphere.__projection_methods_inverse[params['method']]
+        fwdfn = lambda X,p: fwdprojfn(np.dot(FR, X), p)
+        invfn = lambda X,p: np.dot(IR, invprojfn(X, p))
+        params['forward_function'] = fwdfn
+        params['inverse_function'] = invfn
+        params = make_dict(params)
+        submesh.coordinates = fwdfn(submesh.coordinates, params)
+        submesh.options = submesh.options.using(projection_parameters=params)
         return submesh
 
 class Subject:

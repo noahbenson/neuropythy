@@ -19,9 +19,8 @@ setup(
               'neuropythy.cortex',
               'neuropythy.registration'],
     package_data={'': ['LICENSE.txt', 'lib/nben/target/nben-standalone.jar']},
-    install_requires=[
-        'numpy>=1.2',
-        'scipy>=0.7',
-        'nibabel>=1.2',
-        'pysistence>=0.4',
-        'py4j>=0.9'])
+    install_requires=['numpy>=1.2',
+                      'scipy>=0.7',
+                      'nibabel>=2.0',
+                      'pysistence>=0.4',
+                      'py4j>=0.9'])

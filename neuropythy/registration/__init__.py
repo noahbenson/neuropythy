@@ -473,9 +473,9 @@ def schira_anchors(mesh, mdl,
            ] + ([] if suffix is None else suffix)
 
 # The topology and registration stuff is below:
-class Topology:
+class JavaTopology:
     '''
-    Topology(triangles, registrations) constructs a topology object object with the given triangle
+    JavaTopology(triangles, registrations) constructs a topology object object with the given triangle
     mesh, defined by a 3xn matrix of triangle indices, and with the registration coordinate matrices
     given in the dictionary registrations. This class should only be instantiated by the neuropythy
     library and should generally not be constructed directly. See Hemisphere.topology objects to
@@ -488,7 +488,8 @@ class Topology:
         faces = serialize_numpy(triangles.T, 'i')
         topo = _java.jvm.nben.geometry.spherical.MeshTopology.fromBytes(faces)
         # Okay, make our registration dictionary
-        d = {k: topo.registerBytes(serialize_numpy(v, 'd')) for (k,v) in registrations.iteritems()}
+        d = {k: topo.registerBytes(serialize_numpy(v, 'd'))
+             for (k,v) in registrations.iteritems()}
         # That's all really
         self.__dict__['_java_object'] = topo
         self.__dict__['registrations'] = d

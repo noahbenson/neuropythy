@@ -18,9 +18,18 @@ def normalize(u):
 
 def vector_angle_cos(u, v):
     '''
-    vector_angle_cos(u, v) yields the cosine of the angle between the two vectors u and v.
+    vector_angle_cos(u, v) yields the cosine of the angle between the two vectors u and v. If u
+    or v (or both) is a (d x n) matrix of n vectors, the result will be a length n vector of the
+    cosines.
     '''
-    return np.dot(np.asarray(u) / np.linalg.norm(u), np.asarray(v) / np.linalg.norm(v))
+    u = u / np.sqrt((np.asarray(u) ** 2).sum(0))
+    v = v / np.sqrt((np.asarray(v) ** 2).sum(0))
+    if len(u.shape) == 1:
+        return np.dot(u,v)
+    elif len(v.shape) == 1:
+        return np.dot(v,u)
+    else:
+        return (u * v).sum(0)
 
 def vector_angle(u, v, direction=None):
     '''
@@ -96,6 +105,20 @@ def alignment_matrix_2D(u, v):
     '''
     return rotation_matrix_2D(vector_angle_2D(u, v, direction=True))
 
+def line_intersection_2D(((x1,y1),(x2,y2)), ((x3,y3),(x4,y4))):
+    '''
+    line_intersection((a, b), (c, d)) yields the intersection point between the lines that pass
+    through the given pairs of points.
+    '''
+    dx12 = (x1 - x2)
+    dx34 = (x3 - x4)
+    dy12 = (y1 - y2)
+    dy34 = (y3 - y4)
+    denom = dx12*dy34 - dy12*dx34
+    q12 = (x1*y2 - y1*x2) / denom
+    q34 = (x3*y4 - y3*x4) / denom
+    return (q12*dx34 - q34*dx12, q12*dy34 - q34*dy12)
+
 def triangle_area(a,b,c):
     '''
     triangle_area(a, b, c) yields the area of the triangle whose vertices are given by the points a,
@@ -106,3 +129,44 @@ def triangle_area(a,b,c):
     else:
         mtx = alignment_matrix_3D(np.cross(np.asarray(b) - a, np.asarray(c) - a), [0,0,1])[0:1]
         return triangle_area(np.dot(mtx, a), np.dot(mtx, b), np.dot(mtx, c))
+
+def traingle_address(fx, pt):
+    '''
+    triangle_address(FX, P) yields an address coordinate (t,r) for the point P in the triangle
+    defined by the (3 x d)-sized coordinate matrix FX, in which each row of the matrix is the
+    d-dimensional vector representing the respective triangle vertx for triangle [A,B,C]. The
+    resulting coordinates (t,r) (0 <= t <= 1, 0 <= r <= 1) address the point P such that, if t gives
+    the fraction of the angle from vector AB to vector AC that is made by the angle between vectors
+    AB and AP, and r gives the fraction ||AP||/||AR|| where R is the point of intersection between
+    lines AP and BC. If P is a (d x n)-sized matrix of points, then a (2 x n) matrix of addresses
+    is returned.
+    '''
+    fx = np.asarray(fx)
+    pt = np.asarray(pt)
+    # The triangle vectors...
+    ab = fx[1] - fx[0]
+    ac = fx[2] - fx[0]
+    bc = fx[2] - fx[1]
+    ap = np.asarray([pt_i - a_i for (pt_i, a_i) in zip(pt, fx[0])])
+    # get the unnormalized distance...
+    r = np.sqrt((ap ** 2).sum(0))
+    # now we can find the angle...
+    unit = 1 - r.astype(bool)
+    t = vector_angle(ap + [ab_i * unit for ab_i in ab], ab) / vector_angle(ab, ac)
+    # the angle A of the triangle and the reference r0...
+    r0 = np.sqrt((np.asarray([ab_i + t*bc_i for (ab_i,bc_i) in zip(ab, bc)]) ** 2).sum(0))
+    return np.asarray([t, r/r0])
+
+def triangle_unaddress(fx, tr):
+    '''
+    triangle_unaddress(FX, tr) yields the point P, inside the reference triangle given by the 
+    (3 x d)-sized coordinate matrix FX, that is addressed by the address coordinate tr, which may
+    either be a 2-d vector or a (2 x n)-sized matrix.
+    '''
+    fx = np.asarray(fx)
+    tr = np.asarray(tr)
+    # the triangle vectors...
+    ab = fx[1] - fx[0]
+    ac = fx[2] - fx[0]
+    bc = fx[2] - fx[1]
+    return np.asarray([ax + tr[1]*(abx + tr[0]*bcx) for (ax, bcx, abx) in zip(fx[0], bc, ab)])
