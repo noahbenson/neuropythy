@@ -130,7 +130,7 @@ def triangle_area(a,b,c):
         mtx = alignment_matrix_3D(np.cross(np.asarray(b) - a, np.asarray(c) - a), [0,0,1])[0:1]
         return triangle_area(np.dot(mtx, a), np.dot(mtx, b), np.dot(mtx, c))
 
-def traingle_address(fx, pt):
+def triangle_address(fx, pt):
     '''
     triangle_address(FX, P) yields an address coordinate (t,r) for the point P in the triangle
     defined by the (3 x d)-sized coordinate matrix FX, in which each row of the matrix is the
@@ -152,10 +152,17 @@ def traingle_address(fx, pt):
     r = np.sqrt((ap ** 2).sum(0))
     # now we can find the angle...
     unit = 1 - r.astype(bool)
-    t = vector_angle(ap + [ab_i * unit for ab_i in ab], ab) / vector_angle(ab, ac)
-    # the angle A of the triangle and the reference r0...
-    r0 = np.sqrt((np.asarray([ab_i + t*bc_i for (ab_i,bc_i) in zip(ab, bc)]) ** 2).sum(0))
-    return np.asarray([t, r/r0])
+    t0 = vector_angle(ab, ac)
+    t = vector_angle(ap + [ab_i * unit for ab_i in ab], ab)
+    sint = np.sin(t)
+    sindt = np.sin(t0 - t)
+    # finding r0 is tricker--we use this fancy formula based on the law of sines
+    q0 = np.sqrt((bc ** 2).sum(0))          # B->C distance
+    beta = vector_angle(-ab, bc)            # Angle at B
+    sinGamma = np.sin(math.pi - beta - t0)
+    sinBeta  = np.sin(beta)
+    r0 = q0 * sinBeta * sinGamma / (sinBeta * sindt + sinGamma * sint)
+    return np.asarray([t/t0, r/r0])
 
 def triangle_unaddress(fx, tr):
     '''

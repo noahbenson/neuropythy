@@ -241,12 +241,12 @@ class Registration(Immutable):
         face_id = self.container(data)
         # next, address them...
         if len(data.shape) == 1:
-            (t, r) = geo.address_triangle(self.coordinates[self.topology.triangles[:,face_id]].T,
+            (t, r) = geo.triangle_address(self.coordinates[self.topology.triangles[face_id]],
                                           data)
         else:
-            (t, r) = np.asarray([geo.address_triangle(self.coordinates[tri], x)
-                                 for (tri,x) in zip(self.topology.triangles[:,face_id].T, data.T)]
+            (t, r) = np.asarray([geo.triangle_address(self.coordinates[tri], x)
+                                 for (tri,x) in zip(self.topology.triangles[face_id].T, data.T)]
                                 ).T
         # And return the dictionary
-        return {'face_id': self.faces[:,face_id], 'angle_fraction': t, 'distance_fraction': r}
+        return {'face_id': face_id, 'angle_fraction': t, 'distance_fraction': r}
                 
