@@ -237,16 +237,15 @@ class Registration(Immutable):
         '''
         # we have to have a topology and registration for this to work...
         data = np.asarray(data)
-        # first, find the triangle containing each point
-        face_id = self.container(data)
-        # next, address them...
         if len(data.shape) == 1:
+            face_id = self.container(data)
             (t, r) = geo.triangle_address(self.coordinates[self.topology.triangles[face_id]],
                                           data)
         else:
+            data = data if data.shape[1] == 3 else data.T
+            face_id = self.container(data)
             (t, r) = np.asarray([geo.triangle_address(self.coordinates[tri], x)
-                                 for (tri,x) in zip(self.topology.triangles[face_id].T, data.T)]
-                                ).T
+                                 for (tri,x) in zip(self.topology.triangles[face_id], data)]).T
         # And return the dictionary
         return {'face_id': face_id, 'angle_fraction': t, 'distance_fraction': r}
                 
