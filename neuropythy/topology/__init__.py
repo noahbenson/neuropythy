@@ -28,7 +28,8 @@ class Topology:
         self.triangles = triangles if triangles.shape[1] == 3 else triangles.T
         self.vertex_count = np.max(triangles.flatten())
         self.registrations = make_dict({name: Registration(self, np.asarray(coords))
-                                        for (name, coords) in registrations.iteritems()})
+                                        for (name, coords) in registrations.iteritems()
+                                        if coords is not None})
     def __repr__(self):
         return 'Topology(<%d triangles>, <%d vertices>)' % (self.triangles.shape[0],
                                                             self.vertex_count)
@@ -114,6 +115,19 @@ class Registration(Immutable):
         bc = np.dot(pt - tri[1], np.cross(tri[1], tri[2] - tri[1]))
         ca = np.dot(pt - tri[2], np.cross(tri[2], tri[0] - tri[2]))
         return (ab >= 0 and bc >= 0 and ca >= 0)
+
+    def _find_triangle_search(self, x, k=24, searched=set([])):
+        # This gets called when a container triangle isn't found; the idea is that k should
+        # gradually increase until we find the container triangle; if k passes the max, then
+        # we give up and assume no triangle is the container
+        if k > 288: return None
+        (d,near) = self.triangle_hash.query(x, k=k)
+        near = [n for n in near if n not in searched]
+        searched = searched.union(near)
+        tri_no = next((k for k in near if self._point_in_triangle(k, x)), None)
+        return (tri_no if tri_no is not None
+                else self._find_triangle_search(x, k=(2*k), searched=searched))
+        
     
     def nearest_vertex(self, pt):
         '''
@@ -123,7 +137,7 @@ class Registration(Immutable):
         '''
         (d,near) = self.vertex_hash.query(pt, k=1)
         return near
-    def container(self, pt, k=12, n_jobs=1):
+    def container(self, pt, k=6, n_jobs=1):
         '''
         registration.container(pt) yields the id number of the nearest triangle in the given
         registration to the given point pt. If pt is an (n x dims) matrix of points, an id is given
@@ -132,10 +146,15 @@ class Registration(Immutable):
         pt = np.asarray(pt)
         (d, near) = self.triangle_hash.query(pt, k=k) #n_jobs fails?
         if len(pt.shape) == 1:
-            return next((k for k in near if self._point_in_triangle(k, pt)), None)
+            tri_no = next((k for k in near if self._point_in_triangle(k, pt)), None)
+            return (tri_no if tri_no is not None
+                    else self._find_triangle_search(pt, k=(2*k), searched=set(near)))
         else:
-            return [next((k for k in near_i if self._point_in_triangle(k, x)), None)
-                    for (x, near_i) in zip(pt, near)]
+            return [(tri_no if tri_no is not None
+                     else self._find_triangle_search(x, k=(2*k), searched=set(near_i)))
+                    for (x, near_i) in zip(pt, near)
+                    for tri_no in [next((k for k in near_i if self._point_in_triangle(k, x)),
+                                        None)]]
 
     def interpolate_from(self, reg, data, 
                          smoothing=2, mask=None, null=None, method='automatic', n_jobs=1):
@@ -187,12 +206,12 @@ class Registration(Immutable):
         containers = reg.container(self.coordinates, k=check_no, n_jobs=n_jobs)
         # Okay, now we interpolate for each triangle
         if mask is None:
-            return [null if tri_no is None \
-                        else reg._interpolate_triangle(x, data, tris[tri_no], smoothing)
+            return [(null if tri_no is None
+                     else reg._interpolate_triangle(x, data, tris[tri_no], smoothing))
                     for (x, tri_no) in zip(self.coordinates, containers)]
         else:
-            return [null if tri_no is None or any(mask[u] == 0 for u in tris[tri_no]) \
-                        else reg._interpolate_triangle(x, data, tris[tri_no], smoothing)
+            return [(null if tri_no is None or any(mask[u] == 0 for u in tris[tri_no])
+                     else reg._interpolate_triangle(x, data, tris[tri_no], smoothing))
                     for (x, tri_no) in zip(self.coordinates, containers)]
     def _interpolate_triangle(self, x, data, tri_vertices, smoothing):
         # we'll want to project things down to 2 dimensions:

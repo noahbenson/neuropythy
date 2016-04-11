@@ -112,6 +112,11 @@ class Hemisphere:
             data[0].setflags(write=False)
             data[1].setflags(write=False)
             return data
+    def _load_surface_data_safe(self, name):
+        try:
+            return self._load_surface_data(name)
+        except:
+            return (None, None)
     def _load_surface(self, name, preloaded=None, reg=None):
         data = self._load_surface_data(name) if preloaded is None else preloaded
         return self.__make_surface(data[0], data[1], name, reg=reg)
@@ -157,27 +162,39 @@ class Hemisphere:
         'inflated_surface':     ((), lambda hemi: hemi._load_surface('inflated')),
 
         'sphere_surface_data':  ((), lambda hemi: hemi._load_surface_data('sphere')),
-        'fs_surface_data':      ((), lambda hemi: hemi._load_surface_data('sphere.reg')),
+        'fs_surface_data':      ((), lambda hemi: hemi._load_surface_data_safe('sphere.reg')),
         'sym_surface_data':     ((), 
-                                 lambda hemi: hemi._load_surface_data('fsaverage_sym.sphere.reg')),
+                                 lambda hemi: \
+                                    hemi._load_surface_data_safe('fsaverage_sym.sphere.reg')),
         'faces':                (('sphere_surface_data',), lambda hemi,dat: dat[1]),
 
         'sphere_surface':       (('sphere_surface_data','topology'), 
-                                 lambda hemi,dat,topo: \
-                                     hemi._load_surface('sphere', preloaded=dat,
-                                                        reg=topo.registrations[hemi.subject.id])),
+                                 lambda hemi,dat,topo: hemi._load_surface(
+                                     'sphere',
+                                     preloaded=dat,
+                                     reg=(topo.registrations[hemi.subject.id]
+                                          if hemi.subject.id in topo.registrations
+                                          else None))),
         'fs_sphere_surface':    (('fs_sphere_data','topology'),
                                  lambda hemi,dat,topo: (
                                     hemi.sphere_surface if hemi.subject.id == 'fsaverage'
-                                    else None if dat is None
-                                    else hemi._load_surface('sphere.reg', preloaded=dat,
-                                                            reg=topo.registrations['fsaverage']))),
+                                    else None if dat == (None,None)
+                                    else hemi._load_surface(
+                                            'sphere.reg',
+                                            preloaded=dat,
+                                            reg=(topo.registrations['fsaverage']
+                                                 if 'fsaverage' in topo.registrations
+                                                 else None)))),
         'sym_sphere_surface':   (('sym_sphere_data','topology'),
                                  lambda hemi,dat,topo: (
                                     hemi.sphere_surface if hemi.subject.id == 'fsaverage_sym'
                                     else None if dat is None
-                                    else hemi._load_surface('fsaverage_sym.sphere.reg', preloaded=dat,
-                                                            reg=ropo.registrations['fsaverage_sym']))),
+                                    else hemi._load_surface(
+                                            'fsaverage_sym.sphere.reg',
+                                            preloaded=dat,
+                                            reg=(topo.registrations['fsaverage_sym']
+                                                 if 'fsaverage_sym' in topo.registrations
+                                                 else None)))),
 
         'vertex_count':         (('sphere_surface_data',), lambda hemi,dat: dat[0].shape[1]),
         'midgray_surface':      (('white_surface', 'pial_surface'),
