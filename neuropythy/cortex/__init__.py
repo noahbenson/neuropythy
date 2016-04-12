@@ -67,7 +67,8 @@ class CorticalMesh(Immutable):
                 else:                 raise ValueError('Unrecognized mesh item: %s' % index)
             elif isinstance(index, (list, set)):
                 if len(index) > 3 or not all(isinstance(i,int) for i in index):
-                    return map(lambda x: self[x], index)
+                    if isinstance(index, list): return [self[x]    for x in index]
+                    else:                       return {x: self[x] for x in index}
                 else:
                     return [
                         lambda idx: [],

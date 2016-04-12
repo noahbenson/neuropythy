@@ -5,11 +5,12 @@
 
 import numpy as np
 import scipy as sp
-import os
-import sys
-from numbers import Number
+import os, sys
 from math import pi
+from numbers import Number
 from neuropythy.cortex import CorticalMesh
+from neuropythy.freesurfer import freesurfer_subject
+from neuropythy.topology import Registration
 from pysistence import make_dict
 from array import array
 
@@ -19,9 +20,8 @@ from py4j.java_gateway import (launch_gateway, JavaGateway, GatewayParameters)
 _java_port = None
 _java = None
 def init_registration():
-    global _java
-    if _java is not None:
-        return
+    global _java, _java_port
+    if _java is not None: return
     _java_port = launch_gateway(
         classpath=os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__)))),
@@ -47,7 +47,7 @@ _parse_field_data_types = {
         'gaussian':      ['newGaussianAnchorPotential', ['scale', 1.0], ['shape', 2.0], 
                                                         ['sigma', 1.0], 0, 1, 'X']},
     'perimeter': {
-        'harmonic':      ['newHarmonicAnchorPotential', ['scale', 1.0], ['shape', 2.0], 'F', 'X']}};
+        'harmonic':   ['newHarmonicPerimeterPotential', ['scale', 1.0], ['shape', 2.0], 'F', 'X']}};
 
 def serialize_numpy(m, t):
     '''
@@ -63,13 +63,45 @@ def serialize_numpy(m, t):
     header = array('i', [len(m.shape)] + list(m.shape))
     # Now, we can do the array itself, just flattened
     body = array(t, m.flatten().tolist())
-    # Wwap bytes if necessary...
+    # Wrap bytes if necessary...
     if sys.byteorder != 'big':
         header.byteswap()
         body.byteswap()
     # And return the result:
     return bytearray(header.tostring() + body.tostring())
 
+def to_java_doubles(m):
+    '''
+    to_java_doubles(m) yields a java array object for the vector or matrix m.
+    '''
+    global _java
+    if _java is None: init_registration()
+    m = np.asarray(m)
+    dims = len(m.shape)
+    if dims > 2: raise ValueError('1D and 2D arrays supported only')
+    bindat = serialize_numpy(m, 'd')
+    return (_java.jvm.nben.util.Numpy.double2FromBytes(bindat) if dims == 2
+            else _java.jvm.nben.util.Numpy.double1FromBytes(bindat))
+def to_java_ints(m):
+    '''
+    to_java_ints(m) yields a java array object for the vector or matrix m.
+    '''
+    global _java
+    if _java is None: init_registration()
+    m = np.asarray(m)
+    dims = len(m.shape)
+    if dims > 2: raise ValueError('1D and 2D arrays supported only')
+    bindat = serialize_numpy(m, 'i')
+    return (_java.jvm.nben.util.Numpy.int2FromBytes(bindat) if dims == 2
+            else _java.jvm.nben.util.Numpy.int1FromBytes(bindat))
+def to_java_array(m):
+    '''
+    to_java_array(m) yields to_java_ints(m) if m is an array of integers and to_java_doubles(m) if
+    m is anything else. The numpy array m is tested via numpy.issubdtype(m.dtype, numpy.int64).
+    '''
+    m = np.asarray(m)
+    return to_java_ints(m) if np.issubdtype(m.dtype, np.int64) else to_java_doubles(m)
+        
 def _parse_field_function_argument(argdat, args, faces, coords):
     # first, see if this is an easy one...
     if argdat == 'F':
@@ -77,21 +109,20 @@ def _parse_field_function_argument(argdat, args, faces, coords):
     elif argdat == 'X':
         return coords
     elif isinstance(argdat, (int, long)):
-        return _list_to_java_array(arg[argdat])
+        return to_java_array(args[argdat])
     # okay, none of those; must be a list with a default arg
     argname = argdat[0]
     argdflt = argdat[1]
     # see if we can find such an arg...
     for i in range(len(args)):
         if isinstance(args[i], basestring) and args[i].lower() == argname.lower():
-            return _list_to_java_array(args[i+1])
+            return args[i+1] if isinstance(args[i+1], Number) else to_java_array(args[i+1])
     # did not find the arg; use the default:
     return argdflt
 
 def _parse_field_argument(instruct, faces, coords):
     global _java
-    if _java is None:
-        init_registration()
+    if _java is None: init_registration()
     if isinstance(instruct, basestring):
         insttype = instruct
         instargs = []
@@ -100,13 +131,13 @@ def _parse_field_argument(instruct, faces, coords):
         instargs = instruct[1:]
     else:
         raise RuntimeError('potential field instruction must be list/tuple or string')
-        # look this type up in the types data:
-    instdata = instdata.lower()
-    if instdata not in _parse_field_data_types:
-        raise RuntimeError('Unrecognized field data type: ' + instdata)
+    # look this type up in the types data:
+    insttype = insttype.lower()
+    if insttype not in _parse_field_data_types:
+        raise RuntimeError('Unrecognized field data type: ' + insttype)
     instdata = _parse_field_data_types[insttype]
     # if the data is a dictionary, we must parse on the next arg
-    if not isinstance(instdata, dict):
+    if isinstance(instdata, dict):
         shape_name = instargs[0].lower()
         instargs = instargs[1:]
         if shape_name not in instdata:
@@ -129,80 +160,83 @@ def _parse_field_arguments(arg, faces, coords):
     if len(pot) <= 1:
         return pot[0]
     else:
-        return __jave.jvm.nben.mesh.registration.Fields.newSum(*pot)
+        sp = _java.jvm.nben.mesh.registration.Fields.newSum()
+        for field in pot: sp.addField(field)
+        return sp
 
 # The mesh_register function
 def mesh_register(mesh, field, max_steps=25000, max_step_size=0.1, max_pe_change=1):
-    '''mesh_register(mesh, field) yields the mesh that results from registering the given mesh by
-       minimizing the given potential field description over the position of the vertices in the
-       mesh. The mesh argument must be a CorticalMesh (see neuropythy.cortex) such as can be read
-       from FreeSurfer using the neuropythy.freesurfer.Subject class. The field argument must be
-       a list of field names and arguments; with the exception of 'mesh' (or 'standard'), the 
-       arguments must be a list, the first element of which is the field type name, the second
-       element of which is the field shape name, and the final element of which is a dictionary of
-       arguments accepted by the field shape.
+    '''
+    mesh_register(mesh, field) yields the mesh that results from registering the given mesh by
+    minimizing the given potential field description over the position of the vertices in the
+    mesh. The mesh argument must be a CorticalMesh (see neuropythy.cortex) such as can be read
+    from FreeSurfer using the neuropythy.freesurfer.Subject class. The field argument must be
+    a list of field names and arguments; with the exception of 'mesh' (or 'standard'), the 
+    arguments must be a list, the first element of which is the field type name, the second
+    element of which is the field shape name, and the final element of which is a dictionary of
+    arguments accepted by the field shape.
 
-       The following are valid field type names:
-         * 'mesh' : the standard mesh potential, which includes an edge potential, an angle
-           potential, and a perimeter potential. Accepts no arguments, and must be passed as a
-           single string instead of a list.
-         * 'edge': an edge potential field in which the potential is a function of the change in the
-           edge length, summed over each edge in the mesh.
-         * 'angle': an angle potential field in which the potential is a function of the change in
-           the angle measure, summed over all angles in the mesh.
-         * 'perimeter': a potential that depends on the vertices on the perimeter of a 2D mesh
-           remaining in place; the potential changes as a function of the distance of each perimeter
-           vertex from its reference position.
-         * 'anchor': a potential that depends on the distance of a set of vertices from fixed points
-           in space. After the shape name second argument, an anchor must be followed by a list of
-           vertex ids then a list of fixed points to which the vertex ids are anchored:
-           ['anchor', shape_name, vertex_ids, fixed_points, args...].
+    The following are valid field type names:
+      * 'mesh' : the standard mesh potential, which includes an edge potential, an angle
+        potential, and a perimeter potential. Accepts no arguments, and must be passed as a
+        single string instead of a list.
+      * 'edge': an edge potential field in which the potential is a function of the change in the
+        edge length, summed over each edge in the mesh.
+      * 'angle': an angle potential field in which the potential is a function of the change in
+        the angle measure, summed over all angles in the mesh.
+      * 'perimeter': a potential that depends on the vertices on the perimeter of a 2D mesh
+        remaining in place; the potential changes as a function of the distance of each perimeter
+        vertex from its reference position.
+      * 'anchor': a potential that depends on the distance of a set of vertices from fixed points
+        in space. After the shape name second argument, an anchor must be followed by a list of
+        vertex ids then a list of fixed points to which the vertex ids are anchored:
+        ['anchor', shape_name, vertex_ids, fixed_points, args...].
 
-       The following are valid shape names:
-         * 'harmonic': a harmonic function with the form (c/q) * abs(x - x0)^q.
-           Parameters: 
-             * 'scale', the scale parameter c; default: 1.
-             * 'order', the order parameter q; default: 2.
-         * 'Lennard-Jones': a Lennard-Jones function with the form c (1 + (r0/r)^q - 2(r0/r)^(q/2));
-           Parameters:
-             * 'scale': the scale parameter c; default: 1. 
-             * 'order': the order parameter q; default: 2.
-         * 'Gaussian': A Gaussian function with the form c (1 - exp(-0.5 abs((x - x0)/s)^q))
-           Parameters:
-             * 'scale': the scale parameter c; default: 1.
-             * 'order': the order parameter q; default: 2.
-             * 'sigma': the standard deviation parameter s; default: 1.
-         * 'infinite-well': an infinite well function with the form 
-           c ( (((x0 - m)/(x - m))^q - 1)^2 + (((M - x0)/(M - x))^q - 1)^2 )
-           Parameters:
-             * 'scale': the scale parameter c; default: 1.
-             * 'order': the order parameter q; default: 0.5.
-             * 'min': the minimum value m; default: 0.
-             * 'max': the maximum value M; default: pi.
+    The following are valid shape names:
+      * 'harmonic': a harmonic function with the form (c/q) * abs(x - x0)^q.
+        Parameters: 
+          * 'scale', the scale parameter c; default: 1.
+          * 'order', the order parameter q; default: 2.
+      * 'Lennard-Jones': a Lennard-Jones function with the form c (1 + (r0/r)^q - 2(r0/r)^(q/2));
+        Parameters:
+          * 'scale': the scale parameter c; default: 1. 
+          * 'order': the order parameter q; default: 2.
+      * 'Gaussian': A Gaussian function with the form c (1 - exp(-0.5 abs((x - x0)/s)^q))
+        Parameters:
+          * 'scale': the scale parameter c; default: 1.
+          * 'order': the order parameter q; default: 2.
+          * 'sigma': the standard deviation parameter s; default: 1.
+      * 'infinite-well': an infinite well function with the form 
+        c ( (((x0 - m)/(x - m))^q - 1)^2 + (((M - x0)/(M - x))^q - 1)^2 )
+        Parameters:
+          * 'scale': the scale parameter c; default: 1.
+          * 'order': the order parameter q; default: 0.5.
+          * 'min': the minimum value m; default: 0.
+          * 'max': the maximum value M; default: pi.
 
-       Options: The following optional arguments are accepted.
-         * max_steps (default: 25000) the maximum number of steps to minimize for.
-         * max_step_size (default: 0.1) the maximum distance to allow a vertex to move in a single
-           minimization step.
-         * max_pe_change: the maximum fraction of the initial potential value that the minimizer
-           should minimize away before returning; i.e., 0 indicates that no minimization should be
-           allowed while 0.9 would indicate that the minimizer should minimize until the potential
-           is 10% or less of the initial potential.
+    Options: The following optional arguments are accepted.
+      * max_steps (default: 25000) the maximum number of steps to minimize for.
+      * max_step_size (default: 0.1) the maximum distance to allow a vertex to move in a single
+        minimization step.
+      * max_pe_change: the maximum fraction of the initial potential value that the minimizer
+        should minimize away before returning; i.e., 0 indicates that no minimization should be
+        allowed while 0.9 would indicate that the minimizer should minimize until the potential
+        is 10% or less of the initial potential.
 
-       Examples:
-         registered_mesh = mesh_register(
-            mesh,
-            [['edge', 'harmonic', 'scale', 0.5], # slightly weak edge potential
-             ['angle', 'infinite-well'], # default arguments for an infinite-well angle potential
-             ['anchor', 'Gaussian', [1, 10, 50], [[0.0, 0.0], [1.1, 1.1], [2.2, 2.2]]]],
-            max_step_size=0.05,
-            max_steps=10000)'''
+    Examples:
+      registered_mesh = mesh_register(
+         mesh,
+         [['edge', 'harmonic', 'scale', 0.5], # slightly weak edge potential
+          ['angle', 'infinite-well'], # default arguments for an infinite-well angle potential
+          ['anchor', 'Gaussian', [1, 10, 50], [[0.0, 0.0], [1.1, 1.1], [2.2, 2.2]]]],
+         max_step_size=0.05,
+         max_steps=10000)
+    '''
     global _java
-    if _java is None:
-        init_registration()
+    if _java is None: init_registration()
     # Sanity checking.
     # First, make sure that the arguments are all okay:
-    if not isinstance(mesh, neuropythy.cortex.CorticalMesh):
+    if not isinstance(mesh, CorticalMesh):
         raise RuntimeError('mesh argument must be an instance of neuropythy.cortex.CorticalMesh')
     if not isinstance(max_steps, (int, long)) or max_steps < 1:
         raise RuntimeError('max_steps argument must be a positive integer')
@@ -211,20 +245,12 @@ def mesh_register(mesh, field, max_steps=25000, max_step_size=0.1, max_pe_change
     if not isinstance(max_pe_change, (float, int, long)) or max_pe_change <= 0 or max_pe_change > 1:
         raise RuntimeError('max_pe_change must be a number x such that 0 < x <= 1')
     # Parse the field argument.
-    faces  = _java.new_array(_java.jvm.int, 3, mesh.faces.shape[1])
-    coords = _java.new_array(_java.jvm.double, 3, mesh.coords.shape[1])
-    for i in range(mesh.faces.shape[1]):
-        faces[0][i] = mesh.faces[0,i]
-        faces[1][i] = mesh.faces[1,i]
-        faces[2][i] = mesh.faces[2,i]
-    for i in range(mesh.coords.shape[1]):
-        coords[0][i] = mesh.coords[0,i]
-        coords[1][i] = mesh.coords[1,i]
-        coords[2][i] = mesh.coords[2,i]
-    potential = _parse_field_argument(field, faces, coords)
+    faces  = to_java_ints([mesh.index[frow] for frow in mesh.faces])
+    coords = to_java_doubles(mesh.coordinates)
+    potential = _parse_field_arguments(field, faces, coords)
     # Okay, that's basically all we need to do the minimization...
     minimizer = _java.jvm.nben.mesh.registration.Minimizer(potential, coords)
-    minimizer.step(max_pe_change, max_steps, max_step_size)
+    minimizer.step(float(max_pe_change), int(max_steps), float(max_step_size))
     return np.array(minimizer.getX())
 
 # How we construct a Schira Model:
@@ -301,31 +327,19 @@ class SchiraModel:
     
     def angle_to_cortex(self, theta, rho):
         global _java
+        if _java is None: init_registration()
         iterTheta = hasattr(theta, '__iter__')
         iterRho = hasattr(rho, '__iter__')
         if iterTheta and iterRho:
             if len(theta) != len(rho):
                 raise RuntimeError('Arguments theta and rho must be the same length!')
-            theta_arr = _java.new_array(_java.jvm.double, len(theta))
-            rho_arr = _java.new_array(_java.jvm.double, len(rho))
-            for i in range(len(theta)):
-                theta_arr[i] = theta[i]
-                rho_arr[i] = rho[i]
-            return self._java_object.angleToCortex(theta_arr, rho_arr)
+            return self._java_object.angleToCortex(to_java_doubles(theta), to_java_doubles(rho))
         elif iterTheta:
-            theta_arr = _java.new_array(_java.jvm.double, len(theta))
-            rho_arr = _java.new_array(_java.jvm.double, len(theta))
-            for i in range(len(theta)):
-                theta_arr[i] = theta[i]
-                rho_arr[i] = rho
-            return self._java_object.angleToCortex(theta_arr, rho_arr)
+            return self._java_object.angleToCortex(to_java_doubles(theta),
+                                                   to_java_doubles([rho for t in theta]))
         elif iterRho:
-            theta_arr = _java.new_array(_java.jvm.double, len(rho))
-            rho_arr = _java.new_array(_java.jvm.double, len(rho))
-            for i in range(len(rho)):
-                theta_arr[i] = theta
-                rho_arr[i] = rho[i]
-            return self._java_object.angleToCortex(theta_arr, rho_arr)
+            return self._java_object.angleToCortex(to_java_doubles([theta for r in rho]),
+                                                   to_java_doubles(rho))
         else:
             return self._java_object.angleToCortex(theta, rho)
     def cortex_to_angle(self, x, y):
@@ -335,26 +349,13 @@ class SchiraModel:
         if iterX and iterY:
             if len(x) != len(y):
                 raise RuntimeError('Arguments x and y must be the same length!')
-            x_arr = _java.new_array(_java.jvm.double, len(x))
-            y_arr = _java.new_array(_java.jvm.double, len(y))
-            for i in range(len(x)):
-                x_arr[i] = x[i]
-                y_arr[i] = y[i]
-            return self._java_object.cortexToAngle(x_arr, y_arr)
+            return self._java_object.cortexToAngle(to_java_doubles(x), to_java_doubles(y))
         elif iterX:
-            x_arr = _java.new_array(_java.jvm.double, len(x))
-            y_arr = _java.new_array(_java.jvm.double, len(x))
-            for i in range(len(x)):
-                x_arr[i] = x[i]
-                y_arr[i] = y
-            return self._java_object.cortexToAngle(x_arr, y_arr)
+            return self._java_object.cortexToAngle(to_java_doubles(x),
+                                                   to_java_doubles([y for i in x]))
         elif iterY:
-            x_arr = _java.new_array(_java.jvm.double, len(y))
-            y_arr = _java.new_array(_java.jvm.double, len(y))
-            for i in range(len(y)):
-                x_arr[i] = x
-                y_arr[i] = y[i]
-            return self._java_object.cortexToAngle(x_arr, y_arr)
+            return self._java_object.cortexToAngle(to_java_doubles([x for i in y]),
+                                                   to_java_doubles(y))
         else:
             return self._java_object.cortexToAngle(x, y)
 
@@ -427,8 +428,8 @@ def schira_anchors(mesh, mdl,
         raise RuntimeError('Polar angle data has incorrect length!')
     # Now Polar Angle...
     eccentricity = eccentricity if eccentricity is not None \
-        else mesh.prop('eccentricity') if mesh.hash_property('eccentricity') \
-        else mesh.prop('PRF_eccentricity') if mesh.hash_property('PRF_eccentricity') \
+        else mesh.prop('eccentricity') if mesh.has_property('eccentricity') \
+        else mesh.prop('PRF_eccentricity') if mesh.has_property('PRF_eccentricity') \
         else None
     if eccentricity is None:
         raise RuntimeError('No eccentricity data given to schira_anchors!')
@@ -466,11 +467,124 @@ def schira_anchors(mesh, mdl,
                     and weight[i] is not None and weight[i] >= weight_cutoff)]
     # okay, we've partially parsed the data that was given; now we can construct the final list of
     # instructions:
-    return ['anchors', shape,
+    return ['anchor', shape,
             [d[0] for d in data for k in range(len(d[1]))],
-            [pt for d in data for pt in d[1]],
+            np.asarray([pt for d in data for pt in d[1]]).T,
             'scale', [d[2] for d in data for k in range(len(d[1]))]
            ] + ([] if suffix is None else suffix)
+
+_empirical_retinotopy_names = {
+    'polar_angle':  ['PRF_polar_angle',  'empirical_polar_angle',  'measured_polar_angle'
+                     'polar_angle'],
+    'eccentricity': ['PRF_eccentricity', 'empirical_eccentricity', 'measured_eccentricity'
+                     'eccentricity'],
+    'weight':       ['PRF_variance_explained',       'PRF_weight',
+                     'measured_variance_explained',  'measured_weight',
+                     'empirical_variance_explained', 'empirical_weight'
+                     'variance_explained',           'weight']}
+# handy function for picking out properties automatically...
+def empirical_retinotopy_data(hemi, retino_type):
+    '''
+    empirical_retinotopy_data(hemi, t) yields a numpy array of data for the given hemisphere object
+    and retinotopy type t; it does this by looking at the properties in hemi and picking out any
+    combination that is commonly used to denote empirical retinotopy data. These common names are
+    stored in _empirical_retintopy_names, in order of preference, which may be modified.
+    The argument t should be one of 'polar_angle', 'eccentricity', 'weight'.
+    '''
+    dat = _empirical_retinotopy_names[retino_type.lower()]
+    return next((hemi.prop(s) for s in dat if hemi.has_property(s)), None)
+    
+def register_retinotopy(hemi,
+                        schira_model=SchiraModel(), radius=pi/4.0,
+                        polar_angle=None, eccentricity=None, weight=None, weight_cutoff=None,
+                        sigma=0.5, edge_scale=1.0, angle_scale=1.0, schira_scale=15.0,
+                        max_steps=30000, max_step_size=0.05,
+                        registration_name='retinotopy'):
+    '''
+    register_retinotopy(hemi) yields the result of registering the given hemisphere's polar angle
+    and eccentricity data to the SchiraModel, a registration in which the vertices are aligned with
+    the Schira model of retinotopy. The registration is added to the hemisphere's topology unless
+    the option registration_name is set to None.
+
+    Options:
+      * schira_model specifies the instance of the Schira model to use (default: SchiraModel()).
+      * polar_angle, eccentricity, and weight specify the property names for the respective
+        quantities; these may alternately be lists or numpy arrays of values. If weight is not given
+        or found, then unity weight for all vertices is assumed. By default, each will check the
+        hemisphere's properties for properties with compatible names; it will prefer the properties
+        PRF_polar_angle, PRF_ecentricity, and PRF_variance_explained if possible.
+      * weight_cutoff specifies the minimum value a vertex must have in the weight property in order
+        to be considered as retinotopically relevant.
+      * sigma specifies the standard deviation of the Gaussian shape for the Schira model anchors.
+      * edge_scale, angle_scale, and schira_scale all specify the relative strengths of the various
+        components of the potential field.
+      * max_steps (default 30,000) specifies the maximum number of registration steps to run.
+      * max_step_size (default 0.05) specifies the maxmim distance a single vertex is allowed to
+        move in a single step of the minimization.
+      * registration_name (default: 'retinotopy') specifies the name of the registration to register
+        with the hemisphere's topology object.
+    '''
+    # Step 1: figure out what properties we're using...
+    (ang, ecc, wgt) = [
+        (hemi.prop(arg) if isinstance(arg, basestring) else
+         arg            if hasattr(arg, '__iter__')    else
+         None           if arg is not None             else
+         empirical_retinotopy_data(hemi, argstr))
+        for (arg, argstr) in [(polar_angle, 'polar_angle'),
+                              (eccentricity, 'eccentricity'),
+                              (weight, 'weight')]]
+    if ang is None: raise ValueError('polar angle data not found')
+    if ecc is None: raise ValueError('eccentricity data not found')
+    ## we also want to make sure weight is 0 where there are none values
+    wgt = np.asarray(
+        [(0 if w is None else w)*(0 if a is None else 1)*(0 if e is None else 1)
+         for (a,e,w) in zip(ang, ecc, [1 for e in ecc] if wgt is None else wgt)])
+    ang = np.asarray([0 if a is None else a for a in ang])
+    ecc = np.asarray([0 if e is None else e for e in ecc])
+    # Step 2: get the properties over to the fsaverage_sym hemisphere
+    lhemi = hemi if hemi.chirality == 'LH' else hemi.subject.RHX
+    sym = freesurfer_subject('fsaverage_sym').LH
+    sym.interpolate(lhemi, ang, apply='polar_angle')
+    sym.interpolate(lhemi, ecc, apply='eccentricity')
+    sym.interpolate(lhemi, wgt, apply='weight')
+    # Step 3: make the projection
+    msym = sym.projection(radius=radius)
+    for nm in ['polar_angle', 'eccentricity', 'weight']:
+        msym.prop(nm, np.asarray(sym.prop(nm))[msym.vertex_labels])
+    # Step 4: run the mesh registration
+    r = mesh_register(
+        msym,
+        [['edge', 'harmonic', 'scale', edge_scale],
+         ['angle', 'infinite-well', 'scale', angle_scale],
+         ['perimeter', 'harmonic'],
+         schira_anchors(msym, schira_model,
+                        weight_cutoff=weight_cutoff,
+                        suffix=['sigma', sigma, 'scale', schira_scale])],
+        max_steps=max_steps,
+        max_step_size=max_step_size)
+    # Step 5: prepare the original subject's map for being warped over to the registration
+    msub = lhemi.projection(mesh='fsaverage_sym', radius=radius)
+    subvtcs = msub.vertex_labels
+    msub.prop('polar_angle',  ang[subvtcs])
+    msub.prop('eccentricity', ecc[subvtcs])
+    msub.prop('weight',       wgt[subvtcs])
+    ## okay, r is the registered coordinates; we can unproject them
+    symrsphere = msym.unproject(r)
+    ## make a new coordinate matrix for the registration
+    symregcoords = np.array(sym.coordsinates, copy=True)
+    symregcoords[:, msym.vertex_labels] = symrsphere
+    symregmesh = sym.LH.surface(symregcoords)
+    ## now, address the subject's coordinates in the original topology and unaddress in this
+    ## new registered mesh
+    addr = sym.topology.registrations['fsaverage_sym'].address(lhemi.coordinates[:,subvtcs])
+    subrsphere = symregmesh.unaddress(addr)
+    msub.coordinates = msub.reproject(subrsphere)
+    if registration_name is not None:
+        subregcoords = np.array(lhemi.coordinates, copy=True)
+        subregcoords[:, subvtcs] = subrsphere
+        hemi.topology.register(registration_name, subregcoords)
+    # We return the subject's map
+    return msub
 
 # The topology and registration stuff is below:
 class JavaTopology:

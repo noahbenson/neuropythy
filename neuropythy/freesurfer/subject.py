@@ -242,6 +242,19 @@ class Hemisphere:
         else:
             raise ValueError('Unrecognized member of Hemisphere: %s' % name)
 
+    # Make a surface out of coordinates, if desired
+    def surface(self, coords, name=None):
+        '''
+        hemi.surface(coords) yields a new surface with the given coordinate matrix and the topology
+        of this hemisphere, hemi. The coordinate matrix must have hemi.vertex_count points.
+        '''
+        coords = np.asarray(coords)
+        coords = (coords   if coords.shape[1] == self.vertex_count else
+                  coords.T if coords.shape[0] == self.vertex_count else
+                  None)
+        if coords is None: raise ValueError('Coordinate matrix was invalid size!')
+        return self.__make_surface(coords, self.faces, name)
+
     
     ################################################################################################
     # The Constructor
@@ -262,6 +275,7 @@ class Hemisphere:
     def __repr__(self):
         return "Hemisphere(" + self.name + ", <subject: " + self.subject.id + ">)"
 
+    
     ################################################################################################
     # Property code
     def add_property(self, name, prop=Ellipsis):
@@ -526,6 +540,12 @@ class Hemisphere:
         elif params['surface'].lower() == 'fsaverage_sym':
             params['surface'] = 'fsaverage_sym'
             params['mesh'] = self.sym_sphere_surface
+        elif params['surface'] in self.topology.registrations:
+            surfname = params['surface']
+            params['mesh'] = self.__make_surface(
+                self.topology.registrations[surfname].coordinates.T,
+                self.faces,
+                surfname)
         else:
             raise ValueError('Unrecognized spherical surface: %s' % params['surface'])
         sphere = params['mesh']

@@ -196,7 +196,10 @@ class Registration(Immutable):
     def _interpolate_nearest(self, reg, data, mask, null, n_jobs):
         # lookup the neighbors...
         (d, nei) = reg.vertex_hash.query(self.coordinates, k=1) #n_jobs fails? version problem?
-        return [reg[i] if mask[i] == 1 else null for i in nei]
+        if mask is None:
+            return [data[i] for i in nei]
+        else:
+            return [data[i] if mask[i] == 1 else null for i in nei]
     # perform linear interpolation
     def _interpolate_linear(self, reg, data, mask, null, smoothing, check_no, n_jobs):
         # first, find the triangle containing each point...
