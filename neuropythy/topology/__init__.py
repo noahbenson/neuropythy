@@ -92,17 +92,27 @@ class Registration(Immutable):
     not via Registration() directly.
     '''
 
+    @staticmethod
+    def __calculate_triangle_centers(triangles, coords):
+        coords = np.asarray(coords)
+        coords = coords if coords.shape[0] < coords.shape[1] else coords.T
+        triangles = np.asarray(triangles)
+        triangles = triangles if triangles.shape[0] < triangles.shape[1] else triangles.T
+        return (coords[:,triangles[0]] + coords[:,triangles[1]] + coords[:,triangles[2]]).T / 3
+        
+    
     def __init__(self, topology, coordinates):
         coordinates = coordinates if coordinates.shape[0] < 4 else coordinates.T
-        Immutable.__init__(self,
-                           {},
-                           {'topology':    topology,
-                            'coordinates': (coordinates / np.sqrt((coordinates ** 2).sum(0))).T},
-                           {'triangle_centers':
-                               (('topology','coordinates'),
-                                lambda topo,x: np.asarray([np.mean(x[tri], 0) for tri in topo.triangles])),
-                            'triangle_hash': (('triangle_centers',), lambda x: space.cKDTree(x)),
-                            'vertex_hash':   (('coordinates',), lambda x: space.cKDTree(x))})
+        Immutable.__init__(
+            self,
+            {},
+            {'topology':    topology,
+             'coordinates': (coordinates / np.sqrt((coordinates ** 2).sum(0))).T},
+            {'triangle_centers':
+             (('topology','coordinates'),
+              lambda topo,x: Registration.__calculate_triangle_centers(topo.triangles, x)),
+             'triangle_hash': (('triangle_centers',), lambda x: space.cKDTree(x)),
+             'vertex_hash':   (('coordinates',), lambda x: space.cKDTree(x))})
     def __repr__(self):
         return 'Registration(<%d triangles>, <%d vertices>)' % (self.topology.triangles.shape[0],
                                                                 self.coordinates.shape[0])
@@ -111,10 +121,9 @@ class Registration(Immutable):
     # True if the point is in the triangle, otherwise False; tri_no is an index into the triangle
     def _point_in_triangle(self, tri_no, pt):
         tri = self.coordinates[self.topology.triangles[tri_no]]
-        ab = np.dot(pt - tri[0], np.cross(tri[0], tri[1] - tri[0]))
-        bc = np.dot(pt - tri[1], np.cross(tri[1], tri[2] - tri[1]))
-        ca = np.dot(pt - tri[2], np.cross(tri[2], tri[0] - tri[2]))
-        return (ab >= 0 and bc >= 0 and ca >= 0)
+        return (np.dot(pt - tri[0], np.cross(tri[0], tri[1] - tri[0])) >= 0 and
+                np.dot(pt - tri[1], np.cross(tri[1], tri[2] - tri[1])) >= 0 and
+                np.dot(pt - tri[2], np.cross(tri[2], tri[0] - tri[2])) >= 0)
 
     def _find_triangle_search(self, x, k=24, searched=set([])):
         # This gets called when a container triangle isn't found; the idea is that k should
@@ -161,7 +170,8 @@ class Registration(Immutable):
         '''
         registration.interpolate_from(reg, data) yields a numpy array of the data interpolated from
         the given array, data, which must contain the same number of elements as there are points in
-        the Registration object reg, to the coordinates in the given Registration object registration.
+        the Registration object reg, to the coordinates in the given Registration object,
+        registration.
         
         The following options are accepted:
           * mask (default: None) indicates that the given True/False or 0/1 valued list/array should
