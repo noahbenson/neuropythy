@@ -146,7 +146,7 @@ class Registration(Immutable):
         '''
         (d,near) = self.vertex_hash.query(pt, k=1)
         return near
-    def container(self, pt, k=6, n_jobs=1):
+    def container(self, pt, k=2, n_jobs=1):
         '''
         registration.container(pt) yields the id number of the nearest triangle in the given
         registration to the given point pt. If pt is an (n x dims) matrix of points, an id is given

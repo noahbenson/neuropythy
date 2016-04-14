@@ -589,7 +589,7 @@ def register_retinotopy(hemi,
 # The topology and registration stuff is below:
 class JavaTopology:
     '''
-    JavaTopology(triangles, registrations) constructs a topology object object with the given triangle
+    JavaTopology(triangles, registrations) creates a topology object object with the given triangle
     mesh, defined by a 3xn matrix of triangle indices, and with the registration coordinate matrices
     given in the dictionary registrations. This class should only be instantiated by the neuropythy
     library and should generally not be constructed directly. See Hemisphere.topology objects to

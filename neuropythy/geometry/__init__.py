@@ -22,14 +22,7 @@ def vector_angle_cos(u, v):
     or v (or both) is a (d x n) matrix of n vectors, the result will be a length n vector of the
     cosines.
     '''
-    u = u / np.sqrt((np.asarray(u) ** 2).sum(0))
-    v = v / np.sqrt((np.asarray(v) ** 2).sum(0))
-    if len(u.shape) == 1:
-        return np.dot(u,v)
-    elif len(v.shape) == 1:
-        return np.dot(v,u)
-    else:
-        return (u * v).sum(0)
+    return (u * v).sum(0) / np.sqrt((np.asarray(u) ** 2).sum(0) * (np.asarray(v) ** 2).sum(0))
 
 def vector_angle(u, v, direction=None):
     '''

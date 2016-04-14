@@ -175,7 +175,7 @@ class Hemisphere:
                                      reg=(topo.registrations[hemi.subject.id]
                                           if hemi.subject.id in topo.registrations
                                           else None))),
-        'fs_sphere_surface':    (('fs_sphere_data','topology'),
+        'fs_sphere_surface':    (('fs_surface_data','topology'),
                                  lambda hemi,dat,topo: (
                                     hemi.sphere_surface if hemi.subject.id == 'fsaverage'
                                     else None if dat == (None,None)
@@ -185,7 +185,7 @@ class Hemisphere:
                                             reg=(topo.registrations['fsaverage']
                                                  if 'fsaverage' in topo.registrations
                                                  else None)))),
-        'sym_sphere_surface':   (('sym_sphere_data','topology'),
+        'sym_sphere_surface':   (('sym_surface_data','topology'),
                                  lambda hemi,dat,topo: (
                                     hemi.sphere_surface if hemi.subject.id == 'fsaverage_sym'
                                     else None if dat is None
@@ -492,14 +492,15 @@ class Hemisphere:
     def _equirectangular_projection(X, params):
         X = np.asarray(X)
         X = X if X.shape[0] < 4 else X.T
+        X = X / np.sqrt((X ** 2).sum(0))
         r = params['sphere_radius']
-        return r / math.pi * np.asarray([np.arctan2(X[0], X[1]), np.arcsin(X[2] / r)])
+        return r / math.pi * np.asarray([np.arctan2(X[1], X[0]), np.arcsin(X[2])])
     @staticmethod
     def _equirectangular_projection_inverse(X, params):
         X = np.asarray(X)
         X = X if X.shape[0] < 4 else X.T
         r = params['sphere_radius']
-        X = X * math.pi / r
+        X = math.pi * X / r
         return np.asarray([np.cos(X[0]) * r, 
                            np.sin(X[0]) * r,
                            np.sin(X[1]) * r])
@@ -507,9 +508,10 @@ class Hemisphere:
     def _mercator_projection(X, params):
         X = np.asarray(X)
         X = X if X.shape[0] < 4 else X.T
+        X = X / np.sqrt((X ** 2).sum(0))
         r = params['sphere_radius']
-        return r * np.asarray([np.arctan2(X[0], X[1]),
-                               np.log(np.tan(0.25 * math.pi + 0.5 * np.arcsin(X[2] / r)))])
+        return r * np.asarray([np.arctan2(X[1], X[0]),
+                               np.log(np.tan(0.25 * math.pi + 0.5 * np.arcsin(X[2])))])
     @staticmethod
     def _mercator_projection_inverse(X, params):
         X = np.asarray(X)
@@ -518,7 +520,7 @@ class Hemisphere:
         X = X / r
         return r * np.asarray([np.cos(X[0]),
                                np.sin(X[0]),
-                               np.sin(2 * (np.atan(np.exp(X[1])) - 0.25*math.pi))])
+                               np.sin(2 * (np.arctan(np.exp(X[1])) - 0.25*math.pi))])
     __projection_methods = {
         'orthographic':    lambda X,p: Hemisphere._orthographic_projection(X,p),
         'equirectangular': lambda X,p: Hemisphere._equirectangular_projection(X,p),
@@ -555,7 +557,7 @@ class Hemisphere:
         elif isinstance(params['center'], int):
             params['center'] = sphere.coordinates[:, params['center']]
         if 'radius' not in params:
-            params['radius'] = math.pi / 3.0
+            params['radius'] = math.pi / 4.0
         elif not isinstance(params['radius'], (int, long, float)) or params['radius'] <= 0:
             raise ValueError('radius parameter must be a positive integer')
         # also, we need to worry about the method...
@@ -593,6 +595,8 @@ class Hemisphere:
         params = make_dict(params)
         submesh.coordinates = fwdfn(submesh.coordinates, params)
         submesh.options = submesh.options.using(projection_parameters=params)
+        for p in self.property_names():
+            submesh.prop(p, np.asarray(hemi.prop(p))[submesh.vertex_labels])
         return submesh
 
 class Subject:
