@@ -549,8 +549,6 @@ def register_retinotopy(hemi,
     sym.interpolate(lhemi, wgt, apply='weight')
     # Step 3: make the projection
     msym = sym.projection(radius=radius)
-    for nm in ['polar_angle', 'eccentricity', 'weight']:
-        msym.prop(nm, np.asarray(sym.prop(nm))[msym.vertex_labels])
     # Step 4: run the mesh registration
     r = mesh_register(
         msym,
