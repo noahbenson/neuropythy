@@ -596,7 +596,10 @@ class Hemisphere:
         submesh.coordinates = fwdfn(submesh.coordinates, params)
         submesh.options = submesh.options.using(projection_parameters=params)
         for p in self.property_names():
-            submesh.prop(p, np.asarray(self.prop(p))[submesh.vertex_labels])
+            try:
+                submesh.prop(p, np.asarray(self.prop(p))[submesh.vertex_labels])
+            except:
+                pass
         return submesh
 
 class Subject:
