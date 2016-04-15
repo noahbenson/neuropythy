@@ -521,16 +521,38 @@ class Hemisphere:
         return r * np.asarray([np.cos(X[0]),
                                np.sin(X[0]),
                                np.sin(2 * (np.arctan(np.exp(X[1])) - 0.25*math.pi))])
+    @staticmethod
+    def _sinusoidal_projection(X, params):
+        X = np.asarray(X)
+        X = X if X.shape[0] < 4 else X.T
+        X = X / np.sqrt((X ** 2).sum(0))
+        r = params['sphere_radius']
+        phi = np.arcsin(X[2])
+        return r / math.pi * np.asarray([np.arctan2(X[1], X[0]) * np.cos(phi), phi])
+    @staticmethod
+    def _sinusoidal_projection_inverse(X, params):
+        X = np.asarray(X)
+        X = X if X.shape[0] < 4 else X.T
+        r = params['sphere_radius']
+        X = math.pi * X / r
+        z = np.sin(X[1])
+        cosphi = np.cos(X[1])
+        return np.asarray([np.cos(X[0] / cosphi) * r,
+                           np.sin(X[0] / cosphi) * r,
+                           np.sin(X[1]) * r])
+
     __projection_methods = {
         'orthographic':    lambda X,p: Hemisphere._orthographic_projection(X,p),
         'equirectangular': lambda X,p: Hemisphere._equirectangular_projection(X,p),
         #'mollweide':       lambda X,p: Hemisphere._mollweide_projection(X,p),
-        'mercator':        lambda X,p: Hemisphere._mercator_projection(X,p)}
+        'mercator':        lambda X,p: Hemisphere._mercator_projection(X,p),
+        'sinusoidal':      lambda X,p: Hemisphere._sinusoidal_projection(X,p)}
     __projection_methods_inverse = {
         'orthographic':    lambda X,p: Hemisphere._orthographic_projection_inverse(X,p),
         'equirectangular': lambda X,p: Hemisphere._equirectangular_projection_inverse(X,p),
         #'mollweide':       lambda X,p: None,
-        'mercator':        lambda X,p: Hemisphere._mercator_projection_inverse(X,p)}
+        'mercator':        lambda X,p: Hemisphere._mercator_projection_inverse(X,p),
+        'sinusoidal':      lambda X,p: Hemisphere._sinusoidal_projection_inverse(X,p)}
     def __interpret_projection_params(self, params):
         # Figure out which spherical surface we're using...
         if 'surface' not in params or params['surface'].lower() == 'native':
