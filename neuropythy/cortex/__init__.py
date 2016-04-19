@@ -6,12 +6,13 @@
 import numpy as np
 import scipy as sp
 import scipy.spatial as space
+from scipy.sparse import csr_matrix
 import neuropythy.geometry as geo
 from neuropythy.immutable import Immutable
 import nibabel.freesurfer.io as fsio
-import os
-import itertools
-import collections
+import os, math
+from numbers import Number
+import itertools, collections
 from pysistence import make_dict
 import pysistence
 
@@ -78,7 +79,7 @@ class CorticalMesh(Immutable):
                         ][len(index)](index)
             elif isinstance(index, np.ndarray):
                 return self[index.tolist()]
-            elif isinstance(index, int):
+            elif isinstance(index, Number):
                 return self.vertex_index.get(index, None)
             else:
                 raise ValueError('Unrecognized mesh item: %s' % index)
@@ -168,14 +169,30 @@ class CorticalMesh(Immutable):
 
     @staticmethod
     def calculate_vertex_normals(vfaces, fnorms):
-        tmp = np.array(
-            map(
-                lambda fs: fnorms[:,fs].sum(1),
-                vfaces)).transpose()
+        tmp = np.array([fnorms[:,fs].sum(1) for fs in vfaces]).T
         norms = np.sqrt((tmp ** 2).sum(0))
         w = (norms == 0)
         norms[w] = 1.0
         return np.where(w, 0, tmp / np.repeat([norms], 3, 0))
+
+    @staticmethod
+    def _order_neighborhood(edges):
+        res = [edges[0][1]]
+        for i in range(len(edges)):
+            for e in edges:
+                if e[0] == res[i]:
+                    res.append(e[1])
+                    break
+        return res
+    @staticmethod
+    def calculate_neighborhoods(vlab, faces, vfindex):
+        nedges = [[((f[0], f[1]) if f[2] == u else
+                    (f[1], f[2]) if f[0] == u else
+                    (f[2], f[0]))
+                   for fid in fs
+                   for f in (faces[:,fid],)]
+                  for (u, fs) in zip(vlab, vfindex)]
+        return [CorticalMesh._order_neighborhood(nei) for nei in nedges]
 
     @staticmethod
     def calculate_index(vertex_index, edge_index, face_index):
@@ -331,6 +348,11 @@ class CorticalMesh(Immutable):
             ('vertex_face_index', 'face_normals'),
             lambda VF,FN: CorticalMesh.calculate_vertex_normals(VF, FN)),
 
+        'neighborhoods': (('vertex_labels','faces','vertex_face_index'),
+                          lambda L, F, VFI: CorticalMesh.calculate_neighborhoods(L, F, VFI)),
+        'indexed_neighborhoods': (('neighborhoods','index'),
+                                  lambda n,idx: [[idx[i] for i in nrow] for nrow in n]),
+        
         'vertex_spatial_hash': (('vertex_coordinates',), lambda X: space.cKDTree(X.T)),
         'face_spatial_hash': (('face_coordinates',), lambda FX: space.cKDTree(FX.mean(0).T)),
 
@@ -681,6 +703,45 @@ class CorticalMesh(Immutable):
             return self.options.get('meta_data', {}).get(arg, None)
 
 
+    def cortical_magnification(self, polar_angle=None, eccentricity=None, weight=None,
+                               weight_cutoff=0):
+        '''
+        mesh.cortical_magnification() yields the cortical magnification factor of each vertex in the
+        given mesh at which the polar angle and eccentricity weight is above the optional
+        weight_cutoff argument.
+        '''
+        angle = (
+            polar_angle if hasattr(polar_angle, '__iter__') else
+            self.prop(polar_angle) if isinstance(polar_angle, basestring) else
+            empirical_retinotopy_data(self, 'polar_angle'))
+        eccen = np.asarray(
+            eccentricity if hasattr(eccentricity, '__iter__') else
+            self.prop(eccentricity) if isinstance(eccentricity, basestring) else
+            empirical_retinotopy_data(self, 'eccentricity'))
+        weight = np.asarray(
+            weight if hasattr(weight, '__iter__') else
+            self.prop(weight) if isinstance(weight, basestring) else
+            empirical_retinotopy_data(self, 'weight'))
+        angle = np.asarray([(90 - ang)*math.pi/180 for ang in angle])
+        point = np.asarray([[ecc * np.cos(ang), ecc * np.sin(ang)] if wgt > 0 else [0,0]
+                            for (ang,ecc,wgt) in zip(angle, eccen, weight)])
+        coord = self.coordinates.T
+        relevant = [
+            np.asarray(
+                [(np.sqrt(((point[u] - point[n]) ** 2).sum(0)),
+                  np.sqrt(((coord[u] - coord[n]) ** 2).sum(0)),
+                  weight[n])
+                 for n in nei if weight[n] > 0]
+                ).T if weight[u] > 0 else []
+            for (u, nei) in enumerate(self.indexed_neighborhoods)]
+        return [
+            (np.dot(rel[1], rel[2])/np.sum(rel[2])) / (np.dot(rel[0], rel[2])/np.sum(rel[2]))
+            if len(rel) > 0
+            else None
+            for rel in relevant]
+            
+        
+        
     ################################################################################################
     # Importers
     # These are static import methods
@@ -768,3 +829,24 @@ def cortex_to_mrvolume(mesh, property):
 
     #here
     return True
+
+_empirical_retinotopy_names = {
+    'polar_angle':  ['PRF_polar_angle',  'empirical_polar_angle',  'measured_polar_angle'
+                     'polar_angle'],
+    'eccentricity': ['PRF_eccentricity', 'empirical_eccentricity', 'measured_eccentricity'
+                     'eccentricity'],
+    'weight':       ['PRF_variance_explained',       'PRF_weight',
+                     'measured_variance_explained',  'measured_weight',
+                     'empirical_variance_explained', 'empirical_weight'
+                     'variance_explained',           'weight']}
+# handy function for picking out properties automatically...
+def empirical_retinotopy_data(hemi, retino_type):
+    '''
+    empirical_retinotopy_data(hemi, t) yields a numpy array of data for the given hemisphere object
+    and retinotopy type t; it does this by looking at the properties in hemi and picking out any
+    combination that is commonly used to denote empirical retinotopy data. These common names are
+    stored in _empirical_retintopy_names, in order of preference, which may be modified.
+    The argument t should be one of 'polar_angle', 'eccentricity', 'weight'.
+    '''
+    dat = _empirical_retinotopy_names[retino_type.lower()]
+    return next((hemi.prop(s) for s in dat if hemi.has_property(s)), None)

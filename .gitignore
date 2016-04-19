@@ -1,6 +1,9 @@
 # Ignore all the compiled files
 *.pyc
 
+# And this particular notebook
+scratch.ipynb
+
 # This is a backup
 *-backup
 .first-commit-backup

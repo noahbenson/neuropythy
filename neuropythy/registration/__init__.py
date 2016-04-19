@@ -8,7 +8,7 @@ import scipy as sp
 import os, sys
 from math import pi
 from numbers import Number
-from neuropythy.cortex import CorticalMesh
+from neuropythy.cortex import CorticalMesh, empirical_retinotopy_data
 from neuropythy.freesurfer import freesurfer_subject
 from neuropythy.topology import Registration
 from pysistence import make_dict
@@ -473,27 +473,6 @@ def schira_anchors(mesh, mdl,
             'scale', [d[2] for d in data for k in range(len(d[1]))]
            ] + ([] if suffix is None else suffix)
 
-_empirical_retinotopy_names = {
-    'polar_angle':  ['PRF_polar_angle',  'empirical_polar_angle',  'measured_polar_angle'
-                     'polar_angle'],
-    'eccentricity': ['PRF_eccentricity', 'empirical_eccentricity', 'measured_eccentricity'
-                     'eccentricity'],
-    'weight':       ['PRF_variance_explained',       'PRF_weight',
-                     'measured_variance_explained',  'measured_weight',
-                     'empirical_variance_explained', 'empirical_weight'
-                     'variance_explained',           'weight']}
-# handy function for picking out properties automatically...
-def empirical_retinotopy_data(hemi, retino_type):
-    '''
-    empirical_retinotopy_data(hemi, t) yields a numpy array of data for the given hemisphere object
-    and retinotopy type t; it does this by looking at the properties in hemi and picking out any
-    combination that is commonly used to denote empirical retinotopy data. These common names are
-    stored in _empirical_retintopy_names, in order of preference, which may be modified.
-    The argument t should be one of 'polar_angle', 'eccentricity', 'weight'.
-    '''
-    dat = _empirical_retinotopy_names[retino_type.lower()]
-    return next((hemi.prop(s) for s in dat if hemi.has_property(s)), None)
-    
 def register_retinotopy(hemi,
                         schira_model=SchiraModel(), radius=pi/4.0,
                         polar_angle=None, eccentricity=None, weight=None, weight_cutoff=None,

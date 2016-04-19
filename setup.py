@@ -4,7 +4,7 @@ from setuptools import setup
 
 setup(
     name='neuropythy',
-    version='0.1.0',
+    version='0.1.1',
     description='Toolbox for flexible cortical mesh analysis and registration',
     keywords='neuroscience mesh cortex registration',
     author='Noah C. Benson',
