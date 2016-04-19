@@ -734,14 +734,11 @@ class CorticalMesh(Immutable):
                  for n in nei if weight[n] > 0]
                 ).T if weight[u] > 0 else []
             for (u, nei) in enumerate(self.indexed_neighborhoods)]
-        return [
-            (np.dot(rel[1], rel[2])/np.sum(rel[2])) / (np.dot(rel[0], rel[2])/np.sum(rel[2]))
-            if len(rel) > 0
-            else None
-            for rel in relevant]
-            
-        
-        
+        return [((np.dot(rel[1], rel[2])/np.sum(rel[2])) / (np.dot(rel[0], rel[2])/np.sum(rel[2]))
+                 if len(rel) > 0 and np.sum(rel[2]) > 0 and np.dot(rel[0], rel[2]) > 0
+                 else None)
+                for rel in relevant]
+
     ################################################################################################
     # Importers
     # These are static import methods

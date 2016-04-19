@@ -196,7 +196,7 @@ class Hemisphere:
                                                  if 'fsaverage_sym' in topo.registrations
                                                  else None)))),
 
-        'vertex_count':         (('sphere_surface_data',), lambda hemi,dat: dat[0].shape[1]),
+        'vertex_count':         (('sphere_surface_data',), lambda hemi,dat: dat[0].shape[0]),
         'midgray_surface':      (('white_surface', 'pial_surface'),
                                  lambda hemi,W,P: hemi.__make_surface(
                                      0.5*(W.coordinates + P.coordinates),
