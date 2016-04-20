@@ -829,9 +829,9 @@ def cortex_to_mrvolume(mesh, property):
 
 _empirical_retinotopy_names = {
     'polar_angle':  ['PRF_polar_angle',  'empirical_polar_angle',  'measured_polar_angle'
-                     'polar_angle'],
+                     'polar_angle', 'template_polar_angle'],
     'eccentricity': ['PRF_eccentricity', 'empirical_eccentricity', 'measured_eccentricity'
-                     'eccentricity'],
+                     'eccentricity', 'template_eccentricity'],
     'weight':       ['PRF_variance_explained',       'PRF_weight',
                      'measured_variance_explained',  'measured_weight',
                      'empirical_variance_explained', 'empirical_weight'

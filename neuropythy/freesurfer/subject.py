@@ -8,7 +8,7 @@ import numpy.linalg
 import scipy as sp
 import scipy.spatial as space
 import nibabel.freesurfer.io as fsio
-import nibabel.freesurfer.mghformat as fsmgh
+from   nibabel.freesurfer.mghformat import load as mghload, MGHImage
 import os, math
 import itertools
 import pysistence
@@ -134,7 +134,7 @@ class Hemisphere:
         if not os.path.exists(path):
             return None
         else:
-            data = fsmgh.load(path)
+            data = mghload(path)
             # for now, no post-processing, just loading of the MGHImage
             return data
     def _make_topology(self, sphere, fsave, fssym):
@@ -164,8 +164,10 @@ class Hemisphere:
         'sphere_surface_data':  ((), lambda hemi: hemi._load_surface_data('sphere')),
         'fs_surface_data':      ((), lambda hemi: hemi._load_surface_data_safe('sphere.reg')),
         'sym_surface_data':     ((), 
-                                 lambda hemi: \
-                                    hemi._load_surface_data_safe('fsaverage_sym.sphere.reg')),
+                                 lambda hemi: (
+                                     hemi._load_surface_data_safe('fsaverage_sym.sphere.reg')
+                                     if hemi.chirality == 'LH' else
+                                     hemi.subject.RHX.sym_surface_data)),
         'faces':                (('sphere_surface_data',), lambda hemi,dat: dat[1]),
 
         'sphere_surface':       (('sphere_surface_data','topology'), 
@@ -208,10 +210,14 @@ class Hemisphere:
         'chirality':            (('name',), 
                                  lambda hemi,name: 'LH' if name == 'LH' or name == 'RHX' else 'RH'),
         'topology':             (('sphere_surface_data', 'fs_surface_data', 'sym_surface_data'),
-                                 lambda hemi,sph,fs,sym: Topology(sph[1],
-                                                                  {hemi.subject.id: sph[0],
-                                                                   'fsaverage': fs[0],
-                                                                   'fsaverage_sym': sym[0]}))}
+                                 lambda hemi,sph,fs,sym: Topology(
+                                     sph[1],
+                                     ({hemi.subject.id: sph[0], 'fsaverage': fs[0]}
+                                      if hemi.subject.id == 'fsaverage_sym' else
+                                      {hemi.subject.id: sph[0], 'fsaverage_sym': sym[0]}
+                                      if hemi.subject.id == 'fsaverage' else
+                                      {hemi.subject.id: sph[0], 'fsaverage': fs[0], 'fsaverage_sym': sym[0]})))}
+
     
     # This function will clear the lazily-evaluated members when a given value is changed
     def __update_values(self, name):
@@ -412,23 +418,26 @@ class Hemisphere:
     # This [private] function and this variable set up automatic properties from the FS directory
     # in order to be auto-loaded, a property must appear in this dictionary:
     _auto_properties = {
-        'sulc':      ('convexity',              lambda f: fsio.read_morph_data(f)),
-        'thickness': ('thickness',              lambda f: fsio.read_morph_data(f)),
-        'area':      ('white_surface_area',     lambda f: fsio.read_morph_data(f)),
-        'area.mid':  ('midgray_surface_area',   lambda f: fsio.read_morph_data(f)),
-        'area.pial': ('pial_surface_area',      lambda f: fsio.read_morph_data(f)),
-        'curv':      ('curvature',              lambda f: fsio.read_morph_data(f)),
+        'sulc':             ('convexity',              lambda f: fsio.read_morph_data(f)),
+        'thickness':        ('thickness',              lambda f: fsio.read_morph_data(f)),
+        'area':             ('white_surface_area',     lambda f: fsio.read_morph_data(f)),
+        'area.mid':         ('midgray_surface_area',   lambda f: fsio.read_morph_data(f)),
+        'area.pial':        ('pial_surface_area',      lambda f: fsio.read_morph_data(f)),
+        'curv':             ('curvature',              lambda f: fsio.read_morph_data(f)),
 
-        'prf_eccen': ('PRF_eccentricity',       lambda f: fsio.read_morph_data(f)),
-        'prf_angle': ('PRF_polar_angle',        lambda f: fsio.read_morph_data(f)),
-        'prf_size':  ('PRF_size',               lambda f: fsio.read_morph_data(f)),
-        'prf_varex': ('PRF_variance_explained', lambda f: fsio.read_morph_data(f)),
+        'prf_eccen':        ('PRF_eccentricity',       lambda f: fsio.read_morph_data(f)),
+        'prf_angle':        ('PRF_polar_angle',        lambda f: fsio.read_morph_data(f)),
+        'prf_size':         ('PRF_size',               lambda f: fsio.read_morph_data(f)),
+        'prf_varex':        ('PRF_variance_explained', lambda f: fsio.read_morph_data(f)),
 
-        'retinotopy_eccen': ('eccentricity',    lambda f: fsio.read_morph_data(f)),
-        'retinotopy_angle': ('polar_angle',     lambda f: fsio.read_morph_data(f)),
-        'retinotopy_areas': ('visual_area',     lambda f: fsio.read_morph_data(f))}
-    # properties grabbed out of MGH or MGZ files in the sufsio.read_morph_data(f)),
-    _mgh_properties = {}
+        'retinotopy_eccen': ('eccentricity',           lambda f: fsio.read_morph_data(f)),
+        'retinotopy_angle': ('polar_angle',            lambda f: fsio.read_morph_data(f)),
+        'retinotopy_areas': ('visual_area',            lambda f: fsio.read_morph_data(f))}
+    # properties grabbed out of MGH or MGZ files
+    _mgh_properties = {
+        'template_eccen':   ('template_eccentricity',  lambda f: mghload(f).get_data().flatten()),
+        'template_angle':   ('template_polar_angle',   lambda f: mghload(f).get_data().flatten()),
+        'template_areas':   ('template_visual_area',   lambda f: mghload(f).get_data().flatten())}
     # funciton for initializing the auto-loading properties
     def __init_properties(self):
         dir = self.directory
@@ -460,7 +469,7 @@ class Hemisphere:
         files = [f for f in os.listdir(dir) if os.path.isfile(os.path.join(dir, f))]
         for f in files:
             if (f[-4:].lower() == '.mgh' or f[-4:].lower() == '.mgz') and \
-                    f[2] == '.' and f[0:2].upper() == self.chirality and \
+                    f[2] == '.' and f[0:2].upper() == self.name and \
                     f[3:-4] in Hemisphere._mgh_properties:
                 (name, fn) = Hemisphere._mgh_properties[f[3:-4]]
                 self.prop(name, fn(os.path.join(dir, f)))
@@ -1026,7 +1035,7 @@ def cortex_to_ribbon(sub, data, map=None, k=12, distance=6, hemi=None, sigma=0.3
         arr = _cortex_to_ribbon_map_into_volume_array(arr, map[1], data[1])
     hdr = vol0.header.copy()
     hdr.set_data_dtype(dtype)
-    return fsmgh.MGHImage(arr, vol0.affine, hdr, vol0.extra, vol0.file_map)
+    return MGHImage(arr, vol0.affine, hdr, vol0.extra, vol0.file_map)
     
     
     
