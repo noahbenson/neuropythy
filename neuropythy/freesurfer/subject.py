@@ -90,7 +90,7 @@ class Hemisphere:
     __settable_members = {
         'properties': lambda m,v: Hemisphere._check_properties(m,v),
         'options': lambda m,v: Hemisphere._check_options(m,v)}
-
+    
     # This static variable and these functions explain the dependency hierarchy in cached data
     def __make_surface(self, coords, faces, name, reg=None):
         return CorticalMesh(
@@ -146,6 +146,29 @@ class Hemisphere:
             sphere.faces, 
             {names[i]: surfs[i].coordinates.T for i in range(len(names)) if surfs[i] is not None})
     @staticmethod
+    def calculate_edge_data(faces):
+        limit = max(faces.flatten()) + 1
+        edge2face = {}
+        idx = {}
+        edge_list = [None for i in range(3*faces.size)]
+        k = 0
+        rng = range(faces.shape[1])
+        for (e,i) in zip(
+            zip(np.concatenate((faces[0], faces[1], faces[2])),
+                np.concatenate((faces[1], faces[2], faces[0]))),
+            np.concatenate((rng, rng, rng))):
+            if e not in idx:
+                idx[e] = k
+                idx[e[::-1]] = k
+                edge_list[k] = e
+                edge2face[e] = i
+                k += 1
+            elif e in edge2face:
+                edge2face[e[::-1]] = i
+        for ((a,b),i) in edge2face.items():
+            edge2face[(b,a)] = i
+        return (np.array(edge_list[0:k]).transpose(), edge2face)
+    @staticmethod
     def _check_meta_data(opts):
         md = opts.get('meta_data', {})
         if not isinstance(md, dict):
@@ -157,6 +180,7 @@ class Hemisphere:
         
     __lazy_members = {
         'meta_data':            (('options',), lambda hemi,opts: Hemisphere._check_meta_data(opts)),
+        'property_names':       (('properties',), lambda hemi,props: set(props.keys())),
         'white_surface':        ((), lambda hemi: hemi._load_surface('white')),
         'pial_surface':         ((), lambda hemi: hemi._load_surface('pial')),
         'inflated_surface':     ((), lambda hemi: hemi._load_surface('inflated')),
@@ -168,7 +192,10 @@ class Hemisphere:
                                      hemi._load_surface_data_safe('fsaverage_sym.sphere.reg')
                                      if hemi.chirality == 'LH' else
                                      hemi.subject.RHX.sym_surface_data)),
-        'faces':                (('sphere_surface_data',), lambda hemi,dat: dat[1]),
+        'faces':                (('sphere_surface_data',), lambda hemi,dat: dat[1].T),
+        'edge_data':            (('faces',), lambda hemi,F: Hemisphere.calculate_edge_data(F)),
+        'edges':                (('edge_data',), lambda hemi,ED: ED[0]),
+        'edge_face_index':      (('edge_data',), lambda hemi,ED: ED[1]),
 
         'sphere_surface':       (('sphere_surface_data','topology'), 
                                  lambda hemi,dat,topo: hemi._load_surface(
@@ -304,10 +331,6 @@ class Hemisphere:
             else:
                 Hemisphere._check_property(self, name, prop)
                 self.__dict__['properties'] = self.properties.using(**{name: prop})
-
-    def property_names(self):
-        '''hemi.property_names() yields a set of property names for the given hemi.'''
-        return set(self.properties.keys())
 
     def has_property(self, name):
         '''hemi.has_property(name) yields True if the given hemisphere contains the property with
@@ -626,7 +649,7 @@ class Hemisphere:
         params = make_dict(params)
         submesh.coordinates = fwdfn(submesh.coordinates, params)
         submesh.options = submesh.options.using(projection_parameters=params)
-        for p in self.property_names():
+        for p in self.property_names:
             try:
                 submesh.prop(p, np.asarray(self.prop(p))[submesh.vertex_labels])
             except:
