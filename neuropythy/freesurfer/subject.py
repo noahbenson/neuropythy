@@ -438,6 +438,30 @@ class Hemisphere:
                 self.prop(apply, result)
         return result
 
+    def partial_volume_factor(self, distance_cutoff=None, angle_cutoff=2.7):
+        '''
+        mesh.partial_volume_factor() yields an array of partial voluming risk metric values, one per
+        vertex. Each value is a number between 0 and 1 such that a 1 indicates a very high risk for
+        partial voluming and a 0 indicates a low risk.
+        Partial voluming factors are calculated as follows:
+        For each vertex u on the pial cortical surface, the set V of all vertices within d mm of u
+        is found; d is chosen to be the mean edge length on the pial surface (if the option
+        distance_cutoff is None) or the provided option.
+        The partial volume factor for u, f(u) = length({v in V | (N(v) . N(u)) < k}) / length(V); the
+        function N(u) indicates the vector normal to the cortical surface at vertex u and k is the
+        cosine of the angle_cutoff option, which, by default, is 2.7 rad, or approximately 155 deg.
+        '''
+        pial = self.pial_surface
+        normals = pial.vertex_normals.T
+        d = np.mean(pial.edge_lengths) if distance_cutoff is None else distance_cutoff
+        k = np.cos(angle_cutoff)
+        # get the neighbors
+        neis = pial.vertex_spatial_hash.query_ball_point(pial.coordinates.T, r=d)
+        # calculate the fraction with large angles:
+        return [float(len([1 for v in V if np.dot(u,normals[v]) < k])) / float(len(V))
+                for (u,V) in zip(normals, neis)]
+        
+    
     # This [private] function and this variable set up automatic properties from the FS directory
     # in order to be auto-loaded, a property must appear in this dictionary:
     _auto_properties = {

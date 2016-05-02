@@ -369,7 +369,7 @@ class CorticalMesh(Immutable):
         'indexed_neighborhoods': (('neighborhoods','index'),
                                   lambda n,idx: [[idx[i] for i in nrow] for nrow in n]),
         
-        'vertex_spatial_hash': (('vertex_coordinates',), lambda X: space.cKDTree(X.T)),
+        'vertex_spatial_hash': (('coordinates',), lambda X: space.cKDTree(X.T)),
         'face_spatial_hash': (('face_coordinates',), lambda FX: space.cKDTree(FX.mean(0).T)),
 
         'meta_data': (
@@ -777,7 +777,7 @@ class CorticalMesh(Immutable):
                 m = norm(lstsq(coord[nei] - x0, data[nei] - y0)[0])
                 res.append(None if m == 0 else 1.0/m)
         return res
-        
+
 
     ################################################################################################
     # Importers
