@@ -16,7 +16,7 @@ from neuropythy.java import (java_link, serialize_numpy,
 from pysistence import make_dict
 from array import array
 
-from .models import (RetinotopyModel, SchiraModel, FlatMeshModel, RetinotopyMeshModel)
+from .models import (RetinotopyModel, SchiraModel, RetinotopyMeshModel)
 
 from py4j.java_gateway import (launch_gateway, JavaGateway, GatewayParameters)
 
@@ -224,11 +224,10 @@ def V123_model(name):
          for (left,right) in [row.split(' :: ')]])
     coords = pts[:,0]
     vals = pts[:,1].T
-    vals = {'polar_angle': pts[:,0], 'eccentricity': pts[:,1], 'visual_area': pts[:,2]}
     tris = np.asarray(
         [map(int, row.split(','))
          for row in lines[(n+4):(n+m+4)]])
-    mdl = FlatMeshModel(coords, tris, vals)
+    mdl = RetinotopyMeshModel(coords, tris, vals[:,0], vals[:,1], vals[:,2], transform=tx)
     __loaded_V123_models[name] = mdl
     return mdl
 
