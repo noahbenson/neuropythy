@@ -5,7 +5,7 @@
 from cortex import (cortex_to_mrvolume, retinotopy_data,
                     empirical_retinotopy_data, predicted_retinotopy_data)
 from freesurfer import freesurfer_subject
-from registration import mesh_register, register_retinotopy
+from registration import (mesh_register, register_retinotopy)
 
 # Version information...
 _version_major = 0
