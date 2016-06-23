@@ -173,7 +173,7 @@ class RetinotopyMeshModel(RetinotopyModel):
         zs = eccens * np.exp((90 - angles)/180*math.pi * 1j)
         coords = np.asarray([zs.real, zs.imag]).T
         self.inverse = {
-            area: geo.Mesh(tris, coords)
+            area: geo.Mesh(np.asarray(tris), coords)
             # Iterate over all the unique areas;
             for area in list(set(area_ids) - set([0]))
             # bind the triangles (0 area_ids indicate borders):
@@ -182,9 +182,10 @@ class RetinotopyMeshModel(RetinotopyModel):
         self.transform = np.asarray(transform) if transform is not None else None
         self.itransform = numpy.linalg.inv(transform) if transform is not None else None
         # Save the data:
+        self.data = {}
         self.data['x'] = xs
         self.data['y'] = ys
-        self.data['polar_angle'] = angles,
+        self.data['polar_angle'] = angles
         self.data['eccentricity'] = eccens
         # we have to fix the area_ids to be the mean of their neighbors when on a boundary:
         boundaryNeis = {}
@@ -205,14 +206,14 @@ class RetinotopyMeshModel(RetinotopyModel):
         if not hasattr(x, '__iter__'):
             return self.cortex_to_angle([x], [y])[0]
         # start by applying the transform to the points
-        tx = self.transform
+        tx = self.itransform
         xy = np.asarray([x,y]).T if tx is None else np.dot(tx, [x,y,[1 for i in x]])[0:2].T
         # we only need to interpolate from the inverse mesh in this case
-        interp = [self.forward.interpolate(xy, self.data[name])
+        interp = [self.forward.interpolate(xy, self.data[name], smoothing=1)
                   for name in ['polar_angle', 'eccentricity', 'id']]
         return np.asarray(
             [(ang, ecc, area) if area is not None else (0, 0, 0)
-             for (ang, ecc, area) in zip(interp)])
+             for (ang, ecc, area) in zip(*interp)])
 
     def angle_to_cortex(self, theta, rho):
         'See RetinotopyModel.angle_to_cortex.'
@@ -221,17 +222,24 @@ class RetinotopyMeshModel(RetinotopyModel):
         theta = np.asarray(theta)
         rho = np.asarray(rho)
         zs = rho * np.exp(1j * (90 - theta)/180*math.pi)
-        coords = np.asarray([zs.real, sz.imag]).T
+        coords = np.asarray([zs.real, zs.imag]).T
         # we step through each area in the forward model and return the appropriate values
-        tx = self.itransform
+        tx = self.transform
         xvals = self.data['x']
         yvals = self.data['y']
-        return np.asarray(
+        res = np.asarray(
             [np.asarray([x,y]).T if tx is None else np.dot(tx, [x,y,[1 for i in x]])[0:2].T
              for area in sorted(self.forward.keys())
-             for (x,y) in [(self.forward[area].interpolate(coords, xvals, nearest=True),
-                            self.forward[area].interpolate(coords, yvals, nearest=True))]
+             for (x,y) in [(self.forward[area].interpolate(coords, xvals, smoothing=1),
+                            self.forward[area].interpolate(coords, yvals, smoothing=1))]]
         ).T
+        # there's a chance that the coords are outside the triangle mesh; we want to make sure
+        # that these get handled correctly...
+        for (i,row) in enumerate(res):
+            if None in set(row.flatten()) and rho[i] > 86 and rho[i] <= 90:
+                # we try to get a fixed version by reducing rho slightly
+                res[i] = angle_to_cortex(theta[i], rho[i] - 0.5);
+        return res
 
              
         

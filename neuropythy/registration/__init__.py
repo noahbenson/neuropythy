@@ -198,7 +198,7 @@ def mesh_register(mesh, field, max_steps=2000, max_step_size=0.1, max_pe_change=
     return np.array(minimizer.getX())
 
 __loaded_V123_models = {}
-def V123_model(name):
+def V123_model(name='standard'):
     '''
     V123_model(name) yields a model of retinotopy in V1-V3 with the given name; if not provided,
     this name 'standard' is used (currently, the only possible option). The model itself is a set of
@@ -207,7 +207,7 @@ def V123_model(name):
     '''
     if name in __loaded_V123_models:
         return __loaded_V123_models[name]
-    fname = os.path.join(__file__, '..', '..', 'lib', 'models', name + '.fmm.gz')
+    fname = os.path.join(os.path.dirname(__file__), '..', '..', 'lib', 'models', name + '.fmm.gz')
     lines = None
     with gzip.open(fname, 'rb') as f:
         lines = f.read().split('\n')
@@ -218,16 +218,18 @@ def V123_model(name):
     tx = np.asarray(
         [map(float, row.split(','))
          for row in lines[3].split(':')[1].strip(' \t[]').split(';')])
-    pts = np.asarray(
-        [(map(float, left.split(',')), map(float, right.split(',')))
-         for row in lines[4:(n+4)]
-         for (left,right) in [row.split(' :: ')]])
-    coords = pts[:,0]
-    vals = pts[:,1].T
-    tris = np.asarray(
+    crds = np.asarray([map(float, left.split(','))
+                       for row in lines[4:(n+4)]
+                       for (left,right) in [row.split(' :: ')]])
+    vals = np.asarray([map(float, right.split(','))
+                       for row in lines[4:(n+4)]
+                       for (left,right) in [row.split(' :: ')]])
+    tris = -1 + np.asarray(
         [map(int, row.split(','))
          for row in lines[(n+4):(n+m+4)]])
-    mdl = RetinotopyMeshModel(coords, tris, vals[:,0], vals[:,1], vals[:,2], transform=tx)
+    mdl = RetinotopyMeshModel(tris, crds,
+                              90 - 180/pi*vals[:,0], vals[:,1], vals[:,2],
+                              transform=tx)
     __loaded_V123_models[name] = mdl
     return mdl
 
@@ -349,7 +351,7 @@ def retinotopy_anchors(mesh, mdl,
            ] + ([] if suffix is None else suffix)
     
 def register_retinotopy(hemi,
-                        retinotopy_model=V123_model(), radius=pi/3.0,
+                        retinotopy_model=None, radius=pi/3.0,
                         polar_angle=None, eccentricity=None, weight=None, weight_cutoff=None,
                         sigma=0.5, edge_scale=1.0, angle_scale=1.0, functional_scale=1.0,
                         max_steps=2000, max_step_size=0.05,
@@ -362,7 +364,7 @@ def register_retinotopy(hemi,
 
     Options:
       * retinotopy_model specifies the instance of the retinotopy model to use; this must be an
-        instance of the RetinotopyModel class (default: V123_model()).
+        instance of the RetinotopyModel class (default: None, which is translated to V123_model()).
       * polar_angle, eccentricity, and weight specify the property names for the respective
         quantities; these may alternately be lists or numpy arrays of values. If weight is not given
         or found, then unity weight for all vertices is assumed. By default, each will check the
@@ -379,7 +381,7 @@ def register_retinotopy(hemi,
         move in a single step of the minimization.
       * registration_name (default: 'retinotopy') specifies the name of the registration to register
         with the hemisphere's topology object.
-      * radius (defailt: pi/3) specifies the radius, in radians, of the included portion of the map
+      * radius (default: pi/3) specifies the radius, in radians, of the included portion of the map
         projection (projected about the occipital pole).
     '''
     # Step 1: figure out what properties we're using...
@@ -408,6 +410,7 @@ def register_retinotopy(hemi,
     # Step 3: make the projection
     msym = sym.projection(radius=radius)
     # Step 4: run the mesh registration
+    retinotopy_model = V123_model() if retinotopy_model is None else retinotopy_model
     r = mesh_register(
         msym,
         [['edge', 'harmonic', 'scale', edge_scale],

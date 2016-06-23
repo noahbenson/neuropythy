@@ -46,9 +46,21 @@ class Mesh(Immutable):
     # True if the point is in the triangle, otherwise False; tri_no is an index into the triangle
     def _point_in_triangle(self, tri_no, pt):
         tri = self.coordinates[self.triangles[tri_no]]
-        return (np.dot(pt - tri[0], np.cross(tri[0], tri[1] - tri[0])) >= 0 and
-                np.dot(pt - tri[1], np.cross(tri[1], tri[2] - tri[1])) >= 0 and
-                np.dot(pt - tri[2], np.cross(tri[2], tri[0] - tri[2])) >= 0)
+        if len(pt) == 2:
+            tol = 1e-13
+            a = triangle_area(tri[0], tri[1], tri[2])
+            if a == 0: return False
+            a = 0.5 / a
+            s = a * (tri[0,1]*tri[2,0] - tri[0,0]*tri[2,1] + 
+                     (tri[2,1] - tri[0,1])*pt[0] + (tri[0,0] - tri[2,1])*pt[1])
+            if (s + tol) < 0 or (s - tol) >= 1: return False
+            t = a * (tri[0,0]*tri[1,1] - tri[0,1]*tri[1,0] + 
+                     (tri[0,1] - tri[1,1])*pt[0] + (tri[1,0] - tri[0,0])*pt[1])
+            return False if (t + tol) < 0 or (s + t - tol) > 1 else True
+        else:
+            return (np.dot(pt - tri[0], np.cross(tri[0], tri[1] - tri[0])) >= 0 and
+                    np.dot(pt - tri[1], np.cross(tri[1], tri[2] - tri[1])) >= 0 and
+                    np.dot(pt - tri[2], np.cross(tri[2], tri[0] - tri[2])) >= 0)
 
     def _find_triangle_search(self, x, k=24, searched=set([])):
         # This gets called when a container triangle isn't found; the idea is that k should
@@ -91,7 +103,7 @@ class Mesh(Immutable):
                                         None)]]
 
     def interpolate(self, x, data, 
-                    smoothing=2, mask=None, null=None, method='automatic', n_jobs=1):
+                    smoothing=1, mask=None, null=None, method='automatic', n_jobs=1):
         '''
         mesh.interpolate(x, data) yields a numpy array of the data interpolated from the given
         array, data, which must contain the same number of elements as there are points in the Mesh
@@ -105,7 +117,7 @@ class Mesh(Immutable):
           * null (default: None) indicates the value that should be placed in the returned result if
             either a vertex does not lie in any triangle or a vertex is masked out via the mask
             option.
-          * smoothing (default: 2) assuming that the method is 'interpolate' or 'automatic', this
+          * smoothing (default: 1) assuming that the method is 'interpolate' or 'automatic', this
             is the exponent used to smooth the interpolated surface; 1 is pure linear interpolation
             while 2 represents a slightly smoother version of this. Note that this is not an order
             of interpolation option.
@@ -166,16 +178,23 @@ class Mesh(Immutable):
                     for (x, tri_no) in zip(coords, containers)]
     def _interpolate_triangle(self, x, data, tri_vertices, smoothing):
         # we'll want to project things down to 2 dimensions:
-        mtx = alignment_matrix_3D(x, [0,0,1])[0:2].T
-        # Project out what we don't want
-        corners = np.dot(self.coordinates[tri_vertices], mtx)
-        x = np.asarray([0,0])
+        if len(x) == 3:
+            mtx = alignment_matrix_3D(x, [0,0,1])[0:2].T
+            # Project out what we don't want
+            corners = np.dot(self.coordinates[tri_vertices], mtx)
+            x = np.asarray([0,0])
+        else:
+            corners = self.coordinates[tri_vertices]
         # get the mini-triangles' areas
         a_area = triangle_area(x, corners[1], corners[2]) ** smoothing
         b_area = triangle_area(x, corners[2], corners[0]) ** smoothing
         c_area = triangle_area(x, corners[0], corners[1]) ** smoothing
+        tot = a_area + b_area + c_area
         # and do the interpolation:
-        return np.dot([a_area, b_area, c_area], data[tri_vertices]) / (a_area + b_area + c_area)
+        if np.isclose(tot, 0):
+            return None
+        else:
+            return np.dot([a_area, b_area, c_area], data[tri_vertices]) / tot
         
 
     def address(self, data):
