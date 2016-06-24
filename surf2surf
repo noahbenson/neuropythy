@@ -85,6 +85,20 @@ if [ "$hemi" = "r" ]; then HEMI=rh; fi
 # get our script's base directory
 BASEDIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 
+FHEMI="$HEMI"
+THEMI="$HEMI"
+
+# some checks in case we use the fsaverage_sym...
+if [ "$FROMSUB" = "$TOSUB" ]
+then die "Interpolation between identical subjects is never necessary!"
+elif [ "$FROMSUB" = "fsaverage_sym" ]
+then FHEMI=LH
+     if [ "$HEMI" = "RH" ]; then THEMI=RHX; fi
+elif [ "$TOSUB" = "fsaverage_sym" ]
+then THEMI=LH
+     if [ "$HEMI" = "RH" ]; then FHEMI=RHX; fi
+fi
+
 PYINTRO='
 '
 
@@ -97,9 +111,9 @@ import nibabel.freesurfer.io as fsio
 import nibabel.freesurfer.mghformat as fsmgh
 
 fsub = neuropythy.freesurfer.Subject('$SUBJECTS_DIR/$FROMSUB')
-fhem = fsub.$HEMI
+fhem = fsub.$FHEMI
 tsub = neuropythy.freesurfer.Subject('$SUBJECTS_DIR/$TOSUB')
-them = tsub.$HEMI
+them = tsub.$THEMI
 
 def read_surf_file(flnm):
   if flnm.endswith("mgh") or flnm.endswith("mgz"):
