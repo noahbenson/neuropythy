@@ -56,6 +56,7 @@ SURF=""
 OUT=""
 while [ $# -gt 0 ]
 do case "$1" in
+     # No options currently allowed...
      *)
          if [ -z "$HEMI" ]
          then HEMI="`echo $1 | tr lrh LRH`"
@@ -93,15 +94,13 @@ if [ "$FROMSUB" = "$TOSUB" ]
 then die "Interpolation between identical subjects is never necessary!"
 elif [ "$FROMSUB" = "fsaverage_sym" ]
 then FHEMI=LH
-     if [ "$HEMI" = "RH" ]; then THEMI=RHX; fi
+     if [ "$HEMI" = "RH" ]; then THEMI="RHX"; fi
 elif [ "$TOSUB" = "fsaverage_sym" ]
 then THEMI=LH
      if [ "$HEMI" = "RH" ]; then FHEMI=RHX; fi
 fi
 
-PYINTRO='
-'
-
+# Execute the python code!
 /usr/bin/env python <<EOF
 import numpy as np
 import sys

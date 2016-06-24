@@ -26,4 +26,4 @@ setup(
                       'nibabel>=2.0',
                       'pysistence>=0.4',
                       'py4j>=0.9',
-                      'igraph>=0.7.1'])
+                      'python-igraph>=0.7.1'])

@@ -207,9 +207,15 @@ def V123_model(name='standard'):
     '''
     if name in __loaded_V123_models:
         return __loaded_V123_models[name]
-    fname = os.path.join(os.path.dirname(__file__), '..', '..', 'lib', 'models', name + '.fmm.gz')
+    fname = os.path.join(os.path.dirname(__file__), '..', '..', 'lib', 'models', name + '.fmm')
+    gz = False
+    if not os.path.isfile(fname):
+        fname = fname + '.gz'
+        gz = True
+        if not os.path.isfile(fname):
+            raise ValueError('Mesh model named \'%s\' not found' % name)
     lines = None
-    with gzip.open(fname, 'rb') as f:
+    with (gzip.open(fname, 'rb') if gz else open(fname, 'r')) as f:
         lines = f.read().split('\n')
     if len(lines) < 3 or lines[0] != 'Flat Mesh Model Version: 1.0':
         raise ValueError('Given name does not correspond to a valid flat mesh model file')
@@ -333,15 +339,19 @@ def retinotopy_anchors(mesh, mdl,
         raise RuntimeError('Weight data has incorrect length!')
     # let's go through and fix up the weights/polar angles/eccentricities into appropriate lists
     if weight_cutoff is None:
-        data = [[i, mdl.angle_to_cortex(polar_angle[i], eccentricity[i]), weight[i]]
+        idcs = [i
                 for i in range(n)
                 if (polar_angle[i] is not None and eccentricity[i] is not None 
                     and weight[i] is not None and weight[i] != 0)]
+        res = mdl.angle_to_cortex(polar_angle[idcs], eccentricity[idcs])
+        data = [[i, r] for (i,r) in zip(idcs, res)]
     else:
-        data = [[i, mdl.angle_to_cortex(polar_angle[i], eccentricity[i]), weight[i]]
+        idcs = [i
                 for i in range(n)
                 if (polar_angle[i] is not None and eccentricity[i] is not None 
                     and weight[i] is not None and weight[i] >= weight_cutoff)]
+        res = mdl.angle_to_cortex(polar_angle[idcs], eccentricity[idcs])
+        data = [[i, r] for (i,r) in zip(idcs, res)]
     # okay, we've partially parsed the data that was given; now we can construct the final list of
     # instructions:
     return ['anchor', shape,

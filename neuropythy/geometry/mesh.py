@@ -56,7 +56,8 @@ class Mesh(Immutable):
             d02 = np.dot(v0, v2)
             d11 = np.dot(v1, v1)
             d12 = np.dot(v1, v2)
-            invDenom = 1 / (d00*d11 - d01*d01)
+            invDenom = (d00*d11 - d01*d01)
+            if np.isclose(invDenom, 0): return False
             s = (d11*d02 - d01*d12) * invDenom
             if (s + tol) < 0 or (s - tol) >= 1: return False
             t = (d00*d12 - d01*d02) * invDenom
