@@ -48,14 +48,18 @@ class Mesh(Immutable):
         tri = self.coordinates[self.triangles[tri_no]]
         if len(pt) == 2:
             tol = 1e-13
-            a = triangle_area(tri[0], tri[1], tri[2])
-            if a == 0: return False
-            a = 0.5 / a
-            s = a * (tri[0,1]*tri[2,0] - tri[0,0]*tri[2,1] + 
-                     (tri[2,1] - tri[0,1])*pt[0] + (tri[0,0] - tri[2,1])*pt[1])
+            v0 = tri[2] - tri[0]
+            v1 = tri[1] - tri[0]
+            v2 = pt - tri[0]
+            d00 = np.dot(v0, v0)
+            d01 = np.dot(v0, v1)
+            d02 = np.dot(v0, v2)
+            d11 = np.dot(v1, v1)
+            d12 = np.dot(v1, v2)
+            invDenom = 1 / (d00*d11 - d01*d01)
+            s = (d11*d02 - d01*d12) * invDenom
             if (s + tol) < 0 or (s - tol) >= 1: return False
-            t = a * (tri[0,0]*tri[1,1] - tri[0,1]*tri[1,0] + 
-                     (tri[0,1] - tri[1,1])*pt[0] + (tri[1,0] - tri[0,0])*pt[1])
+            t = (d00*d12 - d01*d02) * invDenom
             return False if (t + tol) < 0 or (s + t - tol) > 1 else True
         else:
             return (np.dot(pt - tri[0], np.cross(tri[0], tri[1] - tri[0])) >= 0 and

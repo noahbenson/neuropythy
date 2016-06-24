@@ -164,13 +164,13 @@ class RetinotopyMeshModel(RetinotopyModel):
         coordinates = coordinates if coordinates.shape[1] == 2 else coordinates.T
         angles      = np.asarray(angles)
         eccens      = np.asarray(eccens)
-        area_ids    = np.asarray(area_ids)
+        area_ids    = np.asarray(map(int, area_ids))
         # The forward model is the projection from cortical map -> visual angle
         self.forward = geo.Mesh(triangles, coordinates)
         # The inverse model is a set of meshes from visual field space to the cortical map
         xs = coordinates[:,0]
         ys = coordinates[:,1]
-        zs = eccens * np.exp((90 - angles)/180*math.pi * 1j)
+        zs = eccens * np.exp(1j * (90 - angles)/180*math.pi)
         coords = np.asarray([zs.real, zs.imag]).T
         self.inverse = {
             area: geo.Mesh(np.asarray(tris), coords)
@@ -218,7 +218,7 @@ class RetinotopyMeshModel(RetinotopyModel):
     def angle_to_cortex(self, theta, rho):
         'See RetinotopyModel.angle_to_cortex.'
         if not hasattr(theta, '__iter__'):
-            return self.angle_to_cortex([theta], [rho])[0]
+            return self.angle_to_cortex([theta], [rho])[:,0]
         theta = np.asarray(theta)
         rho = np.asarray(rho)
         zs = rho * np.exp(1j * (90 - theta)/180*math.pi)
@@ -228,17 +228,23 @@ class RetinotopyMeshModel(RetinotopyModel):
         xvals = self.data['x']
         yvals = self.data['y']
         res = np.asarray(
-            [np.asarray([x,y]).T if tx is None else np.dot(tx, [x,y,[1 for i in x]])[0:2].T
-             for area in sorted(self.forward.keys())
-             for (x,y) in [(self.forward[area].interpolate(coords, xvals, smoothing=1),
-                            self.forward[area].interpolate(coords, yvals, smoothing=1))]]
-        ).T
+            [[self.inverse[area].interpolate(coords, xvals, smoothing=1),
+              self.inverse[area].interpolate(coords, yvals, smoothing=1)]
+             for area in map(int, sorted(list(set(self.data['id']))))
+             if area != 0]
+        ).transpose((0,2,1))
+        if tx is not None:
+            res = np.asarray(
+                [[np.dot(tx, [xy[0], xy[1], 1])[0:2] if xy[0] is not None else [None, None]
+                  for xy in adat]
+                 for adat in res])
         # there's a chance that the coords are outside the triangle mesh; we want to make sure
         # that these get handled correctly...
-        for (i,row) in enumerate(res):
-            if None in set(row.flatten()) and rho[i] > 86 and rho[i] <= 90:
-                # we try to get a fixed version by reducing rho slightly
-                res[i] = angle_to_cortex(theta[i], rho[i] - 0.5);
+        for (i,adat) in enumerate(res):
+            for (k,row) in enumerate(adat):
+                if None in set(row.flatten()) and rho[k] > 86 and rho[k] <= 90:
+                    # we try to get a fixed version by reducing rho slightly
+                    res[i] = angle_to_cortex(theta[k], rho[k] - 0.5);
         return res
 
              

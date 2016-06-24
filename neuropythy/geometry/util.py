@@ -119,7 +119,7 @@ def triangle_area(a,b,c):
     b, and c.
     '''
     if len(a) == 2:
-        return 0.5*(a[0]*(b[1] - c[1]) + b[0]*(c[1] - a[1]) + c[0]*(a[1] - b[1]))
+        return np.abs(0.5*(a[0]*(b[1] - c[1]) + b[0]*(c[1] - a[1]) + c[0]*(a[1] - b[1])))
     else:
         mtx = alignment_matrix_3D(np.cross(np.asarray(b) - a, np.asarray(c) - a), [0,0,1])[0:1]
         return triangle_area(np.dot(mtx, a), np.dot(mtx, b), np.dot(mtx, c))
