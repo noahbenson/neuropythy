@@ -11,9 +11,9 @@ function syntax {
  <from-subject> and <to-subject> must be valid FreeSurfer subject ids (in the
    $SUBJECTS_DIR directory);
  <surf-file> must be a FreeSurfer surface data file or mgh/mgz file containing
-   surface vertex data for the <from-subject>'s <hemi> hemisphere;
+   surface vertex data for the <from-subject>'"'"'s <hemi> hemisphere;
  <out-file> is the name of the file to output; if the extension is mgh or mgz,
-   the MGH format will be used; otherwise FreeSurfer's curv-file format will
+   the MGH format will be used; otherwise FreeSurfer'"'"'s curv-file format will
    be used.
  Note that the subject argument may be omitted if the $SUBJECT environment
  variable is correctly set.
