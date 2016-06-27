@@ -132,6 +132,7 @@ def read_surf_file(flnm):
   return data
 
 def write_surf_file(flnm, dat):
+  dat = np.asarray(dat)
   if flnm.endswith("mgh") or flnm.endswith("mgz"):
     m = fsmgh.MGHImage(dat, np.eye(4))
     fsmgh.save(m, flnm)
