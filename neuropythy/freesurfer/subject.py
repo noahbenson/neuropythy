@@ -191,7 +191,9 @@ class Hemisphere:
                                  lambda hemi: (
                                      hemi._load_surface_data_safe('fsaverage_sym.sphere.reg')
                                      if hemi.chirality == 'LH' else
-                                     hemi.subject.RHX.sym_surface_data)),
+                                     hemi.subject.RHX.sym_surface_data
+                                     if hemi.subject.RHX is not None else
+                                     (None,None))),
         'faces':                (('sphere_surface_data',), lambda hemi,dat: dat[1].T),
         'edge_data':            (('faces',), lambda hemi,F: Hemisphere.calculate_edge_data(F)),
         'edges':                (('edge_data',), lambda hemi,ED: ED[0]),
@@ -720,12 +722,17 @@ class Subject:
             return make_dict(**md)
     def _load_hemisphere(self, name):
         return Hemisphere(self, name)
+    def _load_hemisphere_safe(self, name):
+        try:
+            return Hemisphere(self, name)
+        except:
+            return None
     __lazy_members = {
         'meta_data': (('options',), lambda mesh,opts: Subject._check_meta_data(opts)),
         'LH':  ((), lambda mesh: mesh._load_hemisphere('LH')),
         'RH':  ((), lambda mesh: mesh._load_hemisphere('RH')),
-        'LHX': ((), lambda mesh: mesh._load_hemisphere('LHX')),
-        'RHX': ((), lambda mesh: mesh._load_hemisphere('RHX'))}
+        'LHX': ((), lambda mesh: mesh._load_hemisphere_safe('LHX')),
+        'RHX': ((), lambda mesh: mesh._load_hemisphere_safe('RHX'))}
     
     # This function will clear the lazily-evaluated members when a given value is changed
     def __update_values(self, name):
