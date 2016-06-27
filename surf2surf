@@ -54,9 +54,12 @@ FROMSUB=""
 TOSUB=""
 SURF=""
 OUT=""
+NEAREST="no"
 while [ $# -gt 0 ]
 do case "$1" in
      # No options currently allowed...
+     -n)
+         NEAREST="yes"
      *)
          if [ -z "$HEMI" ]
          then HEMI="`echo $1 | tr lrh LRH`"
@@ -100,6 +103,11 @@ then THEMI=LH
      if [ "$HEMI" = "RH" ]; then FHEMI=RHX; fi
 fi
 
+if [ "$NEAREST" = "yes" ]
+then SUFFIX=", method='nearest'"
+else SUFFIX=""
+fi
+
 # Execute the python code!
 /usr/bin/env python <<EOF
 import numpy as np
@@ -130,7 +138,7 @@ def write_surf_file(flnm, dat):
     raise ValueError("morph data write not yet supported")
 
 data = read_surf_file('$SURF')
-odat = them.interpolate(fhem, data, apply=False)
+odat = them.interpolate(fhem, data, apply=False${SUFFIX})
 write_surf_file('$OUT', odat)
 
 exit(0)
