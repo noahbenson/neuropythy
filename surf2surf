@@ -60,6 +60,7 @@ do case "$1" in
      # No options currently allowed...
      -n)
          NEAREST="yes"
+         ;;
      *)
          if [ -z "$HEMI" ]
          then HEMI="`echo $1 | tr lrh LRH`"
@@ -74,6 +75,7 @@ do case "$1" in
          then OUT="$1"
          else syntax
          fi
+         ;;
    esac
    shift
 done
