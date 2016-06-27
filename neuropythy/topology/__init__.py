@@ -74,13 +74,20 @@ class Topology:
             integer to specify how many processors to use, or may be -1 to specify all processors.
         '''
         # find a shared registration:
-        reg_name = next((k for k in topo.registrations.iterkeys() if k in self.registrations),
-                        None)
-        if reg_name is None:
+        reg_names = [k for k in topo.registrations.iterkeys() if k in self.registrations]
+        if not reg_names:
             raise RuntimeError('Topologies do not share a matching registration!')
-        return self.registrations[reg_name].interpolate_from(
-            topo.registrations[reg_name], data,
-            mask=mask, null=null, method=method, n_jobs=n_jobs);
+        res = []
+        for reg_name in reg_names:
+            try:
+                res = self.registrations[reg_name].interpolate_from(
+                    topo.registrations[reg_name], data,
+                    mask=mask, null=null, method=method, n_jobs=n_jobs);
+            except:
+                pass
+        if res is None:
+            raise ValueError('All shared topologies raised errors during interpolation!')
+        return res
 
 class Registration(geo.Mesh):
     '''
