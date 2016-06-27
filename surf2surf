@@ -132,8 +132,7 @@ def read_surf_file(flnm):
   return data
 
 def write_surf_file(flnm, dat):
-  print "%d None elements found in export" % sum([1 for x in dat if x is None])
-  dat = np.asarray([0.0 if x is None else float(x) for x in dat])
+  dat = np.asarray([[[np.float32(0 if x is None else x) for x in dat]]])
   if flnm.endswith("mgh") or flnm.endswith("mgz"):
     m = fsmgh.MGHImage(dat, np.eye(4))
     fsmgh.save(m, flnm)

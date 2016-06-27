@@ -519,7 +519,12 @@ class Hemisphere:
                     f[2] == '.' and f[0:2].upper() == self.name and \
                     f[3:-4] in Hemisphere._mgh_properties:
                 (name, fn) = Hemisphere._mgh_properties[f[3:-4]]
-                self.prop(name, fn(os.path.join(dir, f)))
+                try:
+                    pvals = fn(os.path.join(dir, f))
+                except:
+                    pvals = None
+                if pvals is not None:
+                    self.prop(name, pvals)
 
     # This method is a convenient way to get the occipital pole coordinates for the various
     # surfaces in a hemisphere...
