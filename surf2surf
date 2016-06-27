@@ -80,8 +80,6 @@ do case "$1" in
    shift
 done
 
-echo $FROMSUB $TOSUB $HEMI "$SUFFIX"
-
 if [ "$HEMI" = "L" ]; then HEMI=LH; fi
 if [ "$HEMI" = "R" ]; then HEMI=RH; fi
 if [ "$hemi" = "l" ]; then HEMI=lh; fi
