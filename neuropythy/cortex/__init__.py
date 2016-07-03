@@ -508,9 +508,9 @@ class CorticalMesh(Immutable):
             np.union1d([], [l for idcs in self.vertex_faces(vincl)
                               for l in idcs
                               if fs[0,l] in vincl and fs[1,l] in vincl and fs[2,l] in vincl]))
-        vincl = list(vincl)
-        eincl = list(eincl)
-        fincl = list(fincl)
+        vincl = np.asarray([int(i) for i in sorted(list(vincl))])
+        eincl = np.asarray([int(i) for i in sorted(list(eincl))])
+        fincl = np.asarray([int(i) for i in sorted(list(fincl))])
         # Make the subsets
         I = self.index[vincl]
         X = self.coordinates[:, I]
@@ -868,13 +868,13 @@ def cortex_to_mrvolume(mesh, property):
     return True
 
 _empirical_retinotopy_names = {
-    'polar_angle':  set(['prf_polar_angle',  'empirical_polar_angle',  'measured_polar_angle'
-                         'polar_angle']),
-    'eccentricity': set(['prf_eccentricity', 'empirical_eccentricity', 'measured_eccentricity'
-                         'eccentricity']),
-    'weight':       set(['prf_variance_explained',       'prf_weight',
-                         'measured_variance_explained',  'measured_weight',
-                         'empirical_variance_explained', 'empirical_weight'])}
+    'polar_angle':  ['prf_polar_angle',  'empirical_polar_angle',  'measured_polar_angle',
+                     'polar_angle'],
+    'eccentricity': ['prf_eccentricity', 'empirical_eccentricity', 'measured_eccentricity',
+                     'eccentricity'],
+    'weight':       ['prf_variance_explained',       'prf_weight',
+                     'measured_variance_explained',  'measured_weight',
+                     'empirical_variance_explained', 'empirical_weight']}
 
 # handy function for picking out properties automatically...
 def empirical_retinotopy_data(hemi, retino_type):
@@ -886,15 +886,16 @@ def empirical_retinotopy_data(hemi, retino_type):
     The argument t should be one of 'polar_angle', 'eccentricity', 'weight'.
     '''
     dat = _empirical_retinotopy_names[retino_type.lower()]
-    return next((hemi.prop(s) for s in hemi.property_names if s.lower() in dat), None)
+    hdat = {s.lower(): s for s in hemi.property_names}
+    return next((hemi.prop(hdat[s]) for s in dat if s.lower() in hdat), None)
 
 _predicted_retinotopy_names = {
-    'polar_angle':  set(['predicted_polar_angle',   'model_polar_angle',
-                         'registered_polar_angle',  'template_polar_angle']),
-    'eccentricity': set(['predicted_eccentricity',  'model_eccentricity',
-                         'registered_eccentricity', 'template_eccentricity']),
-    'visual_area':  set(['predicted_visual_area',   'model_visual_area',
-                         'registered_visual_area',  'template_visual_area'])}
+    'polar_angle':  ['predicted_polar_angle',   'model_polar_angle',
+                     'registered_polar_angle',  'template_polar_angle'],
+    'eccentricity': ['predicted_eccentricity',  'model_eccentricity',
+                     'registered_eccentricity', 'template_eccentricity'],
+    'visual_area':  ['predicted_visual_area',   'model_visual_area',
+                     'registered_visual_area',  'template_visual_area']}
 
 def predicted_retinotopy_data(hemi, retino_type):
     '''
@@ -905,7 +906,8 @@ def predicted_retinotopy_data(hemi, retino_type):
     The argument t should be one of 'polar_angle', 'eccentricity', 'visual_area'.
     '''
     dat = _predicted_retinotopy_names[retino_type.lower()]
-    return next((hemi.prop(s) for s in hemi.property_names if s.lower() in dat), None)
+    hdat = {s.lower(): s for s in hemi.property_names}
+    return next((hemi.prop(hdat[s]) for s in dat if s.lower() in hdat), None)
 
 _retinotopy_names = {
     'polar_angle':  set(['polar_angle']),

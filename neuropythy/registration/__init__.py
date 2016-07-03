@@ -6,6 +6,7 @@
 import numpy as np
 import scipy as sp
 import os, sys, gzip
+from numpy.linalg import norm
 from math import pi
 from numbers import Number
 from neuropythy.cortex import CorticalMesh, empirical_retinotopy_data
@@ -36,7 +37,7 @@ _parse_field_data_types = {
     'anchor': {
         'harmonic':      ['newHarmonicAnchorPotential', ['scale', 1.0], ['shape', 2.0], 0, 1, 'X'],
         'gaussian':      ['newGaussianAnchorPotential', ['scale', 1.0], ['shape', 2.0], 
-                                                        ['sigma', 1.0], 0, 1, 'X']},
+                                                        ['sigma', 2.0], 0, 1, 'X']},
     'perimeter': {
         'harmonic':   ['newHarmonicPerimeterPotential', ['scale', 1.0], ['shape', 2.0], 'F', 'X']}};
         
@@ -102,7 +103,7 @@ def _parse_field_arguments(arg, faces, coords):
         return sp
 
 # The mesh_register function
-def mesh_register(mesh, field, max_steps=2000, max_step_size=0.1, max_pe_change=1, k=4):
+def mesh_register(mesh, field, max_steps=2000, max_step_size=0.05, max_pe_change=1, k=4):
     '''
     mesh_register(mesh, field) yields the mesh that results from registering the given mesh by
     minimizing the given potential field description over the position of the vertices in the
@@ -241,8 +242,11 @@ def V123_model(name='standard'):
 
 def retinotopy_anchors(mesh, mdl,
                        polar_angle=None, eccentricity=None,
-                       weight=None, weight_cutoff=None,
-                       shape='Gaussian', suffix=None):
+                       weight=None, weight_cutoff=0.1,
+                       scale=1,
+                       shape='Gaussian', suffix=None,
+                       sigma=[0.05, 0.3, 2.0],
+                       select='close'):
     '''
     retinotopy_anchors(mesh, model) is intended for use with the mesh_register function and the
     V123_model() function and/or the RetinotopyModel class; it yields a description of the anchor
@@ -270,11 +274,26 @@ def retinotopy_anchors(mesh, mdl,
       * weight_cutoff (default 0) specifies that the weight must be higher than the given value inn
         order to be included in the fit; vertices with weights below this value have their weights
         truncated to 0.
+      * scale (default 1) specifies a constant by which to multiply all weights for all anchors; the
+        value None is interpreted as 1.
       * shape (default 'Gaussian') specifies the shape of the potential function (see mesh_register)
       * suffix (default None) specifies any additional arguments that should be appended to the 
         potential function description list that is produced by this function; i.e., the 
         retinotopy_anchors function produces a list, and the contents of suffix, if given and not
         None, are appended to that list (see mesh_register).
+      * select (default None) specifies a function that will be called with two arguments for every
+        vertex given an anchor; the arguments are the vertex label and the matrix of anchors. The
+        function should return a list of anchors to use for the label (None is equivalent to
+        lambda id,anc: anc).
+      * sigma (default [0.05, 0.3, 2.0]) specifies how the sigma parameter should be handled; if
+        None, then no sigma value is specified; if a single number, then all sigma values are
+        assigned that value; if a list of three numbers, then the first is the minimum sigma value,
+        the second is the fraction of the minimum distance between paired anchor points, and the 
+        last is the maximum sigma --- the idea with this form of the argument is that the ideal
+        sigma value in many cases is approximately 0.25 to 0.5 times the distance between anchors
+        to which a single vertex is attracted; for any anchor a to which a vertex u is attracted,
+        the sigma of a is the middle sigma-argument value times the minimum distance from a to all
+        other anchors to which u is attracted (clipped by the min and max sigma).
 
     Example:
      # The retinotopy_anchors function is intended for use with mesh_register, as follows:
@@ -296,11 +315,10 @@ def retinotopy_anchors(mesh, mdl,
     if not isinstance(mesh, CorticalMesh):
         raise RuntimeError('given mesh is not a CorticalMesh object!')
     n = len(mesh.vertex_labels)
+    X = mesh.coordinates.T
     # make sure we have our polar angle/eccen/weight values:
-    polar_angle = polar_angle if polar_angle is not None                          \
-        else mesh.prop('polar_angle') if mesh.has_property('polar_angle')         \
-        else mesh.prop('PRF_polar_angle') if mesh.has_property('PRF_polar_angle') \
-        else None
+    polar_angle = polar_angle if polar_angle is not None else \
+                  empirical_retinotopy_data(mesh, 'polar_angle')
     if polar_angle is None:
         raise RuntimeError('No polar angle data given to schira_anchors!')
     if isinstance(polar_angle, dict):
@@ -310,10 +328,8 @@ def retinotopy_anchors(mesh, mdl,
     if len(polar_angle) != n:
         raise RuntimeError('Polar angle data has incorrect length!')
     # Now Polar Angle...
-    eccentricity = eccentricity if eccentricity is not None                         \
-        else mesh.prop('eccentricity') if mesh.has_property('eccentricity')         \
-        else mesh.prop('PRF_eccentricity') if mesh.has_property('PRF_eccentricity') \
-        else None
+    eccentricity = eccentricity if eccentricity is not None else \
+                  empirical_retinotopy_data(mesh, 'eccentricity')
     if eccentricity is None:
         raise RuntimeError('No eccentricity data given to schira_anchors!')
     if isinstance(eccentricity, dict):
@@ -322,12 +338,7 @@ def retinotopy_anchors(mesh, mdl,
     if len(eccentricity) != n:
         raise RuntimeError('Eccentricity data has incorrect length!')
     # Now Weight...
-    weight = weight if weight is not None                                                       \
-        else mesh.prop('weight') if mesh.has_property('weight')                                 \
-        else mesh.prop('variance_explained') if mesh.has_property('variance_explained')         \
-        else mesh.prop('PRF_variance_explained') if mesh.has_property('PRF_variance_explained') \
-        else mesh.prop('retinotopy_weight') if mesh.has_property('retinotopy_weight')           \
-        else None
+    weight = weight if weight is not None else empirical_retinotopy_data(mesh, 'weight')
     if weight is None:
         weight = 1
     if isinstance(weight, dict):
@@ -337,33 +348,62 @@ def retinotopy_anchors(mesh, mdl,
         weight = [weight for i in range(n)]
     if len(weight) != n:
         raise RuntimeError('Weight data has incorrect length!')
+    # Handle the select arg if necessary:
+    select = ['close', [20]] if select == 'close'   else \
+             ['close', [20]] if select == ['close'] else \
+             select
+    if select is None:
+        select = lambda a,b: b
+    elif isinstance(select, list) and len(select) == 2 and select[0] == 'close':
+        d = np.mean(mesh.edge_lengths)*select[1][0] if isinstance(select[1], list) else select[1]
+        select = lambda idx,ancs: [a for a in ancs if a[0] is not None if norm(X[idx] - a) < d]
     # let's go through and fix up the weights/polar angles/eccentricities into appropriate lists
     if weight_cutoff is None:
         idcs = [i
                 for i in range(n)
                 if (polar_angle[i] is not None and eccentricity[i] is not None 
                     and weight[i] is not None and weight[i] != 0)]
-        res = mdl.angle_to_cortex(polar_angle[idcs], eccentricity[idcs])
-        data = [[i, r] for (i,r) in zip(idcs, res)]
     else:
         idcs = [i
                 for i in range(n)
                 if (polar_angle[i] is not None and eccentricity[i] is not None 
                     and weight[i] is not None and weight[i] >= weight_cutoff)]
-        res = mdl.angle_to_cortex(polar_angle[idcs], eccentricity[idcs])
-        data = [[i, r] for (i,r) in zip(idcs, res)]
+    res = mdl.angle_to_cortex(polar_angle[idcs], eccentricity[idcs])
+    # Organize the data; trim out those not selected
+    data = [[[i for dummy in r], r]
+            for (i,r0) in zip(idcs, res)
+            if r0[0] is not None
+            for r in [select(i, r0)]
+            if len(r) > 0]
+    # Flatten out the data into arguments for Java
+    idcs = [i for d in data for i in d[0]]
+    ancs = np.asarray([pt for d in data for pt in d[1]]).T
+    # Get just the relevant weights and the scale
+    wgts = np.asarray(weight)[idcs] * (1 if scale is None else scale)
+    # Figure out the sigma parameter:
+    if sigma is None: sigs = None
+    elif isinstance(sigma, Number): sigs = sigma
+    elif hasattr(sigma, '__iter__') and len(sigma) == 3:
+        [minsig, mult, maxsig] = sigma
+        sigs = np.clip(
+            [mult*min([norm(a0 - a) for a in anchs if a is not a0]) if len(iii) > 1 else maxsig
+             for (iii,anchs) in data
+             for a0 in anchs],
+            minsig, maxsig)
+    else:
+        raise ValueError('sigma must be a number or a list of 3 numbers')
     # okay, we've partially parsed the data that was given; now we can construct the final list of
     # instructions:
-    return ['anchor', shape,
-            [d[0] for d in data for k in range(len(d[1]))],
-            np.asarray([pt for d in data for pt in d[1]]).T,
-            'scale', [d[2] for d in data for k in range(len(d[1]))]
-           ] + ([] if suffix is None else suffix)
+    return (['anchor', shape, idcs, ancs, 'scale', wgts]
+            + ([] if sigs is None else ['sigma', sigs])
+            + ([] if suffix is None else suffix))
     
 def register_retinotopy(hemi,
                         retinotopy_model=None, radius=pi/3.0,
-                        polar_angle=None, eccentricity=None, weight=None, weight_cutoff=None,
-                        sigma=0.5, edge_scale=1.0, angle_scale=1.0, functional_scale=1.0,
+                        polar_angle=None, eccentricity=None, weight=None, weight_cutoff=0.1,
+                        edge_scale=1.0, angle_scale=1.0, functional_scale=1.0,
+                        sigma=Ellipsis,
+                        select='close',
                         max_steps=2000, max_step_size=0.05,
                         registration_name='retinotopy'):
     '''
@@ -386,6 +426,7 @@ def register_retinotopy(hemi,
       * edge_scale, angle_scale, and functional_scale all specify the relative strengths of the
         various components of the potential field (functional_scale refers to the strength of the
         retinotopy model).
+      * select specifies the select option that should be passed to retinotopy_anchors.
       * max_steps (default 30,000) specifies the maximum number of registration steps to run.
       * max_step_size (default 0.05) specifies the maxmim distance a single vertex is allowed to
         move in a single step of the minimization.
@@ -393,6 +434,9 @@ def register_retinotopy(hemi,
         with the hemisphere's topology object.
       * radius (default: pi/3) specifies the radius, in radians, of the included portion of the map
         projection (projected about the occipital pole).
+      * sigma (default Ellipsis) specifies the sigma argument to be passed onto the 
+        retinotopy_anchors function (see help(retinotopy_anchors)); the default value, Ellipsis,
+        is interpreted as the default value of the retinotopy_anchors function's sigma option.
     '''
     # Step 1: figure out what properties we're using...
     (ang, ecc, wgt) = [
@@ -428,7 +472,9 @@ def register_retinotopy(hemi,
          ['perimeter', 'harmonic'],
          retinotopy_anchors(msym, retinotopy_model,
                             weight_cutoff=weight_cutoff,
-                            suffix=['sigma', sigma, 'scale', functional_scale])],
+                            scale=functional_scale,
+                            select=select,
+                            **({} if sigma is Ellipsis else {'sigma':sigma}))],
         max_steps=max_steps,
         max_step_size=max_step_size)
     # Step 5: prepare the original subject's map for being warped over to the registration

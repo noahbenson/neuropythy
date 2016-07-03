@@ -49,9 +49,9 @@ class RetinotopyModel:
 class SchiraModel(RetinotopyModel):
     '''
     The SchiraModel class is a class that inherits from RetinotopyModel and acts as a Python wrapper
-    around the Java nben.neuroscience.SchiraModel class; it handles conversion from visual field angle
-    to cortical surface coordinates and vice versa for the Banded Double-Sech model proposed in the
-    following paper:
+    around the Java nben.neuroscience.SchiraModel class; it handles conversion from visual field 
+    angle to cortical surface coordinates and vice versa for the Banded Double-Sech model proposed
+    in the following paper:
     Schira MM, Tyler CW, Spehar B, Breakspear M (2010) Modeling Magnification and Anisotropy in the
     Primate Foveal Confluence. PLOS Comput Biol 6(1):e1000651. doi:10.1371/journal.pcbi.1000651.
     '''
@@ -216,12 +216,14 @@ class RetinotopyMeshModel(RetinotopyModel):
              for (ang, ecc, area) in zip(*interp)])
 
     def angle_to_cortex(self, theta, rho):
-        'See RetinotopyModel.angle_to_cortex.'
+        'See help(neuropythy.registration.RetinotopyModel.angle_to_cortex).'
         if not hasattr(theta, '__iter__'):
             return self.angle_to_cortex([theta], [rho])[0]
         theta = np.asarray(theta)
         rho = np.asarray(rho)
-        zs = rho * np.exp(1j * (90 - theta)/180*math.pi)
+        zs = np.asarray(
+            rho * np.exp([np.complex(z) for z in 1j * ((90.0 - theta)/180.0*math.pi)]),
+            dtype=np.complex)
         coords = np.asarray([zs.real, zs.imag]).T
         # we step through each area in the forward model and return the appropriate values
         tx = self.transform

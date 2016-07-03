@@ -331,8 +331,7 @@ class Hemisphere:
             if prop is None:
                 self.remove_property(name)
             else:
-                Hemisphere._check_property(self, name, prop)
-                self.__dict__['properties'] = self.properties.using(**{name: prop})
+                self.properties = self.properties.using(**{name: prop})
 
     def has_property(self, name):
         '''hemi.has_property(name) yields True if the given hemisphere contains the property with
