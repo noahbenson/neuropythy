@@ -196,7 +196,8 @@ def mesh_register(mesh, field, max_steps=2000, max_step_size=0.05, max_pe_change
         minimizer.step(float(max_pe_change), int(max_steps), float(max_step_size))
     else:
         minimizer.nimbleStep(float(max_pe_change), int(max_steps), float(max_step_size), int(k))
-    return np.array(minimizer.getX())
+    result = minimizer.getX()
+    return np.asarray([[x for x in row] for row in result])
 
 __loaded_V123_models = {}
 def V123_model(name='standard'):
@@ -397,6 +398,43 @@ def retinotopy_anchors(mesh, mdl,
     return (['anchor', shape, idcs, ancs, 'scale', wgts]
             + ([] if sigs is None else ['sigma', sigs])
             + ([] if suffix is None else suffix))
+
+def register_retinotopy_prepare_hemisphere(hemi,
+                                           radius=pi/3.0,
+                                           polar_angle=None, eccentricity=None, weight=None,
+                                           weight_cutoff=0.1):
+    '''
+    register_retinotopy_prepare_hemisphere(hemi) yields an fsaverage_sym LH hemisphere that has
+    been prepared for retinotopic registration with the data on the given hemisphere, hemi. The
+    options radius, polar_angle, eccentricity, weight, and weight_cutoff are accepted, and are
+    documented in help(register_retinotopy).
+    '''
+    # Step 1: get our properties straight
+    (ang, ecc, wgt) = [
+        (hemi.prop(arg) if isinstance(arg, basestring) else
+         arg            if hasattr(arg, '__iter__')    else
+         None           if arg is not None             else
+         empirical_retinotopy_data(hemi, argstr))
+        for (arg, argstr) in [(polar_angle, 'polar_angle'),
+                              (eccentricity, 'eccentricity'),
+                              (weight, 'weight')]]
+    if ang is None: raise ValueError('polar angle data not found')
+    if ecc is None: raise ValueError('eccentricity data not found')
+    ## we also want to make sure weight is 0 where there are none values
+    wgt = np.asarray(
+        [(0 if w is None else w)*(0 if a is None else 1)*(0 if e is None else 1)
+         for (a,e,w) in zip(ang, ecc, [1 for e in ecc] if wgt is None else wgt)])
+    ang = np.asarray([0 if a is None else a for a in ang])
+    ecc = np.asarray([0 if e is None else e for e in ecc])
+    # Step 2: get the properties over to the fsaverage_sym hemisphere
+    lhemi = hemi if hemi.chirality == 'LH' else hemi.subject.RHX
+    sym = freesurfer_subject('fsaverage_sym').LH
+    sym.interpolate(lhemi, ang, apply='polar_angle')
+    sym.interpolate(lhemi, ecc, apply='eccentricity')
+    sym.interpolate(lhemi, wgt, apply='weight')
+    # Step 3: make the projection
+    msym = sym.projection(radius=radius)
+    return msym
     
 def register_retinotopy(hemi,
                         retinotopy_model=None, radius=pi/3.0,
@@ -438,32 +476,13 @@ def register_retinotopy(hemi,
         retinotopy_anchors function (see help(retinotopy_anchors)); the default value, Ellipsis,
         is interpreted as the default value of the retinotopy_anchors function's sigma option.
     '''
-    # Step 1: figure out what properties we're using...
-    (ang, ecc, wgt) = [
-        (hemi.prop(arg) if isinstance(arg, basestring) else
-         arg            if hasattr(arg, '__iter__')    else
-         None           if arg is not None             else
-         empirical_retinotopy_data(hemi, argstr))
-        for (arg, argstr) in [(polar_angle, 'polar_angle'),
-                              (eccentricity, 'eccentricity'),
-                              (weight, 'weight')]]
-    if ang is None: raise ValueError('polar angle data not found')
-    if ecc is None: raise ValueError('eccentricity data not found')
-    ## we also want to make sure weight is 0 where there are none values
-    wgt = np.asarray(
-        [(0 if w is None else w)*(0 if a is None else 1)*(0 if e is None else 1)
-         for (a,e,w) in zip(ang, ecc, [1 for e in ecc] if wgt is None else wgt)])
-    ang = np.asarray([0 if a is None else a for a in ang])
-    ecc = np.asarray([0 if e is None else e for e in ecc])
-    # Step 2: get the properties over to the fsaverage_sym hemisphere
-    lhemi = hemi if hemi.chirality == 'LH' else hemi.subject.RHX
-    sym = freesurfer_subject('fsaverage_sym').LH
-    sym.interpolate(lhemi, ang, apply='polar_angle')
-    sym.interpolate(lhemi, ecc, apply='eccentricity')
-    sym.interpolate(lhemi, wgt, apply='weight')
-    # Step 3: make the projection
-    msym = sym.projection(radius=radius)
-    # Step 4: run the mesh registration
+    # Step 1: prep the map for registrationfigure out what properties we're using...
+    msym = register_retinotopy_prepare_map(hemi,
+                                           radius=radius,
+                                           polar_angle=polar_angle, eccentricity=eccentricity,
+                                           weight=weight, weight_cutoff=weight_cutoff)
+    sym = msym.options['mesh']
+    # Step 2: run the mesh registration
     retinotopy_model = V123_model() if retinotopy_model is None else retinotopy_model
     r = mesh_register(
         msym,
@@ -471,13 +490,16 @@ def register_retinotopy(hemi,
          ['angle', 'infinite-well', 'scale', angle_scale],
          ['perimeter', 'harmonic'],
          retinotopy_anchors(msym, retinotopy_model,
+                            polar_angle='polar_angle',
+                            eccentricity='eccentricity',
+                            weight='weight',
                             weight_cutoff=weight_cutoff,
                             scale=functional_scale,
                             select=select,
                             **({} if sigma is Ellipsis else {'sigma':sigma}))],
         max_steps=max_steps,
         max_step_size=max_step_size)
-    # Step 5: prepare the original subject's map for being warped over to the registration
+    # Step 3: prepare the original subject's map for being warped over to the registration
     msub = lhemi.projection(mesh='fsaverage_sym', radius=radius)
     subvtcs = msub.vertex_labels
     msub.prop('polar_angle',  ang[subvtcs])
