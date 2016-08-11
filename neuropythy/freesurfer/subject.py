@@ -140,8 +140,15 @@ class Hemisphere:
     def _make_topology(self, sphere, fsave, fssym):
         if sphere is None:
             return None
-        names = [self.subject.id, 'fsaverage', 'fsaverage_sym'];
-        surfs = [sphere, fsave, fssym]
+        if self.subject.id == 'fsaverage_sym':
+            names = ['fsaverage_sym']
+            surfs = [sphere]
+        elif self.subject.id == 'fsaverage':
+            names = ['fsaverage']
+            surfs = [sphere]
+        else:
+            names = [self.subject.id, 'fsaverage', 'fsaverage_sym'];
+            surfs = [sphere, fsave, fssym]
         return Topology(
             sphere.faces, 
             {names[i]: surfs[i].coordinates.T for i in range(len(names)) if surfs[i] is not None})
@@ -241,10 +248,8 @@ class Hemisphere:
         'topology':             (('sphere_surface_data', 'fs_surface_data', 'sym_surface_data'),
                                  lambda hemi,sph,fs,sym: Topology(
                                      sph[1],
-                                     ({hemi.subject.id: sph[0], 'fsaverage': fs[0]}
-                                      if hemi.subject.id == 'fsaverage_sym' else
-                                      {hemi.subject.id: sph[0], 'fsaverage_sym': sym[0]}
-                                      if hemi.subject.id == 'fsaverage' else
+                                     ({hemi.subject.id: sph[0]} if hemi.subject.id == 'fsaverage_sym' else
+                                      {hemi.subject.id: sph[0]} if hemi.subject.id == 'fsaverage'     else
                                       {hemi.subject.id: sph[0], 'fsaverage': fs[0], 'fsaverage_sym': sym[0]})))}
 
     
