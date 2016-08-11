@@ -26,6 +26,13 @@ function die {
     exit 1
 }
 
+function xhem {
+    echo "Either the xhemi directory or the appropriate lh.fsaverage_sym.sphere.reg file is missing"
+    echo "for subject $1, hemisphere $2. Please run the following commands first:"
+    echo " surfreg --s \"$1\" --t fsaverage_sym --lh"
+    echo " surfreg --s \"$1\" --t fsaverage_sym --lh --xhemi"
+    exit 1
+}
 
 # Figure out where this script resides
 SOURCE="${BASH_SOURCE[0]}"
@@ -110,6 +117,25 @@ then SUFFIX=', method="nearest"'
 else SUFFIX=''
 fi
 
+# Make sure there is an xhemi directory...
+if [ "$FHEMI" = "RHX" ]
+then [ -d "$SUBJECTS_DIR/$FROMSUB/xhemi" ]                                         \
+         || [ -r "$SUBJECTS_DIR/$FROMSUB/xhemi/surf/lh.fsaverage_sym.sphere.reg" ] \
+         || xhem "$FROMSUB" "$FHEMI"
+fi
+if [ "$THEMI" = "RHX" ]
+then [ -d "$SUBJECTS_DIR/$TOSUB/xhemi" ]                                         \
+         || [ -r "$SUBJECTS_DIR/$TOSUB/xhemi/surf/lh.fsaverage_sym.sphere.reg" ] \
+         || xhem "$TOSUB" "$TOHEMI"
+fi
+# Make sure the registration to fsaverage_sym has been done...
+if [ "$FHEMI" = "LH" ] && [ "$TOSUB" = "fsaverage_sym" ]
+then [ -r "$SUBJECTS_DIR/$FROMSUB/surf/lh.fsaverage_sym.sphere.reg" ] || xhem "$FROMSUB" LH
+fi
+if [ "$THEMI" = "LH" ] && [ "$FROMSUB" = "fsaverage_sym" ]
+then [ -r "$SUBJECTS_DIR/$TOSUB/surf/lh.fsaverage_sym.sphere.reg" ] || xhem "$TOSUB" LH
+fi
+     
 # Execute the python code!
 /usr/bin/env python <<EOF
 import numpy as np
