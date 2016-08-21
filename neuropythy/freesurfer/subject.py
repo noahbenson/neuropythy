@@ -52,6 +52,7 @@ class PropertyBox(list):
         dat = f()
         self.__dict__['data'] = dat
 
+       
 class Hemisphere:
     '''FreeSurfer.Hemisphere encapsulates the data contained in a subject's freesurfer hemisphere.
     This includes the various surface data as well as certain volume data.'''
@@ -90,6 +91,7 @@ class Hemisphere:
     __settable_members = {
         'properties': lambda m,v: Hemisphere._check_properties(m,v),
         'options': lambda m,v: Hemisphere._check_options(m,v)}
+
     
     # This static variable and these functions explain the dependency hierarchy in cached data
     def __make_surface(self, coords, faces, name, reg=None):
@@ -137,7 +139,7 @@ class Hemisphere:
             data = mghload(path)
             # for now, no post-processing, just loading of the MGHImage
             return data
-    def _make_topology(self, sphere, fsave, fssym):
+    def _make_topology(self, faces, sphere, fsave, fssym):
         if sphere is None:
             return None
         if self.subject.id == 'fsaverage_sym':
@@ -149,9 +151,17 @@ class Hemisphere:
         else:
             names = [self.subject.id, 'fsaverage', 'fsaverage_sym'];
             surfs = [sphere, fsave, fssym]
-        return Topology(
-            sphere.faces, 
-            {names[i]: surfs[i].coordinates.T for i in range(len(names)) if surfs[i] is not None})
+        regs = {names[i]: surfs[i] for i in range(len(names)) if surfs[i] is not None}
+        # get the base path for the subject's surf directory and the prefix
+        base = os.path.join(self.subject.directory, 'surf')
+        prefix = self.chirality.lower() + '.'
+        # find possible additional matches
+        for fl in os.listdir(base):
+            if len(fl) > 14 and fl.startswith(prefix) and fl.endswith('.sphere.reg'):
+                data = self._load_surface_data_safe(fl[3:])
+                if data[0] is not None:
+                    regs[fl[3:-11]] = data[0]
+        return Topology(faces, regs)
     @staticmethod
     def calculate_edge_data(faces):
         limit = max(faces.flatten()) + 1
@@ -246,11 +256,11 @@ class Hemisphere:
         'chirality':            (('name',), 
                                  lambda hemi,name: 'LH' if name == 'LH' or name == 'RHX' else 'RH'),
         'topology':             (('sphere_surface_data', 'fs_surface_data', 'sym_surface_data'),
-                                 lambda hemi,sph,fs,sym: Topology(
-                                     sph[1],
-                                     ({hemi.subject.id: sph[0]} if hemi.subject.id == 'fsaverage_sym' else
-                                      {hemi.subject.id: sph[0]} if hemi.subject.id == 'fsaverage'     else
-                                      {hemi.subject.id: sph[0], 'fsaverage': fs[0], 'fsaverage_sym': sym[0]})))}
+                                 lambda hemi,sph,fs,sym: hemi._make_topology(
+                                     sph[1], sph[0],
+                                     fs  if fs  is None else fs[0],
+                                     sym if sym is None else sym[0]))}
+
 
     
     # This function will clear the lazily-evaluated members when a given value is changed
@@ -378,6 +388,35 @@ class Hemisphere:
         else:
             self.add_property(name, arg)
 
+    def address(self, coords, registration=None, nearest=True):
+        '''
+        hemi.address(coords) yields the address dictionary of the given coords to their closest
+        points in the 3D sphere registration of the given hemi. The optional argument registration
+        may be specified to indicate that a different registration should be used; the default
+        (None) indicates that the subject's native registration should be used. The optional
+        argument nearest (default True) may also be set to False to indicate that the nearest point
+        in the mesh should not be looked up
+        '''
+        coords = np.asarray(coords)
+        if len(coords.shape) == 1:
+            if coords.shape[0] == 0: return []
+            else: return self.address([coords], registration=registration)[:,0]
+        transposed = True if coords.shape[0] != 3 else False
+        coords = coords.T if transposed else coords
+        reg = self.topology.registrations[self.subject.id if registration is None else registration]
+        if nearest: coords = reg.nearest(coords)
+        return reg.address(coords)
+
+    def unaddress(self, addrs, registration=None):
+        '''
+        hemi.unaddress(addrs) yields the coordinates of the given address dictionary addrs, looked
+        up in the native registration of the given hemisphere hemi. The optional argument
+        registration can be provided to indicate that a registration other than the subject's native
+        registration should be used; the default (None) uses the native.
+        '''
+        reg = self.topology.registrations[self.subject.id if registration is None else registration]
+        return reg.unaddress(addrs).T
+            
     def interpolate(self, from_hemi, property_name, 
                     apply=True, method='automatic', mask=None, null=None, n_jobs=1):
         '''
@@ -567,9 +606,10 @@ class Hemisphere:
         X = np.asarray(X)
         X = X if X.shape[0] < 4 else X.T
         r = params['sphere_radius']
-        X = math.pi * X / r
-        return np.asarray([np.cos(X[0]) * r, 
-                           np.sin(X[0]) * r,
+        X = math.pi / r * X
+        cos1 = np.cos(X[1])
+        return np.asarray([cos1 * np.cos(X[0]) * r, 
+                           cos1 * np.sin(X[0]) * r,
                            np.sin(X[1]) * r])
     @staticmethod
     def _mercator_projection(X, params):
@@ -677,12 +717,14 @@ class Hemisphere:
         IR = geo.alignment_matrix_3D([1.0, 0.0, 0.0], params['center'])
         fwdprojfn = Hemisphere.__projection_methods[params['method']]
         invprojfn = Hemisphere.__projection_methods_inverse[params['method']]
-        fwdfn = lambda X,p: fwdprojfn(np.dot(FR, X), p)
-        invfn = lambda X,p: np.dot(IR, invprojfn(X, p))
+        local_tmp = []
+        fwdfn = lambda X: fwdprojfn(np.dot(FR, X), local_tmp)
+        invfn = lambda X: np.dot(IR, invprojfn(X, local_tmp))
         params['forward_function'] = fwdfn
         params['inverse_function'] = invfn
         params = make_dict(params)
-        submesh.coordinates = fwdfn(submesh.coordinates, params)
+        local_tmp = params
+        submesh.coordinates = fwdfn(submesh.coordinates)
         submesh.options = submesh.options.using(projection_parameters=params)
         for p in self.property_names:
             try:
@@ -1018,9 +1060,12 @@ def cortex_to_ribbon_map_lines(sub, hemi=None):
     max_idx = [max(i) for i in idcs]
     vtx_voxels = [((i,j,k), (id, olap))
                   for (id, (xs, xe)) in enumerate(zip(whiteX.T, pialX.T))
-                  for i in range(int(math.floor(min(xs[0], xe[0]))), int(math.ceil(max(xs[0], xe[0]))))
-                  for j in range(int(math.floor(min(xs[1], xe[1]))), int(math.ceil(max(xs[1], xe[1]))))
-                  for k in range(int(math.floor(min(xs[2], xe[2]))), int(math.ceil(max(xs[2], xe[2]))))
+                  for i in range(int(math.floor(min(xs[0], xe[0]))),
+                                 int(math.ceil(max(xs[0], xe[0]))))
+                  for j in range(int(math.floor(min(xs[1], xe[1]))),
+                                 int(math.ceil(max(xs[1], xe[1]))))
+                  for k in range(int(math.floor(min(xs[2], xe[2]))),
+                                 int(math.ceil(max(xs[2], xe[2]))))
                   for olap in [_line_voxel_overlap((i,j,k), xs, xe)]
                   if olap > 0]
     

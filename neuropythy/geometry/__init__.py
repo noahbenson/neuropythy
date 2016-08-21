@@ -16,6 +16,9 @@ from .util import (
     alignment_matrix_2D,
     line_intersection_2D,
     triangle_area,
+    cartesian_to_barycentric_2D,
+    cartesian_to_barycentric_3D,
+    barycentric_to_cartesian,
     triangle_address,
     triangle_unaddress)
 from .mesh import Mesh

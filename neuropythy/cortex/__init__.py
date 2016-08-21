@@ -628,10 +628,10 @@ class CorticalMesh(Immutable):
         projection_params = self.option('projection_parameters')
         if projection_params is None:
             raise ValueError('the given mesh was not created by projection from another mesh')
-        if 'inverse_function' not in projection_params:
-            raise ValueError('the projection method used has not defined inverse')
+        if 'forward_function' not in projection_params:
+            raise ValueError('the projection method used has not defined projection function')
         ffn = projection_params['forward_function']
-        return ffn(X, projection_params)
+        return ffn(X)
     def unproject(self, X):
         '''mesh.unproject(X) yields a 3D coordinate matrix Xu with the same number of points as the
            2D coordinate matrix X such that the points have been projected back from the 2D map to
@@ -644,7 +644,7 @@ class CorticalMesh(Immutable):
         if 'inverse_function' not in projection_params:
             raise ValueError('the projection method used has not defined inverse')
         ifn = projection_params['inverse_function']
-        return ifn(X, projection_params)
+        return ifn(X)
 
     def unaddress(self, data):
         '''mesh.unaddress(addr) yields a coordinate matrix of points on the given mesh that are
@@ -652,8 +652,8 @@ class CorticalMesh(Immutable):
            a mesh.address(points) method call; the two meshes must be topologically equivalent
            or an error may be raised. The resulting matrix will always be sized 2 or 3 by n unless
            the address is of a single point, in which case that point is returned.'''
-        # addresses are dictionaries that contain three fields: 'face_id', 'angle_fraction', and 
-        # 'distance_fraction'; these may be numbers or equally sized lists
+        # addresses are dictionaries that contain two fields: 'face_id' and 'coordinates'
+        # these may be numbers or a list and a matrix whose second dimension is the same lenght
         if self.coordinates.shape[0] == 2:
             # In this case, we unaddress on the sphere, then reproject...
             smesh = self.meta('source_mesh')
@@ -661,23 +661,20 @@ class CorticalMesh(Immutable):
             return self.reproject(smesh.unaddress(data))
         if not isinstance(data, dict):
             raise ValueError('address data must be a dictionary')
-        if 'face_id' not in data: raise ValueError('address must contain face_id')
-        if 'angle_fraction' not in data: raise ValueError('address must contain angle_fraction')
-        if 'distance_fraction' not in data:
-            raise ValueError('address must contain distance_fraction')
+        if 'face_id' not in data: raise ValueError('address must contain face_id key')
+        if 'coordinates' not in data: raise ValueError('address must contain coordinates key')
         face_id = data['face_id']
-        angle_fraction = data['angle_fraction']
-        distance_fraction = data['distance_fraction']
-        if all(hasattr(x, '__iter__') for x in (face_id, angle_fraction, distance_fraction)):
-            if len(face_id) != len(angle_fraction) or len(face_id) != len(distance_fraction):
-                raise ValueError('invalid address specification (unmatched lengths)')
-            return np.asarray(
-                [geo.unaddress_triangle(self.face_coordinates[:,:,fid], [t, r])
-                 for (fid,t,r) in zip(face_id, angle_fraction, distance_fraction)]
-                ).T
+        coordinates = np.asarray(data['coordinates'])
+        if hasattr(face_id, '__iter__'):
+            if len(coordinates.shape) != 2:
+                raise ValueError('if face_id is a list, then coordinates must be a matrix')
+            if coordinates.shape[1] != len(face_id):
+                coordinates = coordinates.T
+            tx = np.asarray(self.coordinates[:, f] for f in self.faces[face_id])
+            return geo.barycentric_to_cartesian(tx, coordinates)
         else:
-            return geo.triangle_unaddress(self.face_coordinates[:, :, face_id],
-                                          [angle_fraction, distance_fraction])
+            return geo.barycentric_to_cartesian(self.face_coordinates[:, :, face_id],
+                                                coordinates)
     def address(self, data):
         '''
         mesh.address(X) yields a dictionary containing the address or addresses of the point or

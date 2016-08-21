@@ -4,14 +4,16 @@
 # By Noah C. Benson
 
 import numpy as np
-import numpy.linalg
 import scipy as sp
 import scipy.spatial as space
 import os, math
 from pysistence import make_dict
+from numpy.linalg import norm
 
 from neuropythy.immutable import Immutable
-from .util import (triangle_area, triangle_address, alignment_matrix_3D)
+from .util import (triangle_area, triangle_address, alignment_matrix_3D,
+                   cartesian_to_barycentric_3D, cartesian_to_barycentric_2D,
+                   barycentric_to_cartesian)
 
 class Mesh(Immutable):
     '''
@@ -88,6 +90,59 @@ class Mesh(Immutable):
         '''
         (d,near) = self.vertex_hash.query(pt, k=1)
         return near
+
+    def point_in_plane(self, tri_no, pt):
+        '''
+        r.point_in_plane(id, pt) yields the distance from the plane of the id'th triangle in the
+        registration r to the given pt and the point in that plane as a tuple (d, x).
+        '''
+        tx = self.coordinates[self.triangles[tri_no]]
+        n = np.cross(tx[1] - tx[0], tx[2] - tx[0])
+        n /= norm(n)
+        d = np.dot(n, pt - tx[0])
+        return (abs(d), pt - n*d)
+    
+    def nearest_data(self, pt, k=2, n_jobs=1):
+        '''
+        mesh.nearest_data(pt) yields a tuple (k, d, x) of the matrix x containing the point(s)
+        nearest the given point(s) pt that is/are in the mesh; a vector d if the distances between
+        the point(s) pt and x; and k, the face index/indices of the triangles containing the 
+        point(s) in x.
+        Note that this function and those of this class are made for spherical meshes and are not
+        intended to work with other kinds of complex topologies; though they should work 
+        heuristically.
+        '''
+        pt = np.asarray(pt)
+        if len(pt.shape) == 1:
+            r = self.nearest_data([pt], k=k, n_jobs=n_jobs)[0];
+            return (r[0][0], r[1][0], r[2][0])
+        pt = pt if pt.shape[1] == 3 else pt.T
+        (d, near) = self.triangle_hash.query(pt, k=k)
+        ids = [tri_no if tri_no is not None else \
+               self._find_triangle_search(x, k=(2*k), searched=set(near_i))
+               for (x, near_i) in zip(pt, near)
+               for tri_no in [next((k for k in near_i if self._point_in_triangle(k, x)), None)]]
+        pips = [self.point_in_plane(i, p) if i is not None else (0, None)
+                for (i,p) in zip(ids, pt)]
+        return (np.asarray(ids),
+                np.asarray([d[0] for d in pips]),
+                np.asarray([d[1] for d in pips]))
+
+    def nearest(self, pt, k=2, n_jobs=1):
+        '''
+        mesh.nearest(pt) yields the point in the given mesh nearest the given array of points pts.
+        '''
+        dat = self.nearest_data(pt)
+        return dat[2]
+
+    def distance(self, pt, k=2, n_jobs=1):
+        '''
+        mesh.distance(pt) yields the distance to the nearest point in the given mesh from the points
+        in the given matrix pt.
+        '''
+        dat = self.nearest_data(pt)
+        return dat[1]
+
     def container(self, pt, k=2, n_jobs=1):
         '''
         mesh.container(pt) yields the id number of the nearest triangle in the given
@@ -200,7 +255,6 @@ class Mesh(Immutable):
             return None
         else:
             return np.dot([a_area, b_area, c_area], data[tri_vertices]) / tot
-        
 
     def address(self, data):
         '''
@@ -214,13 +268,32 @@ class Mesh(Immutable):
         data = np.asarray(data)
         if len(data.shape) == 1:
             face_id = self.container(data)
-            (t, r) = triangle_address(self.coordinates[self.triangles[face_id]],
-                                      data)
+            tx = self.coordinates[self.triangles[face_id]]
         else:
             data = data if data.shape[1] == 3 else data.T
             face_id = self.container(data)
-            (t, r) = np.asarray([triangle_address(self.coordinates[tri], x)
-                                 for (tri,x) in zip(self.triangles[face_id], data)]).T
-        # And return the dictionary
-        return {'face_id': face_id, 'angle_fraction': t, 'distance_fraction': r}
+            faces = self.triangles[face_id].T
+            tx = np.transpose(np.asarray([self.coordinates[f] for f in faces]), (0,2,1))
+        bc = cartesian_to_barycentric_3D(tx, data) if self.coordinates.shape[1] == 3 else \
+             cartesian_to_barycentric_2D(tx, data)
+        return {'face_id': face_id, 'coordinates': bc}
+
+    def unaddress(self, data):
+        '''
+        mesh.unaddress(A) yields a coordinate matrix that is the result of unaddressing the given
+        address dictionary A in the given mesh. See also mesh.address.
+        '''
+        if not isinstance(data, dict):
+            raise ValueError('address data must be a dictionary')
+        if 'face_id' not in data: raise ValueError('address must contain face_id')
+        if 'coordinates' not in data: raise ValueError('address must contain coordinates')
+        face_id = data['face_id']
+        coords = data['coordinates']
+        if all(hasattr(x, '__iter__') for x in (face_id, coords)):
+            faces = self.triangles[face_id].T
+            tx = np.transpose(np.asarray([self.coordinates[f] for f in faces]), (0,2,1))
+        else:
+            tx = np.asarray(self.coordinates[self.triangles[face_id]])
+        return barycentric_to_cartesian(tx, coords)
+
 

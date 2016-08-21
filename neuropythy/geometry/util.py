@@ -124,6 +124,121 @@ def triangle_area(a,b,c):
         mtx = alignment_matrix_3D(np.cross(np.asarray(b) - a, np.asarray(c) - a), [0,0,1])[0:1]
         return triangle_area(np.dot(mtx, a), np.dot(mtx, b), np.dot(mtx, c))
 
+def cartesian_to_barycentric_3D(tri, xy):
+    '''
+    cartesian_to_barycentric_3D(tri,xy) is identical to cartesian_to_barycentric_2D(tri,xy) except
+    it works on 3D data. Note that if tri is a 3 x 3 x n, a 3 x n x 3 or an n x 3 x 3 matrix, the
+    first dimension must always be the triangle vertices and the second 3-sized dimension must be
+    the (x,y,z) coordinates.
+    '''
+    xy = np.asarray(xy)
+    tri = np.asarray(tri)
+    if len(xy.shape) == 1:
+        return cartesian_to_barycentric_2D(np.transpose(np.asarray([tri]), (1,2,0)),
+                                           np.asarray([xy]).T)[:,0]
+    xy = xy if xy.shape[0] == 3 else xy.T
+    if tri.shape[0] == 3:
+        tri = tri if tri.shape[1] == 3 else np.transpose(tri, (0,2,1))
+    elif tri.shape[1] == 3:
+        tri = tri.T if tri.shape[0] == 3 else np.transpose(tri, (1,2,0))
+    elif tri.shape[2] == 3:
+        tri = np.transpose(tri, (2,1,0) if tri.shape[1] == 3 else (2,0,1))
+    if tri.shape[0] != 3 or tri.shape[1] != 3:
+        raise ValueError('Triangle array did not have dimensions of sizes 3 and 3')
+    if xy.shape[0] != 3:
+        raise ValueError('coordinate matrix did not have a dimension of size 3')
+    if tri.shape[2] != xy.shape[1]:
+        raise ValueError('number of triangles and coordinates must match')
+    v0 = tri[1] - tri[0]
+    v1 = tri[2] - tri[0]
+    v2 = xy - tri[0]
+    d00 = np.sum(v0 * v0, axis=0)
+    d01 = np.sum(v0 * v1, axis=0)
+    d11 = np.sum(v1 * v1, axis=0)
+    d20 = np.sum(v2 * v0, axis=0)
+    d21 = np.sum(v2 * v1, axis=0)
+    den = d00*d11 - d01*d01
+    zero = np.isclose(den, 0)
+    unit = 1 - zero
+    den += zero
+    return np.asarray(
+        (unit * (d11 * d20 - d01 * d21) / den,
+         unit * (d00 * d21 - d01 * d20) / den))
+    
+def cartesian_to_barycentric_2D(tri, xy):
+    '''
+    cartesian_to_barycentric_2D(tri, xy) yields a (2 x n) barycentric coordinate matrix 
+    (or just a tuple if xy is a single (x, y) coordinate) of the first two barycentric coordinates
+    for the triangle coordinate array tri. The array tri should be 3 (vertices) x 2 (coordinates) x
+    n (triangles) unless xy is a tuple, in which case it should be a (3 x 2) matrix.
+    '''
+    xy = np.asarray(xy)
+    tri = np.asarray(tri)
+    if len(xy.shape) == 1:
+        return cartesian_to_barycentric_2D(np.transpose(np.asarray([tri]), (1,2,0)),
+                                           np.asarray([xy]).T)[:,0]
+    xy = xy if xy.shape[0] == 2 else xy.T
+    if tri.shape[0] == 3:
+        tri = tri if tri.shape[1] == 2 else np.transpose(tri, (0,2,1))
+    elif tri.shape[1] == 3:
+        tri = tri.T if tri.shape[0] == 2 else np.transpose(tri, (1,2,0))
+    elif tri.shape[2] == 3:
+        tri = np.transpose(tri, (2,1,0) if tri.shape[1] == 2 else (2,0,1))
+    if tri.shape[0] != 3 or tri.shape[1] != 2:
+        raise ValueError('Triangle array did not have dimensions of sizes 3 and 2')
+    if xy.shape[0] != 2:
+        raise ValueError('coordinate matrix did not have a dimension of size 2')
+    if tri.shape[2] != xy.shape[1]:
+        raise ValueError('number of triangles and coordinates must match')
+    # Okay, everything's the right shape...
+    (x,y) = xy
+    ((x1,y1), (x2,y2), (x3,y3)) = tri
+    x_x3  = x  - x3
+    x1_x3 = x1 - x3
+    x3_x2 = x3 - x2
+    y_y3  = y  - y3
+    y1_y3 = y1 - y3
+    y2_y3 = y2 - y3
+    num1 = (y2_y3*x_x3  + x3_x2*y_y3)
+    num2 = (-y1_y3*x_x3 + x1_x3*y_y3)
+    den  = (y2_y3*x1_x3 + x3_x2*y1_y3)
+    zero = np.isclose(den, 0)
+    den += zero
+    unit = 1 - zero
+    l1 = unit * num1 / den
+    l2 = unit * num2 / den
+    return np.asarray((l1, l2))
+
+def barycentric_to_cartesian(tri, bc):
+    '''
+    barycentric_to_cartesian(tri, bc) yields the d x n coordinate matrix of the given barycentric
+    coordinate matrix (also d x n) bc interpolated in the n triangles given in the array tri. See
+    also cartesian_to_barycentric. If tri and bc represent one triangle and coordinate, then just
+    the coordinate and not a matrix is returned. The value d, dimensions, must be 2 or 3.
+    '''
+    bc = np.asarray(bc)
+    tri = np.asarray(tri)
+    if len(bc.shape) == 1:
+        return barycentric_to_cartesian(np.transpose(np.asarray([tri]), (1,2,0)),
+                                        np.asarray([bc]).T)[:,0]
+    bc = bc if bc.shape[0] == 2 else bc.T
+    if tri.shape[0] == 3:
+        tri = tri if (tri.shape[1] == 2 or tri.shape[1] == 3) else np.transpose(tri, (0,2,1))
+    elif tri.shape[1] == 3:
+        tri = tri.T if tri.shape[0] == 2 else np.transpose(tri, (1,2,0))
+    elif tri.shape[2] == 3:
+        tri = np.transpose(tri, (2,0,1) if tri.shape[0] == 2 else (2,1,0))
+    if tri.shape[0] != 3 or (tri.shape[1] != 2 and tri.shape[1] != 3):
+        raise ValueError('Triangle array did not have dimensions of sizes 3 and (2 or 3)')
+    if bc.shape[0] != 2:
+        raise ValueError('barycentric matrix did not have a dimension of size 2')
+    if tri.shape[2] != bc.shape[1]:
+        raise ValueError('number of triangles and coordinates must match')
+    (l1,l2) = bc
+    (p1, p2, p3) = tri
+    l3 = (1 - l1 - l2)
+    return np.asarray([x1*l1 + x2*l2 + x3*l3 for (x1,x2,x3) in zip(p1, p2, p3)])
+    
 def triangle_address(fx, pt):
     '''
     triangle_address(FX, P) yields an address coordinate (t,r) for the point P in the triangle
