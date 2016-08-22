@@ -539,7 +539,7 @@ def register_retinotopy_initialize(hemi, model,
         d['registered_mesh'] = useHemi.registration_mesh(d['registration'])
         d['prediction'] = make_dict({p: v for (p,v) in zip(
                                             ['polar_angle', 'eccentricity', 'visual_area'],
-                                            model.cortex_to_angle(d['registration_mesh']))})
+                                            model.cortex_to_angle(d['registered_mesh']))})
         return make_dict(d)
     data['postprocess_function'] = __postproc_fn
     return data
@@ -654,14 +654,63 @@ def register_retinotopy_command(args):
         vertical meridian represented as 90 degrees or pi/4 instead of the convention in which the
         opper vertical meridian represented as 0 and the right horizontal meridian represented as 90
         degrees or pi/4 radians.
-      * --edge-strength=|-e<weight>
-        --angle-strength=|-a<weight>
-        --functional-strength=|-f<weight>
-        
-     
+      * --edge-strength=|-E<weight>
+        --angle-strength=|-A<weight>
+        --functional-strength=|-F<weight>
+        Each of these specifies the strength of the appropriate potential-field component. By
+        default, these are each 1. Note that each field is already normalized by the number of 
+        components over which it operates; e.g., the edge strength is normalized by the number of
+        edges in the mesh.
+      * --max-steps=|-s<steps>
+        This option specifies the maximum number of steps to run the registration; by default this
+        is 2000.
+      * --max-step-size=|-S<value>
+        This specifies the max step-size for any single vertex; by default this is 0.05.
+      * --prior=|-p<name>
+        This specifies the name of the prior registration to use in the fsaverage_sym subject; by
+        default this is retinotopy. The prior may be omitted if the value "-" or "none" is given.
     '''
     #TODO
-    pass
+    opts = dict(
+        eccen_file=None,
+        angle_file=None,
+        weight_file=None,
+        weight_cutoff='0.2',
+        angle_radians=False,
+        eccen_radians=False,
+        angle_math=False,
+        edge_strength='1',
+        angle_strength='1',
+        func_strength='1',
+        max_steps='2000',
+        prior='retinotopy')
+    cflags = {'r': 'angle_radians', 'R': 'eccen_radians', 'm': 'angle_math'}
+    wflags = {'angle-radians': 'angle_radians',
+              'eccen-radians': 'eccen_radians',
+              'mathematical': 'angle_math'}
+    cargs = {'e': 'eccen_file',
+             'a': 'angle_file',
+             'w': 'weight_file',
+             'c': 'weight_cutoff',
+             'E': 'edge_strength',
+             'A': 'angle_strength',
+             'F': 'func_strength',
+             's': 'max_steps',
+             'S': 'max_step_size',
+             'p': 'prior'}
+    wargs = {'eccen': 'eccen_file',
+             'angle': 'angle_file',
+             'weight': 'weight_file',
+             'cutoff': 'weight_cutoff',
+             'edge-strength': 'edge_strength',
+             'angle-strength': 'angle_strength',
+             'functional-strength': 'func_strength',
+             'max-steps': 'max_steps',
+             'max-steo-size': 'max_step_size',
+             'prior': 'prior'}
+    
+             
+              
 
 # The topology and registration stuff is below:
 class JavaTopology:

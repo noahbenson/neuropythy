@@ -312,9 +312,9 @@ class RegisteredRetinotopyModel(RetinotopyModel):
                     return self.model.cortex_to_angle(X[0], X[1])
                 else:
                     m = self.projection_data['forward_function'](args[0])
-                    res = np.zeros((args[0].vertex_count, 3))
-                    res[:, m.vertex_labels] = self.model.cortex_to_angle(m.coordinates)
-                    return res                    
+                    res = np.zeros((3, args[0].coordinates.shape[1]))
+                    res[:, m.vertex_labels] = np.asarray(self.cortex_to_angle(m.coordinates)).T
+                    return res
             elif isinstance(args[0], nfs.Hemisphere):
                 regname = self.projection_data['registration']
                 if regname is None or regname == 'native':
@@ -324,7 +324,7 @@ class RegisteredRetinotopyModel(RetinotopyModel):
                 else:
                     return self.cortex_to_angle(args[0].registration_mesh(regname))
             else:
-                X = np.asarray(args)
+                X = np.asarray(args[0])
                 if len(X.shape) != 2:
                     raise ValueError('given coordinate matrix must be rectangular')
                 X = X if X.shape[0] == 2 or X.shape[0] == 3 else X.T
