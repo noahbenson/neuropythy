@@ -249,7 +249,7 @@ def retinotopy_anchors(mesh, mdl,
                        weight=None, weight_cutoff=0.2,
                        scale=1,
                        shape='Gaussian', suffix=None,
-                       sigma=[0.05, 0.3, 2.0],
+                       sigma=[0.05, 1.0, 2.0],
                        select='close'):
     '''
     retinotopy_anchors(mesh, model) is intended for use with the mesh_register function and the
@@ -289,7 +289,7 @@ def retinotopy_anchors(mesh, mdl,
         vertex given an anchor; the arguments are the vertex label and the matrix of anchors. The
         function should return a list of anchors to use for the label (None is equivalent to
         lambda id,anc: anc).
-      * sigma (default [0.05, 0.3, 2.0]) specifies how the sigma parameter should be handled; if
+      * sigma (default [0.05, 1.0, 2.0]) specifies how the sigma parameter should be handled; if
         None, then no sigma value is specified; if a single number, then all sigma values are
         assigned that value; if a list of three numbers, then the first is the minimum sigma value,
         the second is the fraction of the minimum distance between paired anchor points, and the 
@@ -536,10 +536,18 @@ def register_retinotopy_initialize(hemi, model,
         # Now, if need be, unresample the points:
         d['registration'] = d['unresample_function'](final_reg)
         # now convert the sub points into retinotopy points
-        d['registered_mesh'] = useHemi.registration_mesh(d['registration'])
-        d['prediction'] = make_dict({p: v for (p,v) in zip(
-                                            ['polar_angle', 'eccentricity', 'visual_area'],
-                                            model.cortex_to_angle(d['registered_mesh']))})
+        rmesh = useHemi.registration_mesh(d['registration'])
+        pred = np.asarray(
+            [(p,e,l) if round(l) > 0 and round(l) < 4 and e <= 85 else (0.0, 0.0, 0)
+             for (p,e,l) in zip(*model.cortex_to_angle(d['registered_mesh']))]).T
+        pred = (np.asarray(p[0], dtype=np.float32),
+                np.asarray(p[1], dtype=np.float32),
+                np.asarray(p[2], dtype=np.int32))
+        for i in (0,1,2): pred[i].flags.writeable = False
+        pred = make_dict({p:v for (p,v) in zip(pred, prop_names)})
+        d['prediction'] = pred
+        rmesh.prop(pred)
+        d['registration_mesh'] = rmesh
         return make_dict(d)
     data['postprocess_function'] = __postproc_fn
     return data
@@ -620,7 +628,7 @@ def register_retinotopy(hemi,
     # Step 3: run the post-processing function
     postproc = data['postprocess_function']
     ppr = postproc(r)
-    return ppr if return_meta_data else ppr['registration']
+    return ppr if return_meta_data else ppr['registered_mesh']
 
 def register_retinotopy_command(args):
     '''
@@ -708,7 +716,7 @@ def register_retinotopy_command(args):
              'max-steps': 'max_steps',
              'max-steo-size': 'max_step_size',
              'prior': 'prior'}
-    
+    return None
              
               
 
