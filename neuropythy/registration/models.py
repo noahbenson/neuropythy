@@ -11,10 +11,12 @@ import os
 import math
 from   pysistence           import make_dict
 
-import neuropythy.geometry  as     geo
-from   neuropythy.immutable import Immutable
-from   neuropythy.java      import (java_link, serialize_numpy,
-                                    to_java_doubles, to_java_ints, to_java_array)
+import neuropythy.geometry   as     geo
+import neuropythy.freesurfer as     nfs
+import neuropythy.cortex     as     ncx
+from   neuropythy.immutable  import Immutable
+from   neuropythy.java       import (java_link, serialize_numpy,
+                                     to_java_doubles, to_java_ints, to_java_array)
 
 class RetinotopyModel:
     '''
@@ -250,4 +252,108 @@ class RetinotopyMeshModel(RetinotopyModel):
         return res
 
              
+class RegisteredRetinotopyModel(RetinotopyModel):
+    '''
+    RegisteredRetinotopyModel is a class that represents a retinotopic map or set of retinotopic
+    maps on the flattened 2D cortex OR on the 3D cortical surface, via a registration and set of
+    map projection parameters.
+    RegisteredRetinotopyModel(model, projection_params) yields a retinotopy
+    mesh model object in which the given RetinotopyModel object model describes the 2D 
+    retinotopy that is predicted for the vertices that result from a map projection, defined using
+    the given projection_params dictionary, of the given registration. In other words, the resulting
+    RegisteredRetinotopyModel will, when given a hemisphere object to which to apply the model,
+    will look up the appropriate registration (by the name registration_name) make a map projection
+    of using the given projection_params dictionary, and apply the model to the resulting
+    coordinates.
+    '''
+
+    def __init__(self, model, **projection_params):
+        '''
+        RegisteredRetinotopyModel(model, <projection parameters...>) yields a
+        retinotopy mesh model object in which the given RetinotopyModel object model describes
+        the 2D retinotopy that is predicted for the vertices that result from a map projection,
+        defined using the given projection_params dictionary, of the given registration. In other
+        words, the resulting RegisteredRetinotopyModel will, when given a hemisphere object to
+        which to apply the model, will look up the appropriate registration (by the name
+        registration_name) make a map projection of using the given projection_params dictionary,
+        and apply the model to the resulting coordinates.
+        See also neuropythy.freesurfer's Hemisphere.projection_data method for details on the
+        projection parameters;
+        '''
+        self.model = model
+        if 'registration' not in projection_params:
+            projection_params['registration'] = 'fsaverage_sym'
+        if 'chirality' in projection_params:
+            chirality = projection_params['chirality']
+        elif 'hemi' in projection_params:
+            chirality = projection_params['hemi']
+        elif 'hemisphere' in projection_params:
+            chirality = projection_params['hemisphere']
+        else:
+            chirality = None
+        if chirality is None:
+            self.projection_data = nfs.Hemisphere._make_projection(**projection_params)
+        else:
+            sub = nfs.freesurfer_subject(projection_params['registration'])
+            hemi = sub.LH if chirality.upper() == 'LH' else sub.RH
+            self.projection_data = hemi.projection_data(**projection_params)
         
+    def cortex_to_angle(self, *args):
+        '''
+        The cortex_to_angle method of the RegisteredRetinotopyModel class is identical to that
+        of the RetinotopyModel class, but the method may be given a map, mesh, or hemisphere, in
+        which case the result is applied to the coordinates after the appropriate transformation (if
+        any) is first applied.
+        '''
+        if len(args) == 1:
+            if isinstance(args[0], ncx.CorticalMesh):
+                if args[0].coordinates.shape[0] == 2:
+                    X = args[0].coordinates
+                    return self.model.cortex_to_angle(X[0], X[1])
+                else:
+                    m = self.projection_data['forward_function'](args[0])
+                    res = np.zeros((args[0].vertex_count, 3))
+                    res[:, m.vertex_labels] = self.model.cortex_to_angle(m.coordinates)
+                    return res                    
+            elif isinstance(args[0], nfs.Hemisphere):
+                regname = self.projection_data['registration']
+                if regname is None or regname == 'native':
+                    regname = args[0].subject.id
+                if regname not in args[0].topology.registrations:
+                    raise ValueError('given hemisphere is not registered to ' + regname)
+                else:
+                    return self.cortex_to_angle(args[0].registration_mesh(regname))
+            else:
+                X = np.asarray(args)
+                if len(X.shape) != 2:
+                    raise ValueError('given coordinate matrix must be rectangular')
+                X = X if X.shape[0] == 2 or X.shape[0] == 3 else X.T
+                if X.shape[0] == 2:
+                    return self.model.cortex_to_angle(X[0], X[1])
+                elif X.shape[0] == 3:
+                    Xp = self.projection_data['forward_function'](X)
+                    return self.model.cortex_to_angle(Xp[0], Xp[1])
+                else:
+                    raise ValueError('coordinate matrix must be 2 or 3 dimensional')
+        else:
+            return self.model.cortex_to_angle(**args)
+                    
+    def angle_to_cortex(self, *args):
+        '''
+        The angle_to_cortex method of the RegisteredRetinotopyModel class is identical to that
+        of the RetinotopyModel class, but the method may be given a map, mesh, or hemisphere, in
+        which case the result is applied to the 'polar_angle' and 'eccentricity' properties.
+        '''
+        if len(args) == 1:
+            if isinstance(args[0], CorticalMesh) or isinstance(args[0], nfs.Hemisphere):
+                ang = ncx.retinotopy_data(args[0])
+                ecc = ncx.retinotopy_data(args[0])
+                return self.model.angle_to_cortex(ang, ecc)
+            else:
+                tr = np.asarray(args)
+                if tr.shape[1] == 2: tr = tr.T
+                elif tr.shape[0] != 2: raise ValueError('cannot interpret argument')
+                return self.model.angle_to_cortex(tr[0], tr[1])
+        else:
+            return self.model.angle_to_cortex(*args)
+                    

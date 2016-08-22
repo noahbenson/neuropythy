@@ -7,6 +7,8 @@ import itertools
 import collections
 from pysistence import make_dict
 import pysistence
+import copy
+import numpy as np
 
 class Immutable:
     '''
@@ -52,11 +54,22 @@ class Immutable:
     # This is the most important function, given the encapsulation of this class:
     def __setattr__(self, name, val):
         if name in self._settable_vals:
+            if self.__dict__['_persistent']:
+                raise ValueError(('Immutable object is persistent and cannot be changed; use ' +
+                                  'the method using or the method transient to update the ' +
+                                  'value %s') % name)
             fn = self._settable_vals[name]
-            self.__dict__[name] = fn(self, val)
+            fixed = fn(self, val)
+            if isinstance(fixed, np.ndarray):
+                if fixed.flags.writeable:
+                    fixed = np.array(fixed)
+                    fixed.flags.writeable = False
+            self.__dict__[name] = fixed
             self.__update_values(name)
         elif name in self._lazy_vals:
             raise ValueError('The member %s is a lazy value and cannot be set' % name)
+        elif name in self._const_vals:
+            raise ValueError('The member %s is a constant value and cannot be set' % name)
         else:
             raise ValueError('Unrecognized Immutable member: %s' % name)
 
@@ -66,8 +79,8 @@ class Immutable:
             return self.__dict__[name]
         if name in self.__dict__:
             return self.__dict__[name]
-        elif name in self._lazy_vals:
-            (deps, fn) = self._lazy_vals[name]
+        elif name in self.__dict__['_lazy_vals']:
+            (deps, fn) = self.__dict__['_lazy_vals'][name]
             tmp = fn(*[getattr(self, x) for x in deps])
             self.__dict__[name] = tmp
             return tmp
@@ -77,12 +90,40 @@ class Immutable:
             raise ValueError('Unrecognized member of Immutable: %s' % name)
 
     def __init__(self, settable_vals, const_vals, lazy_vals, **opts):
+        self.__dict__['_persistent'] = False
         self.__dict__['_settable_vals'] = make_dict(settable_vals).using(
             options=lambda s,o: make_dict(o))
         self.__dict__['_const_vals'] = make_dict(const_vals)
         self.__dict__['_lazy_vals'] = lazy_vals
         self.__dict__['_lazy_deps'] = self.__lazy_deps()
         self.options = opts
+        return self
 
     def __repr__(self):
         return 'Immutable(<' + '>, <'.join([k for k,v in self._settable_vals.iteritems()]) + '>)'
+
+    def transient(self):
+        '''
+        imm.transient() yields a transient copy of imm; i.e., the new immutable has all the same
+        values as imm, but its 
+        '''
+        obj = copy.copy(self)
+        obj.__dict__['_persistent'] = False
+        return obj
+    def persist(self):
+        self.__dict__['_persistent'] = True
+        return self
+    def using(self, **updates):
+        '''
+        imm.using(a=b...) yields a clone of the immutable object imm in which the values indicated 
+        by the for the optional keywords (a) have been updated to the indicated values (b). The
+        resulting immutable has a persistent state identical to imm, so if imm is transient, so will
+        be the result.        
+        '''
+        obj = self.transient()
+        for (k,v) in updates.iteritems():
+            obj.__setattr__(k, v)
+        if self._persistent:
+            return obj.persist()
+        else:
+            return obj

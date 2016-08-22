@@ -17,7 +17,7 @@ from neuropythy.java import (java_link, serialize_numpy,
 from pysistence import make_dict
 from array import array
 
-from .models import (RetinotopyModel, SchiraModel, RetinotopyMeshModel)
+from .models import (RetinotopyModel, SchiraModel, RetinotopyMeshModel, RegisteredRetinotopyModel)
 
 from py4j.java_gateway import (launch_gateway, JavaGateway, GatewayParameters)
 
@@ -200,7 +200,8 @@ def mesh_register(mesh, field, max_steps=2000, max_step_size=0.05, max_pe_change
     return np.asarray([[x for x in row] for row in result])
 
 __loaded_V123_models = {}
-def V123_model(name='standard'):
+def V123_model(name='standard',
+               projection_parameters={'registration':'fsaverage_sym', 'chirality':'LH'}):
     '''
     V123_model(name) yields a model of retinotopy in V1-V3 with the given name; if not provided,
     this name 'standard' is used (currently, the only possible option). The model itself is a set of
@@ -235,15 +236,17 @@ def V123_model(name='standard'):
     tris = -1 + np.asarray(
         [map(int, row.split(','))
          for row in lines[(n+4):(n+m+4)]])
-    mdl = RetinotopyMeshModel(tris, crds,
-                              90 - 180/pi*vals[:,0], vals[:,1], vals[:,2],
-                              transform=tx)
+    mdl = RegisteredRetinotopyModel(
+        RetinotopyMeshModel(tris, crds,
+                            90 - 180/pi*vals[:,0], vals[:,1], vals[:,2],
+                            transform=tx),
+        **projection_parameters)
     __loaded_V123_models[name] = mdl
     return mdl
 
 def retinotopy_anchors(mesh, mdl,
                        polar_angle=None, eccentricity=None,
-                       weight=None, weight_cutoff=0.1,
+                       weight=None, weight_cutoff=0.2,
                        scale=1,
                        shape='Gaussian', suffix=None,
                        sigma=[0.05, 0.3, 2.0],
@@ -318,7 +321,8 @@ def retinotopy_anchors(mesh, mdl,
     n = len(mesh.vertex_labels)
     X = mesh.coordinates.T
     # make sure we have our polar angle/eccen/weight values:
-    polar_angle = polar_angle if polar_angle is not None else \
+    polar_angle = mesh.prop(polar_angle) if isinstance(polar_angle, basestring) else \
+                  polar_angle if polar_angle is not None else \
                   empirical_retinotopy_data(mesh, 'polar_angle')
     if polar_angle is None:
         raise RuntimeError('No polar angle data given to schira_anchors!')
@@ -329,8 +333,9 @@ def retinotopy_anchors(mesh, mdl,
     if len(polar_angle) != n:
         raise RuntimeError('Polar angle data has incorrect length!')
     # Now Polar Angle...
-    eccentricity = eccentricity if eccentricity is not None else \
-                  empirical_retinotopy_data(mesh, 'eccentricity')
+    eccentricity = mesh.prop(eccentricity) if isinstance(eccentricity, basestring) else \
+                   eccentricity if eccentricity is not None else \
+                   empirical_retinotopy_data(mesh, 'eccentricity')
     if eccentricity is None:
         raise RuntimeError('No eccentricity data given to schira_anchors!')
     if isinstance(eccentricity, dict):
@@ -339,7 +344,9 @@ def retinotopy_anchors(mesh, mdl,
     if len(eccentricity) != n:
         raise RuntimeError('Eccentricity data has incorrect length!')
     # Now Weight...
-    weight = weight if weight is not None else empirical_retinotopy_data(mesh, 'weight')
+    weight = mesh.prop(weight) if isinstance(weight, basestring) else \
+             weight if weight is not None else \
+             empirical_retinotopy_data(mesh, 'weight')
     if weight is None:
         weight = 1
     if isinstance(weight, dict):
@@ -399,51 +406,154 @@ def retinotopy_anchors(mesh, mdl,
             + ([] if sigs is None else ['sigma', sigs])
             + ([] if suffix is None else suffix))
 
-def register_retinotopy_prepare_hemisphere(hemi,
-                                           radius=pi/3.0,
-                                           polar_angle=None, eccentricity=None, weight=None,
-                                           weight_cutoff=0.1):
+def _retinotopy_vectors_to_float(ang, ecc, wgt):
+    wgt = np.asarray(
+        [(0.0 if w is None else w)*(0.0 if a is None else 1)*(0.0 if e is None else 1)
+         for (a,e,w) in zip(ang, ecc, [1.0 for e in ecc] if wgt is None else wgt)])
+    ang = np.asarray([0.0 if a is None else a for a in ang])
+    ecc = np.asarray([0.0 if e is None else e for e in ecc])
+    return (ang, ecc, wgt)
+
+
+def register_retinotopy_initialize(hemi, model,
+                                   polar_angle=None, eccentricity=None, weight=None,
+                                   weight_cutoff=0.2,
+                                   prior='retinotopy',
+                                   resample='fsaverage_sym'):
     '''
-    register_retinotopy_prepare_hemisphere(hemi) yields an fsaverage_sym LH hemisphere that has
+    register_retinotopy_initialize(hemi, model) yields an fsaverage_sym LH hemisphere that has
     been prepared for retinotopic registration with the data on the given hemisphere, hemi. The
-    options radius, polar_angle, eccentricity, weight, and weight_cutoff are accepted, and are
-    documented in help(register_retinotopy).
+    options polar_angle, eccentricity, weight, and weight_cutoff are accepted, as are the
+    prior and resample options; all are documented in help(register_retinotopy).
+    The return value of this function is actually a dictionary with the element 'map' giving the
+    resulting map projection, and additional entries giving other meta-data calculated along the
+    way.
     '''
     # Step 1: get our properties straight
+    prop_names = ['polar_angle', 'eccentricity', 'weight']
+    data = {}
     (ang, ecc, wgt) = [
         (hemi.prop(arg) if isinstance(arg, basestring) else
          arg            if hasattr(arg, '__iter__')    else
          None           if arg is not None             else
          empirical_retinotopy_data(hemi, argstr))
-        for (arg, argstr) in [(polar_angle, 'polar_angle'),
-                              (eccentricity, 'eccentricity'),
-                              (weight, 'weight')]]
+        for (arg, argstr) in zip((polar_angle, eccentricity, weight), prop_names)]
     if ang is None: raise ValueError('polar angle data not found')
     if ecc is None: raise ValueError('eccentricity data not found')
     ## we also want to make sure weight is 0 where there are none values
-    wgt = np.asarray(
-        [(0 if w is None else w)*(0 if a is None else 1)*(0 if e is None else 1)
-         for (a,e,w) in zip(ang, ecc, [1 for e in ecc] if wgt is None else wgt)])
-    ang = np.asarray([0 if a is None else a for a in ang])
-    ecc = np.asarray([0 if e is None else e for e in ecc])
-    # Step 2: get the properties over to the fsaverage_sym hemisphere
-    lhemi = hemi if hemi.chirality == 'LH' else hemi.subject.RHX
-    sym = freesurfer_subject('fsaverage_sym').LH
-    sym.interpolate(lhemi, ang, apply='polar_angle')
-    sym.interpolate(lhemi, ecc, apply='eccentricity')
-    sym.interpolate(lhemi, wgt, apply='weight')
-    # Step 3: make the projection
-    msym = sym.projection(radius=radius)
-    return msym
-    
+    (ang, ecc, wgt) = _retinotopy_vectors_to_float(ang, ecc, wgt)
+    ## note these in the result dictionary:
+    data['sub_polar_angle'] = ang
+    data['sub_eccentricity'] = ecc
+    data['sub_weight'] = wgt
+    # Step 2: do alignment, if required
+    if not isinstance(model, RegisteredRetinotopyModel):
+        raise ValueError('model must be a RegisteredRetinotopyModel')
+    data['model'] = model
+    model_reg = model.projection_data['registration']
+    model_reg = 'fsaverage_sym' if model_reg is None else model_reg
+    model_chirality = model.projection_data['chirality']
+    if model_reg == 'fsaverage_sym':
+        useHemi = hemi if hemi.chirality == 'LH' else hemi.subject.RHX
+    else:
+        if model_chiraliry is not None and hemi.chirality != model_chiraliry:
+            raise ValueError('Inverse-chirality hemisphere cannot be registered to model')
+        useHemi = hemi
+    ## make sure we are registered to the model space
+    if model_reg not in useHemi.topology.registrations:
+        raise ValueError('Hemisphere is not registered to the model registration: %s' % model_reg)
+    data['sub_hemi'] = useHemi
+    ## note the position of the coordinates in the 
+    subreg = useHemi.topology.registrations[model_reg]
+    ## if there's a prior, we should enforce it now:
+    if prior is not None:
+        if hemi.subject.id == model_reg:
+            prior_subject = useHemi.subject
+            prior_hemi = None
+        else:
+            prior_subject = freesurfer_subject(model_reg)
+            prior_hemi = prior_subject.__getattr__(model_chirality)
+        if prior not in prior_hemi.topology.registrations:
+            raise ValueError('Prior registration %s not found in prior subject %s' \
+                             % (prior, model_reg))
+        prior_reg0 = prior_hemi.topology.registrations[model_reg]
+        prior_reg1 = prior_hemi.topology.registrations[prior]
+        addr = prior_reg0.address(subreg.coordinates)
+        data['address_in_prior'] = addr
+        coords = prior_reg1.unaddress(addr)
+    else:
+        prior_hemi = None
+        coords = subreg.coordinates
+    prior_reg = Registration(useHemi.topology, coords)
+    data['prior_registration'] = prior_reg
+    data['prior_hemisphere'] = prior_hemi
+    # Step 3: resample, if need be (for now we always resample to fsaverage_sym)
+    data['resample'] = resample
+    if resample is None:
+        tohem = useHemi
+        toreg = prior_reg
+        data['initial_registration'] = prior_reg
+        for (p,v) in zip(prop_names, [useHemi.prop(p) for p in prop_names]):
+            data['initial_' + p] = v
+        data['unresample_function'] = lambda rr: rr
+    else:
+        if resample == 'fsaverage_sym':
+            tohem = freesurfer_subject('fsaverage_sym').LH
+            toreg = tohem.topology.registrations['fsaverage_sym']
+        elif resample == 'fsaverage':
+            tohem = freesurfer_subject('fsaverage').__getattr__(model_chirality)
+            toreg = tohem.topology.registrations['fsaverage']
+        else:
+            raise ValueError('resample argument must be fsaverage, fsaverage_sym, or None')
+        data['resample_hemisphere'] = tohem
+        resamp_addr = toreg.address(prior_reg.coordinates)
+        data['resample_address'] = resamp_addr
+        data['initial_registration'] = toreg
+        for (p,v) in zip(prop_names,
+                         _retinotopy_vectors_to_float(
+                             *[toreg.interpolate_from(prior_reg, data['sub_' + p])
+                               for p in prop_names])):
+            data['initial_' + p] = v
+        data['unresample_function'] = lambda rr: Registration(useHemi.topology,
+                                                              rr.unaddress(resamp_addr))
+    data['initial_mesh'] = tohem.registration_mesh(toreg)
+    # Step 4: make the projection
+    proj_data = model.projection_data
+    m = proj_data['forward_function'](data['initial_mesh'])
+    for p in prop_names:
+        m.prop(p, data['initial_' + p][m.vertex_labels])
+    data['map'] = m
+    # Step 5: Annotate how we get back
+    def __postproc_fn(reg):
+        d = data.copy()
+        d['registered_coordinates'] = reg
+        # First, unproject the map
+        reg_map_3dx = d['map'].unproject(reg).T
+        reg_3dx = np.array(d['initial_registration'].coordinates, copy=True)
+        reg_3dx[d['map'].vertex_labels] = reg_map_3dx
+        final_reg = Registration(tohem.topology, reg_3dx)
+        d['finished_registration'] = final_reg
+        # Now, if need be, unresample the points:
+        d['registration'] = d['unresample_function'](final_reg)
+        # now convert the sub points into retinotopy points
+        d['registered_mesh'] = useHemi.registration_mesh(d['registration'])
+        d['prediction'] = make_dict({p: v for (p,v) in zip(
+                                            ['polar_angle', 'eccentricity', 'visual_area'],
+                                            model.cortex_to_angle(d['registration_mesh']))})
+        return make_dict(d)
+    data['postprocess_function'] = __postproc_fn
+    return data
+
 def register_retinotopy(hemi,
-                        retinotopy_model=None, radius=pi/3.0,
-                        polar_angle=None, eccentricity=None, weight=None, weight_cutoff=0.1,
+                        retinotopy_model=None,
+                        polar_angle=None, eccentricity=None, weight=None, weight_cutoff=0.2,
                         edge_scale=1.0, angle_scale=1.0, functional_scale=1.0,
                         sigma=Ellipsis,
                         select='close',
+                        prior='retinotopy',
+                        resample='fsaverage_sym',
                         max_steps=2000, max_step_size=0.05,
-                        registration_name='retinotopy'):
+                        return_meta_data=False):
     '''
     register_retinotopy(hemi) yields the result of registering the given hemisphere's polar angle
     and eccentricity data to the SchiraModel, a registration in which the vertices are aligned with
@@ -452,7 +562,8 @@ def register_retinotopy(hemi,
 
     Options:
       * retinotopy_model specifies the instance of the retinotopy model to use; this must be an
-        instance of the RetinotopyModel class (default: None, which is translated to V123_model()).
+        instance of the RegisteredRetinotopyModel class (default: None, which is translated to
+        V123_model()).
       * polar_angle, eccentricity, and weight specify the property names for the respective
         quantities; these may alternately be lists or numpy arrays of values. If weight is not given
         or found, then unity weight for all vertices is assumed. By default, each will check the
@@ -468,28 +579,35 @@ def register_retinotopy(hemi,
       * max_steps (default 30,000) specifies the maximum number of registration steps to run.
       * max_step_size (default 0.05) specifies the maxmim distance a single vertex is allowed to
         move in a single step of the minimization.
-      * registration_name (default: 'retinotopy') specifies the name of the registration to register
-        with the hemisphere's topology object.
+      * return_meta_data (default: False) specifies whether the return value should be the new
+        Registration object or a dictionary of meta-data that was used during the registration
+        calculations, in which the key 'registation' gives the registration object.
       * radius (default: pi/3) specifies the radius, in radians, of the included portion of the map
         projection (projected about the occipital pole).
       * sigma (default Ellipsis) specifies the sigma argument to be passed onto the 
         retinotopy_anchors function (see help(retinotopy_anchors)); the default value, Ellipsis,
         is interpreted as the default value of the retinotopy_anchors function's sigma option.
+      * prior (default: 'retinotopy') specifies the prior that should be used, if found, in the 
+        topology registrations for the subject associated with the retinotopy_model's registration.
+      * resample (default: 'fsaverage_sym') specifies that the data should be resampled to one of
+        the uniform meshes, 'fsaverage' or 'fsaverage_sym', prior to registration; if None then no
+        resampling is performed.
     '''
     # Step 1: prep the map for registrationfigure out what properties we're using...
-    msym = register_retinotopy_prepare_map(hemi,
-                                           radius=radius,
-                                           polar_angle=polar_angle, eccentricity=eccentricity,
-                                           weight=weight, weight_cutoff=weight_cutoff)
-    sym = msym.options['mesh']
-    # Step 2: run the mesh registration
     retinotopy_model = V123_model() if retinotopy_model is None else retinotopy_model
+    data = register_retinotopy_initialize(hemi, retinotopy_model,
+                                          polar_angle=polar_angle,
+                                          eccentricity=eccentricity,
+                                          weight=weight,
+                                          weight_cutoff=weight_cutoff,
+                                          prior=prior, resample=resample)
+    # Step 2: run the mesh registration
     r = mesh_register(
-        msym,
+        data['map'],
         [['edge', 'harmonic', 'scale', edge_scale],
          ['angle', 'infinite-well', 'scale', angle_scale],
          ['perimeter', 'harmonic'],
-         retinotopy_anchors(msym, retinotopy_model,
+         retinotopy_anchors(data['map'], retinotopy_model,
                             polar_angle='polar_angle',
                             eccentricity='eccentricity',
                             weight='weight',
@@ -499,29 +617,51 @@ def register_retinotopy(hemi,
                             **({} if sigma is Ellipsis else {'sigma':sigma}))],
         max_steps=max_steps,
         max_step_size=max_step_size)
-    # Step 3: prepare the original subject's map for being warped over to the registration
-    msub = lhemi.projection(mesh='fsaverage_sym', radius=radius)
-    subvtcs = msub.vertex_labels
-    msub.prop('polar_angle',  ang[subvtcs])
-    msub.prop('eccentricity', ecc[subvtcs])
-    msub.prop('weight',       wgt[subvtcs])
-    ## okay, r is the registered coordinates; we can unproject them
-    symrsphere = msym.unproject(r)
-    ## make a new coordinate matrix for the registration
-    symregcoords = np.array(sym.coordsinates, copy=True)
-    symregcoords[:, msym.vertex_labels] = symrsphere
-    symregmesh = sym.LH.surface(symregcoords)
-    ## now, address the subject's coordinates in the original topology and unaddress in this
-    ## new registered mesh
-    addr = sym.topology.registrations['fsaverage_sym'].address(lhemi.coordinates[:,subvtcs])
-    subrsphere = symregmesh.unaddress(addr)
-    msub.coordinates = msub.reproject(subrsphere)
-    if registration_name is not None:
-        subregcoords = np.array(lhemi.coordinates, copy=True)
-        subregcoords[:, subvtcs] = subrsphere
-        hemi.topology.register(registration_name, subregcoords)
-    # We return the subject's map
-    return msub
+    # Step 3: run the post-processing function
+    postproc = data['postprocess_function']
+    ppr = postproc(r)
+    return ppr if return_meta_data else ppr['registration']
+
+def register_retinotopy_command(args):
+    '''
+    register_retinotopy_command(args) can be given a list of arguments, such as sys.argv[1:]; these
+    arguments may include any options and must include one subject id and one hemisphere, all in any
+    order. The subject whose id is given is registered to a retinotopy model, and the resulting
+    registration, as well as the predictions made by the model in the registration, are exported.
+    The following options are accepted:
+      * --eccen=|-e<file>
+        --angle=|-a<file>
+        --weight=|-w<file>
+        Each of these arguments specifies the name of a data file to load in as a representation of
+        the subject's eccentricity, polar angle, or weight; these should be given the names of
+        either an mgh/mgz files whose size is 1 x 1 x n, where n is the number of vertices in the
+        hemisphere for the subject, or a FreeSurfer curv-style filename with n vertices. By default,
+        files in the subject's surf directory that match a template are automatically loaded and
+        used. This template is name <hemi>.<tag><name>, optionally ending with .mgz, where tag is
+        one of (and in order of preference) 'prf_', 'empirical_', 'measured_', 'training_', or '', 
+        and name is one of 'eccentricity'/'eccen', 'polar_angle'/'angle', or 
+        'weight'/'variance_explained'/'vexpl'.
+      * --cutoff=|-c<value>
+        The cutoff value to use for the weight; 0.2 by default. Weights less than this will be
+        truncated to 0.
+      * --angle-radians|-r
+        This flag specifies that the angle-file only is in radians instead of degrees.
+      * --eccen-radians|-R
+        This flag specifies that the eccen-file only is in radians instead of degrees.
+      * --mathematical|-m
+        This flag specifies that the angle file addresses the visual space in the way standard in
+        geometry; i.e., with the right horizontal meridian represented as 0 and with the upper
+        vertical meridian represented as 90 degrees or pi/4 instead of the convention in which the
+        opper vertical meridian represented as 0 and the right horizontal meridian represented as 90
+        degrees or pi/4 radians.
+      * --edge-strength=|-e<weight>
+        --angle-strength=|-a<weight>
+        --functional-strength=|-f<weight>
+        
+     
+    '''
+    #TODO
+    pass
 
 # The topology and registration stuff is below:
 class JavaTopology:
@@ -584,3 +724,4 @@ class JavaTopology:
             order, jmask)
         # then interpret the results...
         return [datares[i] if maskres[i] == 1 else fill for i in range(len(maskres))]
+

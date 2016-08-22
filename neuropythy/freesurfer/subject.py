@@ -12,9 +12,10 @@ from   nibabel.freesurfer.mghformat import load as mghload, MGHImage
 import os, math
 import itertools
 import pysistence
+from   numbers import Number
 from   pysistence import make_dict
 from   neuropythy.cortex import CorticalMesh
-from   neuropythy.topology import Topology
+from   neuropythy.topology import (Topology, Registration)
 import neuropythy.geometry as geo
 
 # These static functions are just handy
@@ -75,22 +76,22 @@ class Hemisphere:
         if not isinstance(val, dict):
             raise ValueError('properties must be a dictionary')
         for (k, v) in val.iteritems(): Hemisphere._check_property(self, k, v)
-        if type(val) is pysistence.persistent_dict.PDict:
+        if isinstance(val, pysistence.persistent_dict.PDict):
             return val
         else:
-            return make_dict(**val)
+            return make_dict(val)
     @staticmethod
     def _check_options(self, val):
         # Options just have to be a dictionary and are converted to an immutable one
         if not isinstance(val, dict):
             raise ValueError('options must be a dictionary')
-        if type(val) is pysistence.persistent_dict.PDict:
+        if isinstance(val, pysistence.persistent_dict.PDict):
             return val
         else:
-            return make_dict(**val)
+            return make_dict(val)
     __settable_members = {
-        'properties': lambda m,v: Hemisphere._check_properties(m,v),
-        'options': lambda m,v: Hemisphere._check_options(m,v)}
+        'properties': lambda h,v: Hemisphere._check_properties(h,v),
+        'options':    lambda h,v: Hemisphere._check_options(h,v)}
 
     
     # This static variable and these functions explain the dependency hierarchy in cached data
@@ -304,6 +305,19 @@ class Hemisphere:
                   None)
         if coords is None: raise ValueError('Coordinate matrix was invalid size!')
         return self.__make_surface(coords, self.faces, name)
+    def registration_mesh(self, name):
+        '''
+        hemi.registration_mesh(name) yields a CorticalMesh object for the given hemisphere hemi, as
+        determined, by the name, which may be a registration name found in
+        hemi.topology.registrations.
+        Alternately, name may be a registration object, in which case it is used.
+        '''
+        if isinstance(name, Registration):
+            return self.surface(name.coordinates)
+        elif not isinstance(name, basestring) or name not in self.topology.registrations:
+            raise ValueError('registration not found in topology')
+        else:
+            return self.surface(self.topology.registrations[name].coordinates, name=name)
 
     
     ################################################################################################
@@ -660,78 +674,176 @@ class Hemisphere:
         #'mollweide':       lambda X,p: None,
         'mercator':        lambda X,p: Hemisphere._mercator_projection_inverse(X,p),
         'sinusoidal':      lambda X,p: Hemisphere._sinusoidal_projection_inverse(X,p)}
-    def __interpret_projection_params(self, params):
-        # Figure out which spherical surface we're using...
-        if 'surface' not in params or params['surface'].lower() == 'native':
-            params['surface'] = 'native'
-            params['mesh'] = self.sphere_surface
-        elif params['surface'].lower() == 'fsaverage':
-            params['surface'] = 'fsaverage'
-            params['mesh'] = self.fs_sphere_surface
-        elif params['surface'].lower() == 'fsaverage_sym':
-            params['surface'] = 'fsaverage_sym'
-            params['mesh'] = self.sym_sphere_surface
-        elif params['surface'] in self.topology.registrations:
-            surfname = params['surface']
-            params['mesh'] = self.__make_surface(
-                self.topology.registrations[surfname].coordinates.T,
-                self.faces,
-                surfname)
+
+    @staticmethod
+    def _make_projection(params):
+        '''
+        Create the projection forward and inverse functions, based on the parameters, which should
+        be identical to those given in the Hemisphere.projection() and Hemisphere.projection_data()
+        funtcions, except that automatic values such as None that get interpreted by the hemisphere
+        object should all already be filled out explicitly. Yields a persistent dictionary that is
+        identical to the given params argument map, but includes both an inverse and a forward
+        function in the entries 'inverse_function' and 'forward_function'.
+        '''
+        registration = 'native' if 'registration' not in params else params['registration']
+        if not isinstance(registration, basestring):
+            raise ValueError('registration parameter must be a string')
+        center = None if 'center' not in params else params['center']
+        if not hasattr(center, '__iter__') or len(center) < 2 or len(center) > 3:
+            raise ValueError('center argument must be explicit and must be a 2 or 3-length vector')
+        center = np.asarray(center)
+        if len(center) == 2:
+            # convert to 3D cartesian coordinates from the, presumed, longitude and latitude in
+            # angular coordinates (radians)
+            center_sc = center
+            cos_phi = np.cos(center[1])
+            center = np.asarray([cos_phi * np.cos(center[0]),
+                                 cos_phi * np.sin(center[0]),
+                                 np.sin(center[1])])
         else:
-            raise ValueError('Unrecognized spherical surface: %s' % params['surface'])
-        sphere = params['mesh']
+          center_sc = [np.arctan2(center[0], center[1]),
+                       np.arcsin(center[2] / np.sqrt(sum(center ** 2)))]
+        radius = None if 'radius' not in params else params['radius']
+        if not isinstance(radius, Number):
+            raise ValueError('radius option must be explicitly given and must be a number')
+        radius = abs(radius)
+        sphere_radius = None if 'sphere_radius' not in params else params['sphere_radius']
+        if not isinstance(sphere_radius, Number):
+            raise ValueError('sphere_radius option must be explicitly given and must be a number')
+        sphere_radius = abs(sphere_radius)
+        method = None if 'method' not in params else params['method']
+        if not isinstance(method, basestring) or method not in Hemisphere.__projection_methods:
+            raise ValueError('method parameter not given or not recognized')
+        method = method.lower()
+        chirality = None if 'chirality' not in params else params['chirality']
+        if chirality is not None:
+            if not isinstance(chirality, basestring):
+                raise ValueError('chirality must be None or a string representing left or right')
+            chirality = chirality.upper()
+            if chirality == 'L' or chirality == 'R':
+                chirality += 'H'
+            elif chirality == 'LEFT' or chirality == 'RIGHT':
+                chirality = chirality[0] + 'H'
+            elif chirality != 'LH' and chirality != 'RH':
+                raise ValueError('Chiraliry must be one of LH, RH, L, R, Left, Right, or None')
+        params['center'] = center
+        params['center_spherical'] = center_sc
+        params['radius'] = radius
+        params['sphere_radius'] = sphere_radius
+        params['method'] = method
+        params['chirality'] = chirality
+        params['registration'] = registration
+        # Setup Projection Data:
+        FR = geo.alignment_matrix_3D(center, [1.0, 0.0, 0.0])
+        IR = geo.alignment_matrix_3D([1.0, 0.0, 0.0], center)
+        params['forward_affine_transform'] = FR
+        params['inverse_affine_transform'] = IR
+        fwdprojfn = Hemisphere.__projection_methods[method]
+        invprojfn = None if method not in Hemisphere.__projection_methods_inverse else \
+                    Hemisphere.__projection_methods_inverse[method]
+        def __fwdfn(obj):
+            # in this forward-function, we want to interpret what the argument actually is...
+            if isinstance(obj, Hemisphere):
+                # check to make sure it's the right chirality
+                if chirality is not None and obj.chirality != chirality:
+                    raise ValueError('Cannot project hemisphere if opposite chirality')
+                # See if it has the appropriate registration
+                usereg = obj.subject.id if registration == 'native' else registration
+                if usereg not in obj.topology.registrations:
+                    raise ValueError('Given hemisphere is not registered to the ' + registration \
+                                     + ' registration')
+                reg = obj.topology.registrations[usereg]
+                mesh = obj.__make_surface(reg.coordinates, org.topology.triangles, usereg)
+                proj = __fwdfn(mesh)
+                proj_params = proj.options['projection_parameters']
+                proj.options = proj.options.using(
+                    projection_parameters=proj_params.using(hemisphere=obj))
+                return proj
+            elif isinstance(obj, CorticalMesh):
+                sc = obj.spherical_coordinates
+                submesh = obj.select(lambda u: spherical_distance(center_sc, sc[0:2,u]) < radius)
+                submesh.coordinates = __fwdfn(submesh.coordinates)
+                submesh.options = submesh.options.using(
+                    projection_parameters=params.using(mesh=obj))
+                return submesh
+            else:
+                obj = np.asarray(obj)
+                X = obj if obj.shape[0] == 3 else obj.T
+                return fwdprojfn(np.dot(FR, X), params)
+        def __invfn(obj):
+            if isinstance(obj, CorticalMesh):
+                obj_proj_params = obj.options['projection_parameters']
+                mesh = obj_proj_params['mesh']
+                X = mesh.coordinates.copy()
+                X[:, obj.vertex_labels] = __invfn(obj.coordinates)
+                X.flags.writeable = False
+                return mesh.using(coordinates=X)
+            else:
+                X = np.asarray(obj)
+                X = X if X.shape[0] == 2 else X.T
+                return np.dot(IR, invprojfn(X, params))
+        params['forward_function'] = __fwdfn
+        params['inverse_function'] = __invfn
+        params = make_dict(params)
+        return params
+            
+    def __interpret_projection_params(self, params):
+        params = params.copy()
+        # Figure out which spherical surface we're using...
+        regname = None if 'registration' not in params else params['registration'].lower()
+        if regname is None or regname == 'native':
+            regname = self.subject.id
+        elif regname not in self.topology.registrations:
+            raise ValueError('Unrecognized registration name: %s' % regname)
+        params['registration'] = regname
+        coords = self.topology.registrations[regname].coordinates.T
+        params['sphere_radius'] = np.mean(np.sqrt(np.sum(coords**2, 0)))
         # important parameters: center and radius => indices
         if 'center' not in params:
-            params['center'] = sphere.coordinates[:, self.occipital_pole_index]
+            params['center'] = coords[:, self.occipital_pole_index]
         elif isinstance(params['center'], int):
-            params['center'] = sphere.coordinates[:, params['center']]
+            params['center'] = coords[:, params['center']]
         if 'radius' not in params:
-            params['radius'] = math.pi / 4.0
-        elif not isinstance(params['radius'], (int, long, float)) or params['radius'] <= 0:
-            raise ValueError('radius parameter must be a positive integer')
+            params['radius'] = math.pi / 3.0
         # also, we need to worry about the method...
         if 'method' not in params:
             params['method'] = 'equirectangular'
-        elif params['method'].lower() not in Hemisphere.__projection_methods:
-            raise ValueError('method given to projection not recognized: %s' % params['method'])
-        # Finally, we need to look at exclusions...
-        # (#TODO)
+        # And the chirality...
+        if 'chirality' not in params:
+            params['chirality'] = self.chirality
         return params
-    @staticmethod
-    def __select_projection_subset(mesh, center, radius):
-        # Figure out which vertices and faces to include, yield the indices of each
-        # use the spherical coordinates...
-        center = np.asarray(center)
-        sc = mesh.spherical_coordinates
-        center_sc = [np.arctan2(center[0], center[1]),
-                     np.arcsin(center[2] / np.sqrt(sum(center ** 2)))]
-        return mesh.select(lambda u: spherical_distance(center_sc, sc[0:2,u]) < radius)
-    def projection(self, **params):
+
+    def projection_data(self, **params):
+        '''
+        hemi.projection_data() yields an immutable dictionary of data describing a map projection
+        of the given hemisphere hemi.
+
+        The following options are understood; options that are not understood are stored as 
+        meta-data and placed in the projection_parameters entry of resulting projected meshes' 
+        options member variable:
+          * center (default: use the occipital pole) specifies the 3D cartesian or 2D spherical 
+            (longitude, latitude, both in radians) vector that is the center of the map projection.
+          * radius (default: pi/3) specifies the distance (in radians along the spherical surface)
+            within which vertices should be included in the projection.
+          * method (default: 'equirectangular') specifies the map projection type; see also
+            Hemisphere._make_projection.
+          * registration (default: self.subject.id) specifies the registration to which the map
+            should be aligned when reprojecting.
+          * chirality (default: self.chirality) specifies which chirality the projection should be
+            restricted to when reprojecting; if None, then chirality is not restricted.
+        '''
         params = self.__interpret_projection_params(params)
-        submesh = Hemisphere.__select_projection_subset(
-            params['mesh'],
-            params['center'],
-            params['radius'])
-        params['sphere_radius'] = np.mean(np.sqrt((submesh.coordinates ** 2).sum(0)))
-        FR = geo.alignment_matrix_3D(params['center'], [1.0, 0.0, 0.0])
-        IR = geo.alignment_matrix_3D([1.0, 0.0, 0.0], params['center'])
-        fwdprojfn = Hemisphere.__projection_methods[params['method']]
-        invprojfn = Hemisphere.__projection_methods_inverse[params['method']]
-        local_tmp = []
-        fwdfn = lambda X: fwdprojfn(np.dot(FR, X), local_tmp)
-        invfn = lambda X: np.dot(IR, invprojfn(X, local_tmp))
-        params['forward_function'] = fwdfn
-        params['inverse_function'] = invfn
-        params = make_dict(params)
-        local_tmp = params
-        submesh.coordinates = fwdfn(submesh.coordinates)
-        submesh.options = submesh.options.using(projection_parameters=params)
-        for p in self.property_names:
-            try:
-                submesh.prop(p, np.asarray(self.prop(p))[submesh.vertex_labels])
-            except:
-                pass
-        return submesh
+        return Hemisphere._make_projection(params)
+    
+    def projection(self, **params):
+        '''
+        hemi.projection() yields a map projection that is centered at the occipital pole of the
+        hemisphere's spherical topology registration (also hemi.sphere_surface). A variety of
+        options that modify the projection may be given; these options are detailed in the
+        Hemisphere.projection_data method.
+        '''
+        proj = self.projection_data(**params)
+        return proj['forward_function'](self)
 
 class Subject:
     '''FreeSurfer.Subject objects encapsulate the data contained in a FreeSurfer

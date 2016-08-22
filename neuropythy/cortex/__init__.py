@@ -396,12 +396,14 @@ class CorticalMesh(Immutable):
                            {'hemisphere': args.pop('hemisphere', None),
                             'subject':    args.pop('subject', None)},
                            CorticalMesh.__lazy_members)
+        coords = np.asarray(coords)
+        coords = coords.T if coords.shape[0] > 3 or coords.shape[0] < 2 else coords
         # Setup coordinates
         self.coordinates = coords
         # And faces...
         self.faces = faces
         # If vertex labels were provided, make sure to set these
-        self.vertex_labels = args.pop('vertex_labels', range(self.coordinates.shape[1]))
+        self.vertex_labels = args.pop('vertex_labels', range(coords.shape[1]))
         # Same with properties
         self.properties = args.pop('properties', make_dict())
         # Finally, set the remaining options...
@@ -520,7 +522,15 @@ class CorticalMesh(Immutable):
         meta = opts.get('meta_data', {}).copy()
         opts = opts.without('meta_data')
         meta = meta.using(source_mesh=self)
-        props = {name: prop[I] for (name,prop) in self.properties.iteritems()}
+        props = {}
+        for p in self.property_names:
+            v = None
+            try:
+                v = self.prop(p)
+            except:
+                pass
+            if v is not None:
+                props[p] = np.asarray(v)[I]
         return CorticalMesh(X, F, vertex_labels=V, meta_data=meta, properties=props, **opts)
 
     def add_property(self, name, prop=Ellipsis):
@@ -865,13 +875,15 @@ def cortex_to_mrvolume(mesh, property):
     return True
 
 _empirical_retinotopy_names = {
-    'polar_angle':  ['prf_polar_angle',  'empirical_polar_angle',  'measured_polar_angle',
-                     'polar_angle'],
-    'eccentricity': ['prf_eccentricity', 'empirical_eccentricity', 'measured_eccentricity',
-                     'eccentricity'],
-    'weight':       ['prf_variance_explained',       'prf_weight',
-                     'measured_variance_explained',  'measured_weight',
-                     'empirical_variance_explained', 'empirical_weight']}
+    'polar_angle':  ['prf_polar_angle',       'empirical_polar_angle',  'measured_polar_angle',
+                     'training_polar_angle',  'polar_angle'],
+    'eccentricity': ['prf_eccentricity',      'empirical_eccentricity', 'measured_eccentricity',
+                     'training_eccentricity', 'eccentricity'],
+    'weight':       ['prf_weight',       'prf_variance_explained',       'prf_vexpl',
+                     'empirical_weight', 'empirical_variance_explained', 'empirical_vexpl',
+                     'measured_weight',  'measured_variance_explained',  'measured_vexpl',
+                     'training_weight',  'training_variance_explained',  'training_vexpl',
+                     'weight',           'variance_explained',           'vexpl']}
 
 # handy function for picking out properties automatically...
 def empirical_retinotopy_data(hemi, retino_type):
