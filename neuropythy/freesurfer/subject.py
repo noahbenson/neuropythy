@@ -546,11 +546,15 @@ class Hemisphere:
         'template_areas':   ('template_visual_area',   lambda f: mghload(f).get_data().flatten())}
     # funciton for initializing the auto-loading properties
     def __init_properties(self):
+        # if this is an xhemi, we want to load the opposite of the chirality
+        loadchi = 'RH' if self.name == 'RHX' else \
+                  'LH' if self.name == 'LHX' else \
+                  self.chirality
         dir = self.directory
-        files = [f for f in os.listdir(dir) if os.path.isfile(os.path.join(dir, f))]            
+        files = [f for f in os.listdir(dir) if os.path.isfile(os.path.join(dir, f))]
         autoprops = Hemisphere._auto_properties
         for file in files:
-            if len(file) > 2 and file[0:2].upper() == self.chirality and file[3:] in autoprops:
+            if len(file) > 2 and file[0:2].upper() == loadchi and file[3:] in autoprops:
                 (name, fn) = autoprops[file[3:]]
                 #self.prop(name, PropertyBox(lambda: fn(os.path.join(dir, file))))
                 self.prop(name, fn(os.path.join(dir, file)))
@@ -558,7 +562,7 @@ class Hemisphere:
         dir = os.path.join(self.subject.directory, 'label')
         files = [f for f in os.listdir(dir) if os.path.isfile(os.path.join(dir, f))]
         for file in files:
-            if len(file) > 9 and file[0:2].upper() == self.chirality and file[-6:] == '.label':
+            if len(file) > 9 and file[0:2].upper() == loadchi and file[-6:] == '.label':
                 if len(file) < 17 or file[-13:-6] != '.thresh':
                     lbl = set(fsio.read_label(os.path.join(dir, file)))
                     self.prop(
@@ -575,7 +579,7 @@ class Hemisphere:
         files = [f for f in os.listdir(dir) if os.path.isfile(os.path.join(dir, f))]
         for f in files:
             if (f[-4:].lower() == '.mgh' or f[-4:].lower() == '.mgz') and \
-                    f[2] == '.' and f[0:2].upper() == self.name and \
+                    f[2] == '.' and f[0:2].upper() == loadchi and \
                     f[3:-4] in Hemisphere._mgh_properties:
                 (name, fn) = Hemisphere._mgh_properties[f[3:-4]]
                 try:
