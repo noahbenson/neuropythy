@@ -2,30 +2,24 @@
 # neuropythy/freesurfer/__init__.py
 # This file defines the FreeSurfer tools that are available as part of neuropythy.
 
+import os
 from .subject import (Subject, Hemisphere, 
-                      cortex_to_ribbon_map, cortex_to_ribbon, cortex_to_ribbon_map_lines)
+                      cortex_to_ribbon_map, cortex_to_ribbon, cortex_to_ribbon_map_lines,
+                      find_subject_path, subject_paths, add_subject_path)
 
 # how to construct a freesurfer subject:
 __freesurfer_subjects = {}
-def _load_freesurfer_subject(name, subjects_dir=None):
-    '''
-    _load_freesurfer_subject(name) yields a freesurfer Subject object for the subject with the given
-    name. If the given subject cannot be found, then a ValueError is raised. The option subjects_dir
-    may be given to specify the location of the subject directory.
-    '''
-    if subjects_dir is None:
-        return Subject(name)
-    else:
-        return Subject(name, subjects_dir=subjects_dir)
-    
-def freesurfer_subject(name, subjects_dir=None):
+def freesurfer_subject(name):
     '''
     freesurfer_subject(name) yields a freesurfer Subject object for the subject with the given name.
     Subjects are cached and not reloaded.
     '''
-    if subjects_dir not in __freesurfer_subjects: __freesurfer_subjects[subjects_dir] = {}
-    sddat = __freesurfer_subjects[subjects_dir]
-    if name in sddat: return sddat[name]
-    sub = _load_freesurfer_subject(name, subjects_dir=subjects_dir)
-    sddat[name] = sub
-    return sub
+    subpath = find_subject_path(name)
+    if subpath is None: return None
+    fpath = '/' + os.path.relpath(subpath, '/')
+    if fpath in __freesurfer_subjects:
+        return __freesurfer_subjects[fpath]
+    else:
+        sub = Subject(subpath)
+        if isinstance(sub, Subject): __freesurfer_subjects[fpath] = sub
+        return sub

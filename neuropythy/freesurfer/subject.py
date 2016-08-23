@@ -845,6 +845,59 @@ class Hemisphere:
         proj = self.projection_data(**params)
         return proj['forward_function'](self)
 
+# Setup the subject directory:
+_subjects_dirs = [
+    path
+    for path in [
+        os.environ['SUBJECTS_DIR'] if 'SUBJECTS_DIR' in os.environ else None,
+        os.path.join(os.environ['FREESURFER_HOME'], 'subjects') \
+          if 'FREESURFER_HOME' in os.environ else None]
+    if path is not None and os.path.isdir(path)]
+def subject_paths():
+    '''
+    subject_paths() yields a list of paths to Freesurfer subject directories in which subjects are
+    automatically searched for when identified by subject-name only. These paths are searched in
+    the order returned from this function.
+    If you must edit these paths, it is recommended to use add_subject_path, but the _subjects_dirs
+    variable may be set as well.
+    '''
+    return _subjects_dirs.copy()
+
+def add_subject_path(path, index=0):
+    '''
+    add_subject_path(path) will add the given path to the list of subject directories in which to
+    search for Freesurfer subjects. The optional argument index may be given to specify the
+    precedence of this path when searching for new subject; the default, 0, always inserts the path
+    at the front of the list; a value of k indicates that the new list should have the new path at
+    index k.
+    If the given path is not a directory or the path could not be inserted, yields False;
+    otherwise, yields True.
+    See also subject_paths.
+    '''
+    if not os.path.isdir(path): return False
+    try:
+        s = _subjects_dirs.insert(index, path)
+        _subjects_dirs = s
+        return True
+    except:
+        return False
+    
+def find_subject_path(sub):
+    '''
+    find_subject_path(sub) yields the full path of a Freesurfer subject with the name given by the
+    string sub, if such a subject can be found in the Freesurfer search paths. See also
+    add_subject_path.
+    If no subject is found, then None is returned.
+    '''
+    looks_like_sub = lambda d: all(os.path.isdir(os.path.join(d, sfx))
+                                   for sfx in ['', 'mri', 'surf', 'label'])
+    # if it's a full/relative path already, use it:
+    if looks_like_sub(sub): return sub
+    for sdir in _subjects_dirs:
+        tmp = os.path.join(sdir, sub)
+        if looks_like_sub(tmp): return tmp
+    return None
+    
 class Subject:
     '''FreeSurfer.Subject objects encapsulate the data contained in a FreeSurfer
        subject directory.'''
@@ -925,18 +978,10 @@ class Subject:
     ################################################################################################
     # The Constructor
     def __init__(self, subject, **args):
-        (dir, name) = os.path.split(subject)
-        if not os.path.isdir(subject):
-            if dir is '':
-                dir = args.pop('subjects_dir', os.environ['SUBJECTS_DIR'])
-        elif dir is '':
-            dir = '.'
-        subpath = os.path.join(dir, name)
-        if not os.path.isdir(subpath):
-            raise ValueError('Subject directory not found: %s' % subpath)
-        if not os.path.isdir(os.path.join(subpath, 'surf')):
-            raise ValueError('Subject surf directory not found')
-        self.__dict__['subjects_dir'] = dir
+        subpath = find_subject_path(subject)
+        if subpath is None: raise ValueError('No valid subject found: %s' % subject)
+        (dr, name) = os.path.split(subpath)
+        self.__dict__['subjects_dir'] = dr
         self.__dict__['id'] = name
         self.__dict__['directory'] = subpath
         self.options = args
