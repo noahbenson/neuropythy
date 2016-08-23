@@ -1159,13 +1159,13 @@ def _line_voxel_overlap(vx, xs, xe):
     seg = [(x0,x1) if x0 <= x1 else (x1,x0) for (x0,x1) in zip(xs,xe)]
     # First, figure out intersections of start and end values
     isect = [(min(seg_end, vox_end), max(seg_start, vox_start))
-             if seg_end >= vox_start and seg_start <= vox_end
-             else None
+             if seg_end >= vox_start and seg_start <= vox_end else None
              for ((seg_start, seg_end), (vox_start, vox_end)) in zip(seg, [(x,x+1) for x in vx])]
     # If any of these are None, we can't possibly overlap
     if None in isect or any(a == b for (a,b) in isect):
         return 0.0
-    return np.linalg.norm([e - s for (s,e) in isect]) / np.linalg.norm([e - s for (s,e) in zip(xs,xe)])
+    return np.linalg.norm([e - s for (s,e) in isect]) \
+        / np.linalg.norm([e - s for (s,e) in zip(xs,xe)])
 
 def cortex_to_ribbon_map_lines(sub, hemi=None):
     '''
@@ -1300,6 +1300,8 @@ def cortex_to_ribbon(sub, data, map=None, k=12, distance=6, hemi=None, sigma=0.3
         arr = _cortex_to_ribbon_map_into_volume_array(arr, map[1], data[1])
     hdr = vol0.header.copy()
     hdr.set_data_dtype(dtype)
+    arr = np.asarray(np.round(arr) if np.issubdtype(dtype, np.int) else arr,
+                     dtype=dtype)
     return MGHImage(arr, vol0.affine, hdr, vol0.extra, vol0.file_map)
     
     

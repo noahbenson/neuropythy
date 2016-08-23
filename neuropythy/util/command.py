@@ -35,6 +35,7 @@ class CommandLineParser(object):
 
     def __call__(self, *args):
         if len(args) > 0 and not isinstance(args[0], basestring) and hasattr(args[0], '__iter__'):
+            args = list(args)
             return self.__call__(*(args[0] + args[1:]))
         else:
             parse_state = None

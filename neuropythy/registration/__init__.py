@@ -10,7 +10,8 @@ from numpy.linalg import norm
 from math import pi
 from numbers import Number
 from neuropythy.cortex import CorticalMesh, empirical_retinotopy_data
-from neuropythy.freesurfer import (freesurfer_subject, add_subject_path)
+from neuropythy.freesurfer import (freesurfer_subject, add_subject_path,
+                                   cortex_to_ribbon, cortex_to_ribbon_map)
 from neuropythy.topology import Registration
 from neuropythy.java import (java_link, serialize_numpy,
                              to_java_doubles, to_java_ints, to_java_array)
@@ -359,6 +360,7 @@ def retinotopy_anchors(mesh, mdl,
         weight = [weight for i in range(n)]
     if len(weight) != n:
         raise RuntimeError('Weight data has incorrect length!')
+    weight = np.asarray([w if isinstance(w, Number) else 0 for w in weight])
     # Handle the select arg if necessary:
     select = ['close', [20]] if select == 'close'   else \
              ['close', [20]] if select == ['close'] else \
@@ -370,15 +372,11 @@ def retinotopy_anchors(mesh, mdl,
         select = lambda idx,ancs: [a for a in ancs if a[0] is not None if norm(X[idx] - a) < d]
     # let's go through and fix up the weights/polar angles/eccentricities into appropriate lists
     if weight_cutoff is None:
-        idcs = [i
-                for i in range(n)
-                if (polar_angle[i] is not None and eccentricity[i] is not None 
-                    and weight[i] is not None and weight[i] != 0)]
+        idcs = [i for (i,a,e,w) in zip(range(n), polar_angle, eccentricity, weight)
+                  if a is not None and e is not None and w > 0]
     else:
-        idcs = [i
-                for i in range(n)
-                if (polar_angle[i] is not None and eccentricity[i] is not None 
-                    and weight[i] is not None and weight[i] >= weight_cutoff)]
+        idcs = [i for (i,a,e,w) in zip(range(n), polar_angle, eccentricity, weight)
+                  if a is not None and e is not None and w >= weight_cutoff]
     res = mdl.angle_to_cortex(polar_angle[idcs], eccentricity[idcs])
     # Organize the data; trim out those not selected
     data = [[[i for dummy in r], r]
@@ -390,7 +388,7 @@ def retinotopy_anchors(mesh, mdl,
     idcs = [i for d in data for i in d[0]]
     ancs = np.asarray([pt for d in data for pt in d[1]]).T
     # Get just the relevant weights and the scale
-    wgts = np.asarray(weight)[idcs] * (1 if scale is None else scale)
+    wgts = weight[idcs] * (1 if scale is None else scale)
     # Figure out the sigma parameter:
     if sigma is None: sigs = None
     elif isinstance(sigma, Number): sigs = sigma
@@ -421,6 +419,7 @@ def _retinotopy_vectors_to_float(ang, ecc, wgt):
 def register_retinotopy_initialize(hemi, model,
                                    polar_angle=None, eccentricity=None, weight=None,
                                    weight_cutoff=0.2,
+                                   max_predicted_eccen=85,
                                    prior='retinotopy',
                                    resample='fsaverage_sym'):
     '''
@@ -541,8 +540,9 @@ def register_retinotopy_initialize(hemi, model,
         # now convert the sub points into retinotopy points
         rmesh = useHemi.registration_mesh(d['registration'])
         pred = np.asarray(
-            [(p,e,l) if round(l) > 0 and round(l) < 4 and e <= 85 else (0.0, 0.0, 0)
-             for (p,e,l) in zip(*model.cortex_to_angle(d['registered_mesh']))]).T
+            [(p,e,l) if rl > 0 and rl < 4 and e <= max_predicted_eccen else (0.0, 0.0, 0)
+             for (p,e,l) in zip(*model.cortex_to_angle(d['registered_mesh']))
+             for rl in [round(l)]]).T
         pred = (np.asarray(p[0], dtype=np.float32),
                 np.asarray(p[1], dtype=np.float32),
                 np.asarray(p[2], dtype=np.int32))
@@ -565,6 +565,7 @@ def register_retinotopy(hemi,
                         prior='retinotopy',
                         resample='fsaverage_sym',
                         max_steps=2000, max_step_size=0.05,
+                        max_predicted_eccen=85,
                         return_meta_data=False):
     '''
     register_retinotopy(hemi) yields the result of registering the given hemisphere's polar angle
@@ -599,6 +600,8 @@ def register_retinotopy(hemi,
       * sigma (default Ellipsis) specifies the sigma argument to be passed onto the 
         retinotopy_anchors function (see help(retinotopy_anchors)); the default value, Ellipsis,
         is interpreted as the default value of the retinotopy_anchors function's sigma option.
+      * max_predicted_eccen (default: 85) specifies the maximum eccentricity that should appear in
+        the predicted retinotopy values.
       * prior (default: 'retinotopy') specifies the prior that should be used, if found, in the 
         topology registrations for the subject associated with the retinotopy_model's registration.
       * resample (default: 'fsaverage_sym') specifies that the data should be resampled to one of
@@ -612,6 +615,7 @@ def register_retinotopy(hemi,
                                           eccentricity=eccentricity,
                                           weight=weight,
                                           weight_cutoff=weight_cutoff,
+                                          max_predicted_eccen=max_predicted_eccen,
                                           prior=prior, resample=resample)
     # Step 2: run the mesh registration
     r = mesh_register(
@@ -789,6 +793,7 @@ _retinotopy_parser_defaults = dict(
     angle_strength='1',
     func_strength='1',
     max_steps='2000',
+    max_step_size='0.05',
     prior='retinotopy',
     eccen_tag='predicted_eccentricity',
     angle_tag='predicted_polar_angle',
@@ -822,11 +827,12 @@ def register_retinotopy_command(args):
         return 1
     # and if we are verbose, lets setup a note function
     verbose = opts['verbose']
-    def __note(s):
+    def note(s):
         if verbose: print s
         return verbose
     # Add the subjects directory, if there is one
-    if 'subjects_dir' in opts: add_subject_path(opts['subjects_dir'])
+    if 'subjects_dir' in opts and opts['subjects_dir'] is not None:
+        add_subject_path(opts['subjects_dir'])
     # Parse the simple numbers
     for o in ['weight_cutoff', 'edge_strength', 'angle_strength', 'func_strength',
               'max_step_size', 'max_out_eccen']:
@@ -843,7 +849,7 @@ def register_retinotopy_command(args):
         note('Processing subject: %s' % sub.id)
         # we need to register this subject...
         res = {}
-        ow = opts['overwrite']
+        ow = not opts['no_overwrite']
         for h in ['LH','RH']:
             note('   Processing hemisphere: %s' % h)
             hemi = sub.__getattr__(h)
@@ -859,8 +865,9 @@ def register_retinotopy_command(args):
                                          weight_cutoff=opts['weight_cutoff'],
                                          edge_scale=opts['edge_strength'],
                                          angle_scale=opts['angle_strength'],
-                                         functional_scale=['func_strength'],
+                                         functional_scale=opts['func_strength'],
                                          prior=opts['prior'],
+                                         max_predicted_eccen=opts['max_out_eccen'],
                                          max_steps=opts['max_steps'],
                                          max_step_size=opts['max_step_size'])
             # Perform the hemi-specific outputs now:
@@ -879,19 +886,23 @@ def register_retinotopy_command(args):
                                         '.'.join([h.lower(), opts[dim + '_tag'], 'mgz']))
                     if ow or not os.path.exist(flnm):
                         note('    - Exporting prediction file: %s' % flnm)
-                        fsmgh.MGHImage(res[h].prop(tag_key[dim]), np.eye(4)).to_filename(flnm)
+                        img = MGHImage(res[h].prop(tag_key[dim]), np.eye(4))
+                        img.header.set_data_type(np.int32 if dim == 'label' else np.float32)
+                        img.to_filename(flnm)
                     else:
                         note('    - Skipping prediction file: %s (file exists)' % flnm)
         # Do the volume exports here
         if not opts['no_vol_export']:
             note('    - Calculating cortex-to-ribbon mapping...')
-            surf2rib = neuropythy.freesurfer.cortex_to_ribbon_map(sub, hemi=None)
+            surf2rib = cortex_to_ribbon_map(sub, hemi=None)
             for dim in ['angle', 'eccen', 'label']:
                 flnm = os.path.join(sub.directory, 'mri', opts[dim + '_tag'] + '.mgz')
                 if ow or not os.path.exist(flnm):
+                    note('    - Generating volume file: %s' % flnm)
+                    vol = cortex_to_ribbon(sub, (res['LH'], res['RH']),
+                                           map=surf2rib,
+                                           dtype=(np.int32 if dim == 'label' else np.float32))
                     note('    - Exporting volume file: %s' % flnm)
-                    surf_data = (res['LH'], res['RH'])
-                    vol = neuropythy.freesurfer.cortex_to_ribbon(sub, surf_data, map=surf2rib)
                     vol.to_filename(flnm)
                 else:
                     note('    - Skipping volume file: %s (file exists)' % flnm)
