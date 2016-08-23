@@ -457,29 +457,29 @@ def register_retinotopy_initialize(hemi, model,
     model_chirality = model.projection_data['chirality']
     if model_reg == 'fsaverage_sym':
         useHemi = hemi if hemi.chirality == 'LH' else hemi.subject.RHX
-        sub_hemi_name = 'LH' if hemi.chirality == 'LH' else 'RHX'
     else:
         if model_chiraliry is not None and hemi.chirality != model_chiraliry:
             raise ValueError('Inverse-chirality hemisphere cannot be registered to model')
         useHemi = hemi
-        sub_hemi_name = hemi.name
     ## make sure we are registered to the model space
     if model_reg not in useHemi.topology.registrations:
         raise ValueError('Hemisphere is not registered to the model registration: %s' % model_reg)
     data['sub_hemi'] = useHemi
-    ## note the position of the coordinates in the 
+    ## note the subject's registration to the model's registration:
     subreg = useHemi.topology.registrations[model_reg]
     ## if there's a prior, we should enforce it now:
     if prior is not None:
         if hemi.subject.id == model_reg:
             prior_subject = useHemi.subject
-            prior_hemi = None
+            prior_hemi = useHemi
         else:
             prior_subject = freesurfer_subject(model_reg)
-            prior_hemi = prior_subject.__getattr__(sub_hemi_name)
+            prior_hemi = prior_subject.__getattr__(useHemi.chirality)
         if prior not in prior_hemi.topology.registrations:
             raise ValueError('Prior registration %s not found in prior subject %s' \
                              % (prior, model_reg))
+        if model_reg not in prior_hemi.topology.registrations:
+            raise ValueError('Model registratio not found in prior subject: %s' % prior_subject)
         prior_reg0 = prior_hemi.topology.registrations[model_reg]
         prior_reg1 = prior_hemi.topology.registrations[prior]
         addr = prior_reg0.address(subreg.coordinates)
@@ -620,21 +620,24 @@ def register_retinotopy(hemi,
                                           max_predicted_eccen=max_predicted_eccen,
                                           prior=prior, resample=resample)
     # Step 2: run the mesh registration
-    r = mesh_register(
-        data['map'],
-        [['edge', 'harmonic', 'scale', edge_scale],
-         ['angle', 'infinite-well', 'scale', angle_scale],
-         ['perimeter', 'harmonic'],
-         retinotopy_anchors(data['map'], retinotopy_model,
-                            polar_angle='polar_angle',
-                            eccentricity='eccentricity',
-                            weight='weight',
-                            weight_cutoff=weight_cutoff,
-                            scale=functional_scale,
-                            select=select,
-                            **({} if sigma is Ellipsis else {'sigma':sigma}))],
-        max_steps=max_steps,
-        max_step_size=max_step_size)
+    if max_steps == 0:
+        r = data['map'].coordinates
+    else:
+        r = mesh_register(
+            data['map'],
+            [['edge', 'harmonic', 'scale', edge_scale],
+             ['angle', 'infinite-well', 'scale', angle_scale],
+             ['perimeter', 'harmonic'],
+             retinotopy_anchors(data['map'], retinotopy_model,
+                                polar_angle='polar_angle',
+                                eccentricity='eccentricity',
+                                weight='weight',
+                                weight_cutoff=weight_cutoff,
+                                scale=functional_scale,
+                                select=select,
+                                **({} if sigma is Ellipsis else {'sigma':sigma}))],
+            max_steps=max_steps,
+            max_step_size=max_step_size)
     # Step 3: run the post-processing function
     postproc = data['postprocess_function']
     ppr = postproc(r)
@@ -899,13 +902,15 @@ def register_retinotopy_command(args):
                         note('    - Skipping prediction file: %s (file exists)' % flnm)
         # Do the volume exports here
         if not opts['no_vol_export']:
+            note('   Processing volume data...')
             note('    - Calculating cortex-to-ribbon mapping...')
             surf2rib = cortex_to_ribbon_map(sub, hemi=None)
             for dim in ['angle', 'eccen', 'label']:
                 flnm = os.path.join(sub.directory, 'mri', opts[dim + '_tag'] + '.mgz')
                 if ow or not os.path.exist(flnm):
                     note('    - Generating volume file: %s' % flnm)
-                    vol = cortex_to_ribbon(sub, (res['LH'], res['RH']),
+                    vol = cortex_to_ribbon(sub,
+                                           (res['LH'].prop(tag_key(dim)), res['RH'].prop(tag_key(dim))),
                                            map=surf2rib,
                                            dtype=(np.int32 if dim == 'label' else np.float32))
                     note('    - Exporting volume file: %s' % flnm)

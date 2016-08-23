@@ -874,17 +874,23 @@ def add_subject_path(path, index=0):
     precedence of this path when searching for new subject; the default, 0, always inserts the path
     at the front of the list; a value of k indicates that the new list should have the new path at
     index k.
+    The path may contain :'s, in which case the individual directories are separated and added.
     If the given path is not a directory or the path could not be inserted, yields False;
-    otherwise, yields True.
+    otherwise, yields True. If the string contains a : and multiple paths, then True is yielded
+    only if all paths were successfully inserted.
     See also subject_paths.
     '''
-    if not os.path.isdir(path): return False
-    try:
-        s = _subjects_dirs.insert(index, path)
-        _subjects_dirs = s
-        return True
-    except:
-        return False
+    paths = [p for p in path.split(':') if len(p) > 0]
+    if len(paths) > 1:
+        return all(add_subject_path(p, index=index) for p in reversed(paths))
+    else:
+        if not os.path.isdir(path): return False
+        try:
+            s = _subjects_dirs.insert(index, path)
+            _subjects_dirs = s
+            return True
+        except:
+            return False
     
 def find_subject_path(sub):
     '''
@@ -1271,19 +1277,18 @@ def cortex_to_ribbon_map(sub, hemi=None, method='lines', options={}):
 
 def _cortex_to_ribbon_map_into_volume_array(vol, m, dat):
     dat = np.array(dat)
-    for k,v in m.items():
+    for k,v in m.iteritems():
         vol[k[0]-1, k[1]-1, k[2]-1] = np.dot(dat[v[0]], v[1])
     return vol
 
-def cortex_to_ribbon(sub, data, map=None, k=12, distance=6, hemi=None, sigma=0.35355, 
-                     default=0, dtype=np.float32):
+def cortex_to_ribbon(sub, data, map=None, hemi=None, method='lines', options={}, dtype=np.float32):
     '''cortex_to_ribbon(sub, data, args...) applies the cortical-surface to ribbon transformation
          that is represented by the result of cortex_to_ribbon_map(sub, args...). The option 'map'
          may also be given if the cortex_to_ribbon_map calls have already been made, and the option
          'default' may be used to specify what value non-ribbon voxels will take.'''
     hemi = hemi.lower() if isinstance(hemi, basestring) else hemi
     if map is None:
-        map = cortex_to_ribbon_map(sub, k=k, distance=distance, hemi=hemi, sigma=sigma)
+        map = cortex_to_ribbon_map(sub, hemi=hemi, method=method, options=options)
     if hemi is None:
         if not isinstance(map, tuple) or len(map) != 2:
             raise ValueError('map must match hemi argument')
