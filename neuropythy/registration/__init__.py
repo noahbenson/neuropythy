@@ -457,10 +457,12 @@ def register_retinotopy_initialize(hemi, model,
     model_chirality = model.projection_data['chirality']
     if model_reg == 'fsaverage_sym':
         useHemi = hemi if hemi.chirality == 'LH' else hemi.subject.RHX
+        sub_hemi_name = 'LH' if hemi.chirality == 'LH' else 'RHX'
     else:
         if model_chiraliry is not None and hemi.chirality != model_chiraliry:
             raise ValueError('Inverse-chirality hemisphere cannot be registered to model')
         useHemi = hemi
+        sub_hemi_name = hemi.name
     ## make sure we are registered to the model space
     if model_reg not in useHemi.topology.registrations:
         raise ValueError('Hemisphere is not registered to the model registration: %s' % model_reg)
@@ -474,7 +476,7 @@ def register_retinotopy_initialize(hemi, model,
             prior_hemi = None
         else:
             prior_subject = freesurfer_subject(model_reg)
-            prior_hemi = prior_subject.__getattr__(model_chirality)
+            prior_hemi = prior_subject.__getattr__(sub_hemi_name)
         if prior not in prior_hemi.topology.registrations:
             raise ValueError('Prior registration %s not found in prior subject %s' \
                              % (prior, model_reg))
@@ -541,17 +543,17 @@ def register_retinotopy_initialize(hemi, model,
         rmesh = useHemi.registration_mesh(d['registration'])
         pred = np.asarray(
             [(p,e,l) if rl > 0 and rl < 4 and e <= max_predicted_eccen else (0.0, 0.0, 0)
-             for (p,e,l) in zip(*model.cortex_to_angle(d['registered_mesh']))
+             for (p,e,l) in zip(*model.cortex_to_angle(rmesh))
              for rl in [round(l)]]).T
-        pred = (np.asarray(p[0], dtype=np.float32),
-                np.asarray(p[1], dtype=np.float32),
-                np.asarray(p[2], dtype=np.int32))
+        pred = (np.asarray(pred[0], dtype=np.float32),
+                np.asarray(pred[1], dtype=np.float32),
+                np.asarray(pred[2], dtype=np.int32))
         for i in (0,1,2): pred[i].flags.writeable = False
         pred = make_dict({p:v
-                          for (p,v) in zip(pred, ['polar_angle', 'eccentricity', 'V123_label'])})
+                          for (p,v) in zip(['polar_angle', 'eccentricity', 'V123_label'], pred)})
         d['prediction'] = pred
         rmesh.prop(pred)
-        d['registration_mesh'] = rmesh
+        d['registered_mesh'] = rmesh
         return make_dict(d)
     data['postprocess_function'] = __postproc_fn
     return data
@@ -872,11 +874,13 @@ def register_retinotopy_command(args):
                                          max_step_size=opts['max_step_size'])
             # Perform the hemi-specific outputs now:
             if not opts['no_reg_export']:
-                regflnm = os.path.join(sub.directory, 'surf',
-                                       '.'.join([h.lower(), 'retinotopy', 'sphere', 'reg']))
+                regflnm = (os.path.join(sub.directory, 'surf',
+                                        '.'.join([h.lower(), 'retinotopy', 'sphere', 'reg']))
+                           if h == 'LH' else
+                           os.path.join(sub.directory, 'xhemi', 'surf', 'lh.retinotopy.sphere.reg'))
                 if ow or not os.path.exist(regflnm):
                     note('    - Exporting registration file: %s' % regflnm)
-                    fsio.write_geometry(reflnm, res[h].coordinates.T, res[h].faces.T,
+                    fsio.write_geometry(regflnm, res[h].coordinates.T, res[h].faces.T,
                                         'Created by neuropythy (github.com/noahbenson/neuropythy)')
                 else:
                     note('    - Skipping registration file: %s (file exists)' % regflnm)
@@ -886,8 +890,10 @@ def register_retinotopy_command(args):
                                         '.'.join([h.lower(), opts[dim + '_tag'], 'mgz']))
                     if ow or not os.path.exist(flnm):
                         note('    - Exporting prediction file: %s' % flnm)
-                        img = MGHImage(res[h].prop(tag_key[dim]), np.eye(4))
-                        img.header.set_data_type(np.int32 if dim == 'label' else np.float32)
+                        img = fsmgh.MGHImage(
+                            np.asarray([[res[h].prop(tag_key[dim])]]),
+                            np.eye(4))
+                        img.header.set_data_dtype(np.int32 if dim == 'label' else np.float32)
                         img.to_filename(flnm)
                     else:
                         note('    - Skipping prediction file: %s (file exists)' % flnm)
