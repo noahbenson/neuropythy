@@ -12,6 +12,7 @@ setup(
     url='https://github.com/noahbenson/neuropythy/',
     license='GPLv3',
     packages=['neuropythy',
+              'neuropythy.util',
               'neuropythy.java',
               'neuropythy.geometry', 
               'neuropythy.immutable',
