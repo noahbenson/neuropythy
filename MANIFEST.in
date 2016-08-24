@@ -1,0 +1,3 @@
+include neuropythy/lib/nben/target/nben-standalone.jar
+include neuropythy/lib/models/*.ffm
+include neuropythy/lib/models/*.ffm.gz
