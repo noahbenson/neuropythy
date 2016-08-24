@@ -11,7 +11,8 @@ from math import pi
 from numbers import Number
 from neuropythy.cortex import CorticalMesh, empirical_retinotopy_data
 from neuropythy.freesurfer import (freesurfer_subject, add_subject_path,
-                                   cortex_to_ribbon, cortex_to_ribbon_map)
+                                   cortex_to_ribbon, cortex_to_ribbon_map,
+                                   Hemisphere)
 from neuropythy.topology import Registration
 from neuropythy.java import (java_link, serialize_numpy,
                              to_java_doubles, to_java_ints, to_java_array)
@@ -204,8 +205,7 @@ def mesh_register(mesh, field, max_steps=2000, max_step_size=0.05, max_pe_change
     return np.asarray([[x for x in row] for row in result])
 
 __loaded_V123_models = {}
-def V123_model(name='standard',
-               projection_parameters={'registration':'fsaverage_sym', 'chirality':'LH'}):
+def V123_model(name='standard', radius=pi/3.0, sphere_radius=100.0):
     '''
     V123_model(name) yields a model of retinotopy in V1-V3 with the given name; if not provided,
     this name 'standard' is used (currently, the only possible option). The model itself is a set of
@@ -228,23 +228,34 @@ def V123_model(name='standard',
         raise ValueError('Given name does not correspond to a valid flat mesh model file')
     n = int(lines[1].split(':')[1].strip())
     m = int(lines[2].split(':')[1].strip())
+    reg = lines[3].split(':')[1].strip()
+    hemi = lines[4].split(':')[1].strip().upper()
+    center = map(float, lines[5].split(':')[1].strip().split(','))
+    onxaxis = map(float, lines[6].split(':')[1].strip().split(','))
+    method = lines[7].split(':')[1].strip().lower()
     tx = np.asarray(
         [map(float, row.split(','))
-         for row in lines[3].split(':')[1].strip(' \t[]').split(';')])
+         for row in lines[8].split(':')[1].strip(' \t[]').split(';')])
     crds = np.asarray([map(float, left.split(','))
-                       for row in lines[4:(n+4)]
+                       for row in lines[9:(n+9)]
                        for (left,right) in [row.split(' :: ')]])
     vals = np.asarray([map(float, right.split(','))
-                       for row in lines[4:(n+4)]
+                       for row in lines[9:(n+9)]
                        for (left,right) in [row.split(' :: ')]])
     tris = -1 + np.asarray(
         [map(int, row.split(','))
-         for row in lines[(n+4):(n+m+4)]])
+         for row in lines[(n+9):(n+m+9)]])
     mdl = RegisteredRetinotopyModel(
         RetinotopyMeshModel(tris, crds,
                             90 - 180/pi*vals[:,0], vals[:,1], vals[:,2],
                             transform=tx),
-        **projection_parameters)
+        registration=reg,
+        center=center,
+        center_right=onxaxis,
+        method=method,
+        radius=radius,
+        sphere_radius=sphere_radius,
+        chirality=hemi)
     __loaded_V123_models[name] = mdl
     return mdl
 
@@ -910,7 +921,8 @@ def register_retinotopy_command(args):
                 if ow or not os.path.exist(flnm):
                     note('    - Generating volume file: %s' % flnm)
                     vol = cortex_to_ribbon(sub,
-                                           (res['LH'].prop(tag_key(dim)), res['RH'].prop(tag_key(dim))),
+                                           (res['LH'].prop(tag_key[dim]),
+                                            res['RH'].prop(tag_key[dim])),
                                            map=surf2rib,
                                            dtype=(np.int32 if dim == 'label' else np.float32))
                     note('    - Exporting volume file: %s' % flnm)
