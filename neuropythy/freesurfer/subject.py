@@ -707,6 +707,17 @@ class Hemisphere:
         else:
           center_sc = [np.arctan2(center[0], center[1]),
                        np.arcsin(center[2] / np.sqrt(sum(center ** 2)))]
+        center_right = [0,1,0] if 'center_right' not in params else params['center_right']
+        if not hasattr(center_right, '__iter__') or len(center_right) < 2 or len(center_right) > 3:
+            raise ValueError('center_right argument must be explicit and must be a 2 or 3-length' \
+                             + ' vector')
+        center_right = np.asarray(center_right)
+        if len(center_right) == 2:
+            center_right_sc = center_right
+            cos_phi = np.cos(center_right[1])
+            center_right = np.asarray([cos_phi * np.cos(center_right[0]),
+                                       cos_phi * np.sin(center_right[0]),
+                                       np.sin(center[1])])
         radius = None if 'radius' not in params else params['radius']
         if not isinstance(radius, Number):
             raise ValueError('radius option must be explicitly given and must be a number')
@@ -731,6 +742,7 @@ class Hemisphere:
             elif chirality != 'LH' and chirality != 'RH':
                 raise ValueError('Chiraliry must be one of LH, RH, L, R, Left, Right, or None')
         params['center'] = center
+        params['center_right'] = center_right
         params['center_spherical'] = center_sc
         params['radius'] = radius
         params['sphere_radius'] = sphere_radius
@@ -739,7 +751,10 @@ class Hemisphere:
         params['registration'] = registration
         # Setup Projection Data:
         FR = geo.alignment_matrix_3D(center, [1.0, 0.0, 0.0])
-        IR = geo.alignment_matrix_3D([1.0, 0.0, 0.0], center)
+        cr = np.dot(FR, center_right)
+        rot_ang = math.pi/2 -  np.arctan2(cr[1], -cr[2])
+        FR = np.dot(geo.rotation_matrix_3D([1.0,0.0,0.0], rot_ang), FR)
+        IR = numpy.linalg.inv(FR)
         params['forward_affine_transform'] = FR
         params['inverse_affine_transform'] = IR
         fwdprojfn = Hemisphere.__projection_methods[method]
@@ -1281,7 +1296,8 @@ def _cortex_to_ribbon_map_into_volume_array(vol, m, dat):
         vol[k[0]-1, k[1]-1, k[2]-1] = np.dot(dat[v[0]], v[1])
     return vol
 
-def cortex_to_ribbon(sub, data, map=None, hemi=None, method='lines', options={}, dtype=np.float32):
+def cortex_to_ribbon(sub, data, map=None, hemi=None, method='lines', options={},
+                     default=0, dtype=np.float32):
     '''cortex_to_ribbon(sub, data, args...) applies the cortical-surface to ribbon transformation
          that is represented by the result of cortex_to_ribbon_map(sub, args...). The option 'map'
          may also be given if the cortex_to_ribbon_map calls have already been made, and the option
