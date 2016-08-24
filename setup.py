@@ -20,7 +20,7 @@ setup(
               'neuropythy.freesurfer',
               'neuropythy.cortex',
               'neuropythy.registration',
-              'neuropythy.main'],
+              'neuropythy.command'],
     package_data={'': ['LICENSE.txt',
                        'lib/nben/target/nben-standalone.jar',
                        'lib/models/standard.ffm.gz']},
