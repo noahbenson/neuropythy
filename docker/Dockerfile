@@ -27,9 +27,10 @@ RUN ln -s /opt/neuropythy/surf2ribbon /usr/bin/surf2ribbon
 RUN ln -s /opt/neuropythy/surf2surf /usr/bin/surf2surf
 
 # Make sure we have the run.sh script ready:
-COPY contents/run.sh /run.sh
+COPY contents/main.sh /main.sh
+RUN chmod 755 /main.sh
 # And mark it as the entrypoint
-ENTRYPOINT ["/run.sh"]
+ENTRYPOINT ["/main.sh"]
 
 
 
