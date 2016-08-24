@@ -10,7 +10,7 @@ from .register_retinotopy import register_retinotopy_command
 
 # The commands that can be run by main:
 _commands = pysistence.make_dict(
-    register-retinotopy=register_retinotopy_command)
+    register_retinotopy=register_retinotopy_command)
 
 def main(argv):
     if len(argv) < 1:
