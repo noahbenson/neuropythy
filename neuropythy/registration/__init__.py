@@ -204,6 +204,10 @@ def mesh_register(mesh, field, max_steps=2000, max_step_size=0.05, max_pe_change
     return np.asarray([[x for x in row] for row in result])
 
 __loaded_V123_models = {}
+_V123_model_paths = [
+    os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        'lib', 'models')]
 def V123_model(name='standard', radius=pi/3.0, sphere_radius=100.0):
     '''
     V123_model(name) yields a model of retinotopy in V1-V3 with the given name; if not provided,
@@ -211,15 +215,32 @@ def V123_model(name='standard', radius=pi/3.0, sphere_radius=100.0):
     meshes with values at the vertices that define the polar angle and eccentricity. These meshes
     are loaded from files in the neuropythy lib directory.
     '''
-    if name in __loaded_V123_models:
-        return __loaded_V123_models[name]
-    fname = os.path.join(os.path.dirname(__file__), '..', '..', 'lib', 'models', name + '.fmm')
-    gz = False
-    if not os.path.isfile(fname):
-        fname = fname + '.gz'
-        gz = True
-        if not os.path.isfile(fname):
-            raise ValueError('Mesh model named \'%s\' not found' % name)
+    if os.path.isfile(name):
+        fname = name
+        name = None
+    else:
+        if len(name) > 4 and name[-4:] == '.fmm':
+            fname = name
+            name = name[:-4]
+        elif len(name) > 7 and name[-7:] == '.fmm.gz':
+            fname = name
+            name = name[:-7]
+        else:
+            fname = name + '.fmm'
+        if name in __loaded_V123_models:
+            return __loaded_V123_models[name]
+        # Find it in the search paths...
+        fname = next(
+            (os.path.join(path, nm0)
+             for path in _V123_model_paths
+             for nm0 in os.listdir(path)
+             for nm in [nm0[:-4] if len(nm0) > 4 and nm0[-4:] == '.fmm'    else \
+                        nm0[:-7] if len(nm0) > 7 and nm0[-7:] == '.fmm.gz' else \
+                        None]
+             if nm is not None and nm == name),
+            None)
+        if fname is None: raise ValueError('Cannot find an FFM file with the name %s' % name)
+    gz = True if fname[-3:] == '.gz' else False
     lines = None
     with (gzip.open(fname, 'rb') if gz else open(fname, 'r')) as f:
         lines = f.read().split('\n')
