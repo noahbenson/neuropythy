@@ -23,7 +23,7 @@ setup(
               'neuropythy.commands'],
     package_data={'': ['LICENSE.txt',
                        'neuropythy/lib/nben/target/nben-standalone.jar',
-                       'neuropythy/lib/models/standard.ffm.gz']},
+                       'neuropythy/lib/models/standard.fmm.gz']},
     include_package_data=True,
     install_requires=['numpy>=1.2',
                       'scipy>=0.7',
