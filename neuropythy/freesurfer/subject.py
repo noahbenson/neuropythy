@@ -9,7 +9,7 @@ import scipy as sp
 import scipy.spatial as space
 import nibabel.freesurfer.io as fsio
 from   nibabel.freesurfer.mghformat import load as mghload, MGHImage
-import os, math
+import os, math, copy
 import itertools
 import pysistence
 from   numbers import Number
@@ -865,13 +865,7 @@ class Hemisphere:
         return proj['forward_function'](self)
 
 # Setup the subject directory:
-_subjects_dirs = [
-    path
-    for path in [
-        os.environ['SUBJECTS_DIR'] if 'SUBJECTS_DIR' in os.environ else None,
-        os.path.join(os.environ['FREESURFER_HOME'], 'subjects') \
-          if 'FREESURFER_HOME' in os.environ else None]
-    if path is not None and os.path.isdir(path)]
+_subjects_dirs = []
 def subject_paths():
     '''
     subject_paths() yields a list of paths to Freesurfer subject directories in which subjects are
@@ -880,7 +874,7 @@ def subject_paths():
     If you must edit these paths, it is recommended to use add_subject_path, but the _subjects_dirs
     variable may be set as well.
     '''
-    return _subjects_dirs.copy()
+    return copy.copy(_subjects_dirs)
 
 def add_subject_path(path, index=0):
     '''
@@ -897,15 +891,21 @@ def add_subject_path(path, index=0):
     '''
     paths = [p for p in path.split(':') if len(p) > 0]
     if len(paths) > 1:
-        return all(add_subject_path(p, index=index) for p in reversed(paths))
+        tests = [add_subject_path(p, index=index) for p in reversed(paths)]
+        return all(t for t in tests)
     else:
         if not os.path.isdir(path): return False
+        if path in _subjects_dirs:   return True
         try:
-            s = _subjects_dirs.insert(index, path)
-            _subjects_dirs = s
+            _subjects_dirs.insert(index, path)
             return True
         except:
             return False
+# add the SUBJECTS_DIR environment variable...
+if 'FREESURFER_HOME' in os.environ:
+    add_subject_path(os.path.join(os.environ['FREESURFER_HOME'], 'subjects'))
+if 'SUBJECTS_DIR' in os.environ:
+    add_subject_path(os.environ['SUBJECTS_DIR'])
     
 def find_subject_path(sub):
     '''
