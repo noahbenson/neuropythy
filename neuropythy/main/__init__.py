@@ -7,12 +7,10 @@ import os, sys, math
 import pysistence
 
 from .register_retinotopy import register_retinotopy_command
-from .atlas               import atlas_command
 
 # The commands that can be run by main:
 _commands = pysistence.make_dict(
-    register-retinotopy=egister_retinotopy_command,
-    atlas=atlas_command)
+    register-retinotopy=register_retinotopy_command)
 
 def main(argv):
     if len(argv) < 1:
