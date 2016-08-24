@@ -17,4 +17,4 @@ SUBJECTS_DIR=""
 
 # Okay, now invoke neuropythy
 export SUBJECTS_DIR
-exec python -m neuropythy.main "$@"
+exec python -m neuropythy.__main__ "$@"
