@@ -149,6 +149,9 @@ def cartesian_to_barycentric_3D(tri, xy):
         raise ValueError('coordinate matrix did not have a dimension of size 3')
     if tri.shape[2] != xy.shape[1]:
         raise ValueError('number of triangles and coordinates must match')
+    # The algorithm here is borrowed from this stack-exchange post:
+    # http://gamedev.stackexchange.com/questions/23743
+    # in which it is attributed to Christer Ericson's book Real-Time Collision Detection.
     v0 = tri[1] - tri[0]
     v1 = tri[2] - tri[0]
     v2 = xy - tri[0]
@@ -161,9 +164,9 @@ def cartesian_to_barycentric_3D(tri, xy):
     zero = np.isclose(den, 0)
     unit = 1 - zero
     den += zero
-    return np.asarray(
-        (unit * (d11 * d20 - d01 * d21) / den,
-         unit * (d00 * d21 - d01 * d20) / den))
+    l2 = unit * (d11 * d20 - d01 * d21) / den
+    l3 = unit * (d00 * d21 - d01 * d20) / den
+    return np.asarray([1.0 - l2 - l3, l2])
     
 def cartesian_to_barycentric_2D(tri, xy):
     '''

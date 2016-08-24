@@ -27,6 +27,22 @@ class Mesh(Immutable):
         triangles = np.asarray(triangles)
         triangles = triangles if triangles.shape[0] < triangles.shape[1] else triangles.T
         return (coords[:,triangles[0]] + coords[:,triangles[1]] + coords[:,triangles[2]]).T / 3
+
+    @staticmethod
+    def __calculate_triangle_normals(triangles, coords):
+        coords = np.asarray(coords)
+        coords = coords if coords.shape[0] < coords.shape[1] else coords.T
+        triangles = np.asarray(triangles)
+        triangles = triangles if triangles.shape[0] < triangles.shape[1] else triangles.T
+        tmp = coords[:, triangles[0]]
+        u01 = coords[:, triangles[1]] - tmp
+        u02 = coords[:, triangles[2]] - tmp
+        xp = np.cross(u01, u02, axisa=0, axisb=0)
+        xpnorms = np.sqrt(np.sum(xp**2, axis=1))
+        zero = np.isclose(xpnorms, 0)
+        zero_idcs = np.where(zero)
+        xp[zeros_idcs,:] = 0
+        return xp / (xpnorms + zero)
         
     
     def __init__(self, triangles, coordinates):
@@ -38,6 +54,8 @@ class Mesh(Immutable):
             {'coordinates': coordinates.T, 'triangles': triangles.T},
             {'triangle_centers': (('triangles','coordinates'),
                                   lambda t,x: Mesh.__calculate_triangle_centers(t, x)),
+             'triangle_normals': (('triangle','coordinates'),
+                                  lambda t,x: Mesh.__calculate_triangle_normals(t, x)),
              'triangle_hash':    (('triangle_centers',), lambda x: space.cKDTree(x)),
              'vertex_hash':      (('coordinates',), lambda x: space.cKDTree(x))})
     def __repr__(self):
@@ -109,7 +127,7 @@ class Mesh(Immutable):
         the point(s) pt and x; and k, the face index/indices of the triangles containing the 
         point(s) in x.
         Note that this function and those of this class are made for spherical meshes and are not
-        intended to work with other kinds of complex topologies; though they should work 
+        intended to work with other kinds of complex topologies; though they might work 
         heuristically.
         '''
         pt = np.asarray(pt)
@@ -118,8 +136,7 @@ class Mesh(Immutable):
             return (r[0][0], r[1][0], r[2][0])
         pt = pt if pt.shape[1] == 3 else pt.T
         (d, near) = self.triangle_hash.query(pt, k=k)
-        ids = [tri_no if tri_no is not None else \
-               self._find_triangle_search(x, k=(2*k), searched=set(near_i))
+        ids = [tri_no if tri_no is not None else self._find_triangle_search(x, 2*k, set(near_i))
                for (x, near_i) in zip(pt, near)
                for tri_no in [next((k for k in near_i if self._point_in_triangle(k, x)), None)]]
         pips = [self.point_in_plane(i, p) if i is not None else (0, None)
