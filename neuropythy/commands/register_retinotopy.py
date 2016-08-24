@@ -50,7 +50,7 @@ _register_retinotopy_help = \
       subject's 3D volume. Note that the volumes are oriented like Freesurfer's
       mri/brain.mgz file; if you want to convert this to the orientation of your
       original anatomical scan, use mri_convert:
-       > mri_convert -rl mri/rawavg.mgz mri/angle_predict.mgz \
+       > mri_convert -rl mri/rawavg.mgz mri/angle_predict.mgz \\
                      mri/scanner.angle_predict.mgz
    The following options are accepted:
     * --eccen=|-e<file>
