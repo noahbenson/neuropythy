@@ -24,6 +24,7 @@ setup(
     package_data={'': ['LICENSE.txt',
                        'neuropythy/lib/nben/target/nben-standalone.jar',
                        'neuropythy/lib/models/standard.ffm.gz']},
+    include_package_data=True,
     install_requires=['numpy>=1.2',
                       'scipy>=0.7',
                       'nibabel>=2.0',
