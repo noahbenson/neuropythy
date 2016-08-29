@@ -2,8 +2,7 @@
 
 '''Tools for analyzing and registering cortical meshes.'''
 
-from cortex import (cortex_to_mrvolume, retinotopy_data,
-                    empirical_retinotopy_data, predicted_retinotopy_data)
+from cortex import (retinotopy_data, empirical_retinotopy_data, predicted_retinotopy_data)
 from freesurfer import (freesurfer_subject,
                         Hemisphere as FreeSurferHemisphere,
                         Subject as FreeSurferSubject)
