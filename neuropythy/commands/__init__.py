@@ -6,8 +6,10 @@
 import os, sys, math
 import pysistence
 
-from .register_retinotopy import register_retinotopy_command
+from .register_retinotopy import (register_retinotopy_command, register_retinotopy_help)
+from .benson14_retinotopy import (benson14_retinotopy_command, benson14_retinotopy_help)
 
 # The commands that can be run by main:
 commands = pysistence.make_dict(
-    register_retinotopy=register_retinotopy_command)
+    register_retinotopy=register_retinotopy_command,
+    benson14_retinotopy=benson14_retinotopy_command)

@@ -914,8 +914,8 @@ def find_subject_path(sub):
     add_subject_path.
     If no subject is found, then None is returned.
     '''
-    looks_like_sub = lambda d: all(os.path.isdir(os.path.join(d, sfx))
-                                   for sfx in ['', 'mri', 'surf', 'label'])
+    looks_like_sub = lambda d: all(os.path.isdir(os.path.join(d, sfx) if sfx is not None else d)
+                                   for sfx in [None, 'mri', 'surf', 'label'])
     # if it's a full/relative path already, use it:
     if looks_like_sub(sub): return sub
     for sdir in _subjects_dirs:

@@ -12,7 +12,7 @@ from numbers import Number
 from neuropythy.cortex import CorticalMesh, empirical_retinotopy_data
 from neuropythy.freesurfer import (freesurfer_subject, add_subject_path,
                                    cortex_to_ribbon, cortex_to_ribbon_map,
-                                   Hemisphere)
+                                   Hemisphere, subject_paths)
 from neuropythy.topology import Registration
 from neuropythy.java import (java_link, serialize_numpy,
                              to_java_doubles, to_java_ints, to_java_array)
@@ -674,6 +674,51 @@ def register_retinotopy(hemi,
     ppr = postproc(r)
     return ppr if return_meta_data else ppr['registered_mesh']
 
+__benson14_templates = None
+def benson14_retinotopy(sub):
+    '''
+    benson14_retinotopy(subject) yields a pair of dictionaries each with three keys: polar_angle,
+    eccentricity, and v123roi; each of these keys maps to a numpy array with one entry per vertex.
+    The first element of the yielded pair is the left hemisphere map and the second is the right
+    hemisphere map. The values are obtained by resampling the Benson et al. 2014 anatomically
+    defined template of retinotopy to the given subject.
+    Note that the subject must have been registered to the fsaverage_sym subject prior to calling
+    this function; this requires using the surfreg command (after the xhemireg command for the RH).
+    Additionally, you must have the fsaverage_sym template files in your fsaverage_syn/surf
+    directory; these files are sym.template_angle.mgz, sym.template_eccen.mgz, and 
+    sym.template_areas.mgz.
+    '''
+    global __benson14_templates
+    if __benson14_templates is None:
+        # Find a sym template that has the right data:
+        sym_path = next((os.path.join(path0, 'fsaverage_sym')
+                         for path0 in subject_paths()
+                         for path in [os.path.join(path0, 'fsaverage_sym', 'surf')]
+                         if os.path.isfile(os.path.join(path, 'sym.template_angle.mgz'))     \
+                            and os.path.isfile(os.path.join(path, 'sym.template_eccen.mgz')) \
+                            and os.path.isfile(os.path.join(path, 'sym.template_areas.mgz'))),
+                        None)
+        if sym_path is None:
+            raise ValueError('No fsaverage_sym subject found with surf/sym.template_*.mgz files!')
+        sym = freesurfer_subject(sym_path).LH
+        tmpl_path = os.path.join(sym_path, 'surf', 'sym.template_')
+        # We need to load in the template data
+        __benson14_templates = {
+            'angle':  fsmgh.load(tmpl_path + 'angle.mgz').get_data().flatten(),
+            'eccen': fsmgh.load(tmpl_path + 'eccen.mgz').get_data().flatten(),
+            'v123r':      fsmgh.load(tmpl_path + 'areas.mgz').get_data().flatten()}
+    # Okay, we just need to interpolate over to this subject
+    sym = freesurfer_subject('fsaverage_sym').LH
+    return (
+        {'polar_angle':  sub.LH.interpolate(sym, __benson14_templates['angle'], apply=False),
+         'eccentricity': sub.LH.interpolate(sym, __benson14_templates['eccen'], apply=False),
+         'v123roi':      sub.LH.interpolate(sym, __benson14_templates['v123r'], apply=False,
+                                            method='nearest')},
+        {'polar_angle':  sub.RHX.interpolate(sym, __benson14_templates['angle'], apply=False),
+         'eccentricity': sub.RHX.interpolate(sym, __benson14_templates['eccen'], apply=False),
+         'v123roi':      sub.RHX.interpolate(sym, __benson14_templates['v123r'], apply=False,
+                                             method='nearest')})
+        
 # The topology and registration stuff is below:
 class JavaTopology:
     '''

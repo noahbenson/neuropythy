@@ -20,16 +20,13 @@ from neuropythy.util import CommandLineParser
 from neuropythy.registration import (register_retinotopy, V123_model)
 
 
-_register_retinotopy_help = \
+register_retinotopy_help = \
    '''
    The register_retinotopy command can be used to register a subject's
    hemisphere(s) to a model of V1-V3. At least one  subject id (either a freesurfer
    subject name, if SUBJECTS_DIR is set appropriately in the environment, or a path
    to a subject directory) must be given. Registration to a retinotopic model of
-   V1-V3 is performed for both hemispheres of all of these subjects. A subject's
-   specification may optionally end with /LH, /RH, or /XH to indicate that only the
-   left, only the the right, or explicitly both hemispheres, respectively, should
-   be registered.
+   V1-V3 is performed for both hemispheres of all of these subjects.
    In each subject's freesurfer directory, a variety of output data is deposited:
     * surf/lh.retinotopy_sym.sphere.reg
       xhemi/surf/lh.retinotopy_sym.sphere.reg
@@ -188,7 +185,7 @@ def register_retinotopy_command(args):
     (args, opts) = _retinotopy_parser(args)
     # First, help?
     if opts['help']:
-        print _register_retinotopy_help
+        print register_retinotopy_help
         return 1
     # and if we are verbose, lets setup a note function
     verbose = opts['verbose']
