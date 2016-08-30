@@ -53,9 +53,12 @@ _register_retinotopy_help = \
        > mri_convert -rl mri/rawavg.mgz mri/angle_predict.mgz \\
                      mri/scanner.angle_predict.mgz
    The following options are accepted:
-    * --eccen=|-e<file>
-      --angle=|-a<file>
-      --weight=|-w<file>
+    * --eccen-lh=|-e<file>
+      --angle-lh=|-a<file>
+      --weight-lh=|-w<file>
+      --eccen-rh=|-A<file>
+      --angle-rh=|-E<file>
+      --weight-rh=|-W<file>
       Each of these arguments specifies the name of a data file to load in as a
       representation of the subject's eccentricity, polar angle, or weight; these
       should be given the names of either an mgh/mgz files whose size is 1 x 1 x n,
@@ -82,8 +85,8 @@ _register_retinotopy_help = \
       instead of the convention in which the opper vertical meridian represented as
       0 and the right horizontal meridian represented as 90 degrees or pi/4
       radians.
-    * --edge-strength=|-E<weight>
-      --angle-strength=|-A<weight>
+    * --edge-strength=|-D<weight>
+      --angle-strength=|-T<weight>
       --functional-strength=|-F<weight>
       Each of these specifies the strength of the appropriate potential-field
       component. By default, these are each 1. Note that each field is already
@@ -139,61 +142,36 @@ _register_retinotopy_help = \
    '''
 _retinotopy_parser_instructions = [
     # Flags
-    ('h', 'help',                   'help'),
-    ('v', 'verbose',                'verbose'),
-    ('r', 'angle-radians',          'angle_radians'),
-    ('R', 'eccen-radians',          'eccen_radians'),
-    ('m', 'mathematical',           'angle_math'),
-    ('x', 'no-volume-export',       'no_vol_export'),
-    ('z', 'no-surface-export',      'no_surf_export'),
-    ('X', 'no-registration-export', 'no_reg_export'),
-    ('n', 'no-overwrite',           'no_overwrite'),
+    ('h', 'help',                   'help',              False),
+    ('v', 'verbose',                'verbose',           False),
+    ('r', 'angle-radians',          'angle_radians',     False),
+    ('R', 'eccen-radians',          'eccen_radians',     False),
+    ('m', 'mathematical',           'angle_math',        False),
+    ('x', 'no-volume-export',       'no_vol_export',     False),
+    ('z', 'no-surface-export',      'no_surf_export',    False),
+    ('X', 'no-registration-export', 'no_reg_export',     False),
+    ('n', 'no-overwrite',           'no_overwrite',      False),
     # Options                       
-    ['e', 'eccen',                  'eccen_file'],
-    ['a', 'angle',                  'angle_file'],
-    ['w', 'weight',                 'weight_file'],
-    ['c', 'cutoff',                 'weight_cutoff'],
-    ['E', 'edge-strength',          'edge_strength'],
-    ['A', 'angle-strength',         'angle_strength'],
-    ['F', 'functional-strength',    'func_strength'],
-    ['s', 'max-steps',              'max_steps'],
-    ['S', 'max-step-size',          'max_step_size'],
-    ['p', 'prior',                  'prior'],
-    ['y', 'eccen-tag',              'eccen_tag'],
-    ['t', 'angle-tag',              'angle_tag'],
-    ['l', 'label-tag',              'label_tag'],
-    ['u', 'registration-name',      'registration_name'],
-    ['M', 'max-output-eccen',       'max_out_eccen'],
-    ['d', 'subjects-dir',           'subjects_dir']]
-_retinotopy_parser_defaults = dict(
-    help=False,
-    verbose=False,
-    eccen_file=None,
-    angle_file=None,
-    weight_file=None,
-    weight_cutoff='0.2',
-    angle_radians=False,
-    eccen_radians=False,
-    angle_math=False,
-    edge_strength='1',
-    angle_strength='1',
-    func_strength='1',
-    max_steps='2000',
-    max_step_size='0.05',
-    prior='retinotopy',
-    eccen_tag='eccen_predict',
-    angle_tag='angle_predict',
-    label_tag='v123roi_predict',
-    registration_name='retinotopy_sym',
-    max_out_eccen=85,
-    no_vol_export=False,
-    no_surf_export=False,
-    no_reg_export=False,
-    subjects_dir=None,
-    no_overwrite=False)
-_retinotopy_parser = CommandLineParser(
-    _retinotopy_parser_instructions,
-    defaults=_retinotopy_parser_defaults)
+    ['e', 'eccen-lh',               'eccen_lh_file',     None],
+    ['a', 'angle-lh',               'angle_lh_file',     None],
+    ['w', 'weight-lh'               'weight_lh_file',    None],
+    ['E', 'eccen-rh',               'eccen_rh_file',     None],
+    ['A', 'angle-rh',               'angle_rh_file',     None],
+    ['W', 'weight-rh'               'weight_rh_file',    None],
+    ['c', 'cutoff',                 'weight_cutoff',     '0.2'],
+    ['D', 'edge-strength',          'edge_strength',     '1'],
+    ['T', 'angle-strength',         'angle_strength',    '1'],
+    ['F', 'functional-strength',    'func_strength',     '1'],
+    ['s', 'max-steps',              'max_steps',         '2000'],
+    ['S', 'max-step-size',          'max_step_size',     '0.05'],
+    ['p', 'prior',                  'prior',             'retinotopy'],
+    ['y', 'eccen-tag',              'eccen_tag',         'eccen_predict'],
+    ['t', 'angle-tag',              'angle_tag',         'angle_predict'],
+    ['l', 'label-tag',              'label_tag',         'v123roi_predict'],
+    ['u', 'registration-name',      'registration_name', 'retinotopy_sym'],
+    ['M', 'max-output-eccen',       'max_out_eccen',     '85'],
+    ['d', 'subjects-dir',           'subjects_dir',      None]]
+_retinotopy_parser = CommandLineParser(_retinotopy_parser_instructions)
 def _guess_surf_file(fl):
     if len(fl) > 4 and (fl[-4:] == '.mgz' or fl[-4:] == '.mgh'):
         return np.squeeze(np.array(fsmgh.load(fl).dataobj))
@@ -242,9 +220,10 @@ def register_retinotopy_command(args):
             hemi = sub.__getattr__(h)
             # See if we are loading custom values...
             (ang,ecc,wgt) = (None,None,None)
-            if opts['angle_file']  is not None: ang = _guess_surf_file(opts['angle_file'])
-            if opts['eccen_file']  is not None: ecc = _guess_surf_file(opts['eccen_file'])
-            if opts['weight_file'] is not None: wgt = _guess_surf_file(opts['weight_file'])
+            suffix = '_' + h.lower() + '_file'
+            if opts['angle'  + suffix] is not None: ang = _guess_surf_file(opts['angle'  + suffix])
+            if opts['eccen'  + suffix] is not None: ecc = _guess_surf_file(opts['eccen'  + suffix])
+            if opts['weight' + suffix] is not None: wgt = _guess_surf_file(opts['weight' + suffix])
             # Do the registration
             note('    - Running Registration...')
             res[h] = register_retinotopy(hemi, V123_model(),
