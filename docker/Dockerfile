@@ -13,7 +13,7 @@ MAINTAINER Noah C. Benson <nben@nyu.edu>
 
 # Install some stuff...
 RUN apt-get -y update
-RUN apt-get -y install g++ make python2.7 python-dev python-setuptools python-igraph python-numpy python-scipy libxml2 libxml2-dev zlib1g zlib1g-dev git 
+RUN apt-get -y install g++ make python2.7 python-dev python-setuptools python-igraph python-numpy python-scipy libxml2 libxml2-dev zlib1g zlib1g-dev git default-jre
 
 # Copy the README and license over.
 COPY contents/LICENSE.txt  /LICENSE.txt
@@ -21,7 +21,7 @@ COPY contents/README.md    /README.md
 
 # Install python, and get the neuropythy library working.
 RUN cd /opt && git clone https://github.com/noahbenson/neuropythy
-RUN cd /opt/neuropythy && python setup.py install
+RUN cd /opt/neuropythy && git submodule init && git submodule update && python setup.py install
 RUN chmod 755 /opt/neuropythy/surf2ribbon
 RUN ln -s /opt/neuropythy/surf2ribbon /usr/bin/surf2ribbon
 RUN ln -s /opt/neuropythy/surf2surf /usr/bin/surf2surf
