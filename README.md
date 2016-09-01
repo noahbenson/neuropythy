@@ -28,7 +28,7 @@ python setup.py install
 
 ## Dependencies ####################################################################################
 
-The neuropythy library depends on two other libraries, all freely available:
+The neuropythy library depends on a few other libraries, all freely available:
  * [numpy](http://numpy.scipy.org/) >= 1.2
  * [scipy](http://www.scipy.org/) >= 0.7.0
  * [nibabel](https://github.com/nipy/nibabel) >= 1.2
