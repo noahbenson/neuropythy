@@ -4,7 +4,7 @@ A neuroscience library for Python, intended to complement the existing nibabel l
 ## Author ##########################################################################################
 Noah C. Benson &lt;<nben@nyu.edu>&gt;
 
-## Instalaltion ####################################################################################
+## Installation ####################################################################################
 
 The neuropythy library is available on [PyPI](https://pypi.python.org/pypi/neuropythy) and can be
 installed via pip:
