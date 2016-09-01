@@ -22,7 +22,7 @@ git clone https://github.com/noahbenson/neuropythy
 # Enter the reo directory
 cd neuropythy
 # Install the library
-python setup.pu install
+python setup.py install
 
 ```
 
@@ -33,7 +33,7 @@ The neuropythy library depends on two other libraries, all freely available:
  * [scipy](http://www.scipy.org/) >= 0.7.0
  * [nibabel](https://github.com/nipy/nibabel) >= 1.2
  * [pysistence](https://pythonhosted.org/pysistence/) >= 0.4.0
- * [python-igraph](http://igraph.org/python/) >= 0.7.1
+ * [python-igraph](http://igraph.org/python/) >= 0.7.1 (optional)
  * [py4j](https://www.py4j.org/) >= 0.9 (optional)
 
 These libaries should be installed automatically for you if you use pip or setuptools (see above),
