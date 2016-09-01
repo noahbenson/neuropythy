@@ -164,7 +164,7 @@ def V123_model(name='standard', radius=pi/3.0, sphere_radius=100.0, search_paths
         else:
             fname = name + '.fmm'
         # Find it in the search paths...
-        spaths = (search_paths if search_paths is not None else []) + __V123_model_paths
+        spaths = (search_paths if search_paths is not None else []) + _V123_model_paths
         fname = next(
             (os.path.join(path, nm0)
              for path in spaths
