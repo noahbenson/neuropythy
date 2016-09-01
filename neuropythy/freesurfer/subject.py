@@ -14,9 +14,11 @@ import itertools
 import pysistence
 from   numbers import Number
 from   pysistence import make_dict
-from   neuropythy.cortex import CorticalMesh
-from   neuropythy.topology import (Topology, Registration)
-import neuropythy.geometry as geo
+
+from   neuropythy.cortex    import (CorticalMesh)
+from   neuropythy.topology  import (Topology, Registration)
+from   neuropythy.immutable import (Immutable)
+import neuropythy.geometry  as      geo
 
 # These static functions are just handy
 def spherical_distance(pt0, pt1):
@@ -54,9 +56,12 @@ class PropertyBox(list):
         self.__dict__['data'] = dat
 
        
-class Hemisphere:
-    '''FreeSurfer.Hemisphere encapsulates the data contained in a subject's freesurfer hemisphere.
-    This includes the various surface data as well as certain volume data.'''
+class Hemisphere(Immutable):
+    '''
+    The neuropythy.freesurfer.Hemisphere class inherits from neuropythy.Immutable and encapsulates
+    the data contained in a subject's Freesurfer hemisphere. This includes the various surface data
+    found in the Freesurfer subject's directory as well as certain volume data.
+    '''
     
 
     ################################################################################################
@@ -92,11 +97,10 @@ class Hemisphere:
     __settable_members = {
         'properties': lambda h,v: Hemisphere._check_properties(h,v),
         'options':    lambda h,v: Hemisphere._check_options(h,v)}
-
     
     # This static variable and these functions explain the dependency hierarchy in cached data
-    def __make_surface(self, coords, faces, name, reg=None):
-        return CorticalMesh(
+    def _make_surface(self, coords, faces, name, reg=None):
+        mesh = CorticalMesh(
             coords,
             faces,
             subject = self.subject,
@@ -106,6 +110,8 @@ class Hemisphere:
                    'hemisphere': self,
                    'name': name,
                    'registration': reg}))
+        if self.is_persistent(): mesh = mesh.persist()
+        return mesh
     def _load_surface_data(self, name):
         path = self.subject.surface_path(name, self.name)
         if not os.path.exists(path):
@@ -122,7 +128,7 @@ class Hemisphere:
             return (None, None)
     def _load_surface(self, name, preloaded=None, reg=None):
         data = self._load_surface_data(name) if preloaded is None else preloaded
-        return self.__make_surface(data[0], data[1], name, reg=reg)
+        return self._make_surface(data[0], data[1], name, reg=reg)
     def _load_sym_surface(self, name):
         path = self.subject.surface_path(name, self.name)
         if not os.path.exists(path):
@@ -131,7 +137,7 @@ class Hemisphere:
             data = fsio.read_geometry(path)
             data[0].setflags(write=False)
             data[1].setflags(write=False)
-            return self.__make_surface(data[0], data[1], name)
+            return self._make_surface(data[0], data[1], name)
     def _load_ribbon(self):
         path = self.subject.volume_path('ribbon', self.name)
         if not os.path.exists(path):
@@ -195,103 +201,79 @@ class Hemisphere:
             return md
         else:
             return make_dict(**md)
-        
-    __lazy_members = {
-        'meta_data':            (('options',), lambda hemi,opts: Hemisphere._check_meta_data(opts)),
-        'property_names':       (('properties',), lambda hemi,props: set(props.keys())),
-        'white_surface':        ((), lambda hemi: hemi._load_surface('white')),
-        'pial_surface':         ((), lambda hemi: hemi._load_surface('pial')),
-        'inflated_surface':     ((), lambda hemi: hemi._load_surface('inflated')),
 
-        'sphere_surface_data':  ((), lambda hemi: hemi._load_surface_data('sphere')),
-        'fs_surface_data':      ((), lambda hemi: hemi._load_surface_data_safe('sphere.reg')),
-        'sym_surface_data':     ((), 
-                                 lambda hemi: (
-                                     hemi._load_surface_data_safe('fsaverage_sym.sphere.reg')
-                                     if hemi.chirality == 'LH' else
-                                     hemi.subject.RHX.sym_surface_data
-                                     if hemi.subject.RHX is not None else
-                                     (None,None))),
-        'faces':                (('sphere_surface_data',), lambda hemi,dat: dat[1].T),
-        'edge_data':            (('faces',), lambda hemi,F: Hemisphere.calculate_edge_data(F)),
-        'edges':                (('edge_data',), lambda hemi,ED: ED[0]),
-        'edge_face_index':      (('edge_data',), lambda hemi,ED: ED[1]),
-
-        'sphere_surface':       (('sphere_surface_data','topology'), 
-                                 lambda hemi,dat,topo: hemi._load_surface(
-                                     'sphere',
-                                     preloaded=dat,
-                                     reg=(topo.registrations[hemi.subject.id]
-                                          if hemi.subject.id in topo.registrations
-                                          else None))),
-        'fs_sphere_surface':    (('fs_surface_data','topology'),
-                                 lambda hemi,dat,topo: (
-                                    hemi.sphere_surface if hemi.subject.id == 'fsaverage'
-                                    else None if dat == (None,None)
-                                    else hemi._load_surface(
-                                            'sphere.reg',
-                                            preloaded=dat,
-                                            reg=(topo.registrations['fsaverage']
-                                                 if 'fsaverage' in topo.registrations
-                                                 else None)))),
-        'sym_sphere_surface':   (('sym_surface_data','topology'),
-                                 lambda hemi,dat,topo: (
-                                    hemi.sphere_surface if hemi.subject.id == 'fsaverage_sym'
-                                    else None if dat is None
-                                    else hemi._load_surface(
-                                            'fsaverage_sym.sphere.reg',
-                                            preloaded=dat,
-                                            reg=(topo.registrations['fsaverage_sym']
-                                                 if 'fsaverage_sym' in topo.registrations
-                                                 else None)))),
-
-        'vertex_count':         (('sphere_surface_data',), lambda hemi,dat: dat[0].shape[0]),
-        'midgray_surface':      (('white_surface', 'pial_surface'),
-                                 lambda hemi,W,P: hemi.__make_surface(
-                                     0.5*(W.coordinates + P.coordinates),
-                                     W.faces,
-                                     'midgray')),
-        'occipital_pole_index': (('inflated_surface',),
-                                 lambda hemi,mesh: np.argmin(mesh.coordinates[1])),
-        'ribbon':               ((), lambda hemi: hemi._load_ribbon()),
-        'chirality':            (('name',), 
-                                 lambda hemi,name: 'LH' if name == 'LH' or name == 'RHX' else 'RH'),
-        'topology':             (('sphere_surface_data', 'fs_surface_data', 'sym_surface_data'),
-                                 lambda hemi,sph,fs,sym: hemi._make_topology(
-                                     sph[1], sph[0],
-                                     fs  if fs  is None else fs[0],
-                                     sym if sym is None else sym[0]))}
-
-
-    
     # This function will clear the lazily-evaluated members when a given value is changed
     def __update_values(self, name):
         for (sname, (deps, fn)) in Hemisphere.__lazy_members.items():
             if name in deps and sname in self.__dict__:
                 del self.__dict__[sname]
 
-    # This is the most important function, given the encapsulation of this class:
-    def __setattr__(self, name, val):
-        if name in Hemisphere.__settable_members:
-            fn = Hemisphere.__settable_members[name]
-            self.__dict__[name] = fn(self, val)
-            self.__update_values(name)
-        elif name in Hemisphere.__lazy_members:
-            raise ValueError('The member %s is a lazy value and cannot be set' % name)
-        else:
-            raise ValueError('Unrecognized Hemisphere member: %s' % name)
 
-    # The getattr method makes sure that lazy members are computed when requested
-    def __getattr__(self, name):
-        if name in self.__dict__:
-            return self.__dict__[name]
-        elif name in Hemisphere.__lazy_members:
-            (deps, fn) = Hemisphere.__lazy_members[name]
-            tmp = fn(self, *map(lambda x: getattr(self, x), deps))
-            self.__dict__[name] = tmp
-            return tmp
-        else:
-            raise ValueError('Unrecognized member of Hemisphere: %s' % name)
+        
+    __lazy_members = {
+        'meta_data':            (('options',), lambda opts: Hemisphere._check_meta_data(opts)),
+        'property_names':       (('properties',), lambda props: set(props.keys())),
+        'white_surface':        (('_load_surface',), lambda f: f('white')),
+        'pial_surface':         (('_load_surface',), lambda f: f('pial')),
+        'inflated_surface':     (('_load_surface',), lambda f: f('inflated')),
+
+        'sphere_surface_data':  (('_load_surface_data',),      lambda f: f('sphere')),
+        'fs_surface_data':      (('_load_surface_data_safe','subject'),
+                                 lambda f,sub: (
+                                     f('sphere') if sub.id == 'fsaverage' else 
+                                     f('sphere.reg'))),
+        'sym_surface_data':     (('_load_surface_data_safe','chirality','subject'), 
+                                 lambda (f, ch, sub): (
+                                     f('sphere')                   if sub.id == 'fsaverage_sym' else
+                                     f('fsaverage_sym.sphere.reg') if ch == 'LH'                else
+                                     sub.RHX.sym_surface_data      if sub.RHX is not None       else
+                                     (None,None))),
+        'faces':                (('sphere_surface_data',), lambda dat: dat[1].T),
+        'edge_data':            (('faces',), lambda F: Hemisphere.calculate_edge_data(F)),
+        'edges':                (('edge_data',), lambda ED: ED[0]),
+        'edge_face_index':      (('edge_data',), lambda ED: ED[1]),
+
+        'sphere_surface':       (('_load_surface','subject','sphere_surface_data','topology'), 
+                                 lambda f,sub,dat,topo: f(
+                                     'sphere',
+                                     preloaded=dat,
+                                     reg=(topo.registrations[sub.id]
+                                          if sub.id in topo.registrations
+                                          else None))),
+        'fs_sphere_surface':    (('_load_surface','fs_surface_data','topology'),
+                                 lambda f,dat,topo: (
+                                     None if dat == (None,None) else
+                                     f('sphere.reg',
+                                       preloaded=dat,
+                                       reg=(topo.registrations['fsaverage']
+                                            if 'fsaverage' in topo.registrations
+                                            else None)))),
+        'sym_sphere_surface':   (('_load_surface','sym_surface_data','topology'),
+                                 lambda f,dat,topo: (
+                                     None if dat is None else
+                                     f('fsaverage_sym.sphere.reg',
+                                       preloaded=dat,
+                                       reg=(topo.registrations['fsaverage_sym']
+                                            if 'fsaverage_sym' in topo.registrations
+                                            else None)))),
+
+        'vertex_count':         (('sphere_surface_data',), lambda dat: dat[0].shape[0]),
+        'midgray_surface':      (('_make_surface', 'white_surface', 'pial_surface'),
+                                 lambda f,W,P: f(
+                                     0.5*(W.coordinates + P.coordinates),
+                                     W.faces,
+                                     'midgray')),
+        'occipital_pole_index': (('inflated_surface',),
+                                 lambda mesh: np.argmin(mesh.coordinates[1])),
+        'ribbon':               (('_load_ribbon'), lambda f: f()),
+        'chirality':            (('name',), 
+                                 lambda name: 'LH' if name == 'LH' or name == 'RHX' else 'RH'),
+        'topology':             (('_make_topology', 'sphere_surface_data',
+                                  'fs_surface_data', 'sym_surface_data'),
+                                 lambda f,sph,fs,sym: f(
+                                     sph[1], sph[0],
+                                     None if fs  is None or fs[0]  is None else fs[0],
+                                     None if sym is None or sym[0] is None else sym[0]))}
 
     # Make a surface out of coordinates, if desired
     def surface(self, coords, name=None):
@@ -304,7 +286,7 @@ class Hemisphere:
                   coords.T if coords.shape[0] == self.vertex_count else
                   None)
         if coords is None: raise ValueError('Coordinate matrix was invalid size!')
-        return self.__make_surface(coords, self.faces, name)
+        return self._make_surface(coords, self.faces, name)
     def registration_mesh(self, name):
         '''
         hemi.registration_mesh(name) yields a CorticalMesh object for the given hemisphere hemi, as
@@ -322,14 +304,17 @@ class Hemisphere:
     
     ################################################################################################
     # The Constructor
-    def __init__(self, subject, type, **args):
+    def __init__(self, subject, hemi_name, **args):
         if not isinstance(subject, Subject):
             raise ValueError('Argument subject must be a FreeSurfer.Subject object')
-        if type.upper() not in set(['RH', 'LH', 'RHX', 'LHX']):
-            raise ValueError('Argument type must be RH, LH, RHX, or LHX')
-        self.__dict__['subject'] = subject
-        self.__dict__['name'] = type.upper()
-        self.__dict__['directory'] = os.path.join(subject.directory, 'surf')
+        if hemi_name.upper() not in set(['RH', 'LH', 'RHX', 'LHX']):
+            raise ValueError('Argument hemi_name must be RH, LH, RHX, or LHX')
+        Immutable.__init__(self,
+                           Hemisphere.__settable_members,
+                           {'name':      hemi_name.upper(),
+                            'subject':   subject,
+                            'directory': os.path.join(subject.directory, 'surf')},
+                           Hemisphere.__lazy_members)
         self.properties = args.pop('properties', make_dict())
         self.options = args
         self.__init_properties()
@@ -538,12 +523,52 @@ class Hemisphere:
 
         'retinotopy_eccen': ('eccentricity',           lambda f: fsio.read_morph_data(f)),
         'retinotopy_angle': ('polar_angle',            lambda f: fsio.read_morph_data(f)),
-        'retinotopy_areas': ('visual_area',            lambda f: fsio.read_morph_data(f))}
+        'retinotopy_areas': ('visual_area',            lambda f: fsio.read_morph_data(f)),
+
+        'retino_eccen':     ('eccentricity',           lambda f: fsio.read_morph_data(f)),
+        'retino_angle':     ('polar_angle',            lambda f: fsio.read_morph_data(f)),
+        'retino_areas':     ('visual_area',            lambda f: fsio.read_morph_data(f))}
+
     # properties grabbed out of MGH or MGZ files
     _mgh_properties = {
-        'template_eccen':   ('template_eccentricity',  lambda f: mghload(f).get_data().flatten()),
-        'template_angle':   ('template_polar_angle',   lambda f: mghload(f).get_data().flatten()),
-        'template_areas':   ('template_visual_area',   lambda f: mghload(f).get_data().flatten())}
+        'prf_eccen':         ('PRF_eccentricity',       lambda f: mghload(f).get_data().flatten()),
+        'prf_angle':         ('PRF_polar_angle',        lambda f: mghload(f).get_data().flatten()),
+        'prf_size':          ('PRF_size',               lambda f: mghload(f).get_data().flatten()),
+        'prf_varex':         ('PRF_variance_explained', lambda f: mghload(f).get_data().flatten()),
+        'prf_vexpl':         ('PRF_variance_explained', lambda f: mghload(f).get_data().flatten()),
+
+        'retinotopy_eccen':  ('eccentricity',           lambda f: fsio.read_morph_data(f)),
+        'retinotopy_angle':  ('polar_angle',            lambda f: fsio.read_morph_data(f)),
+        'retinotopy_areas':  ('visual_area',            lambda f: fsio.read_morph_data(f)),
+        'retino_eccen':      ('eccentricity',           lambda f: fsio.read_morph_data(f)),
+        'retino_angle':      ('polar_angle',            lambda f: fsio.read_morph_data(f)),
+        'retino_areas':      ('visual_area',            lambda f: fsio.read_morph_data(f)),
+
+        'predicted_eccen':   ('predicted_eccentricity', lambda f: mghload(f).get_data().flatten()),
+        'predicted_angle':   ('predicted_polar_angle',  lambda f: mghload(f).get_data().flatten()),
+        'predicted_areas':   ('predicted_visual_area',  lambda f: mghload(f).get_data().flatten()),
+        'predicted_v123roi': ('predicted_visual_area',  lambda f: mghload(f).get_data().flatten()),
+
+        'predict_eccen':     ('predicted_eccentricity', lambda f: mghload(f).get_data().flatten()),
+        'predict_angle':     ('predicted_polar_angle',  lambda f: mghload(f).get_data().flatten()),
+        'predict_areas':     ('predicted_visual_area',  lambda f: mghload(f).get_data().flatten()),
+        'predict_v123roi':   ('predicted_visual_area',  lambda f: mghload(f).get_data().flatten()),
+
+        'benson14_eccen':    ('benson14_eccentricity',  lambda f: mghload(f).get_data().flatten()),
+        'benson14_angle':    ('benson14_polar_angle',   lambda f: mghload(f).get_data().flatten()),
+        'benson14_areas':    ('benson14_visual_area',   lambda f: mghload(f).get_data().flatten()),
+        'benson14_v123roi':  ('benson14_visual_area',   lambda f: mghload(f).get_data().flatten()),
+
+        'eccen_predict':     ('predicted_eccentricity', lambda f: mghload(f).get_data().flatten()),
+        'angle_predict':     ('predicted_polar_angle',  lambda f: mghload(f).get_data().flatten()),
+        'areas_predict':     ('predicted_visual_area',  lambda f: mghload(f).get_data().flatten()),
+        'v123roi_predict':   ('predicted_visual_area',  lambda f: mghload(f).get_data().flatten()),
+
+        'eccen_benson14':    ('benson14_eccentricity',  lambda f: mghload(f).get_data().flatten()),
+        'angle_benson14':    ('benson14_polar_angle',   lambda f: mghload(f).get_data().flatten()),
+        'areas_benson14':    ('benson14_visual_area',   lambda f: mghload(f).get_data().flatten()),
+        'v123roi_benson14':  ('benson14_visual_area',   lambda f: mghload(f).get_data().flatten())}
+    
     # funciton for initializing the auto-loading properties
     def __init_properties(self):
         # if this is an xhemi, we want to load the opposite of the chirality
@@ -772,7 +797,7 @@ class Hemisphere:
                     raise ValueError('Given hemisphere is not registered to the ' + registration \
                                      + ' registration')
                 reg = obj.topology.registrations[usereg]
-                mesh = obj.__make_surface(reg.coordinates, org.topology.triangles, usereg)
+                mesh = obj._make_surface(reg.coordinates, org.topology.triangles, usereg)
                 proj = __fwdfn(mesh)
                 proj_params = proj.options['projection_parameters']
                 proj.options = proj.options.using(
@@ -923,7 +948,7 @@ def find_subject_path(sub):
         if looks_like_sub(tmp): return tmp
     return None
     
-class Subject:
+class Subject(Immutable):
     '''FreeSurfer.Subject objects encapsulate the data contained in a FreeSurfer
        subject directory.'''
 
@@ -957,48 +982,23 @@ class Subject:
         else:
             return make_dict(**md)
     def _load_hemisphere(self, name):
-        return Hemisphere(self, name)
+        hem = Hemisphere(self, name)
+        if self.is_persistent(): hem.persist()
+        return hem
     def _load_hemisphere_safe(self, name):
         try:
-            return Hemisphere(self, name)
+            hem = Hemisphere(self, name)
+            if self.is_persistent(): hem.persist()
+            return hem
         except:
             return None
     __lazy_members = {
-        'meta_data': (('options',), lambda mesh,opts: Subject._check_meta_data(opts)),
-        'LH':  ((), lambda mesh: mesh._load_hemisphere('LH')),
-        'RH':  ((), lambda mesh: mesh._load_hemisphere('RH')),
-        'LHX': ((), lambda mesh: mesh._load_hemisphere_safe('LHX')),
-        'RHX': ((), lambda mesh: mesh._load_hemisphere_safe('RHX'))}
+        'meta_data': (('options',), lambda opts: Subject._check_meta_data(opts)),
+        'LH':  (('_load_hemisphere',),      lambda f: f('LH')),
+        'RH':  (('_load_hemisphere',),      lambda f: f('RH')),
+        'LHX': (('_load_hemisphere_safe',), lambda f: f('LHX')),
+        'RHX': (('_load_hemisphere_safe',), lambda f: f('RHX'))}
     
-    # This function will clear the lazily-evaluated members when a given value is changed
-    def __update_values(self, name):
-        for (sname, (deps, fn)) in Subject.__lazy_members.items():
-            if name in deps and sname in self.__dict__:
-                del self.__dict__[sname]
-
-    # This is the most important function, given the encapsulation of this class:
-    def __setattr__(self, name, val):
-        if name in Subject.__settable_members:
-            fn = Subject.__settable_members[name]
-            self.__dict__[name] = fn(self, val)
-            self.__update_values(name)
-        elif name in Subject.__lazy_members:
-            raise ValueError('The member %s is a lazy value and cannot be set' % name)
-        else:
-            raise ValueError('Unrecognized Subject member: %s' % name)
-
-    # The getattr method makes sure that lazy members are computed when requested
-    def __getattr__(self, name):
-        if name in self.__dict__:
-            return self.__dict__[name]
-        elif name in Subject.__lazy_members:
-            (deps, fn) = Subject.__lazy_members[name]
-            tmp = fn(self, *map(lambda x: getattr(self, x), deps))
-            self.__dict__[name] = tmp
-            return tmp
-        else:
-            raise ValueError('Unrecognized member of Subject: %s' % name)
-
     
     ################################################################################################
     # The Constructor
@@ -1006,9 +1006,12 @@ class Subject:
         subpath = find_subject_path(subject)
         if subpath is None: raise ValueError('No valid subject found: %s' % subject)
         (dr, name) = os.path.split(subpath)
-        self.__dict__['subjects_dir'] = dr
-        self.__dict__['id'] = name
-        self.__dict__['directory'] = subpath
+        Immutable.__init__(self,
+                           Subject.__settable_members,
+                           {'subjects_dir': dr,
+                            'id': name,
+                            'directory': subpath},
+                           Subject.__lazy_members)
         self.options = args
     
     ################################################################################################

@@ -10,7 +10,7 @@ import pysistence
 import copy
 import numpy as np
 
-class Immutable:
+class Immutable(object):
     '''
     The Immutable class can be overloaded by any class that wishes to be an immutable lazily-loading
     class---Immutable facilitates that. It does so by overloading the standard dictionary functions
@@ -75,10 +75,8 @@ class Immutable:
 
     # The getattr method makes sure that lazy members are computed when requested
     def __getattr__(self, name):
-        if name[0] == '_':
-            return self.__dict__[name]
-        if name in self.__dict__:
-            return self.__dict__[name]
+        if name[0] == '_' or name in self.__dict__ or name in Immutable.__dict__:
+            return object.__getattr__(self, name)
         elif name in self.__dict__['_lazy_vals']:
             (deps, fn) = self.__dict__['_lazy_vals'][name]
             tmp = fn(*[getattr(self, x) for x in deps])
@@ -111,8 +109,19 @@ class Immutable:
         obj.__dict__['_persistent'] = False
         return obj
     def persist(self):
+        '''
+        imm.persist() marks the immutable object imm as persistent then returns imm. Once an
+        immutable is marked as persistent, its settable attributes may no longer be changed; to
+        update values, instead create a new object with the transient() member function.
+        '''
         self.__dict__['_persistent'] = True
         return self
+    def is_persistent(self):
+        '''
+        imm.is_persistent() yields True if the immutable object imm is marked as persistent;
+        otherwise yields False.
+        '''
+        return ('_persistent' in self.__dict__ and self.__dict__['_persistent'] is True)
     def using(self, **updates):
         '''
         imm.using(a=b...) yields a clone of the immutable object imm in which the values indicated 

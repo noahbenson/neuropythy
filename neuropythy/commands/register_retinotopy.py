@@ -69,6 +69,8 @@ register_retinotopy_help = \
     * --cutoff=|-c<value>
       The cutoff value to use for the weight; 0.2 by default. Weights less than
       this will be truncated to 0.
+    * -N|--no-partial-correction
+      Indicates that partial voluming correction should not be performed.
     * --angle-radians|-r
       This flag specifies that the angle-file only is in radians instead of
       degrees.
@@ -148,6 +150,7 @@ _retinotopy_parser_instructions = [
     ('z', 'no-surface-export',      'no_surf_export',    False),
     ('X', 'no-registration-export', 'no_reg_export',     False),
     ('n', 'no-overwrite',           'no_overwrite',      False),
+    ('N', 'no-partial-correction',  'part_vol_correct',  True),
     # Options                       
     ['e', 'eccen-lh',               'eccen_lh_file',     None],
     ['a', 'angle-lh',               'angle_lh_file',     None],
@@ -226,6 +229,7 @@ def register_retinotopy_command(args):
             res[h] = register_retinotopy(hemi, V123_model(),
                                          polar_angle=ang, eccentricity=ecc, weight=wgt,
                                          weight_cutoff=opts['weight_cutoff'],
+                                         partial_voluming_correction=opts['part_vol_correct'],
                                          edge_scale=opts['edge_strength'],
                                          angle_scale=opts['angle_strength'],
                                          functional_scale=opts['func_strength'],

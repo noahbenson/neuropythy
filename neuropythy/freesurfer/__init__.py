@@ -13,6 +13,9 @@ def freesurfer_subject(name):
     '''
     freesurfer_subject(name) yields a freesurfer Subject object for the subject with the given name.
     Subjects are cached and not reloaded.
+    Note that subects returned by freesurfer_subject() are always persistent Immutable objects; this
+    means that you must create a transient version of the subject to modify it via the member
+    function sub.transient().
     '''
     subpath = find_subject_path(name)
     if subpath is None: return None
@@ -20,6 +23,6 @@ def freesurfer_subject(name):
     if fpath in __freesurfer_subjects:
         return __freesurfer_subjects[fpath]
     else:
-        sub = Subject(subpath)
+        sub = Subject(subpath).persist()
         if isinstance(sub, Subject): __freesurfer_subjects[fpath] = sub
         return sub

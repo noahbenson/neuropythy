@@ -21,7 +21,8 @@ import nibabel.freesurfer.mghformat as fsmgh
 from pysistence import make_dict
 from array import array
 
-from .models import (RetinotopyModel, SchiraModel, RetinotopyMeshModel, RegisteredRetinotopyModel)
+from neuropythy.vision import (RetinotopyModel, SchiraModel,
+                               RetinotopyMeshModel, RegisteredRetinotopyModel)
 
 from py4j.java_gateway import (launch_gateway, JavaGateway, GatewayParameters)
 

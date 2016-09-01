@@ -1,5 +1,5 @@
 ####################################################################################################
-# registration.py
+# neuropythy/vision/retinotopy.py
 # Tools for registering the cortical surface to a particular potential function
 # By Noah C. Benson
 
@@ -365,6 +365,7 @@ def register_retinotopy_initialize(hemi,
                                    polar_angle=None, eccentricity=None, weight=None,
                                    weight_cutoff=0.2,
                                    max_predicted_eccen=85,
+                                   partial_voluming_correction=True,
                                    prior='retinotopy',
                                    resample='fsaverage_sym'):
     '''
@@ -387,6 +388,8 @@ def register_retinotopy_initialize(hemi,
                 ('weight', [weight for i in range(n)] if isinstance(weight, Number) else weight)]]
     ## we also want to make sure weight is 0 where there are none values
     (ang, ecc, wgt) = _retinotopy_vectors_to_float(ang, ecc, wgt, weight_cutoff=weight_cutoff)
+    ## correct for partial voluming if necessary:
+    if partial_voluming_correct is True: wgt *= (1.0 - hemi.partial_volume_factor())
     ## note these in the result dictionary:
     data['sub_polar_angle'] = ang
     data['sub_eccentricity'] = ecc
@@ -505,6 +508,7 @@ def register_retinotopy_initialize(hemi,
 def register_retinotopy(hemi,
                         retinotopy_model='standard',
                         polar_angle=None, eccentricity=None, weight=None, weight_cutoff=0.2,
+                        partial_voluming_correction=True,
                         edge_scale=1.0, angle_scale=1.0, functional_scale=1.0,
                         sigma=Ellipsis,
                         select='close',
@@ -530,6 +534,9 @@ def register_retinotopy(hemi,
         PRF_polar_angle, PRF_ecentricity, and PRF_variance_explained if possible.
       * weight_cutoff specifies the minimum value a vertex must have in the weight property in order
         to be considered as retinotopically relevant.
+      * partial_voluming_correction (default: True), if True, specifies that the value
+        (1 - hemi.partial_volume_factor()) should be applied to all weight values (i.e., weights
+        should be down-weighted when likely to be affected by a partial voluming error).
       * sigma specifies the standard deviation of the Gaussian shape for the Schira model anchors.
       * edge_scale, angle_scale, and functional_scale all specify the relative strengths of the
         various components of the potential field (functional_scale refers to the strength of the
@@ -565,6 +572,7 @@ def register_retinotopy(hemi,
                                           eccentricity=eccentricity,
                                           weight=weight,
                                           weight_cutoff=weight_cutoff,
+                                          partial_voluming_correction=partial_voluming_correction,
                                           max_predicted_eccen=max_predicted_eccen,
                                           prior=prior, resample=resample)
     # Step 2: run the mesh registration
