@@ -33,8 +33,8 @@ The neuropythy library depends on a few other libraries, all freely available:
  * [scipy](http://www.scipy.org/) >= 0.7.0
  * [nibabel](https://github.com/nipy/nibabel) >= 1.2
  * [pysistence](https://pythonhosted.org/pysistence/) >= 0.4.0
- * [python-igraph](http://igraph.org/python/) >= 0.7.1 (optional)
- * [py4j](https://www.py4j.org/) >= 0.9 (optional)
+ * [py4j](https://www.py4j.org/) >= 0.9
+ * [python-igraph](http://igraph.org/python/) >= 0.7.1
 
 These libaries should be installed automatically for you if you use pip or setuptools (see above),
 and they must be found on your PYTHONPATH in order to use neuropythy.
