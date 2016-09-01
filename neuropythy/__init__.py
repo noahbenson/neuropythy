@@ -12,7 +12,7 @@ from vision     import (retinotopy_data, empirical_retinotopy_data, predicted_re
 # Version information...
 _version_major = 0
 _version_minor = 1
-_version_micro = 3
+_version_micro = 4
 __version__ = "%s.%s.%s" % (_version_major, _version_minor, _version_micro)
 
 description = 'Integrate Python environment with FreeSurfer and perform mesh registration'
