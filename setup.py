@@ -4,7 +4,7 @@ from setuptools import setup
 
 setup(
     name='neuropythy',
-    version='0.1.1',
+    version='0.1.2',
     description='Toolbox for flexible cortical mesh analysis and registration',
     keywords='neuroscience mesh cortex registration',
     author='Noah C. Benson',
@@ -20,6 +20,7 @@ setup(
               'neuropythy.freesurfer',
               'neuropythy.cortex',
               'neuropythy.registration',
+              'neuropythy.vision',
               'neuropythy.commands'],
     package_data={'': ['LICENSE.txt',
                        'neuropythy/lib/nben/target/nben-standalone.jar',

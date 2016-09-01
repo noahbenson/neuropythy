@@ -12,7 +12,8 @@ import neuropythy.geometry as geo
 from neuropythy.immutable import Immutable
 import nibabel.freesurfer.io as fsio
 import os, math
-from numbers import Number
+from numbers import (Number, Integral)
+from types import DictType
 import itertools, collections
 from pysistence import make_dict
 import pysistence
@@ -317,6 +318,7 @@ class CorticalMesh(Immutable):
 
     # This static variable explains the dependency hierarchy in cached data
     __lazy_members = {
+        'vertex_count': (('vertex_labels',), lambda L: len(L)),
         'vertex_data': (
             ('faces', 'edges', 'coordinates', 'vertex_labels'),
             lambda F,E,X,L: CorticalMesh.calculate_vertex_data(F, E, X, L)),
@@ -795,73 +797,3 @@ class CorticalMesh(Immutable):
         (coords, faces) = fsio.read_geometry(file)
         return CorticalMesh(coords, faces, source_file=file)
 
-
-
-_empirical_retinotopy_names = {
-    'polar_angle':  ['prf_polar_angle',       'empirical_polar_angle',  'measured_polar_angle',
-                     'training_polar_angle',  'polar_angle'],
-    'eccentricity': ['prf_eccentricity',      'empirical_eccentricity', 'measured_eccentricity',
-                     'training_eccentricity', 'eccentricity'],
-    'weight':       ['prf_weight',       'prf_variance_explained',       'prf_vexpl',
-                     'empirical_weight', 'empirical_variance_explained', 'empirical_vexpl',
-                     'measured_weight',  'measured_variance_explained',  'measured_vexpl',
-                     'training_weight',  'training_variance_explained',  'training_vexpl',
-                     'weight',           'variance_explained',           'vexpl']}
-
-# handy function for picking out properties automatically...
-def empirical_retinotopy_data(hemi, retino_type):
-    '''
-    empirical_retinotopy_data(hemi, t) yields a numpy array of data for the given hemisphere object
-    and retinotopy type t; it does this by looking at the properties in hemi and picking out any
-    combination that is commonly used to denote empirical retinotopy data. These common names are
-    stored in _empirical_retintopy_names, in order of preference, which may be modified.
-    The argument t should be one of 'polar_angle', 'eccentricity', 'weight'.
-    '''
-    dat = _empirical_retinotopy_names[retino_type.lower()]
-    hdat = {s.lower(): s for s in hemi.property_names}
-    return next((hemi.prop(hdat[s]) for s in dat if s.lower() in hdat), None)
-
-_predicted_retinotopy_names = {
-    'polar_angle':  ['predicted_polar_angle',   'model_polar_angle',
-                     'registered_polar_angle',  'template_polar_angle'],
-    'eccentricity': ['predicted_eccentricity',  'model_eccentricity',
-                     'registered_eccentricity', 'template_eccentricity'],
-    'visual_area':  ['predicted_visual_area',   'model_visual_area',
-                     'registered_visual_area',  'template_visual_area']}
-
-def predicted_retinotopy_data(hemi, retino_type):
-    '''
-    predicted_retinotopy_data(hemi, t) yields a numpy array of data for the given hemisphere object
-    and retinotopy type t; it does this by looking at the properties in hemi and picking out any
-    combination that is commonly used to denote empirical retinotopy data. These common names are
-    stored in _predicted_retintopy_names, in order of preference, which may be modified.
-    The argument t should be one of 'polar_angle', 'eccentricity', 'visual_area'.
-    '''
-    dat = _predicted_retinotopy_names[retino_type.lower()]
-    hdat = {s.lower(): s for s in hemi.property_names}
-    return next((hemi.prop(hdat[s]) for s in dat if s.lower() in hdat), None)
-
-_retinotopy_names = {
-    'polar_angle':  set(['polar_angle']),
-    'eccentricity': set(['eccentricity']),
-    'visual_area':  set(['visual_area']),
-    'weight':       set(['weight', 'variance_explained'])}
-
-def retinotopy_data(hemi, retino_type):
-    '''
-    retinotopy_data(hemi, t) yields a numpy array of data for the given hemisphere object
-    and retinotopy type t; it does this by looking at the properties in hemi and picking out any
-    combination that is commonly used to denote empirical retinotopy data. These common names are
-    stored in _predicted_retintopy_names, in order of preference, which may be modified.
-    The argument t should be one of 'polar_angle', 'eccentricity', 'visual_area', or 'weight'.
-    Unlike the related functions empirical_retinotopy_data and predicted_retinotopy_data, this
-    function calls both of these (predicted first then empirical) in the case that it does not
-    find a valid property.
-    '''
-    dat = _retinotopy_names[retino_type.lower()]
-    val = next((hemi.prop(s) for s in hemi.property_names if s.lower() in dat), None)
-    if val is None and retino_type.lower() != 'weight':
-        val = predicted_retinotopy_data(hemi, retino_type)
-    if val is None and retino_type.lower() != 'visual_area':
-        val = empirical_retinotopy_data(hemi, retino_type)
-    return val
