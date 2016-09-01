@@ -17,7 +17,6 @@ from types import DictType
 import itertools, collections
 from pysistence import make_dict
 import pysistence
-import igraph
 
 class CorticalMesh(Immutable):
     '''CorticalMesh is a class that handles properties of the cortical surface mesh. 
@@ -217,6 +216,7 @@ class CorticalMesh(Immutable):
 
     @staticmethod
     def construct_mesh_graph(V,E,L):
+        import igraph
         g = igraph.Graph()
         g.add_vertices(V)
         g.add_edges(E.T)

@@ -8,13 +8,13 @@ import scipy as sp
 import os, sys, gzip
 
 from array import array
-from py4j.java_gateway import (launch_gateway, JavaGateway, GatewayParameters)
 
 # Java start:
 _java_port = None
 _java = None
 
 def _init_registration():
+    from py4j.java_gateway import (launch_gateway, JavaGateway, GatewayParameters)
     global _java, _java_port
     if _java is not None: return
     _java_port = launch_gateway(
