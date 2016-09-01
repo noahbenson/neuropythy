@@ -110,7 +110,7 @@ def extract_retinotopy_argument(obj, retino_type, arg, default='any'):
     that the empirical_retinotopy_data and predicted_retinotopy_data functions should be used,
     respectively.
     '''
-    if isinstance(arg, basestring): values = mesh.prop(arg)
+    if isinstance(arg, basestring): values = obj.prop(arg)
     elif hasattr(arg, '__iter__'):  values = arg
     elif arg is not None:           raise ValueError('cannot interpret retinotopy arg: %s' % arg)
     elif default == 'predicted':    values = predicted_retinotopy_data(obj, retino_type)
@@ -389,7 +389,7 @@ def register_retinotopy_initialize(hemi,
     ## we also want to make sure weight is 0 where there are none values
     (ang, ecc, wgt) = _retinotopy_vectors_to_float(ang, ecc, wgt, weight_cutoff=weight_cutoff)
     ## correct for partial voluming if necessary:
-    if partial_voluming_correct is True: wgt *= (1.0 - hemi.partial_volume_factor())
+    if partial_voluming_correction is True: wgt *= (1.0 - np.asarray(hemi.partial_volume_factor()))
     ## note these in the result dictionary:
     data['sub_polar_angle'] = ang
     data['sub_eccentricity'] = ecc

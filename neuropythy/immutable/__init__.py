@@ -76,7 +76,7 @@ class Immutable(object):
     # The getattr method makes sure that lazy members are computed when requested
     def __getattr__(self, name):
         if name[0] == '_' or name in self.__dict__ or name in Immutable.__dict__:
-            return object.__getattr__(self, name)
+            return object.__getattribute__(self, name)
         elif name in self.__dict__['_lazy_vals']:
             (deps, fn) = self.__dict__['_lazy_vals'][name]
             tmp = fn(*[getattr(self, x) for x in deps])
@@ -85,7 +85,7 @@ class Immutable(object):
         elif name in self._const_vals:
             return self._const_vals[name];
         else:
-            raise ValueError('Unrecognized member of Immutable: %s' % name)
+            raise AttributeError('Unrecognized member of Immutable: %s' % name)
 
     def __init__(self, settable_vals, const_vals, lazy_vals, **opts):
         self.__dict__['_persistent'] = False

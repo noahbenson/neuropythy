@@ -223,7 +223,7 @@ class Hemisphere(Immutable):
                                      f('sphere') if sub.id == 'fsaverage' else 
                                      f('sphere.reg'))),
         'sym_surface_data':     (('_load_surface_data_safe','chirality','subject'), 
-                                 lambda (f, ch, sub): (
+                                 lambda f, ch, sub: (
                                      f('sphere')                   if sub.id == 'fsaverage_sym' else
                                      f('fsaverage_sym.sphere.reg') if ch == 'LH'                else
                                      sub.RHX.sym_surface_data      if sub.RHX is not None       else
@@ -265,7 +265,7 @@ class Hemisphere(Immutable):
                                      'midgray')),
         'occipital_pole_index': (('inflated_surface',),
                                  lambda mesh: np.argmin(mesh.coordinates[1])),
-        'ribbon':               (('_load_ribbon'), lambda f: f()),
+        'ribbon':               (('_load_ribbon',), lambda f: f()),
         'chirality':            (('name',), 
                                  lambda name: 'LH' if name == 'LH' or name == 'RHX' else 'RH'),
         'topology':             (('_make_topology', 'sphere_surface_data',
