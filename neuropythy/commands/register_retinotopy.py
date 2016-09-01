@@ -154,10 +154,10 @@ _retinotopy_parser_instructions = [
     # Options                       
     ['e', 'eccen-lh',               'eccen_lh_file',     None],
     ['a', 'angle-lh',               'angle_lh_file',     None],
-    ['w', 'weight-lh'               'weight_lh_file',    None],
+    ['w', 'weight-lh',              'weight_lh_file',    None],
     ['E', 'eccen-rh',               'eccen_rh_file',     None],
     ['A', 'angle-rh',               'angle_rh_file',     None],
-    ['W', 'weight-rh'               'weight_rh_file',    None],
+    ['W', 'weight-rh',              'weight_rh_file',    None],
     ['c', 'cutoff',                 'weight_cutoff',     '0.2'],
     ['D', 'edge-strength',          'edge_strength',     '1'],
     ['T', 'angle-strength',         'angle_strength',    '1'],
