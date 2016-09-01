@@ -41,8 +41,8 @@ _parse_field_data_types = {
                                                         ['min',   0.0], ['max',   pi],  'F', 'X']},
     'anchor': {
         'harmonic':      ['newHarmonicAnchorPotential', ['scale', 1.0], ['shape', 2.0], 0, 1, 'X'],
-        'gaussian':      ['newGaussianAnchorPotential', ['scale', 1.0], ['shape', 2.0], 
-                                                        ['sigma', 2.0], 0, 1, 'X']},
+        'gaussian':      ['newGaussianAnchorPotential', ['scale', 1.0], ['sigma', 2.0], 
+                                                        ['shape', 2.0], 0, 1, 'X']},
     'perimeter': {
         'harmonic':   ['newHarmonicPerimeterPotential', ['scale', 1.0], ['shape', 2.0], 'F', 'X']}};
         

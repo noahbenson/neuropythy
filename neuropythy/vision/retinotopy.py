@@ -338,7 +338,7 @@ def retinotopy_anchors(mesh, mdl,
             for r in [select(i, r0)]
             if len(r) > 0]
     # Flatten out the data into arguments for Java
-    idcs = [i for d in data for i in d[0]]
+    idcs = [int(i) for d in data for i in d[0]]
     ancs = np.asarray([pt for d in data for pt in d[1]]).T
     # Get just the relevant weights and the scale
     wgts = weight[idcs] * (1 if scale is None else scale)

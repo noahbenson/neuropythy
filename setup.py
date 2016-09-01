@@ -30,5 +30,5 @@ setup(
                       'scipy>=0.7',
                       'nibabel>=2.0',
                       'pysistence>=0.4',
-                      'py4j>=0.9',
+                      'py4j>=0.10',
                       'python-igraph>=0.7.1'])
