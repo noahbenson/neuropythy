@@ -14,7 +14,7 @@ from pysistence import make_dict
 from neuropythy.immutable import Immutable
 import neuropythy.geometry as geo
 
-class Topology:
+class Topology(object):
     '''
     Topology(triangles, registrations) constructs a topology object object with the given triangle
     mesh, defined by a 3xn matrix of triangle indices, and with the registration coordinate matrices
