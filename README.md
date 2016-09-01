@@ -19,7 +19,7 @@ github repository and run setuptools:
 ```bash
 # Clone the repository
 git clone https://github.com/noahbenson/neuropythy
-# Enter the reo directory
+# Enter the repo directory
 cd neuropythy
 # Install the library
 python setup.py install
