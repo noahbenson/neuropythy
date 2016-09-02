@@ -73,7 +73,7 @@ def predicted_retinotopy_data(hemi, retino_type):
 _retinotopy_names = {
     'polar_angle':  set(['polar_angle']),
     'eccentricity': set(['eccentricity']),
-    'visual_area':  set(['visual_area']),
+    'visual_area':  set(['visual_area', 'v123roi']),
     'weight':       set(['weight', 'variance_explained'])}
 
 def retinotopy_data(hemi, retino_type):
