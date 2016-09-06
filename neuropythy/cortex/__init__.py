@@ -81,7 +81,7 @@ class CorticalMesh(Immutable):
                         ][len(index)](index)
             elif isinstance(index, np.ndarray):
                 return self[index.tolist()]
-            elif isinstance(index, Number) or np.issubdtype(index, np.float):
+            elif isinstance(index, Number) or np.issubdtype(type(index), np.float):
                 return self.vertex_index.get(index, None)
             else:
                 raise ValueError('Unrecognized mesh item: %s' % index)

@@ -89,15 +89,16 @@ class SchiraModel(RetinotopyModel):
         # start by getting the proper parameters
         params = self.__check_parameters(opts)
         # Now, do the translations that we need...
-        if isinstance(params['scale'], Number) or np.issubdtype(params['scale'], np.float):
+        if isinstance(params['scale'], Number) or np.issubdtype(type(params['scale']), np.float):
             params['scale'] = [params['scale'], params['scale']]
-        if (isinstance(params['shear'], Number) or np.issubdtype(params['shear'], np.float)) \
+        if (isinstance(params['shear'], Number) or np.issubdtype(type(params['shear']), np.float)) \
            and params['shear'] == 0:
             params['shear'] = [[1, 0], [0, 1]]
         elif params['shear'][0][0] != 1 or params['shear'][1][1] != 1:
             raise RuntimeError('shear matrix [0,0] elements and [1,1] elements must be 1!')
-        if (isinstance(params['center'], Number) or np.issubdtype(params['center'], np.float)) \
-           and params['center'] == 0:
+        if ((isinstance(params['center'], Number)
+             or np.issubdtype(type(params['center']), np.float))
+            and params['center'] == 0):
             params['center'] = [0.0, 0.0]
         self.__dict__['parameters'] = make_dict(params)
         # Okay, let's construct the object...

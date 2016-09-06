@@ -745,11 +745,11 @@ class Hemisphere(Immutable):
                                        cos_phi * np.sin(center_right[0]),
                                        np.sin(center[1])])
         radius = None if 'radius' not in params else params['radius']
-        if not isinstance(radius, Number) or np.issubdtype(radius, np.float):
+        if not (isinstance(radius, Number) or np.issubdtype(type(radius), np.float)):
             raise ValueError('radius option must be explicitly given and must be a number')
         radius = abs(radius)
         sphere_radius = None if 'sphere_radius' not in params else params['sphere_radius']
-        if not isinstance(sphere_radius, Number) or np.issubdtype(sphere_radius, np.float):
+        if not (isinstance(sphere_radius, Number) or np.issubdtype(type(sphere_radius), np.float)):
             raise ValueError('sphere_radius option must be explicitly given and must be a number')
         sphere_radius = abs(sphere_radius)
         method = None if 'method' not in params else params['method']

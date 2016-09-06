@@ -316,7 +316,7 @@ def retinotopy_anchors(mesh, mdl,
                 ('polar_angle', polar_angle),
                 ('eccentricity', eccentricity),
                 ('weight', [weight for i in range(n)] \
-                           if isinstance(weight, Number) or np.issubdtype(weight, np.float) \
+                           if isinstance(weight, Number) or np.issubdtype(type(weight), np.float) \
                            else weight)]]
     # Make sure they contain no None/invalid values
     (polar_angle, eccentricity, weight) = _retinotopy_vectors_to_float(
@@ -347,7 +347,7 @@ def retinotopy_anchors(mesh, mdl,
     wgts = weight[idcs] * (1 if scale is None else scale)
     # Figure out the sigma parameter:
     if sigma is None: sigs = None
-    elif isinstance(sigma, Number) or np.issubdtype(sigma, np.float): sigs = sigma
+    elif isinstance(sigma, Number) or np.issubdtype(type(sigma), np.float): sigs = sigma
     elif hasattr(sigma, '__iter__') and len(sigma) == 3:
         [minsig, mult, maxsig] = sigma
         sigs = np.clip(
@@ -390,7 +390,7 @@ def register_retinotopy_initialize(hemi,
                 ('polar_angle', polar_angle),
                 ('eccentricity', eccentricity),
                 ('weight', [weight for i in range(n)] \
-                           if isinstance(weight, Number) or np.issubdtype(weight, np.float) \
+                           if isinstance(weight, Number) or np.issubdtype(type(weight), np.float) \
                            else weight)]]
     ## we also want to make sure weight is 0 where there are none values
     (ang, ecc, wgt) = _retinotopy_vectors_to_float(ang, ecc, wgt, weight_cutoff=weight_cutoff)
