@@ -219,7 +219,8 @@ def V123_model(name='standard', radius=pi/3.0, sphere_radius=100.0, search_paths
 # Tools for retinotopy registration:
 def _retinotopy_vectors_to_float(ang, ecc, wgt, weight_cutoff=0):
     (ang, ecc, wgt) = np.asarray(
-        [(a,e,w) if all(isinstance(x, Number) for x in [a,e,w]) and w > weight_cutoff else (0,0,0)
+        [(a,e,w) if all(isinstance(x, Number) or np.issubdtype(type(x), np.float) for x in [a,e,w]) \
+                    and w > weight_cutoff else (0,0,0)
          for (a,e,w) in zip(ang, ecc, wgt)]).T
     return (ang, ecc, wgt)
 
@@ -380,6 +381,7 @@ def register_retinotopy_initialize(hemi,
     # Step 1: get our properties straight
     prop_names = ['polar_angle', 'eccentricity', 'weight']
     data = {}
+    n = hemi.vertex_count
     (ang, ecc, wgt) = [
         extract_retinotopy_argument(hemi, name, arg, default='empirical')
         for (name, arg) in [
