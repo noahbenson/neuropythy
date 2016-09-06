@@ -3,8 +3,9 @@
 # The code that manages the neuropythy link to the JVM.
 # By Noah C. Benson
 
-import numpy as np
-import scipy as sp
+import numpy   as np
+import scipy   as sp
+import numbers as num
 import os, sys, gzip
 
 from array import array
@@ -82,7 +83,7 @@ def to_java_array(m):
     m is anything else. The numpy array m is tested via numpy.issubdtype(m.dtype, numpy.int64).
     '''
     m = np.asarray(m)
-    if np.issubdtype(m.dtype, np.int) or all(isinstance(x, Integral) for x in m):
+    if np.issubdtype(m.dtype, np.int) or all(isinstance(x, num.Integral) for x in m):
         return to_java_ints(m)
     else:
         return to_java_doubles(m)

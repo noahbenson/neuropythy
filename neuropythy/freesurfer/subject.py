@@ -1258,11 +1258,11 @@ def cortex_to_ribbon_map_lines(sub, hemi=None):
     # and accumulate these lists... first group by voxel index then sum across these
     first_fn = lambda x: x[0]
     vox_byidx = {
-        vox: ([q[0] for q in sdat], [q[1] for q in sdat])
+        vox: ([q[0] for q in xdat], [q[1] for q in xdat])
         for (vox,xdat) in itertools.groupby(sorted(vtx_voxels, key=first_fn), key=first_fn)
         for dat in [[q[1] for q in xdat]]}
     return {
-        [i-1 for i in idx]: (ids, np.array(olaps) / np.sum(olaps))
+        tuple([i-1 for i in idx]): (ids, np.array(olaps) / np.sum(olaps))
         for idx in idcs
         if idx in vox_byidx
         for (ids, olaps) in [vox_byidx[idx]]}
@@ -1332,10 +1332,14 @@ def cortex_to_ribbon(sub, data, map='lines', hemi=None, method='weighted',
     '''
     hemi = hemi.lower() if isinstance(hemi, basestring) else hemi
     # First, interpret the arguments:
-    if map is None: map = 'lines'
+    mtd = None
+    if map is None:
+        map = cortex_to_ribbon_map(sub, hemi=hemi, method='lines')
     if isinstance(map, TupleType):
-        (mtd, mtdopts) = map if len(map) == 2 else (map[0], {})
-        map = cortex_to_ribbon_map(sub, hemi=hemi, method=mtd, options=mtdopts)
+        if len(map) < 1 or len(map) > 2: raise ValueError('Invalid map tuple: %s' % map)
+        if isinstance(map[0], basestring):
+            (mtd, mtdopts) = map if len(map) == 2 else (map[0], {})
+            map = cortex_to_ribbon_map(sub, hemi=hemi, method=mtd, options=mtdopts)
     elif isinstance(map, basestring):
         map = cortex_to_ribbon_map(sub, hemi=hemi, method=map)
     else:

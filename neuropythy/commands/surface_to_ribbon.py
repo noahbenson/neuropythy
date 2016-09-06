@@ -10,6 +10,7 @@ import nibabel.freesurfer.mghformat as     fsmgh
 from   math                         import pi
 from   numbers                      import Number
 from   pysistence                   import make_dict
+from   numbers                      import Integral
 import os, sys
 
 from neuropythy.freesurfer import (freesurfer_subject, add_subject_path,
@@ -72,7 +73,7 @@ _surface_to_ribbon_parser_instructions = [
     ['m', 'method',       'method',       'weighted'],
     ['t', 'type',         'dtype',        None],
     ['d', 'subjects-dir', 'subjects_dir', None]]
-_surface_to_ribbon_parser = CommandLineParser(_retinotopy_parser_instructions)
+_surface_to_ribbon_parser = CommandLineParser(_surface_to_ribbon_parser_instructions)
 
 def read_surf_file(flnm):
   if flnm.endswith(".mgh") or flnm.endswith(".mgz"):
@@ -137,10 +138,10 @@ def surface_to_ribbon_command(args):
                 raise ValueError('Too many arguments and no subject given')
             (lhfl, rhfl) = args
         outfl = args[2]
-     elif len(args) == 4:
+    elif len(args) == 4:
          if lhfl is not None or rhfl is not None:
              raise ValueError('Too many arguments and no subject given')
-         subidx = next(i for (i,a) in enumerate(args) if os.path.isdir(a), None)
+         subidx = next((i for (i,a) in enumerate(args) if os.path.isdir(a)), None)
          if subidx is None: raise ValueError('No subject given')
          sub = args[subidx]
          del args[subidx]
