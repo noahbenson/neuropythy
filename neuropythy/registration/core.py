@@ -60,7 +60,8 @@ def _parse_field_function_argument(argdat, args, faces, coords):
     # see if we can find such an arg...
     for i in range(len(args)):
         if isinstance(args[i], basestring) and args[i].lower() == argname.lower():
-            return args[i+1] if isinstance(args[i+1], Number) else to_java_array(args[i+1])
+            return (args[i+1] if isinstance(args[i+1], Number) or np.issubdtype(args[i+1], np.float)
+                    else to_java_array(args[i+1]))
     # did not find the arg; use the default:
     return argdflt
 

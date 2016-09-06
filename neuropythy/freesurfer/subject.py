@@ -745,11 +745,11 @@ class Hemisphere(Immutable):
                                        cos_phi * np.sin(center_right[0]),
                                        np.sin(center[1])])
         radius = None if 'radius' not in params else params['radius']
-        if not isinstance(radius, Number):
+        if not isinstance(radius, Number) or np.issubdtype(radius, np.float):
             raise ValueError('radius option must be explicitly given and must be a number')
         radius = abs(radius)
         sphere_radius = None if 'sphere_radius' not in params else params['sphere_radius']
-        if not isinstance(sphere_radius, Number):
+        if not isinstance(sphere_radius, Number) or np.issubdtype(sphere_radius, np.float):
             raise ValueError('sphere_radius option must be explicitly given and must be a number')
         sphere_radius = abs(sphere_radius)
         method = None if 'method' not in params else params['method']
@@ -1258,7 +1258,7 @@ def cortex_to_ribbon_map_lines(sub, hemi=None):
     # and accumulate these lists... first group by voxel index then sum across these
     first_fn = lambda x: x[0]
     vox_byidx = {
-        vox: ([q[0] for q in xdat], [q[1] for q in xdat])
+        vox: ([q[0] for q in dat], [q[1] for q in dat])
         for (vox,xdat) in itertools.groupby(sorted(vtx_voxels, key=first_fn), key=first_fn)
         for dat in [[q[1] for q in xdat]]}
     return {

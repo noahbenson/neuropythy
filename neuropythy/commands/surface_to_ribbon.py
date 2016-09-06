@@ -13,7 +13,7 @@ from   pysistence                   import make_dict
 from   numbers                      import Integral
 import os, sys
 
-from neuropythy.freesurfer import (freesurfer_subject, add_subject_path,
+from neuropythy.freesurfer import (freesurfer_subject, add_subject_path, find_subject_path,
                                    cortex_to_ribbon, cortex_to_ribbon_map, Hemisphere)
 from neuropythy.util       import (CommandLineParser)
 
@@ -107,48 +107,50 @@ def surface_to_ribbon_command(args):
     # figure out our arguments:
     (lhfl, rhfl) = (opts['lh_file'], opts['rh_file'])
     if len(args) == 0:
-        raise ValueError('Not enough arguments provided!')
+      raise ValueError('Not enough arguments provided!')
     elif len(args) == 1:
-        # must be that the subject is in the env?
-        sub = os.getenv('SUBJECT')
-        outfl = args[0]
+      # must be that the subject is in the env?
+      sub = find_subject_path(os.getenv('SUBJECT'))
+      outfl = args[0]
     elif len(args) == 2:
-        if os.path.isdir(args[0]):
-            sub = args[0]
-        else:
-            sub = os.getenv('SUBJECT')
-            if lhfl is not None: rhfl = args[0]
-            elif rhfl is not None: lhfl = args[0]
-            else: raise ValueError('Given arg is not a subject: %s' % args[0])
-        outfl = args[1]
+      sbpth = find_subject_path(args[0])
+      if sbpth is not None:
+        sub = sbpth
+      else:
+        sub = find_subject_path(os.getenv('SUBJECT'))
+        if lhfl is not None: rhfl = args[0]
+        elif rhfl is not None: lhfl = args[0]
+        else: raise ValueError('Given arg is not a subject: %s' % args[0])
+      outfl = args[1]
     elif len(args) == 3:
-        if os.path.isdir(args[0]):
-            sub = args[0]
-            if lhfl is not None: rhfl = args[1]
-            elif rhfl is not None: lhfl = args[1]
-            else: raise ValueError('Too many arguments given: %s' % args[1])
-        elif os.path.isdir(args[1]):
-            sub = args[1]
-            if lhfl is not None: rhfl = args[0]
-            elif rhfl is not None: lhfl = args[0]
-            else: raise ValueError('Too many arguments given: %s' % args[0])
-        else:
-            sub = os.getenv('SUBJECT')
-            if lhfl is not None or rhfl is not None:
-                raise ValueError('Too many arguments and no subject given')
-            (lhfl, rhfl) = args
-        outfl = args[2]
+      sbpth0 = find_subject_path(args[0])
+      sbpth1 = find_subject_path(args[1])
+      if sbpth0 is not None:
+        sub = sbpth0
+        if lhfl is not None: rhfl = args[1]
+        elif rhfl is not None: lhfl = args[1]
+        else: raise ValueError('Too many arguments given: %s' % args[1])
+      elif sbpth1 is not None:
+        sub = sbpth1
+        if lhfl is not None: rhfl = args[0]
+        elif rhfl is not None: lhfl = args[0]
+        else: raise ValueError('Too many arguments given: %s' % args[0])
+      else:
+        sub = find_subject_path(os.getenv('SUBJECT'))
+        if lhfl is not None or rhfl is not None:
+          raise ValueError('Too many arguments and no subject given')
+        (lhfl, rhfl) = args
+      outfl = args[2]
     elif len(args) == 4:
-         if lhfl is not None or rhfl is not None:
-             raise ValueError('Too many arguments and no subject given')
-         subidx = next((i for (i,a) in enumerate(args) if os.path.isdir(a)), None)
-         if subidx is None: raise ValueError('No subject given')
-         sub = args[subidx]
-         del args[subidx]
-         (lhfl, rhfl) = args
-         outfl = args[3]
+      if lhfl is not None or rhfl is not None:
+          raise ValueError('Too many arguments and no subject given')
+      subidx = next((i for (i,a) in enumerate(args) if find_subject_path(a) is not None), None)
+      if subidx is None: raise ValueError('No subject given')
+      sub = find_subject_path(args[subidx])
+      del args[subidx]
+      (lhfl, rhfl, outfl) = args
     else:
-        raise ValueError('Too many arguments provided!')
+      raise ValueError('Too many arguments provided!')
     if sub is None: raise ValueError('No subject specified or found in $SUBJECT')
     if lhfl is None and rhfl is None: raise ValueError('No surfaces provided')
     # check the method
@@ -165,20 +167,20 @@ def surface_to_ribbon_command(args):
     (lhdat, rhdat) = (None, None)
     if lhfl is not None:
         note('   - Reading LH file: %s' % lhfl)
-        lhdat = read_surface_file(lhfl)
+        lhdat = read_surf_file(lhfl)
     if rhfl is not None:
-        note('   - Reading RH file: %s' % lhfl)
-        rhdat = read_surface_file(rhfl)
+        note('   - Reading RH file: %s' % rhfl)
+        rhdat = read_surf_file(rhfl)
     (dat, hemi) = (rhdat, 'rh') if lhdat is None else \
                   (lhdat, 'lh') if rhdat is None else \
                   ((lhdat, rhdat), None)
     note('Generating vertex-to-voxel mapping...')
-    sub = neuro.freesurfer_subject(sub)
+    sub = freesurfer_subject(sub)
     s2r = cortex_to_ribbon_map(sub, hemi=hemi)
     # okay, make the volume...
     note('Generating volume...')
     vol = cortex_to_ribbon(sub, dat,
-                           map=s2r, hemi=hemi, method=method, fill=opts['fill'], dtype=dtp)
+                           map=s2r, hemi=hemi, method=method, fill=opts['fill'], dtype=dtyp)
     # and write out the file
     note('Exporting volume file: %s' % outfl)
     vol.to_filename(outfl)
