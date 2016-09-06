@@ -22,9 +22,6 @@ COPY contents/README.md    /README.md
 # Install python, and get the neuropythy library working.
 RUN cd /opt && git clone https://github.com/noahbenson/neuropythy
 RUN cd /opt/neuropythy && git submodule init && git submodule update && python setup.py install
-RUN chmod 755 /opt/neuropythy/surf2ribbon
-RUN ln -s /opt/neuropythy/surf2ribbon /usr/bin/surf2ribbon
-RUN ln -s /opt/neuropythy/surf2surf /usr/bin/surf2surf
 
 # Make sure we have the run.sh script ready:
 COPY contents/main.sh /main.sh

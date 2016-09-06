@@ -7,6 +7,8 @@ if [ "$1" = "README" ] || [ "$1" == "readme" ]
 then exec cat /README.md
 elif [ "$1" = "LICENSE" ] || [ "$1" == "license" ]
 then exec cat /LICENSE.txt
+elif [ "$1" = "bash" ]
+then exec /bin/bash
 fi
 
 # A few things we do first:
