@@ -255,9 +255,9 @@ def register_retinotopy_command(args):
                     if ow or not os.path.exist(flnm):
                         note('    - Exporting prediction file: %s' % flnm)
                         img = fsmgh.MGHImage(
-                            np.asarray([[res[h].prop(tag_key[dim])]]),
+                            np.asarray([[res[h].prop(tag_key[dim])]],
+                                       dtype=(np.int32 if dim == 'label' else np.float32)),
                             np.eye(4))
-                        img.header.set_data_dtype(np.int32 if dim == 'label' else np.float32)
                         img.to_filename(flnm)
                     else:
                         note('    - Skipping prediction file: %s (file exists)' % flnm)

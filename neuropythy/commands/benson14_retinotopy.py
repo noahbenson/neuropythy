@@ -126,9 +126,8 @@ def benson14_retinotopy_command(*args):
                 if ow or not os.path.exist(flnm):
                     note('    - Exporting LH prediction file: %s' % flnm)
                     img = fsmgh.MGHImage(
-                        np.asarray([[dat]]),
+                        np.asarray([[dat]], dtype=(np.int32 if dim == 'v123roi' else np.float32)),
                         np.eye(4))
-                    img.header.set_data_dtype(np.int32 if dim == 'v123roi' else np.float32)
                     img.to_filename(flnm)
                 else:
                     note('    - Not overwriting existing file: %s' % flnm)
