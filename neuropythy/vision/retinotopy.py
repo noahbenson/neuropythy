@@ -229,7 +229,7 @@ def retinotopy_anchors(mesh, mdl,
                        weight=None, weight_cutoff=0.2,
                        scale=1,
                        shape='Gaussian', suffix=None,
-                       sigma=[0.05, 1.0, 2.0],
+                       sigma=[0.05, 0.3, 2.0],
                        select='close'):
     '''
     retinotopy_anchors(mesh, model) is intended for use with the mesh_register function and the
@@ -274,7 +274,7 @@ def retinotopy_anchors(mesh, mdl,
         the mesh should be excluded; a value of just ['close', k] on the other hand indicates that
         any anchor more than k distance from the vertex should be exlcuded. The default value,
         'close', is equivalent to ['close', [20]].
-      * sigma (default [0.05, 1.0, 2.0]) specifies how the sigma parameter should be handled; if
+      * sigma (default [0.05, 0.3, 2.0]) specifies how the sigma parameter should be handled; if
         None, then no sigma value is specified; if a single number, then all sigma values are
         assigned that value; if a list of three numbers, then the first is the minimum sigma value,
         the second is the fraction of the minimum distance between paired anchor points, and the 
@@ -543,7 +543,8 @@ def register_retinotopy(hemi,
       * partial_voluming_correction (default: True), if True, specifies that the value
         (1 - hemi.partial_volume_factor()) should be applied to all weight values (i.e., weights
         should be down-weighted when likely to be affected by a partial voluming error).
-      * sigma specifies the standard deviation of the Gaussian shape for the Schira model anchors.
+      * sigma specifies the standard deviation of the Gaussian shape for the Schira model anchors;
+        see retinotopy_anchors for more information.
       * edge_scale, angle_scale, and functional_scale all specify the relative strengths of the
         various components of the potential field (functional_scale refers to the strength of the
         retinotopy model).
