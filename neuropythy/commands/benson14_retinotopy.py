@@ -126,7 +126,7 @@ def benson14_retinotopy_command(*args):
                 if ow or not os.path.exist(flnm):
                     note('    - Exporting LH prediction file: %s' % flnm)
                     img = fsmgh.MGHImage(
-                        np.asarray([[dat]], dtype=(np.int32 if dim == 'v123roi' else np.float32)),
+                        np.asarray([[dat]], dtype=(np.int32 if t == 'v123roi' else np.float32)),
                         np.eye(4))
                     img.to_filename(flnm)
                 else:
@@ -144,7 +144,7 @@ def benson14_retinotopy_command(*args):
                     vol = cortex_to_ribbon(sub,
                                            (lhdat[t], rhdat[t]),
                                            map=surf2rib,
-                                           dtype=(np.int32 if dim == 'label' else np.float32))
+                                           dtype=(np.int32 if t == 'v123roi' else np.float32))
                     note('    - Exporting volume file: %s' % flnm)
                     vol.to_filename(flnm)
                 else:
