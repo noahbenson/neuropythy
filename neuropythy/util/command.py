@@ -2,11 +2,41 @@
 # neuropythy/util/command.py
 # This file implements the command-line tools that are available as part of neuropythy.
 
+from types      import (ListType, TupleType)
 from pysistence import make_dict
 
 class CommandLineParser(object):
     '''
-    CommandLineParser()
+    CommandLineParser(instructions) yields a command line parser object, which acts as a function,
+    that is capable of parsing command line options into a dictionary of opts and a list of args,
+    as defined by the list of instructions.
+    The instructions should be a list of lists (or tuples), each of which should have three or four
+    entries: [character, word, entry, default] where the default is optional.
+    The character and word are the -x and --xxx versions of the argument; the entry is the name of
+    the entry in the opts dictionary that is yielded for that command line option, and the default
+    is the value inserted into the dictionary if the command line option is not found; if no
+    default value is given, then the entry will appear in the dictionary only if it appears in the
+    command line arguments.
+    If the default value given is either True or False, then the option is understood to be a flag;
+    i.e., the option does not take an argument (and single letter flags can appear together, such
+    as -it instead of -i -t), and the appearance of the flag toggles the default to the opposite
+    value.
+    
+    Example:
+      parser = CommandLineParser(
+        [('a', 'flag-a', 'aval', False),
+         ('b', 'flag-b', 'bval', True),
+         ('c', 'flag-c', 'cval', True),
+         ('d', 'flag-d', 'dval', False),
+         ('e', 'opt-e',  'eval', None),
+         ('f', 'opt-f',  'fval', None),
+         ('g', 'opt-g',  'gval'),
+         ('h', 'opt-h',  'hval')])
+      cmd_line = ['-ab', 'arg1', '--flag-d', '-etestE', '--opt-f=123', '-htestH', 'arg2']
+      parser(cmd_line) == parser(*cmd_line)  # identical calls
+      parser(cmd_line)
+      # ==> (['arg1', 'arg2'],
+      # ==>  {'a':True, 'b':False, 'c':True, 'd':True, 'e':'testE', 'f':'123', 'h':'testH'})
     '''
 
     def __init__(self, instructions):
@@ -35,9 +65,10 @@ class CommandLineParser(object):
         self.option_characters = make_dict(cargs)
 
     def __call__(self, *args):
-        if len(args) > 0 and not isinstance(args[0], basestring) and hasattr(args[0], '__iter__'):
+        if len(args) > 0 and not isinstance(args[0], basestring) and \
+           isinstance(args[0], (ListType, TupleType)):
             args = list(args)
-            return self.__call__(*(args[0] + args[1:]))
+            return self.__call__(*(list(args[0]) + args[1:]))
         parse_state = None
         more_opts = True
         remaining_args = []
