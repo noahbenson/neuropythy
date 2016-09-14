@@ -229,7 +229,7 @@ def retinotopy_anchors(mesh, mdl,
                        weight=None, weight_cutoff=0.2,
                        scale=1,
                        shape='Gaussian', suffix=None,
-                       sigma=[0.05, 0.3, 2.0],
+                       sigma=[0.05, 1.0, 2.0],
                        select='close'):
     '''
     retinotopy_anchors(mesh, model) is intended for use with the mesh_register function and the
@@ -274,7 +274,7 @@ def retinotopy_anchors(mesh, mdl,
         the mesh should be excluded; a value of just ['close', k] on the other hand indicates that
         any anchor more than k distance from the vertex should be exlcuded. The default value,
         'close', is equivalent to ['close', [20]].
-      * sigma (default [0.05, 0.3, 2.0]) specifies how the sigma parameter should be handled; if
+      * sigma (default [0.05, 1.0, 2.0]) specifies how the sigma parameter should be handled; if
         None, then no sigma value is specified; if a single number, then all sigma values are
         assigned that value; if a list of three numbers, then the first is the minimum sigma value,
         the second is the fraction of the minimum distance between paired anchor points, and the 
