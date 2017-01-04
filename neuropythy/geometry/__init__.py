@@ -15,6 +15,8 @@ from .util import (
     alignment_matrix_3D,
     alignment_matrix_2D,
     line_intersection_2D,
+    segment_intersection_2D,
+    line_segment_intersection_2D,
     triangle_area,
     cartesian_to_barycentric_2D,
     cartesian_to_barycentric_3D,

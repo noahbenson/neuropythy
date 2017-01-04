@@ -7,10 +7,39 @@ from freesurfer import (freesurfer_subject,
                         Subject    as FreeSurferSubject)
 from cortex     import (CorticalMesh)
 from vision     import (retinotopy_data, empirical_retinotopy_data, predicted_retinotopy_data,
-                        register_retinotopy, retinotopy_anchors, V123_model)
+                        register_retinotopy, retinotopy_anchors, V123_model,
+                        neighborhood_cortical_magnification)
 
 # Version information...
 __version__ = '0.1.6'
 
 description = 'Integrate Python environment with FreeSurfer and perform mesh registration'
-    
+
+
+def reload_neuropythy():
+    '''
+    reload_neuropythy() reloads all of the modules of neuropythy and returns the reloaded
+    neuropythy module.
+    '''
+    import sys
+    mdls = ('neuropythy.immutable',
+            'neuropythy.util',
+            'neuropythy.java',
+            'neuropythy.geometry.util',
+            'neuropythy.geometry.mesh',
+            'neuropythy.geometry',
+            'neuropythy.topology',
+            'neuropythy.cortex',
+            'neuropythy.freesurfer.subject',
+            'neuropythy.freesurfer',
+            'neuropythy.registration.core',
+            'neuropythy.registration',
+            'neuropythy.vision.models',
+            'neuropythy.vision.retinotopy',
+            'neuropythy.vision.cmag',
+            'neuropythy.vision',
+            'neuropythy.commands.surface_to_ribbon',
+            'neuropythy.commands.benson14_retinotopy',
+            'neuropythy.commands.register_retinotopy',
+            'neuropythy.commands')
+    return reload(sys.modules['neuropythy'])

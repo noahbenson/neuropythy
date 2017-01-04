@@ -102,27 +102,83 @@ def alignment_matrix_2D(u, v):
 def line_intersection_2D(((x1,y1),(x2,y2)), ((x3,y3),(x4,y4))):
     '''
     line_intersection((a, b), (c, d)) yields the intersection point between the lines that pass
-    through the given pairs of points.
+    through the given pairs of points. If any lines are parallel, (numpy.nan, numpy.nan) is
+    returned; note that a, b, c, and d can all be 2 x n matrices of x and y coordinate row-vectors.
     '''
     dx12 = (x1 - x2)
     dx34 = (x3 - x4)
     dy12 = (y1 - y2)
     dy34 = (y3 - y4)
     denom = dx12*dy34 - dy12*dx34
+    unit = np.isclose(denom, 0)
+    if unit is True: return (np.nan, np.nan)
+    denom = unit + denom
     q12 = (x1*y2 - y1*x2) / denom
     q34 = (x3*y4 - y3*x4) / denom
-    return (q12*dx34 - q34*dx12, q12*dy34 - q34*dy12)
+    xi = q12*dx34 - q34*dx12
+    yi = q12*dy34 - q34*dy12
+    if   unit is False: return (xi, yi)
+    elif unit is True:  return (np.nan, np.nan)
+    else:
+        xi = np.asarray(xi)
+        yi = np.asarray(yi)
+        xi[unit] = np.nan
+        yi[unit] = np.nan
+        return (xi, yi)
+
+def segment_intersection_2D((p1,p2), (p3,p4)):
+    '''
+    segment_intersection((a, b), (c, d)) yields the intersection point between the line segments
+    that pass from point a to point b and from point c to point d. If there is no intersection
+    point, then (numpy.nan, numpy.nan) is returned.
+    '''
+    pi = np.asarray(line_intersection_2D((p1,p2), (p3,p4)))
+    p1 = np.asarray(p1)
+    p2 = np.asarray(p2)
+    p3 = np.asarray(p3)
+    p4 = np.asarray(p4)
+    u12 = p2 - p1
+    u34 = p4 - p3
+    dfn = lambda a,b: a[0]*b[0] + a[1]*b[1]
+    bad = 1 - ((dfn(u12, pi-p1) > 0) * (dfn(u34, pi-p3) > 0)
+               * (dfn(u12, p2-pi) > 0) * (dfn(u34, p4-pi) > 0))
+    if len(pi.shape) == 1:
+        return (np.nan, np.nan) if bad else pi
+    else:
+        (xi,yi) = pi
+        bad = np.where(bad)[0]
+        xi[bad] = np.nan
+        yi[bad] = np.nan
+        return (xi,yi)
+
+def line_segment_intersection_2D((p1,p2), (p3,p4)):
+    '''
+    line_segment_intersection((a, b), (c, d)) yields the intersection point between the line
+    passing through points a and b and the line segment that passes from point c to point d. If
+    there is no intersection point, then (numpy.nan, numpy.nan) is returned.
+    '''
+    pi = np.asarray(line_intersection_2D((p1,p2), (p3,p4)))
+    p3 = np.asarray(p3)
+    u34 = p4 - p3
+    dfn = lambda a,b: a[0]*b[0] + a[1]*b[1]
+    bad = 1 - ((dfn(u34, pi-p3) > 0) * (dfn(u34, p4-pi) > 0))
+    if len(pi.shape) == 1:
+        return (np.nan, np.nan) if bad else pi
+    else:
+        (xi,yi) = pi
+        bad = np.where(bad)[0]
+        xi[bad] = np.nan
+        yi[bad] = np.nan
+        return (xi,yi)
 
 def triangle_area(a,b,c):
     '''
     triangle_area(a, b, c) yields the area of the triangle whose vertices are given by the points a,
     b, and c.
     '''
-    if len(a) == 2:
-        return np.abs(0.5*(a[0]*(b[1] - c[1]) + b[0]*(c[1] - a[1]) + c[0]*(a[1] - b[1])))
-    else:
-        mtx = alignment_matrix_3D(np.cross(np.asarray(b) - a, np.asarray(c) - a), [0,0,1])[0:1]
-        return triangle_area(np.dot(mtx, a), np.dot(mtx, b), np.dot(mtx, c))
+    sides = np.sqrt(np.sum([(p1.T - p2.T)**2 for (p1,p2) in zip([b,c,a],[c,a,b])], axis=1))
+    s = 0.5 * np.sum(sides, axis=0)
+    return np.sqrt(s * np.prod(s - sides, axis=0))
 
 def cartesian_to_barycentric_3D(tri, xy):
     '''

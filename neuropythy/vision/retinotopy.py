@@ -131,7 +131,7 @@ _V123_model_paths = [
     os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         'lib', 'models')]
-def V123_model(name='standard', radius=pi/3.0, sphere_radius=100.0, search_paths=None, update=False):
+def V123_model(name='standard', radius=pi/3.0, sphere_radius=100., search_paths=None, update=False):
     '''
     V123_model() yields a standard retinotopy model of V1, V2, and V3. The model itself is a set of
     meshes with values at the vertices that define the polar angle and eccentricity. These meshes
@@ -219,7 +219,7 @@ def V123_model(name='standard', radius=pi/3.0, sphere_radius=100.0, search_paths
 # Tools for retinotopy registration:
 def _retinotopy_vectors_to_float(ang, ecc, wgt, weight_cutoff=0):
     (ang, ecc, wgt) = np.asarray(
-        [(a,e,w) if all(isinstance(x, Number) or np.issubdtype(type(x), np.float) for x in [a,e,w]) \
+        [(a,e,w) if all(isinstance(x,Number) or np.issubdtype(type(x),np.float) for x in [a,e,w]) \
                     and w > weight_cutoff else (0,0,0)
          for (a,e,w) in zip(ang, ecc, wgt)]).T
     return (ang, ecc, wgt)
