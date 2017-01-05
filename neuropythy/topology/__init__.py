@@ -40,7 +40,7 @@ class Topology(object):
         coords = np.asarray(coords)
         self.registrations = self.registrations.using(
             name,
-            Registration(coords if coords.shape[0] < 4 else coords.T))
+            Registration(self, coords if coords.shape[0] < 4 else coords.T))
         return self
     def interpolate_from(self, topo, data, mask=None, null=None, method='automatic', n_jobs=1):
         '''
