@@ -139,14 +139,25 @@ def segment_intersection_2D((p1,p2), (p3,p4)):
     p4 = np.asarray(p4)
     u12 = p2 - p1
     u34 = p4 - p3
-    dfn = lambda a,b: a[0]*b[0] + a[1]*b[1]
-    bad = 1 - ((dfn(u12, pi-p1) > 0) * (dfn(u34, pi-p3) > 0)
-               * (dfn(u12, p2-pi) > 0) * (dfn(u34, p4-pi) > 0))
+    cfn = lambda px,iis: (px if iis is None or len(px.shape) == 1 or px.shape[1] == len(iis) else
+                          px[:,iis])
+    dfn = lambda a,b:     a[0]*b[0] + a[1]*b[1]
+    sfn = lambda a,b:     ((a-b)                 if len(a.shape) == len(b.shape) else
+                           (np.transpose([a])-b) if len(a.shape) <  len(b.shape) else
+                           (a - np.transpose([b])))
+    fn  = lambda px,iis:  (1 - ((dfn(cfn(u12,iis), sfn(         px, cfn(p1,iis))) > 0) *
+                                (dfn(cfn(u34,iis), sfn(         px, cfn(p3,iis))) > 0) *
+                                (dfn(cfn(u12,iis), sfn(cfn(p2,iis),          px)) > 0) *
+                                (dfn(cfn(u34,iis), sfn(cfn(p4,iis),          px)) > 0)))
     if len(pi.shape) == 1:
+        if not np.isfinite(pi[0]): return (np.nan, np.nan)
+        bad = fn(pi, None)
         return (np.nan, np.nan) if bad else pi
     else:
+        nonpar = np.where(np.isfinite(pi[0]))[0]
+        bad = fn(cfn(pi, nonpar), nonpar)
         (xi,yi) = pi
-        bad = np.where(bad)[0]
+        bad = nonpar[np.where(bad)[0]]
         xi[bad] = np.nan
         yi[bad] = np.nan
         return (xi,yi)
@@ -161,7 +172,10 @@ def line_segment_intersection_2D((p1,p2), (p3,p4)):
     p3 = np.asarray(p3)
     u34 = p4 - p3
     dfn = lambda a,b: a[0]*b[0] + a[1]*b[1]
-    bad = 1 - ((dfn(u34, pi-p3) > 0) * (dfn(u34, p4-pi) > 0))
+    sfn = lambda a,b: ((a-b)                 if len(a.shape) == len(b.shape) else
+                       (np.transpose([a])-b) if len(a.shape) < len(b.shape)  else
+                       (a - np.transpose([b])))
+    bad = 1 - ((dfn(u34, sfn(pi,p3)) > 0) * (dfn(u34, sfn(p4,pi)) > 0))
     if len(pi.shape) == 1:
         return (np.nan, np.nan) if bad else pi
     else:
@@ -345,3 +359,26 @@ def triangle_unaddress(fx, tr):
     ac = fx[2] - fx[0]
     bc = fx[2] - fx[1]
     return np.asarray([ax + tr[1]*(abx + tr[0]*bcx) for (ax, bcx, abx) in zip(fx[0], bc, ab)])
+
+def point_in_triangle(tri, pt):
+    if len(pt) == 2:
+        tol = 1e-13
+        v0 = tri[2] - tri[0]
+        v1 = tri[1] - tri[0]
+        v2 = pt - tri[0]
+        d00 = np.dot(v0, v0)
+        d01 = np.dot(v0, v1)
+        d02 = np.dot(v0, v2)
+        d11 = np.dot(v1, v1)
+        d12 = np.dot(v1, v2)
+        invDenom = (d00*d11 - d01*d01)
+        if np.isclose(invDenom, 0): return False
+        s = (d11*d02 - d01*d12) / invDenom
+        if (s + tol) < 0 or (s - tol) >= 1: return False
+        t = (d00*d12 - d01*d02) / invDenom
+        return False if (t + tol) < 0 or (s + t - tol) > 1 else True
+    else:
+        return (np.dot(pt - tri[0], np.cross(tri[0], tri[1] - tri[0])) >= 0 and
+                np.dot(pt - tri[1], np.cross(tri[1], tri[2] - tri[1])) >= 0 and
+                np.dot(pt - tri[2], np.cross(tri[2], tri[0] - tri[2])) >= 0)
+    

@@ -92,6 +92,8 @@ class Mesh(Immutable):
         # gradually increase until we find the container triangle; if k passes the max, then
         # we give up and assume no triangle is the container
         if k > 288: return None
+        # for some reason, not doing this makes results inconsistent
+        x = np.asarray(x, dtype=np.float32)
         (d,near) = self.triangle_hash.query(x, k=k)
         near = [n for n in near if n not in searched]
         searched = searched.union(near)
@@ -169,14 +171,14 @@ class Mesh(Immutable):
         pt = np.asarray(pt)
         (d, near) = self.triangle_hash.query(pt, k=k) #n_jobs fails?
         if len(pt.shape) == 1:
-            tri_no = next((k for k in near if self._point_in_triangle(k, pt)), None)
+            tri_no = next((kk for kk in near if self._point_in_triangle(kk, pt)), None)
             return (tri_no if tri_no is not None
                     else self._find_triangle_search(pt, k=(2*k), searched=set(near)))
         else:
             return [(tri_no if tri_no is not None
                      else self._find_triangle_search(x, k=(2*k), searched=set(near_i)))
                     for (x, near_i) in zip(pt, near)
-                    for tri_no in [next((k for k in near_i if self._point_in_triangle(k, x)),
+                    for tri_no in [next((kk for kk in near_i if self._point_in_triangle(kk, x)),
                                         None)]]
 
     def interpolate(self, x, data, 
@@ -287,7 +289,7 @@ class Mesh(Immutable):
             face_id = self.container(data)
             tx = self.coordinates[self.triangles[face_id]]
         else:
-            data = data if data.shape[1] == 3 else data.T
+            data = data if data.shape[1] == 3 or data.shape[1] == 2 else data.T
             face_id = self.container(data)
             faces = self.triangles[face_id].T
             tx = np.transpose(np.asarray([self.coordinates[f] for f in faces]), (0,2,1))

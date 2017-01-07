@@ -22,6 +22,7 @@ from .util import (
     cartesian_to_barycentric_3D,
     barycentric_to_cartesian,
     triangle_address,
-    triangle_unaddress)
+    triangle_unaddress,
+    point_in_triangle)
 from .mesh import Mesh
 
