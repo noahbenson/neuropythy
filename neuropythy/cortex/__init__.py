@@ -6,6 +6,7 @@
 import numpy as np
 import scipy as sp
 import scipy.spatial as space
+import scipy.optimize as spopt
 from scipy.sparse import csr_matrix
 from numpy.linalg import lstsq, norm
 import neuropythy.geometry as geo
@@ -797,3 +798,71 @@ class CorticalMesh(Immutable):
         (coords, faces) = fsio.read_geometry(file)
         return CorticalMesh(coords, faces, source_file=file)
 
+# smooth a field on the cortical surface
+def mesh_smooth(mesh, prop, ignore_outliers=False, outliers=4.0, smoothness=0.5):
+    '''
+    mesh_smooth(mesh, prop) yields a numpy array of the values in the mesh property prop after they
+      have been smoothed on the cortical surface. Smoothing is done by minimizing the square
+      difference between the values in prop and the smoothed values simultaneously with the
+      difference between values connected by edges. The prop argument may be either a property name
+      or a list of property values.
+    
+    The following options are accepted:
+      * ignore_outliers (default: True) may be false to indicate that no outliers in the property
+        should be ignored; if True, outliers are minimized but they are not scored relative to their
+        starting position, so don't affect the local smoothing values.
+      * outliers (default: 4.0) may be None or an empty collection to indicate that there are no
+        outliers, may be a list of outlier vertex labels (not indices), or may be a function f that
+        is called as f(mu, sigma, values) and must return a boolean array the same size as values
+        that indicates which values are outliers. Finally, if outliers is a single number, then all
+        values more than <outliers> standard deviations from the mean are considered outliers.
+      * smoothness (default: 0.5) specifies how much the function should care about the smoothness
+        versus the original values when optimizing the surface smoothness. A value of 0 would result
+        in no smoothing performed while a value of 1 indicates that only the smoothing (and not the
+        original values at all) matter in the solution.
+    '''
+    prop = np.asarray(mesh.prop(prop) if isinstance(prop, basestring) else prop)
+    # deal with outliers
+    if outliers is not None:
+        if np.issubdtype(type(outliers), np.number):
+            n_sigmas = outliers
+            outliers = lambda mu,sig,vals: np.abs(vals - mu) >= n_sigmas*sig
+        # should either be a label list, a boolean array, or a function
+        if hasattr(outliers, '__iter__'):
+            if len(outliers) == len(prop) and all(x == 1 or x == 0 for x in np.unique(outliers)):
+                outliers = np.where(outliers)[0]
+            else:
+                idx = mesh.index
+                outliers = np.asarray([i for i in [idx[i] for i in outliers] if i])
+        else:
+            prop_ids = np.asarray([i for (i,p) in enumerate(prop)
+                                   if np.issubdtype(type(p), np.number)])
+            prop_nums = prop[prop_ids]
+            mu = np.mean(prop_nums)
+            sig = np.std(prop_nums)
+            outliers = prop_ids[np.where(outliers(mu, sig, prop_nums))[0]]
+    else:
+        outliers = []
+    outliers = set(outliers)
+    # find indices we care about (i.e., where the numbers are; don't ignore outliers yet)
+    idcs = frozenset([i for (i,p) in enumerate(prop) if np.issubdtype(type(p), np.number)])
+    el0 = mesh.indexed_edges
+    el = el0 if len(idcs) == len(prop) else \
+         np.asarray([(a,b) for (a,b) in el0.T if a in idcs and b in idcs]).T
+    # okay, we have to build up our constraints; first, we want things to stay close to where they
+    # are if they aren't outliers:
+    non_outliers = np.asarray(list(idcs - outliers))
+    x0 = prop[non_outliers]
+    (ks, ke) = (smoothness, 1.0 - smoothness)
+    def _f(x):
+        rs = np.sum((x0[non_outliers] - x[non_outliers])**2)
+        re = np.sum((x[el[0]] - x[el[1]])**2)
+        return ks*rs + ke*re
+    def _f_jac(x):
+        df = np.zeros(x.shape)
+        df[non_outliers] = 2*ks*(x[non_outliers] - x0[non_outliers])
+        for (u,v,dx) in zip(el[0], el[1], x[el[0]] - x[el[1]]):
+            df[u] += dx
+            df[v] -= dx
+        return df
+    return spopt.minimize(_f, prop, jac=_f_jac, method='L-BGFS-B').x
