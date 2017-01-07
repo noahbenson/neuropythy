@@ -194,7 +194,6 @@ def path_cortical_magnification(mesh, path, mask=None, return_all=False,
         ss.append(pt)
         # here is the line segment we want to intersect with things
         seg = (pt, next_pt)
-
         while not point_in_triangle(vis_reg.coordinates[vis_reg.triangles[tid]], next_pt):
             # otherwise, we need to find the next neighboring triangle:
             vtcs   = vis_reg.triangles[tid]
@@ -228,6 +227,7 @@ def path_cortical_magnification(mesh, path, mask=None, return_all=False,
                 tid = None
             if tid is None:
                 if len(ss) > 1: steps.append(ss)
+                ss = []
                 isect = np.asarray(segment_intersection_2D((pt0, next_pt), all_segs)).T
                 # we want to ignore intersections in the current triangle tid0
                 isect_idcs = [idc for idc in np.where(~np.isnan(isect[:,0]))[0]
