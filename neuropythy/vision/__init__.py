@@ -9,5 +9,5 @@ from .retinotopy import (empirical_retinotopy_data, predicted_retinotopy_data, r
                          extract_retinotopy_argument,
                          register_retinotopy, retinotopy_anchors, V123_model, benson14_retinotopy,
                          register_retinotopy_initialize)
-from .cmag       import (neighborhood_cortical_magnification)
+from .cmag       import (neighborhood_cortical_magnification, path_cortical_magnification)
 
