@@ -92,7 +92,7 @@ def neighborhood_cortical_magnification(mesh, coordinates, direction='area'):
                 try:
                     isects_vis = np.asarray(line_segment_intersection_2D(line, segs_vis))
                     # okay, these will all be nan but two of them; they are the points we care about
-                    isect_idcs = np.unique(np.where(-np.isnan(isects_vis))[1])
+                    isect_idcs = np.unique(np.where(~np.isnan(isects_vis))[1])
                 except:
                     isect_idcs = []
                 if len(isect_idcs) != 2:
