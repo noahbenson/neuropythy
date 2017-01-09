@@ -171,16 +171,23 @@ def line_segment_intersection_2D((p1,p2), (p3,p4)):
     pi = np.asarray(line_intersection_2D((p1,p2), (p3,p4)))
     p3 = np.asarray(p3)
     u34 = p4 - p3
-    dfn = lambda a,b: a[0]*b[0] + a[1]*b[1]
-    sfn = lambda a,b: ((a-b)                 if len(a.shape) == len(b.shape) else
-                       (np.transpose([a])-b) if len(a.shape) < len(b.shape)  else
-                       (a - np.transpose([b])))
-    bad = 1 - ((dfn(u34, sfn(pi,p3)) > 0) * (dfn(u34, sfn(p4,pi)) > 0))
+    cfn = lambda px,iis: (px if iis is None or len(px.shape) == 1 or px.shape[1] == len(iis) else
+                          px[:,iis])
+    dfn = lambda a,b:     a[0]*b[0] + a[1]*b[1]
+    sfn = lambda a,b:     ((a-b)                 if len(a.shape) == len(b.shape) else
+                           (np.transpose([a])-b) if len(a.shape) <  len(b.shape) else
+                           (a - np.transpose([b])))
+    fn  = lambda px,iis:  (1 - ((dfn(cfn(u34,iis), sfn(         px, cfn(p3,iis))) > 0) *
+                                (dfn(cfn(u34,iis), sfn(cfn(p4,iis),          px)) > 0)))
     if len(pi.shape) == 1:
+        if not np.isfinite(pi[0]): return (np.nan, np.nan)
+        bad = fn(pi, None)
         return (np.nan, np.nan) if bad else pi
     else:
+        nonpar = np.where(np.isfinite(pi[0]))[0]
+        bad = fn(cfn(pi, nonpar), nonpar)
         (xi,yi) = pi
-        bad = np.where(bad)[0]
+        bad = nonpar[np.where(bad)[0]]
         xi[bad] = np.nan
         yi[bad] = np.nan
         return (xi,yi)
