@@ -843,7 +843,7 @@ def mesh_smooth(mesh, prop, ignore_outliers=False, outliers=4.0, smoothness=0.5)
             outliers = prop_ids[np.where(outliers(mu, sig, prop_nums))[0]]
     else:
         outliers = []
-    outliers = set(outliers)
+    outliers = frozenset(outliers)
     # find indices we care about (i.e., where the numbers are; don't ignore outliers yet)
     idcs = frozenset([i for (i,p) in enumerate(prop) if np.issubdtype(type(p), np.number)])
     el0 = mesh.indexed_edges
@@ -855,14 +855,14 @@ def mesh_smooth(mesh, prop, ignore_outliers=False, outliers=4.0, smoothness=0.5)
     x0 = prop[non_outliers]
     (ks, ke) = (smoothness, 1.0 - smoothness)
     def _f(x):
-        rs = np.sum((x0[non_outliers] - x[non_outliers])**2)
+        rs = np.sum((x0 - x[non_outliers])**2)
         re = np.sum((x[el[0]] - x[el[1]])**2)
         return ks*rs + ke*re
     def _f_jac(x):
         df = np.zeros(x.shape)
-        df[non_outliers] = 2*ks*(x[non_outliers] - x0[non_outliers])
+        df[non_outliers] = 2*ks*(x[non_outliers] - x0)
         for (u,v,dx) in zip(el[0], el[1], x[el[0]] - x[el[1]]):
             df[u] += dx
             df[v] -= dx
         return df
-    return spopt.minimize(_f, prop, jac=_f_jac, method='L-BGFS-B').x
+    return spopt.minimize(_f, prop, jac=_f_jac, method='L-BFGS-B').x
