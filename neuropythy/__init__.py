@@ -23,6 +23,7 @@ def reload_neuropythy():
     '''
     import sys
     mdls = ('neuropythy.immutable',
+            'neuropythy.util.command',
             'neuropythy.util',
             'neuropythy.java',
             'neuropythy.geometry.util',
@@ -42,4 +43,7 @@ def reload_neuropythy():
             'neuropythy.commands.benson14_retinotopy',
             'neuropythy.commands.register_retinotopy',
             'neuropythy.commands')
+    for mdl in mdls:
+        if mdl in sys.modules:
+            reload(sys.modules[mdl])
     return reload(sys.modules['neuropythy'])
