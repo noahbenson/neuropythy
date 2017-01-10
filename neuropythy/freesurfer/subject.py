@@ -798,7 +798,7 @@ class Hemisphere(Immutable):
                     raise ValueError('Given hemisphere is not registered to the ' + registration \
                                      + ' registration')
                 reg = obj.topology.registrations[usereg]
-                mesh = obj._make_surface(reg.coordinates, org.topology.triangles, usereg)
+                mesh = obj._make_surface(reg.coordinates, obj.topology.triangles, usereg)
                 proj = __fwdfn(mesh)
                 proj_params = proj.options['projection_parameters']
                 proj.options = proj.options.using(
