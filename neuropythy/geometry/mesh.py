@@ -13,7 +13,7 @@ from numpy.linalg import norm
 from neuropythy.immutable import Immutable
 from .util import (triangle_area, triangle_address, alignment_matrix_3D,
                    cartesian_to_barycentric_3D, cartesian_to_barycentric_2D,
-                   barycentric_to_cartesian)
+                   barycentric_to_cartesian, point_in_triangle)
 
 class Mesh(Immutable):
     '''
@@ -66,26 +66,7 @@ class Mesh(Immutable):
     # True if the point is in the triangle, otherwise False; tri_no is an index into the triangle
     def _point_in_triangle(self, tri_no, pt):
         tri = self.coordinates[self.triangles[tri_no]]
-        if len(pt) == 2:
-            tol = 1e-13
-            v0 = tri[2] - tri[0]
-            v1 = tri[1] - tri[0]
-            v2 = pt - tri[0]
-            d00 = np.dot(v0, v0)
-            d01 = np.dot(v0, v1)
-            d02 = np.dot(v0, v2)
-            d11 = np.dot(v1, v1)
-            d12 = np.dot(v1, v2)
-            invDenom = (d00*d11 - d01*d01)
-            if np.isclose(invDenom, 0): return False
-            s = (d11*d02 - d01*d12) / invDenom
-            if (s + tol) < 0 or (s - tol) >= 1: return False
-            t = (d00*d12 - d01*d02) / invDenom
-            return False if (t + tol) < 0 or (s + t - tol) > 1 else True
-        else:
-            return (np.dot(pt - tri[0], np.cross(tri[0], tri[1] - tri[0])) >= 0 and
-                    np.dot(pt - tri[1], np.cross(tri[1], tri[2] - tri[1])) >= 0 and
-                    np.dot(pt - tri[2], np.cross(tri[2], tri[0] - tri[2])) >= 0)
+        return point_in_triangle(tri, pt)
 
     def _find_triangle_search(self, x, k=24, searched=set([])):
         # This gets called when a container triangle isn't found; the idea is that k should
@@ -287,11 +268,12 @@ class Mesh(Immutable):
         data = np.asarray(data)
         if len(data.shape) == 1:
             face_id = self.container(data)
+            if face_id is None: return None
             tx = self.coordinates[self.triangles[face_id]]
         else:
             data = data if data.shape[1] == 3 or data.shape[1] == 2 else data.T
             face_id = self.container(data)
-            faces = self.triangles[face_id].T
+            faces = self.triangles[face_id]
             tx = np.transpose(np.asarray([self.coordinates[f] for f in faces]), (0,2,1))
         bc = cartesian_to_barycentric_3D(tx, data) if self.coordinates.shape[1] == 3 else \
              cartesian_to_barycentric_2D(tx, data)
