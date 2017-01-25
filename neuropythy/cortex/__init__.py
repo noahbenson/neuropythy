@@ -18,6 +18,7 @@ from types import DictType
 import itertools, collections
 from pysistence import make_dict
 import pysistence
+import colorsys
 
 class CorticalMesh(Immutable):
     '''CorticalMesh is a class that handles properties of the cortical surface mesh. 
@@ -866,4 +867,127 @@ def mesh_smooth(mesh, prop, ignore_outliers=False, outliers=4.0, smoothness=0.5)
             df[v] -= dx
         return df
     return spopt.minimize(_f, prop, jac=_f_jac, method='L-BFGS-B').x
+
+# Plotting and Coloring Meshes #####################################################################
+# All of this requires matplotlib, so we try all and fail gracefully if we don't have it
+
+try:
+    import matplotlib, matplotlib.pyplot
+    _curv_cmap_dict = {
+        name: ((0.0, 0.0, 0.5),
+               (0.5, 0.5, 0.2),
+               (1.0, 0.2, 0.0))
+        for name in ['red', 'green', 'blue']}
+    _curv_cmap = matplotlib.colors.LinearSegmentedColormap('curv', _curv_cmap_dict)
+
+    def vertex_curvature_color(m):
+        return [0.2,0.2,0.2,1.0] if m['curvature'] > -0.025 else [0.7,0.7,0.7,1.0]
+    def vertex_weight(m):
+        return m['weight']                 if 'weight'                 in m else \
+               m['variance_explained']     if 'variance_explained'     in m else \
+               m['PRF_variance_explained'] if 'PRF_variance_explained' in m else \
+               1.0
+    def vertex_angle_color(m, weight_cutoff=0.2, weighted=True):
+        w = vertex_weight(m)
+        curvColor = np.asarray(vertex_curvature_color(m))
+        if weighted and w < weight_cutoff: return curvColor
+        angColor = colorsys.hsv_to_rgb(0.666667*(1 - m['polar_angle']/180), 1, 1)
+        angColor = np.asarray(angColor + (1,))
+        if weighted:
+            return angColor*w + curvColor*(1-w)
+        else:
+            return angColor
+    _eccen_cmap = matplotlib.colors.LinearSegmentedColormap(
+        'eccentricity',
+        {'red':   ((0.0,       0.0, 0.0),
+                   (2.5/90.0,  0.5, 0.5),
+                   (5.0/90.0,  1.0, 1.0),
+                   (10.0/90.0, 1.0, 1.0),
+                   (20.0/90.0, 0.0, 0.0),
+                   (40.0/90.0, 0.0, 0.0),
+                   (90.0/90.0, 1.0, 1.0)),
+         'green': ((0.0,       0.0, 0.0),
+                   (2.5/90.0,  0.0, 0.0),
+                   (5.0/90.0,  0.0, 0.0),
+                   (10.0/90.0, 1.0, 1.0),
+                   (20.0/90.0, 1.0, 1.0),
+                   (40.0/90.0, 1.0, 1.0),
+                   (90.0/90.0, 1.0, 1.0)),
+         'blue':  ((0.0,       0.0, 0.0),
+                   (2.5/90.0,  0.5, 0.5),
+                   (5.0/90.0,  0.0, 0.0),
+                   (10.0/90.0, 0.0, 0.0),
+                   (20.0/90.0, 0.0, 0.0),
+                   (40.0/90.0, 1.0, 1.0),
+                   (90.0/90.0, 1.0, 1.0))})
+    def vertex_eccen_color(m, weight_cutoff=0.2, weighted=True):
+        global _eccen_cmap
+        w = vertex_weight(m)
+        curvColor = np.asarray(vertex_curvature_color(m))
+        if weighted and w < weight_cutoff: return curvColor
+        eccColor = np.asarray(_eccen_cmap(m['eccentricity']/90.0))
+        if weighted:
+            return eccColor*w + curvColor*(1-w)
+        else:
+            return eccColor
+    def curvature_colors(m):
+        return np.asarray(m.map_vertices(vertex_curvature_color))
+    def angle_colors(m):
+        return np.asarray(m.map_vertices(vertex_angle_color))
+    def eccen_colors(m):
+        return np.asarray(m.map_vertices(vertex_eccen_color))
+    def colors_to_cmap(colors):
+        colors = np.asarray(colors)
+        if colors.shape[1] == 3:
+            colors = np.hstack((colors, np.ones((len(colors),1))))
+        steps = (0.5 + np.asarray(range(len(colors)-1), dtype=np.float))/(len(colors) - 1)
+        return matplotlib.colors.LinearSegmentedColormap(
+            'auto_cmap',
+            {clrname: ([(0, col[0], col[0])] +
+                       [(step, c0, c1) for (step,c0,c1) in zip(steps, col[:-1], col[1:])] +
+                       [(1, col[-1], col[-1])])
+             for (clridx,clrname) in enumerate(['red', 'green', 'blue', 'alpha'])
+             for col in [colors[:,clridx]]},
+            N=(len(colors)))
+    def cortex_plot(the_map, color=None, plotter=matplotlib.pyplot, weights=Ellipsis):
+        '''
+        cortex_plot(map) yields a plot of the given 2D cortical mesh, map. The following options are
+        accepted:
+          * color (default: None) specifies a function that, when passed a single argument, a dict
+            of the properties of a single vertex, yields an RGBA list for that vertex. By default,
+            uses the curvature colors.
+          * weight (default: Ellipsis) specifies that the given weights should be used instead of
+            the weights attached to the given map; note that Ellipsis indicates that the current
+            map's weights should be used. If None or a single number is given, then all weights are
+            considered to be 1. A string may be given to indicate that a property should be used.
+          * plotter (default: matplotlib.pyplot) specifies a particular plotting object should be
+            used.
+        '''
+        tri = matplotlib.tri.Triangulation(the_map.coordinates[0],
+                                           the_map.coordinates[1],
+                                           triangles=the_map.indexed_faces.T)
+        if weights is not Ellipsis:
+            if weights is None or not hasattr(weights, '__iter__'):
+                weights = np.ones(the_map.vertex_count)
+            elif isinstance(weights, basestring):
+                weights = the_map.prop(weights)
+            the_map = the_map.using(properties=the_map.properties.using(weight=weights))
+        if isinstance(color, np.ndarray):
+            colors = color
+        else:
+            if color is None or color == 'curv' or color == 'curvature':
+                color = vertex_curvature_color
+            elif color == 'angle' or color == 'polar_angle':
+                color = vertex_angle_color
+            elif color == 'eccen' or color == 'eccentricity':
+                color = vertex_eccen_color
+            colors = np.asarray(the_map.map_vertices(color))
+        cmap = rgbs_to_cmap(colors)
+        zs = np.asarray(range(the_map.vertex_count), dtype=np.float) / (the_map.vertex_count - 1)
+        if plotter is None:
+            return (zs, cmap)
+        else:
+            return plotter.tripcolor(tri, zs, cmap=cmap, shading='gouraud')
+except:
+    pass
 
