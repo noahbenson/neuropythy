@@ -866,3 +866,4 @@ def mesh_smooth(mesh, prop, ignore_outliers=False, outliers=4.0, smoothness=0.5)
             df[v] -= dx
         return df
     return spopt.minimize(_f, prop, jac=_f_jac, method='L-BFGS-B').x
+

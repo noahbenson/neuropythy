@@ -43,6 +43,9 @@ _parse_field_data_types = {
         'harmonic':      ['newHarmonicAnchorPotential', ['scale', 1.0], ['shape', 2.0], 0, 1, 'X'],
         'gaussian':      ['newGaussianAnchorPotential', ['scale', 1.0], ['sigma', 2.0], 
                                                         ['shape', 2.0], 0, 1, 'X']},
+    'mesh-field': {
+        'harmonic':      ['newHarmonicMeshPotential',   ['scale', 1.0], ['order', 2.0], 0, 1, 2,
+                                                        3, 4, 'X']},
     'perimeter': {
         'harmonic':   ['newHarmonicPerimeterPotential', ['scale', 1.0], ['shape', 2.0], 'F', 'X']}};
         
@@ -110,7 +113,8 @@ def _parse_field_arguments(arg, faces, coords):
         return sp
 
 # The mesh_register function
-def mesh_register(mesh, field, max_steps=2000, max_step_size=0.05, max_pe_change=1, k=4):
+def mesh_register(mesh, field, max_steps=2000, max_step_size=0.05, max_pe_change=1, k=4,
+                  return_report=False):
     '''
     mesh_register(mesh, field) yields the mesh that results from registering the given mesh by
     minimizing the given potential field description over the position of the vertices in the
@@ -160,7 +164,7 @@ def mesh_register(mesh, field, max_steps=2000, max_step_size=0.05, max_pe_change
           * 'max': the maximum value M; default: pi.
 
     Options: The following optional arguments are accepted.
-      * max_steps (default: 25000) the maximum number of steps to minimize for.
+      * max_steps (default: 2000) the maximum number of steps to minimize for.
       * max_step_size (default: 0.1) the maximum distance to allow a vertex to move in a single
         minimization step.
       * max_pe_change: the maximum fraction of the initial potential value that the minimizer
@@ -171,6 +175,8 @@ def mesh_register(mesh, field, max_steps=2000, max_step_size=0.05, max_pe_change
         this argument, if greater than 1, specifies that the minimizer should use the nimbleStep
         rather than the step function for performing gradient descent; the number of partitions is
         k in this case.
+      * return_report (default: False) indicates that instead of returning the registered data,
+        mesh_register should instead return the Java Minimizer.Report object (for debugging).
 
     Examples:
       registered_mesh = mesh_register(
@@ -200,11 +206,15 @@ def mesh_register(mesh, field, max_steps=2000, max_step_size=0.05, max_pe_change
     # Okay, that's basically all we need to do the minimization...
     minimizer = java_link().jvm.nben.mesh.registration.Minimizer(potential, coords)
     if k == 1:
-        minimizer.step(float(max_pe_change), int(max_steps), float(max_step_size))
+        rep = minimizer.step(float(max_pe_change), int(max_steps), float(max_step_size))
     else:
-        minimizer.nimbleStep(float(max_pe_change), int(max_steps), float(max_step_size), int(k))
-    result = minimizer.getX()
-    return np.asarray([[x for x in row] for row in result])
+        rep = minimizer.nimbleStep(float(max_pe_change), int(max_steps), float(max_step_size), int(k))
+    # Return the report if requested
+    if return_report:
+        return rep
+    else:
+        result = minimizer.getX()
+        return np.asarray([[x for x in row] for row in result])
 
 # The topology and registration stuff is below:
 class JavaTopology:

@@ -224,6 +224,100 @@ def _retinotopy_vectors_to_float(ang, ecc, wgt, weight_cutoff=0):
          for (a,e,w) in zip(ang, ecc, wgt)]).T
     return (ang, ecc, wgt)
 
+def retinotopy_mesh_field(mesh, mdl,
+                          polar_angle=None, eccentricity=None, weight=None,
+                          weight_cutoff=0, scale=1, shape=2, suffix=None):
+    '''
+    mesh_field_spec(mesh, model) yields a list that can be used with mesh_register as a potential
+    term. This should generally be used in a similar fashion to retinotopy_anchors.
+
+    Options:
+      * polar_angle (default None) specifies that the given data should be used in place of the
+        'polar_angle' or 'PRF_polar_angle'  property values. The given argument must be numeric and
+        the same length as the the number of vertices in the mesh. If None is given, then the
+        property value of the mesh is used; if a list is given and any element is None, then the
+        weight for that vertex is treated as a zero. If the option is a string, then the property
+        value with the same name isused as the polar_angle data.
+      * eccentricity (default None) specifies that the given data should be used in places of the
+        'eccentricity' or 'PRF_eccentricity' property values. The eccentricity option is handled 
+        virtually identically to the polar_angle option.
+      * weight (default None) specifies that the weight or scale of the data; this is handled
+        generally like the polar_angle and eccentricity options, but may also be 1, indicating that
+        all vertices with polar_angle and eccentricity values defined will be given a weight of 1.
+        If weight is left as None, then the function will check for 'weight',
+        'variance_explained', 'PRF_variance_explained', and 'retinotopy_weight' values and will use
+        the first found (in that order). If none of these is found, then a value of 1 is assumed.
+      * weight_cutoff (default 0) specifies that the weight must be higher than the given value inn
+        order to be included in the fit; vertices with weights below this value have their weights
+        truncated to 0.
+      * scale (default 1) specifies a constant by which to multiply all weights for all anchors; the
+        value None is interpreted as 1.
+      * shape (default 2.0) specifies the exponent in the harmonic function.
+      * suffix (default None) specifies any additional arguments that should be appended to the 
+        potential function description list that is produced by this function; i.e., the 
+        retinotopy_anchors function produces a list, and the contents of suffix, if given and not
+        None, are appended to that list (see mesh_register).
+
+    Example:
+     # The retinotopy_anchors function is intended for use with mesh_register, as follows:
+     # Define our Schira Model:
+     model = neuropythy.V123_model()
+     # Make sure our mesh has polar angle, eccentricity, and weight data:
+     mesh.prop('polar_angle',  polar_angle_vertex_data);
+     mesh.prop('eccentricity', eccentricity_vertex_data);
+     mesh.prop('weight',       variance_explained_vertex_data);
+     # register the mesh using the retinotopy and model:
+     registered_mesh = neuropythy.registration.mesh_register(
+        mesh,
+        ['mesh', retinotopy_mesh_field(mesh, model)],
+        max_step_size=0.05,
+        max_steps=2000)
+    '''
+    if isinstance(mdl, basestring):
+        mdl = V123_model(mdl)
+    if not isinstance(mdl, RetinotopyMeshModel):
+        if isinstance(mdl, RegisteredRetinotopyModel):
+            mdl = mdl.model
+        if not isinstance(mdl, RetinotopyMeshModel):
+            raise RuntimeError('given model is not a RetinotopyMeshModel instance!')
+    if not hasattr(mdl, 'data') or 'polar_angle' not in mdl.data or 'eccentricity' not in mdl.data:
+        raise ValueError('Retinotopy model does not have polar angle and eccentricity data')
+    if not isinstance(mesh, CorticalMesh):
+        raise RuntimeError('given mesh is not a CorticalMesh object!')
+    n = mesh.vertex_count
+    X = mesh.coordinates.T
+    if weight_cutoff is None: weight_cutoff = 0
+    # make sure we have our polar angle/eccen/weight values:
+    # (weight is odd because it might be a single number, so handle that first)
+    (polar_angle, eccentricity, weight) = [
+        extract_retinotopy_argument(mesh, name, arg, default='empirical')
+        for (name, arg) in [
+                ('polar_angle', polar_angle),
+                ('eccentricity', eccentricity),
+                ('weight', [weight for i in range(n)] \
+                           if isinstance(weight, Number) or np.issubdtype(type(weight), np.float) \
+                           else weight)]]
+    # Make sure they contain no None/invalid values
+    (polar_angle, eccentricity, weight) = _retinotopy_vectors_to_float(
+        polar_angle, eccentricity, weight,
+        weight_cutoff=weight_cutoff)
+    idcs = [i for (i,w) in enumerate(weight) if w > 0]
+    # Okay, let's get the model data ready
+    mdl_1s = np.ones(mdl.forward.coordinates.shape[0])
+    mdl_coords = np.dot(mdl.transform, np.vstack((mdl.forward.coordinates.T, mdl_1s)))[:2].T
+    mdl_faces  = mdl.forward.triangles
+    mdl_data   = np.asarray([mdl.data['polar_angle'], mdl.data['eccentricity']])
+    # Get just the relevant weights and the scale
+    wgts = weight[idcs] * (1 if scale is None else scale)
+    # and the relevant polar angle/eccen data
+    msh_data = np.asarray([polar_angle, eccentricity])[:,idcs]
+    # format shape correctly
+    shape = np.full((len(idcs)), float(shape), dtype=np.float32)
+    # okay, we've partially parsed the data that was given; now we can construct the final list of
+    # instructions:
+    return (['mesh-field', 'harmonic', mdl_coords, mdl_faces, mdl_data, idcs, msh_data,
+             'scale', wgts, 'order', shape] + ([] if suffix is None else suffix))
+        
 def retinotopy_anchors(mesh, mdl,
                        polar_angle=None, eccentricity=None,
                        weight=None, weight_cutoff=0.2,
@@ -380,10 +474,11 @@ def register_retinotopy_initialize(hemi,
     resulting map projection, and additional entries giving other meta-data calculated along the
     way.
     '''
-    # Step 1: get our properties straight
+    # Step 0: Initialization of variables ##########################################################
     prop_names = ['polar_angle', 'eccentricity', 'weight']
-    data = {}
+    data = {}  # the map we build up in this function
     n = hemi.vertex_count
+    # Step 1: get our properties straight ##########################################################
     (ang, ecc, wgt) = [
         extract_retinotopy_argument(hemi, name, arg, default='empirical')
         for (name, arg) in [
@@ -392,15 +487,15 @@ def register_retinotopy_initialize(hemi,
                 ('weight', [weight for i in range(n)] \
                            if isinstance(weight, Number) or np.issubdtype(type(weight), np.float) \
                            else weight)]]
-    ## we also want to make sure weight is 0 where there are none values
+    # we also want to make sure weight is 0 where there are none values
     (ang, ecc, wgt) = _retinotopy_vectors_to_float(ang, ecc, wgt, weight_cutoff=weight_cutoff)
-    ## correct for partial voluming if necessary:
+    # correct for partial voluming if necessary:
     if partial_voluming_correction is True: wgt *= (1.0 - np.asarray(hemi.partial_volume_factor()))
-    ## note these in the result dictionary:
+    # note these in the result dictionary:
     data['sub_polar_angle'] = ang
     data['sub_eccentricity'] = ecc
     data['sub_weight'] = wgt
-    # Step 2: do alignment, if required
+    # Step 2: do alignment, if required ############################################################
     if isinstance(model, basestring): model = V123_model(model)
     if not isinstance(model, RegisteredRetinotopyModel):
         raise ValueError('model must be a RegisteredRetinotopyModel')
@@ -409,56 +504,62 @@ def register_retinotopy_initialize(hemi,
     model_reg = 'fsaverage_sym' if model_reg is None else model_reg
     model_chirality = model.projection_data['chirality']
     if model_reg == 'fsaverage_sym':
-        useHemi = hemi if hemi.chirality == 'LH' else hemi.subject.RHX
+        proj_from_hemi = hemi if hemi.chirality == 'LH' else hemi.subject.RHX
     else:
         if model_chiraliry is not None and hemi.chirality != model_chiraliry:
             raise ValueError('Inverse-chirality hemisphere cannot be registered to model')
-        useHemi = hemi
-    ## make sure we are registered to the model space
-    if model_reg not in useHemi.topology.registrations:
+        proj_from_hemi = hemi
+    # make sure we are registered to the model space
+    if model_reg not in proj_from_hemi.topology.registrations:
         raise ValueError('Hemisphere is not registered to the model registration: %s' % model_reg)
-    data['sub_hemi'] = useHemi
-    ## note the subject's registration to the model's registration:
-    subreg = useHemi.topology.registrations[model_reg]
+    # give this hemisphere the correct data
+    proj_from_hemi = proj_from_hemi.using(
+        properties=proj_from_hemi.properties.using(
+            polar_angle=ang,
+            eccentricity=ecc,
+            weight=wgt))
+    data['project_from_hemi'] = proj_from_hemi
+    # note the subject's registration to the model's registration:
+    subreg = proj_from_hemi.topology.registrations[model_reg]
     ## if there's a prior, we should enforce it now:
-    if prior is not None:
-        if hemi.subject.id == model_reg:
-            prior_subject = useHemi.subject
-            prior_hemi = useHemi
+    if prior is None:
+        prior_hemi = None
+        coords = subreg.coordinates
+    else:
+        if hemi.subject.id == model_reg or model_reg == 'native':
+            prior_subject = proj_from_hemi.subject
+            prior_hemi = proj_from_hemi
         else:
             prior_subject = freesurfer_subject(model_reg)
-            prior_hemi = prior_subject.__getattr__(useHemi.chirality)
-        if prior not in prior_hemi.topology.registrations:
+            prior_hemi = getattr(prior_subject, proj_from_hemi.chirality)
+        if prior != 'native' and prior not in prior_hemi.topology.registrations:
             raise ValueError('Prior registration %s not found in prior subject %s' \
                              % (prior, model_reg))
-        if model_reg not in prior_hemi.topology.registrations:
+        if model_reg != 'native' and model_reg not in prior_hemi.topology.registrations:
             raise ValueError('Model registratio not found in prior subject: %s' % prior_subject)
         prior_reg0 = prior_hemi.topology.registrations[model_reg]
         prior_reg1 = prior_hemi.topology.registrations[prior]
         addr = prior_reg0.address(subreg.coordinates)
         data['address_in_prior'] = addr
         coords = prior_reg1.unaddress(addr)
-    else:
-        prior_hemi = None
-        coords = subreg.coordinates
-    prior_reg = Registration(useHemi.topology, coords)
+    prior_reg = Registration(proj_from_hemi.topology, coords)
     data['prior_registration'] = prior_reg
     data['prior_hemisphere'] = prior_hemi
     # Step 3: resample, if need be (for now we always resample to fsaverage_sym)
     data['resample'] = resample
     if resample is None:
-        tohem = useHemi
+        tohem = proj_from_hemi
         toreg = prior_reg
         data['initial_registration'] = prior_reg
-        for (p,v) in zip(prop_names, [useHemi.prop(p) for p in prop_names]):
-            data['initial_' + p] = v
+        for p in prop_names:
+            data['initial_' + p] = data['sub_' + p]
         data['unresample_function'] = lambda rr: rr
     else:
         if resample == 'fsaverage_sym':
             tohem = freesurfer_subject('fsaverage_sym').LH
             toreg = tohem.topology.registrations['fsaverage_sym']
         elif resample == 'fsaverage':
-            tohem = freesurfer_subject('fsaverage').__getattr__(model_chirality)
+            tohem = getattr(freesurfer_subject('fsaverage'), model_chirality)
             toreg = tohem.topology.registrations['fsaverage']
         else:
             raise ValueError('resample argument must be fsaverage, fsaverage_sym, or None')
@@ -471,11 +572,17 @@ def register_retinotopy_initialize(hemi,
                              *[toreg.interpolate_from(prior_reg, data['sub_' + p])
                                for p in prop_names])):
             data['initial_' + p] = v
-        data['unresample_function'] = lambda rr: Registration(useHemi.topology,
+        data['unresample_function'] = lambda rr: Registration(proj_from_hemi.topology,
                                                               rr.unaddress(resamp_addr))
     data['initial_mesh'] = tohem.registration_mesh(toreg)
     # Step 4: make the projection
     proj_data = model.projection_data
+    if resample is None:
+        proj_data = proj_from_hemi.projection_data(center=proj_data['center'],
+                                                   center_right=proj_data['center_right'],
+                                                   method=proj_data['method'],
+                                                   registration=proj_data['registration'],
+                                                   radius=proj_data['radius'])
     m = proj_data['forward_function'](data['initial_mesh'])
     for p in prop_names:
         m.prop(p, data['initial_' + p][m.vertex_labels])
@@ -493,7 +600,7 @@ def register_retinotopy_initialize(hemi,
         # Now, if need be, unresample the points:
         d['registration'] = d['unresample_function'](final_reg)
         # now convert the sub points into retinotopy points
-        rmesh = useHemi.registration_mesh(d['registration'])
+        rmesh = proj_from_hemi.registration_mesh(d['registration'])
         pred = np.asarray(
             [(p,e,l) if rl > 0 and rl < 4 and e <= max_predicted_eccen else (0.0, 0.0, 0)
              for (p,e,l) in zip(*model.cortex_to_angle(rmesh))

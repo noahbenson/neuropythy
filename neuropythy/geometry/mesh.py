@@ -274,7 +274,7 @@ class Mesh(Immutable):
             data = data if data.shape[1] == 3 or data.shape[1] == 2 else data.T
             face_id = self.container(data)
             faces = self.triangles[face_id]
-            tx = np.transpose(np.asarray([self.coordinates[f] for f in faces]), (0,2,1))
+            tx = np.transpose(np.asarray([self.coordinates[f] for f in faces]), (0,1,2))
         bc = cartesian_to_barycentric_3D(tx, data) if self.coordinates.shape[1] == 3 else \
              cartesian_to_barycentric_2D(tx, data)
         return {'face_id': face_id, 'coordinates': bc}
