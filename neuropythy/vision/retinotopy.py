@@ -20,7 +20,8 @@ from neuropythy.freesurfer   import (freesurfer_subject, add_subject_path,
                                      cortex_to_ribbon, cortex_to_ribbon_map,
                                      Hemisphere, subject_paths)
 from neuropythy.topology     import (Registration)
-from neuropythy.registration import (mesh_register)
+from neuropythy.registration import (mesh_register, java_potential_term)
+from neuropythy.java         import (to_java_doubles, to_java_ints)
 
 from .models import (RetinotopyModel, SchiraModel, RetinotopyMeshModel, RegisteredRetinotopyModel,
                      load_fmm_model)
@@ -226,7 +227,11 @@ def _retinotopy_vectors_to_float(ang, ecc, wgt, weight_cutoff=0):
 
 def retinotopy_mesh_field(mesh, mdl,
                           polar_angle=None, eccentricity=None, weight=None,
-                          weight_cutoff=0, scale=1, shape=2, suffix=None):
+                          weight_cutoff=0, scale=1, sigma=None, shape=2, suffix=None,
+                          max_eccentricity=Ellipsis,
+                          max_polar_angle=180,
+                          angle_type='both',
+                          exclusion_threshold=None):
     '''
     mesh_field_spec(mesh, model) yields a list that can be used with mesh_register as a potential
     term. This should generally be used in a similar fashion to retinotopy_anchors.
@@ -253,10 +258,26 @@ def retinotopy_mesh_field(mesh, mdl,
       * scale (default 1) specifies a constant by which to multiply all weights for all anchors; the
         value None is interpreted as 1.
       * shape (default 2.0) specifies the exponent in the harmonic function.
+      * sigma (default None) specifies, if given as a number, the sigma parameter of the Gaussian
+        potential function; if sigma is None, however, the potential function is harmonic.
       * suffix (default None) specifies any additional arguments that should be appended to the 
         potential function description list that is produced by this function; i.e., the 
         retinotopy_anchors function produces a list, and the contents of suffix, if given and not
         None, are appended to that list (see mesh_register).
+      * max_eccentricity (default Ellipsis) specifies how the eccentricity portion of the potential
+        field should be normalized. Specifically, in order to ensure that polar angle and
+        eccentricity contribute roughly equally to the potential, this should be approximately the
+        max eccentricity appearing in the data on the mesh. If the argument is the default then the
+        actual max eccentricity will be used.
+      * max_polar_angle (default: 180) is used the same way as the max_eccentricity function, but if
+        Ellipsis is given, the value 180 is always assumed regardless of measured data.
+      * exclusion_threshold (default None) specifies that if the initial norm of a vertex's gradient
+        is greater than exclusion_threshold * std + median (where std and median are calculated over
+        the vertices with non-zero gradients) then its weight is set to 0 and it is not kept as part
+        of the potential field.
+      * angle_type (default: None) specifies that only one type of angle should be included in the
+        mesh; this may be one of 'polar', 'eccen', 'eccentricity', 'angle', or 'polar_angle'. If
+        None, then both polar angle and eccentricity are included.
 
     Example:
      # The retinotopy_anchors function is intended for use with mesh_register, as follows:
@@ -313,10 +334,49 @@ def retinotopy_mesh_field(mesh, mdl,
     msh_data = np.asarray([polar_angle, eccentricity])[:,idcs]
     # format shape correctly
     shape = np.full((len(idcs)), float(shape), dtype=np.float32)
+    # Last thing before constructing the field description: normalize both polar angle and eccen to
+    # cover a range of 0-1:
+    if max_eccentricity is Ellipsis: max_eccentricity = np.max(msh_data[1])
+    if max_polar_angle  is Ellipsis: max_polar_angle  = 180
+    if max_polar_angle is not None:
+        msh_data[0] /= max_polar_angle
+        mdl_data[0] /= max_polar_angle
+    if max_eccentricity is not None:
+        msh_data[1] /= max_eccentricity
+        mdl_data[1] /= max_eccentricity
+    # Check if we are making an eccentricity-only or a polar-angle-only field:
+    if angle_type is not None:
+        angle_type = angle_type.lower()
+        if angle_type != 'both' and angle_type != 'all':
+            convert = {'eccen':'eccen', 'eccentricity':'eccen', 'radius':'eccen',
+                       'angle':'angle', 'polar_angle': 'angle', 'polar': 'angle'}
+            angle_type = convert[angle_type]
+            mdl_data = [mdl_data[0 if angle_type == 'angle' else 1]]
+            msh_data = [msh_data[0 if angle_type == 'angle' else 1]]
     # okay, we've partially parsed the data that was given; now we can construct the final list of
     # instructions:
-    return (['mesh-field', 'harmonic', mdl_coords, mdl_faces, mdl_data, idcs, msh_data,
-             'scale', wgts, 'order', shape] + ([] if suffix is None else suffix))
+    if sigma is None:
+        field_desc = ['mesh-field', 'harmonic', mdl_coords, mdl_faces, mdl_data, idcs, msh_data,
+                      'scale', wgts, 'order', shape]
+    else:
+        if not hasattr(sigma, '__iter__'): sigma = [sigma for _ in wgts]
+        field_desc = ['mesh-field', 'gaussian', mdl_coords, mdl_faces, mdl_data, idcs, msh_data,
+                      'scale', wgts, 'order', shape, 'sigma', sigma]
+    if suffix is not None: field_desc += suffix
+    # now, if we want to exclude outliers, we do so here:
+    if exclusion_threshold is not None:
+        jpe = java_potential_term(mesh, field_desc)
+        jcrds = to_java_doubles(mesh.coordinates)
+        jgrad = to_java_doubles(np.zeros(mesh.coordinates.shape))
+        jpe.calculate(jcrds,jgrad)
+        gnorms = np.sum((np.asarray([[x for x in row] for row in jgrad])[:, idcs])**2, axis=0)
+        gnorms_pos = gnorms[gnorms > 0]
+        mdn = np.median(gnorms_pos)
+        std = np.std(gnorms_pos)
+        gn_idcs = np.where(gnorms > mdn + std*3.5)[0]
+        for i in gn_idcs: wgts[i] = 0;
+    return field_desc
+
         
 def retinotopy_anchors(mesh, mdl,
                        polar_angle=None, eccentricity=None,
