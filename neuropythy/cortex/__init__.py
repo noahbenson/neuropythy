@@ -872,7 +872,7 @@ def mesh_smooth(mesh, prop, ignore_outliers=False, outliers=4.0, smoothness=0.5)
 # All of this requires matplotlib, so we try all and fail gracefully if we don't have it
 
 try:
-    import matplotlib, matplotlib.pyplot
+    import matplotlib, matplotlib.pyplot, matplotlib.tri
     _curv_cmap_dict = {
         name: ((0.0, 0.0, 0.5),
                (0.5, 0.5, 0.2),
@@ -961,7 +961,11 @@ try:
             map's weights should be used. If None or a single number is given, then all weights are
             considered to be 1. A string may be given to indicate that a property should be used.
           * plotter (default: matplotlib.pyplot) specifies a particular plotting object should be
-            used.
+            used. If plotter is None, then instead of attempting to render the plot, a tuple of
+            (tri, zs, cmap) is returned; in this case, tri is a matplotlib.tri.Triangulation
+            object for the given map and zs and cmap are an array and colormap (respectively) that
+            will produce the correct colors. Without plotter equal to None, these would instead
+            be rendered as plotter.tripcolor(tri, zs, cmap, shading='gouraud').
         '''
         tri = matplotlib.tri.Triangulation(the_map.coordinates[0],
                                            the_map.coordinates[1],
@@ -982,10 +986,10 @@ try:
             elif color == 'eccen' or color == 'eccentricity':
                 color = vertex_eccen_color
             colors = np.asarray(the_map.map_vertices(color))
-        cmap = rgbs_to_cmap(colors)
+        cmap = colors_to_cmap(colors)
         zs = np.asarray(range(the_map.vertex_count), dtype=np.float) / (the_map.vertex_count - 1)
         if plotter is None:
-            return (zs, cmap)
+            return (tri, zs, cmap)
         else:
             return plotter.tripcolor(tri, zs, cmap=cmap, shading='gouraud')
 except:
