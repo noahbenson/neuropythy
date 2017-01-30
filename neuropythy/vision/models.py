@@ -213,11 +213,20 @@ class RetinotopyMeshModel(RetinotopyModel):
         tx = self.itransform
         xy = np.asarray([x,y]).T if tx is None else np.dot(tx, [x,y,[1 for i in x]])[0:2].T
         # we only need to interpolate from the inverse mesh in this case
-        interp = [self.forward.interpolate(xy, self.data[name], smoothing=1)
-                  for name in ['polar_angle', 'eccentricity', 'id']]
-        return np.asarray(
-            [(ang, ecc, area) if area is not None else (0, 0, 0)
-             for (ang, ecc, area) in zip(*interp)])
+        interp_ae = self.forward.interpolate(
+            xy,
+            [self.data[tt] for tt in ['polar_angle', 'eccentricity']],
+            method='automatic',
+            null=np.nan)
+        interp_id = self.forward.interpolate(
+            xy,
+            self.data['id'],
+            method='nearest',
+            null=np.nan)
+        interp = np.asarray([interp_ae[0], interp_ae[1], interp_id])
+        bad = np.where(np.isnan(np.prod(interp, axis=0)))[0]
+        interp[:,bad] = 0.0
+        return interp
 
     def angle_to_cortex(self, theta, rho):
         'See help(neuropythy.registration.RetinotopyModel.angle_to_cortex).'
@@ -315,7 +324,7 @@ class RegisteredRetinotopyModel(RetinotopyModel):
                 else:
                     m = self.projection_data['forward_function'](args[0])
                     res = np.zeros((3, args[0].coordinates.shape[1]))
-                    res[:, m.vertex_labels] = np.asarray(self.cortex_to_angle(m.coordinates)).T
+                    res[:, m.vertex_labels] = self.cortex_to_angle(m.coordinates)
                     return res
             elif isinstance(args[0], nfs.Hemisphere):
                 regname = self.projection_data['registration']
@@ -338,7 +347,7 @@ class RegisteredRetinotopyModel(RetinotopyModel):
                 else:
                     raise ValueError('coordinate matrix must be 2 or 3 dimensional')
         else:
-            return self.model.cortex_to_angle(**args)
+            return self.model.cortex_to_angle(*args)
                     
     def angle_to_cortex(self, *args):
         '''
