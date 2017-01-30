@@ -9,4 +9,4 @@ models that are projected to the cortical surface. See specifically, the help st
 mesh_register function.
 '''
 
-from .core       import (mesh_register)
+from .core       import (mesh_register, java_potential_term)

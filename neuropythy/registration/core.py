@@ -45,7 +45,9 @@ _parse_field_data_types = {
                                                         ['shape', 2.0], 0, 1, 'X']},
     'mesh-field': {
         'harmonic':      ['newHarmonicMeshPotential',   ['scale', 1.0], ['order', 2.0], 0, 1, 2,
-                                                        3, 4, 'X']},
+                                                        3, 4, 'X'],
+        'gaussian':      ['newGaussianMeshPotential',   ['scale', 1.0], ['sigma', 0.5],
+                                                        ['order', 2.0], 0, 1, 2, 3, 4, 'X']},
     'perimeter': {
         'harmonic':   ['newHarmonicPerimeterPotential', ['scale', 1.0], ['shape', 2.0], 'F', 'X']}};
         
@@ -112,6 +114,17 @@ def _parse_field_arguments(arg, faces, coords):
         for field in pot: sp.addField(field)
         return sp
 
+def java_potential_term(mesh, instructions):
+    '''
+    java_potential_term(mesh, instructions) yields a Java object that implements the potential field
+      described in the given list of instructions. Generally, this should not be invoked directly
+      and should only be called by mesh_register. Note: this expects a single term's description,
+      not a series of descriptions.
+    '''
+    faces  = to_java_ints(mesh.indexed_faces)
+    coords = to_java_doubles(mesh.coordinates)
+    return _parse_field_arguments([instructions], faces, coords)
+    
 # The mesh_register function
 def mesh_register(mesh, field, max_steps=2000, max_step_size=0.05, max_pe_change=1, k=4,
                   return_report=False):
