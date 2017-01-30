@@ -163,7 +163,8 @@ class Mesh(Immutable):
                                         None)]]
 
     def interpolate(self, x, data, 
-                    smoothing=1, mask=None, null=None, method='automatic', n_jobs=1):
+                    smoothing=1, mask=None, null=None, method='automatic', n_jobs=1,
+                    container_ids=None):
         '''
         mesh.interpolate(x, data) yields a numpy array of the data interpolated from the given
         array, data, which must contain the same number of elements as there are points in the Mesh
@@ -206,11 +207,16 @@ class Mesh(Immutable):
             raise ValueError('interpolation points must be a matrix or vector')
         if dims != self.coordinates.shape[1]:
             raise ValueError('interpolation points have wrong dimensionality for mesh')
+        data = np.asarray(data)
+        data_t = (data.shape[0] != self.coordinates.shape[0])
+        if data_t: data = data.T
         # Okay, switch on method:
         if method == 'nearest':
-            return self._interpolate_nearest(x, data, mask, null, n_jobs)
+            data = self._interpolate_nearest(x, data, mask, null, n_jobs)
         elif method == 'automatic':
-            return self._interpolate_linear(x, data, mask, null, smoothing, 12, n_jobs)
+            data = self._interpolate_linear(x, data, mask, null, smoothing, 12, n_jobs)
+        data = np.asarray(data)
+        return data.T if data_t else data
 
     # perform nearest-neighbor interpolation
     def _interpolate_nearest(self, x, data, mask, null, n_jobs):
@@ -224,19 +230,19 @@ class Mesh(Immutable):
     def _interpolate_linear(self, coords, data, mask, null, smoothing, check_no, n_jobs):
         # first, find the triangle containing each point...
         tris = self.triangles
-        data = np.asarray(data)
         ## we only query the nearest check_no triangles; otherwise we don't fine the container
         containers = self.container(coords, k=check_no, n_jobs=n_jobs)
         # Okay, now we interpolate for each triangle
+        nulls = [null for _ in range(data.shape[1])] if len(data.shape) > 1 else null
         if mask is None:
-            return [(null if tri_no is None
-                     else self._interpolate_triangle(x, data, tris[tri_no], smoothing))
+            return [(nulls if tri_no is None
+                     else self._interpolate_triangle(x, data, tris[tri_no], smoothing, nulls))
                     for (x, tri_no) in zip(coords, containers)]
         else:
-            return [(null if tri_no is None or any(mask[u] == 0 for u in tris[tri_no])
-                     else self._interpolate_triangle(x, data, tris[tri_no], smoothing))
+            return [(nulls if tri_no is None or any(mask[u] == 0 for u in tris[tri_no])
+                     else self._interpolate_triangle(x, data, tris[tri_no], smoothing, nulls))
                     for (x, tri_no) in zip(coords, containers)]
-    def _interpolate_triangle(self, x, data, tri_vertices, smoothing):
+    def _interpolate_triangle(self, x, data, tri_vertices, smoothing, nulls):
         # we'll want to project things down to 2 dimensions:
         if len(x) == 3:
             mtx = alignment_matrix_3D(x, [0,0,1])[0:2].T
@@ -252,9 +258,12 @@ class Mesh(Immutable):
         tot = a_area + b_area + c_area
         # and do the interpolation:
         if np.isclose(tot, 0):
-            return None
+            return nulls
         else:
-            return np.dot([a_area, b_area, c_area], data[tri_vertices]) / tot
+            if len(data.shape) == 1:
+                return np.dot([a_area, b_area, c_area], data[tri_vertices]) / tot
+            else:
+                return np.dot([[a_area, b_area, c_area]], data[tri_vertices])[0] / tot
 
     def address(self, data):
         '''
