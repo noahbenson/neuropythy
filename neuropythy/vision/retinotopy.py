@@ -878,23 +878,23 @@ def benson14_retinotopy(sub):
     if __benson14_templates is None:
         # Find a sym template that has the right data:
         sym_path = next((os.path.join(path0, 'fsaverage_sym')
-                         for path0 in [subject_paths(),
-                                       os.path.join(os.path.dirname(os.path.dirname(__file__)),
-                                                    'lib', 'data')]
+                         for path0 in (subject_paths() +
+                                       [os.path.join(os.path.dirname(os.path.dirname(__file__)),
+                                                     'lib', 'data')])
                          for path in [os.path.join(path0, 'fsaverage_sym', 'surf')]
                          if os.path.isfile(os.path.join(path, 'sym.benson14_angle.mgz'))     \
                             and os.path.isfile(os.path.join(path, 'sym.benson14_eccen.mgz')) \
-                            and os.path.isfile(os.path.join(path, 'sym.benson14_areas.mgz'))),
+                            and os.path.isfile(os.path.join(path, 'sym.benson14_v123roi.mgz'))),
                         None)
         if sym_path is None:
-            raise ValueError('No fsaverage_sym subject found with surf/sym.template_*.mgz files!')
-        sym = freesurfer_subject(sym_path).LH
-        tmpl_path = os.path.join(sym_path, 'surf', 'sym.template_')
+            raise ValueError('No fsaverage_sym subject found with surf/sym.benson14_*.mgz files!')
+        sym = freesurfer_subject('fsaverage_sym').LH
+        tmpl_path = os.path.join(sym_path, 'surf', 'sym.benson14_')
         # We need to load in the template data
         __benson14_templates = {
             'angle': fsmgh.load(tmpl_path + 'angle.mgz').get_data().flatten(),
             'eccen': fsmgh.load(tmpl_path + 'eccen.mgz').get_data().flatten(),
-            'v123r': fsmgh.load(tmpl_path + 'areas.mgz').get_data().flatten()}
+            'v123r': fsmgh.load(tmpl_path + 'v123roi.mgz').get_data().flatten()}
     # Okay, we just need to interpolate over to this subject
     sym = freesurfer_subject('fsaverage_sym').LH
     return (
