@@ -11,6 +11,7 @@ import nibabel.freesurfer.io as fsio
 from   nibabel.freesurfer.mghformat import load as mghload, MGHImage
 import os, math, copy
 import itertools
+from   warnings import warn
 import pysistence
 from   numbers import (Number, Integral)
 from   types import TupleType
@@ -114,7 +115,9 @@ class Hemisphere(Immutable):
         if self.is_persistent(): mesh = mesh.persist()
         return mesh
     def _load_surface_data(self, name):
-        path = self.subject.surface_path(name, self.name)
+        path = name
+        if not os.path.exists(path):
+            path = self.subject.surface_path(name, self.name)
         if not os.path.exists(path):
             return None
         else:
@@ -169,6 +172,18 @@ class Hemisphere(Immutable):
                 data = self._load_surface_data_safe(fl[3:])
                 if data[0] is not None:
                     regs[fl[3:-11]] = data[0]
+        # If this is the fsaverage_sym and we didn't find the retinotopy topology, we need to
+        # load it out of the data directory
+        if self.subject.id == 'fsaverage_sym' and 'retinotopy' not in regs:
+            flnm = os.path.join(os.path.dirname(os.path.dirname(__file__)),
+                                'lib', 'data', 'fsaverage_sym', 'surf',
+                                'lh.retinotopy.sphere.reg')
+            data = self._load_surface_data_safe(flnm)
+            if data is None or data[0] is None:
+                warn('Could not load fsaverage_sym retinotopy registration')
+            else:
+                print 1
+                regs['retinotopy'] = data[0]
         return Topology(faces, regs)
     @staticmethod
     def calculate_edge_data(faces):

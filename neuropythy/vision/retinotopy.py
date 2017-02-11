@@ -601,7 +601,7 @@ def register_retinotopy_initialize(hemi,
         if prior != 'native' and prior not in prior_hemi.topology.registrations:
             raise ValueError('Prior registration %s not found in prior subject %s' \
                              % (prior, model_reg))
-        if model_reg != 'native' and model_reg not in prior_hemi.topology.registrations:
+        elif model_reg != 'native' and model_reg not in prior_hemi.topology.registrations:
             raise ValueError('Model registratio not found in prior subject: %s' % prior_subject)
         prior_reg0 = prior_hemi.topology.registrations[model_reg]
         prior_reg1 = prior_hemi.topology.registrations[prior]
@@ -878,11 +878,13 @@ def benson14_retinotopy(sub):
     if __benson14_templates is None:
         # Find a sym template that has the right data:
         sym_path = next((os.path.join(path0, 'fsaverage_sym')
-                         for path0 in subject_paths()
+                         for path0 in [subject_paths(),
+                                       os.path.join(os.path.dirname(os.path.dirname(__file__)),
+                                                    'lib', 'data')]
                          for path in [os.path.join(path0, 'fsaverage_sym', 'surf')]
-                         if os.path.isfile(os.path.join(path, 'sym.template_angle.mgz'))     \
-                            and os.path.isfile(os.path.join(path, 'sym.template_eccen.mgz')) \
-                            and os.path.isfile(os.path.join(path, 'sym.template_areas.mgz'))),
+                         if os.path.isfile(os.path.join(path, 'sym.benson14_angle.mgz'))     \
+                            and os.path.isfile(os.path.join(path, 'sym.benson14_eccen.mgz')) \
+                            and os.path.isfile(os.path.join(path, 'sym.benson14_areas.mgz'))),
                         None)
         if sym_path is None:
             raise ValueError('No fsaverage_sym subject found with surf/sym.template_*.mgz files!')

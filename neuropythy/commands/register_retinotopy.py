@@ -67,7 +67,7 @@ register_retinotopy_help = \
       'measured_', 'training_', or '', and name is one of 'eccentricity'/'eccen',
       'polar_angle'/'angle', or 'weight'/'variance_explained'/'vexpl'.
     * --cutoff=|-c<value>
-      The cutoff value to use for the weight; 0.2 by default. Weights less than
+      The cutoff value to use for the weight; 0.1 by default. Weights less than
       this will be truncated to 0.
     * -N|--no-partial-correction
       Indicates that partial voluming correction should not be performed.
@@ -112,9 +112,9 @@ register_retinotopy_help = \
       This parameter indicates that the registration file, by default named 
       lh.retinotopy_sym.sphere.reg, should instead be named lh.<string>.sphere.reg.
     * --max-output-eccen=|-M<val>
-      This specifies the maximum eccentricity to include in the output; due to 
-      instability in the estimation routine near the 90 degree eccentricity border,
-      it is currently recommended that this be left at its default value of 85.
+      This specifies the maximum eccentricity to include in the output; there is no
+      particular need to limit one's output, but it can be done with this argument.
+      By default this is 90.
     * --no-volume-export|-x
       --no-surface-export|-z
       --no-registration-export|-X
