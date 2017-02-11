@@ -223,6 +223,8 @@ def _retinotopy_vectors_to_float(ang, ecc, wgt, weight_cutoff=0):
         [(a,e,w) if all(isinstance(x,Number) or np.issubdtype(type(x),np.float) for x in [a,e,w]) \
                     and w > weight_cutoff else (0,0,0)
          for (a,e,w) in zip(ang, ecc, wgt)]).T
+    #wgt = np.clip((wgt - weight_cutoff) / (1.0 - weight_cutoff), 0, 1)
+    wgt[wgt <= weight_cutoff] = 0
     return (ang, ecc, wgt)
 
 def retinotopy_mesh_field(mesh, mdl,
@@ -380,7 +382,7 @@ def retinotopy_mesh_field(mesh, mdl,
         
 def retinotopy_anchors(mesh, mdl,
                        polar_angle=None, eccentricity=None,
-                       weight=None, weight_cutoff=0.2,
+                       weight=None, weight_cutoff=0.1,
                        scale=1,
                        shape='Gaussian', suffix=None,
                        sigma=[0.05, 1.0, 2.0],
@@ -489,7 +491,7 @@ def retinotopy_anchors(mesh, mdl,
     # Okay, apply the model:
     res = mdl.angle_to_cortex(polar_angle[idcs], eccentricity[idcs])
     # Organize the data; trim out those not selected
-    data = [[[i for dummy in r], r]
+    data = [[[i for _ in r], r]
             for (i,r0) in zip(idcs, res)
             if r0[0] is not None
             for r in [select(i, r0)]
@@ -520,7 +522,7 @@ def retinotopy_anchors(mesh, mdl,
 def register_retinotopy_initialize(hemi,
                                    model='standard',
                                    polar_angle=None, eccentricity=None, weight=None,
-                                   weight_cutoff=0.2,
+                                   weight_cutoff=0.1,
                                    max_predicted_eccen=85,
                                    partial_voluming_correction=True,
                                    prior='retinotopy',
@@ -555,6 +557,10 @@ def register_retinotopy_initialize(hemi,
     data['sub_polar_angle'] = ang
     data['sub_eccentricity'] = ecc
     data['sub_weight'] = wgt
+    if hemi.has_property('curvature'):
+        data['sub_curvature'] = hemi.prop('curvature')
+    else:
+        data['sub_curvature'] = np.zeros((len(ang),))
     # Step 2: do alignment, if required ############################################################
     if isinstance(model, basestring): model = V123_model(model)
     if not isinstance(model, RegisteredRetinotopyModel):
@@ -613,6 +619,7 @@ def register_retinotopy_initialize(hemi,
         data['initial_registration'] = prior_reg
         for p in prop_names:
             data['initial_' + p] = data['sub_' + p]
+        data['initial_curvature'] = data['sub_curvature']
         data['unresample_function'] = lambda rr: rr
     else:
         if resample == 'fsaverage_sym':
@@ -632,6 +639,7 @@ def register_retinotopy_initialize(hemi,
                              *[toreg.interpolate_from(prior_reg, data['sub_' + p])
                                for p in prop_names])):
             data['initial_' + p] = v
+        data['initial_curvature'] = toreg.interpolate_from(prior_reg, data['sub_curvature'])
         data['unresample_function'] = lambda rr: Registration(proj_from_hemi.topology,
                                                               rr.unaddress(resamp_addr))
     data['initial_mesh'] = tohem.registration_mesh(toreg)
@@ -646,6 +654,7 @@ def register_retinotopy_initialize(hemi,
     m = proj_data['forward_function'](data['initial_mesh'])
     for p in prop_names:
         m.prop(p, data['initial_' + p][m.vertex_labels])
+    m.prop('curvature', data['initial_curvature'][m.vertex_labels])
     data['map'] = m
     # Step 5: Annotate how we get back
     def __postproc_fn(reg):
@@ -680,7 +689,7 @@ def register_retinotopy_initialize(hemi,
 
 def register_retinotopy(hemi,
                         retinotopy_model='standard',
-                        polar_angle=None, eccentricity=None, weight=None, weight_cutoff=0.2,
+                        polar_angle=None, eccentricity=None, weight=None, weight_cutoff=0.1,
                         partial_voluming_correction=True,
                         edge_scale=1.0, angle_scale=1.0, functional_scale=1.0,
                         sigma=Ellipsis,

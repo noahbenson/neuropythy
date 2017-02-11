@@ -37,7 +37,7 @@ _parse_field_data_types = {
     'angle': {
         'harmonic':      ['newHarmonicAnglePotential',  ['scale', 1.0], ['order', 2.0], 'F', 'X'],
         'lennard-jones': ['newLJAnglePotential',        ['scale', 1.0], ['order', 2.0], 'F', 'X'],
-        'infinite-well': ['newWellAnglePotential',      ['scale', 1.0], ['order', 2.0], 
+        'infinite-well': ['newWellAnglePotential',      ['scale', 1.0], ['order', 0.5], 
                                                         ['min',   0.0], ['max',   pi],  'F', 'X']},
     'anchor': {
         'harmonic':      ['newHarmonicAnchorPotential', ['scale', 1.0], ['shape', 2.0], 0, 1, 'X'],
@@ -126,8 +126,8 @@ def java_potential_term(mesh, instructions):
     return _parse_field_arguments([instructions], faces, coords)
     
 # The mesh_register function
-def mesh_register(mesh, field, max_steps=2000, max_step_size=0.05, max_pe_change=1, k=4,
-                  return_report=False):
+def mesh_register(mesh, field, max_steps=2000, max_step_size=0.05, max_pe_change=1,
+                  method='random', return_report=False):
     '''
     mesh_register(mesh, field) yields the mesh that results from registering the given mesh by
     minimizing the given potential field description over the position of the vertices in the
@@ -184,12 +184,24 @@ def mesh_register(mesh, field, max_steps=2000, max_step_size=0.05, max_pe_change
         should minimize away before returning; i.e., 0 indicates that no minimization should be
         allowed while 0.9 would indicate that the minimizer should minimize until the potential
         is 10% or less of the initial potential.
-      * k (default: 4) the number of groups into which the gradient should be partitioned each step;
-        this argument, if greater than 1, specifies that the minimizer should use the nimbleStep
-        rather than the step function for performing gradient descent; the number of partitions is
-        k in this case.
       * return_report (default: False) indicates that instead of returning the registered data,
         mesh_register should instead return the Java Minimizer.Report object (for debugging).
+      * method (default: 'random') specifies the search algorithm used; available options are 
+        'random', 'nimble', and 'pure'. Generally all options will converge on a similar solution,
+        but usually 'random' is fastest. The 'pure' option uses the nben library's step function,
+        which performs straight-forward gradient descent. The 'nimble' option performs a gradient
+        descent in which subsets of vertices in the mesh that have the highest gradients during the
+        registration are updated more often than those vertices with small gradients; this can
+        sometimes but not always increase the speed of the minimization. Note that instead of
+        'nimble', one may alternately provide ('nimble', k) where k is the number of partitions that
+        the vertices should be sorted into (by partition). 'nimble' by itself is equivalent to 
+        ('nimble', 4). Note also that a single step of nimble minimization is equivalent to 2**k
+        steps of 'pure' minimization. Finally, the 'random' option uses the nben library's
+        randomStep function, which is a gradient descent algorithm that moves each vertex in the
+        direction of its negative gradient during each step but which randomizes the length of the
+        gradient at each individual vertex by drawing from an exponential distribution centered at
+        the vertex's actual gradient length. In effect, this can prevent vertices with very large
+        gradients from dominating the minimization and often results in the best results.
 
     Examples:
       registered_mesh = mesh_register(
@@ -210,18 +222,31 @@ def mesh_register(mesh, field, max_steps=2000, max_step_size=0.05, max_pe_change
         raise RuntimeError('max_step_size must be a positive number')
     if not isinstance(max_pe_change, (float, int, long)) or max_pe_change <= 0 or max_pe_change > 1:
         raise RuntimeError('max_pe_change must be a number x such that 0 < x <= 1')
-    if not isinstance(k, (int, long)) or k < 1:
-        raise RuntimeError('k must be a positive integer')
+    if isinstance(method, basestring):
+        method = method.lower()
+        if method == 'nimble': k = 4
+        else:                  k = 0
+    else:
+        k = method[1]
+        method = method[0].lower()
+    max_pe_change = float(max_pe_change)
+    max_steps = int(max_steps)
+    max_step_size = float(max_step_size)
     # Parse the field argument.
     faces  = to_java_ints([mesh.index[frow] for frow in mesh.faces])
     coords = to_java_doubles(mesh.coordinates)
     potential = _parse_field_arguments(field, faces, coords)
     # Okay, that's basically all we need to do the minimization...
     minimizer = java_link().jvm.nben.mesh.registration.Minimizer(potential, coords)
-    if k == 1:
-        rep = minimizer.step(float(max_pe_change), int(max_steps), float(max_step_size))
+    if method == 'pure':
+        rep = minimizer.step(max_pe_change, max_steps, max_step_size)
+    elif method == 'random':
+        # if k is -1, we do the inverse version where we draw from the 1/mean distribution
+        rep = minimizer.randomStep(max_pe_change, max_steps, max_step_size, k == -1)
+    elif method == 'nimble':
+        rep = minimizer.nimbleStep(max_pe_change, max_steps, max_step_size, int(k))
     else:
-        rep = minimizer.nimbleStep(float(max_pe_change), int(max_steps), float(max_step_size), int(k))
+        raise ValueError('Unrecognized method: %s' % method)
     # Return the report if requested
     if return_report:
         return rep
