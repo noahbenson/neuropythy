@@ -52,7 +52,8 @@ be passed for further information about each command.
    orientation as the subject's mri/orig.mgz file. The algorithm used tends to be much cleaner than
    that used by FreeSurfer's mri_surf2vol.
  * **benson14_retinotopy**. This command applies the anatomically-defined template of retinotopy
-   described Benson *et al.* (2014; see *References* below) to a subject.
+   described Benson *et al.* (2014; see *References* below) to a subject. Note that the template
+   applied is not actually the template shown in the paper but is a similar updated version.   
  * **register_retinotopy**. This command fits a retinotopic model of V1, V2, and V3 to retinotopy
    data for a subject and saves the predicted retinotopic maps that result. This command is
    currently experimental.
