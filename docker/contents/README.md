@@ -7,6 +7,18 @@ about the Neuropythy library, visit the following website:
 ## Author ##########################################################################################
 Noah C. Benson &lt;<nben@nyu.edu>&gt;
 
+## Usage ###########################################################################################
+
+This Docker packages the Neuropythy library and can be used to run Neuropythy library commands.
+These commands are described on the github repository page and in the code itself. When running a
+command, the Docker will look to see if you have mounted a FreeSurfer subjects directory into the
+Docker's filesystem at /subjects or /freesurfer_subjects and will automatically use these. For
+example:
+
+```bash
+docker run -ti --rm -v /my/local/fs_subjects_dir:/subjects benson14_retinotopy bert
+```
+
 ## License #########################################################################################
 
 This README file is part of the Neuropythy libraray Docker.
