@@ -158,7 +158,7 @@ _retinotopy_parser_instructions = [
     ['E', 'eccen-rh',               'eccen_rh_file',     None],
     ['A', 'angle-rh',               'angle_rh_file',     None],
     ['W', 'weight-rh',              'weight_rh_file',    None],
-    ['c', 'cutoff',                 'weight_cutoff',     '0.2'],
+    ['c', 'cutoff',                 'weight_cutoff',     '0.1'],
     ['D', 'edge-strength',          'edge_strength',     '1'],
     ['T', 'angle-strength',         'angle_strength',    '1'],
     ['F', 'functional-strength',    'func_strength',     '1'],
@@ -169,7 +169,7 @@ _retinotopy_parser_instructions = [
     ['t', 'angle-tag',              'angle_tag',         'angle_predict'],
     ['l', 'label-tag',              'label_tag',         'v123roi_predict'],
     ['u', 'registration-name',      'registration_name', 'retinotopy_sym'],
-    ['M', 'max-output-eccen',       'max_out_eccen',     '85'],
+    ['M', 'max-output-eccen',       'max_out_eccen',     '90'],
     ['d', 'subjects-dir',           'subjects_dir',      None]]
 _retinotopy_parser = CommandLineParser(_retinotopy_parser_instructions)
 def _guess_surf_file(fl):

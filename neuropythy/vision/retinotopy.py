@@ -611,7 +611,7 @@ def register_retinotopy_initialize(hemi,
     prior_reg = Registration(proj_from_hemi.topology, coords)
     data['prior_registration'] = prior_reg
     data['prior_hemisphere'] = prior_hemi
-    # Step 3: resample, if need be (for now we always resample to fsaverage_sym)
+    # Step 3: resample, if need be
     data['resample'] = resample
     if resample is None:
         tohem = proj_from_hemi
@@ -696,14 +696,88 @@ def register_retinotopy(hemi,
                         select='close',
                         prior='retinotopy',
                         resample='fsaverage_sym',
-                        max_steps=2000, max_step_size=0.05,
-                        max_predicted_eccen=85,
-                        return_meta_data=False):
+                        max_steps=2000, max_step_size=0.05, method='random',
+                        max_predicted_eccen=90,
+                        return_meta_data=False,
+                        mutate_hemi=Ellipsis):
     '''
-    register_retinotopy(hemi) yields the result of registering the given hemisphere's polar angle
-    and eccentricity data to the SchiraModel, a registration in which the vertices are aligned with
-    the given model of retinotopy. The registration is added to the hemisphere's topology unless
-    the option registration_name is set to None.
+    register_retinotopy(hemi) registers the given hemisphere object, hemi, to a model of V1, V2,
+      and V3 retinotopy, and yields a copy of hemi that is identical but additionally contains
+      the registration 'retinotopy', whose coordinates are aligned with the model.
+
+    Registration attempts to align the vertex positions of the hemisphere's spherical surface with a
+    model of polar angle and eccentricity. This alignment proceeds through several steps and can
+    be modified by several options. A description of these steps and options are provided here. For
+    most cases, the default options should work relatively well.
+
+    Method:
+      (1) Prepare for registration by running neuropythy.vision.register_retinotopy_initialize. This
+          function runs through a number of substeps:
+            a. Extract the polar angle, eccentricity and weight data from the hemisphere. These
+               data are usually properties on the mesh and can be modifies by the options
+               polar_angle, eccentricity, and weight, which can be either property names or list
+               of property values. By default (None), a property is chosen using the functions
+               neuropythy.vision.extract_retinotopy_argument with the default option set to
+               'empirical'.
+            b. If partial voluming correction is enabled (via the option
+               partial_voluming_correction), multiply the weight by (1 - p) where p is 
+               hemi.partial_volume_factor().
+            c. If there is a prior that is specified as a belief about the retinotopy, then a
+               Registration is created for the hemisphere such that its vertices are arranged
+               according to that prior (see also the prior option). Note that because hemi's
+               coordinates must always be projected into the registration specified by the model,
+               the prior must be the name of a registration to which the model's specified subject
+               is also registered. This is clear in the case of an example. The default value for
+               this is 'retinotopy'; assuming that our model is specified on the fsaverage_sym, 
+               surface, the initial positions of the coordinates for the registration process would
+               be the result of starting with hemi's fsaverage_sym-aligned coordinates then warping
+               these coordinates in a way that is equivalent to the warping from fsaverage_sym's 
+               native spherical coordinates to fsaverage_sym's retinotopy registration coordinates.
+               Note that the retinotopy registration would usually be specified in a file in the
+               fsaverage_sym subject's surf directory: surf/lh.retinotopy.sphere.reg.
+               If no prior is specified (option value None), then the vertices that are used are
+               those aligned with the registration of the model, which will usually be 'fsaverage'
+               or 'fsaverage_sym'.
+            d. If the option resample is not None, then the vertex coordinates are resampled onto
+               either the fsaverage or fsaverage_sym's native sphere surface. (The value of resample
+               should be either 'fsaverage' or 'fsaverage_sym'.) Resampling can prevent vertices
+               that have been rearranged by alignment with the model's specified registration or by
+               application of a prior from beginning the alignment with very high initial gradients
+               and is recommended for subject alignments.
+               If resample is None then no changes are made.
+            e. A 2D projection of the (possibly aligned, prior-warped, and resampled) cortical
+               surface is made according to the projection parameters of the model. This map is the
+               mesh that is warped to eventually fit the model.
+      (2) Perform the registration by running neuropythy.registration.mesh_register. This step
+          consists of two major components.
+            a. Create the potential function, which we will minimize. The potential function is a
+               complex function whose inputs are the coordinates of all of the vertices and whose
+               output is a potential value that increases both as the mesh is warped and as the
+               vertices with retinotopy predictions get farther away from the positions in the model
+               that their retinotopy values would predict they should lie. The balance of these
+               two forces is best controlled by the option functional_scale. The potential function
+               fundamentally consists of four terms; the first three describe mesh deformations and
+               the last describes the model fit.
+                - The edge deformation term is described for any vertices u and v that are connected
+                  by an edge in the mesh; it's value is c/p (r(u,v) - r0(u,v))^2 where c is the
+                  edge_scale, p is the number of edges in the mesh, r(a,b) is the distance between
+                  vertices a and b, and r0(a,b) is the distance between a and b in the initial mesh.
+                - The angle deformation term is described for any three vertices (u,v,w) that form
+                  an angle in the mesh; its value is c/m h(t(u,v,w), t0(u,v,w)) where c is the
+                  angle_scale argument, m is the number of angles in the mesh, t is the value of the
+                  angle (u,v,w), t0 is the value of the angle in the initial mesh, and h(t,t0) is an
+                  infinite-well function that asymptotes to positive infinity as t approaches both 0
+                  and pi and is minimal when t = t0 (see the nben's 
+                  nben.mesh.registration.InfiniteWell documentation for more details).
+                - The perimeter term prevents the perimeter vertices form moving significantly;
+                  this primarily prevents the mesh from wrapping in on itself during registration.
+                  The form of this term is, for any vertex u on the mesh perimeter, 
+                  (x(u) - x0(u))^2 where x and x0 are the position and initial position of the
+                  vertex.
+                - Finally, the functional term is minimized when the vertices best align with the
+                  retinotopy model.
+            b. Register the mesh vertices to the potential function using the nben Java library. The
+               particular parameters of the registration are method, max_steps, and max_step_size.
 
     Options:
       * retinotopy_model specifies the instance of the retinotopy model to use; this must be an
@@ -728,6 +802,8 @@ def register_retinotopy(hemi,
       * max_steps (default 30,000) specifies the maximum number of registration steps to run.
       * max_step_size (default 0.05) specifies the maxmim distance a single vertex is allowed to
         move in a single step of the minimization.
+      * method (default 'random') is the method argument passed to mesh_register. This should be
+        'random', 'pure', or 'nimble'. Generally, 'random' is recommended.
       * return_meta_data (default: False) specifies whether the return value should be the new
         Registration object or a dictionary of meta-data that was used during the registration
         calculations, in which the key 'registation' gives the registration object.
@@ -744,7 +820,7 @@ def register_retinotopy(hemi,
         the uniform meshes, 'fsaverage' or 'fsaverage_sym', prior to registration; if None then no
         resampling is performed.
     '''
-    # Step 1: prep the map for registrationfigure out what properties we're using...
+    # Step 1: prep the map for registration--figure out what properties we're using...
     retinotopy_model = \
         V123_model()                 if retinotopy_model is None                 else \
         V123_model(retinotopy_model) if isinstance(retinotopy_model, basestring) else \
@@ -764,17 +840,18 @@ def register_retinotopy(hemi,
     else:
         r = mesh_register(
             data['map'],
-            [['edge', 'harmonic', 'scale', edge_scale],
-             ['angle', 'infinite-well', 'scale', angle_scale],
+            [['edge',      'harmonic',      'scale', edge_scale],
+             ['angle',     'infinite-well', 'scale', angle_scale],
              ['perimeter', 'harmonic'],
              retinotopy_anchors(data['map'], retinotopy_model,
                                 polar_angle='polar_angle',
                                 eccentricity='eccentricity',
                                 weight='weight',
-                                weight_cutoff=weight_cutoff,
+                                weight_cutoff=0, # taken care of above
                                 scale=functional_scale,
                                 select=select,
                                 **({} if sigma is Ellipsis else {'sigma':sigma}))],
+            method=method,
             max_steps=max_steps,
             max_step_size=max_step_size)
     # Step 3: run the post-processing function
