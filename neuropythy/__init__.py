@@ -11,7 +11,7 @@ from vision     import (retinotopy_data, empirical_retinotopy_data, predicted_re
                         neighborhood_cortical_magnification)
 
 # Version information...
-__version__ = '0.2.1'
+__version__ = '0.2.2'
 
 description = 'Integrate Python environment with FreeSurfer and perform mesh registration'
 

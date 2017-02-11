@@ -218,12 +218,15 @@ class CorticalMesh(Immutable):
 
     @staticmethod
     def construct_mesh_graph(V,E,L):
-        import igraph
-        g = igraph.Graph()
-        g.add_vertices(V)
-        g.add_edges(E.T)
-        g.es['length'] = L
-        return g
+        try:
+            import igraph
+            g = igraph.Graph()
+            g.add_vertices(V)
+            g.add_edges(E.T)
+            g.es['length'] = L
+            return g
+        except:
+            raise ValueError('Graphs are not currently supported')
 
 
     ################################################################################################
