@@ -72,8 +72,7 @@ class Mesh(Immutable):
         # This gets called when a container triangle isn't found; the idea is that k should
         # gradually increase until we find the container triangle; if k passes the max, then
         # we give up and assume no triangle is the container
-        if k >= 2*self.triangles.shape[0]: return None
-        k = min((k, self.triangles.shape[0]))
+        if k >= 288: return None
         (d,near) = self.triangle_hash.query(x, k=k)
         near = [n for n in near if n not in searched]
         searched = searched.union(near)
