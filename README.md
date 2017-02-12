@@ -36,15 +36,28 @@ The neuropythy library depends on a few other libraries, all freely available:
  * [py4j](https://www.py4j.org/) >= 0.9
 
 These libaries should be installed automatically for you if you use pip or setuptools (see above),
-and they must be found on your PYTHONPATH in order to use neuropythy. Note that you can only create
-graphs from cortical surface meshes if you also have the [python-igraph >= 0.7.1](http://igraph.org/python/) library installed, but it is not required otherwise.
+and they must be found on your PYTHONPATH in order to use neuropythy.
 
+### Optional Dependencies
+
+ * **[python-igraph >= 0.7.1](http://igraph.org/python/)**. You can only create graph objects from
+   cortical surface meshes if you have installed the [python-igraph](http://igraph.org/python/)
+   library; it is not required otherwise.
+ * **Java**. The registration algorithm employed by the register_retinotopy command is performed by
+   a Java library embedded in the neuropythy Python library. This library is the
+   [nben](https://github.com/noahbenson/nben) library, and is included as a submodule of this
+   GitHub repository, found in neuropythy/lib/nben; a standalone jar-file is also distributed as
+   part of the PyPI neuropythy distribution. However, in order for the Py4j library, which allows
+   Python to execute Java routines, to use this jar-file, you must have a working version of Java
+   installed; accordingly, the register_retinotopy command is only available if you have Java
+   installed and working. For help getting Java configured to work with Py4j, see the
+   [Py4j installation page](https://www.py4j.org/install.html).
 
 
 ## Commands ########################################################################################
 
 Currently Neuropythy is undergoing rapid development, but to get started, the neuropythy.commands
-package contains functions that run command-interfaces for the various routine included.  Any of
+package contains functions that run command-interfaces for the various routines included.  Any of
 these commands may be invoked by calling Neuropythy's main function and passing the name of the
 command as the first argument followed by any additional command arguments. The argument --help may
 be passed for further information about each command.
@@ -53,11 +66,20 @@ be passed for further information about each command.
    orientation as the subject's mri/orig.mgz file. The algorithm used tends to be much cleaner than
    that used by FreeSurfer's mri_surf2vol.
  * **benson14_retinotopy**. This command applies the anatomically-defined template of retinotopy
-   described Benson *et al.* (2014; see *References* below) to a subject. Note that the template
-   applied is not actually the template shown in the paper but is a similar updated version.   
+   described by Benson *et al.* (2014; see **References** below) to a subject. Note that the
+   template applied is not actually the template shown in the paper but is a similar updated
+   version.
  * **register_retinotopy**. This command fits a retinotopic model of V1, V2, and V3 to retinotopy
    data for a subject and saves the predicted retinotopic maps that result. This command is
    currently experimental.
+
+If neuropythy is installed on your machine, then you can execute a command like so:
+
+```bash
+> python -m neuropythy.__main__ surface_to_ribbon --help
+> python -m neuropythy.__main__ benson14_retinotopy bert
+```
+
 
 ## Docker ##########################################################################################
 
