@@ -72,16 +72,14 @@ class Mesh(Immutable):
         # This gets called when a container triangle isn't found; the idea is that k should
         # gradually increase until we find the container triangle; if k passes the max, then
         # we give up and assume no triangle is the container
-        if k > 288: return None
-        # for some reason, not doing this makes results inconsistent
-        x = np.asarray(x, dtype=np.float32)
+        if k >= 2*self.triangles.shape[0]: return None
+        k = min((k, self.triangles.shape[0]))
         (d,near) = self.triangle_hash.query(x, k=k)
         near = [n for n in near if n not in searched]
         searched = searched.union(near)
-        tri_no = next((k for k in near if self._point_in_triangle(k, x)), None)
+        tri_no = next((kk for kk in near if self._point_in_triangle(kk, x)), None)
         return (tri_no if tri_no is not None
                 else self._find_triangle_search(x, k=(2*k), searched=searched))
-        
     
     def nearest_vertex(self, pt):
         '''
@@ -113,7 +111,7 @@ class Mesh(Immutable):
         intended to work with other kinds of complex topologies; though they might work 
         heuristically.
         '''
-        pt = np.asarray(pt)
+        pt = np.asarray(pt, dtype=np.float32)
         if len(pt.shape) == 1:
             r = self.nearest_data([pt], k=k, n_jobs=n_jobs)[0];
             return (r[0][0], r[1][0], r[2][0])
@@ -149,7 +147,7 @@ class Mesh(Immutable):
         mesh to the given point pt. If pt is an (n x dims) matrix of points, an id is given
         for each column of pt.
         '''
-        pt = np.asarray(pt)
+        pt = np.asarray(pt, dtype=np.float32)
         (d, near) = self.triangle_hash.query(pt, k=k) #n_jobs fails?
         if len(pt.shape) == 1:
             tri_no = next((kk for kk in near if self._point_in_triangle(kk, pt)), None)
