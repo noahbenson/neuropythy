@@ -43,6 +43,10 @@ and they must be found on your PYTHONPATH in order to use neuropythy.
  * **[python-igraph >= 0.7.1](http://igraph.org/python/)**. You can only create graph objects from
    cortical surface meshes if you have installed the [python-igraph](http://igraph.org/python/)
    library; it is not required otherwise.
+ * **[Matplotlib >= 1.5.3](http://matplitlib.org/))**. A few functions for plotting cortical maps
+   are defined in the neuropythy.cortex package. These are not defined if matplotlib is not imported
+   successfully. The functions in question are cortex_plot, vertex_angle_color, vertex_eccen_color,
+   and a few helper functions.
  * **Java**. The registration algorithm employed by the register_retinotopy command is performed by
    a Java library embedded in the neuropythy Python library. This library is the
    [nben](https://github.com/noahbenson/nben) library, and is included as a submodule of this
