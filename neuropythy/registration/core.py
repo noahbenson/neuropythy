@@ -230,7 +230,7 @@ def mesh_register(mesh, field, max_steps=2000, max_step_size=0.05, max_pe_change
         k = method[1]
         method = method[0].lower()
     # If steps is 0, we can skip most of this...
-    if steps == 0:
+    if max_steps == 0:
         if return_report: return None
         else: return mesh.coordinates
     # Otherwise, we run at least some minimization
