@@ -216,7 +216,7 @@ def mesh_register(mesh, field, max_steps=2000, max_step_size=0.05, max_pe_change
     # First, make sure that the arguments are all okay:
     if not isinstance(mesh, CorticalMesh):
         raise RuntimeError('mesh argument must be an instance of neuropythy.cortex.CorticalMesh')
-    if not isinstance(max_steps, (int, long)) or max_steps < 1:
+    if not isinstance(max_steps, (int, long)) or max_steps < 0:
         raise RuntimeError('max_steps argument must be a positive integer')
     if not isinstance(max_steps, (float, int, long)) or max_step_size <= 0:
         raise RuntimeError('max_step_size must be a positive number')
@@ -229,6 +229,11 @@ def mesh_register(mesh, field, max_steps=2000, max_step_size=0.05, max_pe_change
     else:
         k = method[1]
         method = method[0].lower()
+    # If steps is 0, we can skip most of this...
+    if steps == 0:
+        if return_report: return None
+        else: return mesh.coordinates
+    # Otherwise, we run at least some minimization
     max_pe_change = float(max_pe_change)
     max_steps = int(max_steps)
     max_step_size = float(max_step_size)
