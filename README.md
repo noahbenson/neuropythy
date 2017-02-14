@@ -21,6 +21,8 @@ github repository and run setuptools:
 git clone https://github.com/noahbenson/neuropythy
 # Enter the repo directory
 cd neuropythy
+# setup the submodules
+git submodule init && git submodule update
 # Install the library
 python setup.py install
 
