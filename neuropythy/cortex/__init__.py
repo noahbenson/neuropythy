@@ -803,7 +803,9 @@ class CorticalMesh(Immutable):
         return CorticalMesh(coords, faces, source_file=file)
 
 # smooth a field on the cortical surface
-def mesh_smooth(mesh, prop, ignore_outliers=False, outliers=4.0, smoothness=0.5):
+def mesh_smooth(mesh, prop, smoothness=0.5,
+                outliers=None, mask=None, null=np.nan,
+                data_range=None, match_distribution=None):
     '''
     mesh_smooth(mesh, prop) yields a numpy array of the values in the mesh property prop after they
       have been smoothed on the cortical surface. Smoothing is done by minimizing the square
@@ -812,64 +814,100 @@ def mesh_smooth(mesh, prop, ignore_outliers=False, outliers=4.0, smoothness=0.5)
       or a list of property values.
     
     The following options are accepted:
-      * ignore_outliers (default: True) may be false to indicate that no outliers in the property
-        should be ignored; if True, outliers are minimized but they are not scored relative to their
-        starting position, so don't affect the local smoothing values.
-      * outliers (default: 4.0) may be None or an empty collection to indicate that there are no
-        outliers, may be a list of outlier vertex labels (not indices), or may be a function f that
-        is called as f(mu, sigma, values) and must return a boolean array the same size as values
-        that indicates which values are outliers. Finally, if outliers is a single number, then all
-        values more than <outliers> standard deviations from the mean are considered outliers.
       * smoothness (default: 0.5) specifies how much the function should care about the smoothness
         versus the original values when optimizing the surface smoothness. A value of 0 would result
         in no smoothing performed while a value of 1 indicates that only the smoothing (and not the
         original values at all) matter in the solution.
+      * outliers (default: None) specifies which vertices should be considered 'outliers' in that,
+        when performing minimization, their values are counted in the smoothness term but not in the
+        original-value term. This means that any vertex marked as an outlier will attempt to fit its
+        value smoothly from its neighbors without regard to its original value. Outliers may be
+        given as a boolean mask or a list of indices. Additionally, all vertices whose values are
+        either infinite or outside the given data_range, if any, are always considered outliers
+        even if the outliers argument is None.
+      * mask (default: None) specifies which vertices should be included in the smoothing and which
+        vertices should not. A mask of None includes all vertices by default; otherwise the mask may
+        be a list of vertex indices of vertices to include or a boolean array in which True values
+        indicate inclusion in the smoothing. Additionally, any vertex whose value is either NaN or
+        None is always considered outside of the mask.
+      * data_range (default: None) specifies the range of the data that should be accepted as input;
+        any data outside the data range is considered an outlier. This may be given as (min, max),
+        or just max, in which case 0 is always considered the min.
+      * match_distribution (default: None) allows one to specify that the output values should be
+        distributed according to a particular distribution. This distribution may be None (no
+        transform performed), True (match the distribution of the input data to the output,
+        excluding outliers), a collection of values whose distribution should be matched, or a 
+        function that accepts a single real-valued argument between 0 and 1 (inclusive) and returns
+        the appropriate value for that quantile.
+      * null (default: numpy.nan) specifies what value should be placed in elements of the property
+        that are not in the mask or that were NaN to begin with. By default, this is NaN, but 0 is
+        often desirable.
     '''
-    prop = np.asarray(mesh.prop(prop) if isinstance(prop, basestring) else prop)
-    # deal with outliers
-    if outliers is not None:
-        if np.issubdtype(type(outliers), np.number):
-            n_sigmas = outliers
-            outliers = lambda mu,sig,vals: np.abs(vals - mu) >= n_sigmas*sig
-        # should either be a label list, a boolean array, or a function
-        if hasattr(outliers, '__iter__'):
-            if len(outliers) == len(prop) and all(x == 1 or x == 0 for x in np.unique(outliers)):
-                outliers = np.where(outliers)[0]
-            else:
-                idx = mesh.index
-                outliers = np.asarray([i for i in [idx[i] for i in outliers] if i])
-        else:
-            prop_ids = np.asarray([i for (i,p) in enumerate(prop)
-                                   if np.issubdtype(type(p), np.number)])
-            prop_nums = prop[prop_ids]
-            mu = np.mean(prop_nums)
-            sig = np.std(prop_nums)
-            outliers = prop_ids[np.where(outliers(mu, sig, prop_nums))[0]]
-    else:
-        outliers = []
-    outliers = frozenset(outliers)
-    # find indices we care about (i.e., where the numbers are; don't ignore outliers yet)
-    idcs = frozenset([i for (i,p) in enumerate(prop) if np.issubdtype(type(p), np.number)])
+    # Do some argument processing ##################################################################
+    n = mesh.vertex_count
+    all_vertices = np.asarray(range(n), dtype=np.int)
+    # Parse the property data...
+    prop = mesh.prop(prop) if isinstance(prop, basestring) else prop
+    if not isinstance(prop, np.ndarray):
+        prop = [np.nan if x is None else x for x in prop]
+    prop = np.asarray(prop, dtype=np.float)
+    where_inf = np.where(np.isinf(prop))[0]
+    where_nan = np.where(np.isnan(prop))[0]
+    where_bad = np.union1d(where_inf, where_nan)
+    where_ok  = np.setdiff1d(all_vertices, where_bad)
+    # make the mask...
+    mask = np.setdiff1d(all_vertices if mask is None else all_vertices[mask], where_nan)
+    mask_ok = np.intersect1d(mask, where_ok)
+    # parse the data range
+    if data_range is None: data_range = (np.min(prop[mask_ok]), np.max(prop[mask_ok]))
+    elif np.issubdtype(data_range, np.number): data_range = (0, data_range)
+    elif len(data_range) == 1: data_range = (0, data_range[0])
+    elif len(data_range) != 2: raise ValueError('data_range not recognized')
+    # deal with outliers...
+    outliers = np.union1d([] if outliers is None else all_vertices[outliers], where_inf)
+    outliers = np.union1d(outliers, where_ok[np.where(prop[where_ok] < data_range[0])[0]])
+    outliers = np.union1d(outliers, where_ok[np.where(prop[where_ok] > data_range[1])[0]])
+    outliers = np.asarray(outliers, dtype=np.int)
+    # here are the vertex sets we will use below
+    tethered = np.setdiff1d(mask, outliers)
+    maskset  = frozenset(mask)
+    # Do the minimization ##########################################################################
+    # start by looking at the edges
     el0 = mesh.indexed_edges
-    el = el0 if len(idcs) == len(prop) else \
-         np.asarray([(a,b) for (a,b) in el0.T if a in idcs and b in idcs]).T
+    el = el0 if len(mask) == len(prop) else \
+         np.asarray([(a,b) for (a,b) in el0.T if a in maskset and b in maskset]).T
     # okay, we have to build up our constraints; first, we want things to stay close to where they
-    # are if they aren't outliers:
-    non_outliers = np.asarray(list(idcs - outliers))
-    x0 = prop[non_outliers]
+    # are if they aren't outliers (aka, tethered):
+    x0 = prop
+    # give all the outliers mean values:
+    x0[outliers] = np.mean(prop[tethered])
     (ks, ke) = (smoothness, 1.0 - smoothness)
     def _f(x):
-        rs = np.sum((x0 - x[non_outliers])**2)
+        rs = np.sum((x0[tethered] - x[tethered])**2)
         re = np.sum((x[el[0]] - x[el[1]])**2)
         return ks*rs + ke*re
     def _f_jac(x):
         df = np.zeros(x.shape)
-        df[non_outliers] = 2*ks*(x[non_outliers] - x0)
+        df[tethered] = 2*ks*(x[tethered] - x0[tethered])
         for (u,v,dx) in zip(el[0], el[1], x[el[0]] - x[el[1]]):
             df[u] += dx
             df[v] -= dx
         return df
-    return spopt.minimize(_f, prop, jac=_f_jac, method='L-BFGS-B').x
+    sm_prop = spopt.minimize(_f, prop, jac=_f_jac, method='L-BFGS-B').x
+    # Apply output re-distributing if requested ####################################################
+    if match_distribution is not None:
+        percentiles = 100.0 * np.argsort(np.argsort(sm_prop[mask])) / (float(len(mask)) - 1.0)
+        if match_distribution is True:
+            sm_prop[mask] = np.percentile(prop[mask], percentiles)
+        elif hasattr(match_distribution, '__iter__'):
+            sm_prop[mask] = np.percentile(match_distribution, percentiles)
+        elif hasattr(match_distribution, '__call__'):
+            sm_prop[mask] = map(match_distribution, percentiles / 100.0)
+        else:
+            raise ValueError('Invalid match_distribution argument')
+    nonmask = np.setdiff1d(all_vertices, mask)
+    sm_prop[nonmask] = null
+    return sm_prop
 
 # Plotting and Coloring Meshes #####################################################################
 # All of this requires matplotlib, so we try all and fail gracefully if we don't have it

@@ -5,7 +5,7 @@
 from freesurfer import (freesurfer_subject,
                         Hemisphere as FreeSurferHemisphere,
                         Subject    as FreeSurferSubject)
-from cortex     import (CorticalMesh)
+from cortex     import (CorticalMesh, mesh_smooth)
 from vision     import (retinotopy_data, empirical_retinotopy_data, predicted_retinotopy_data,
                         register_retinotopy, retinotopy_anchors, V123_model,
                         neighborhood_cortical_magnification)
