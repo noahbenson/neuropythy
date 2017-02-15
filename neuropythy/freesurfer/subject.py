@@ -182,7 +182,6 @@ class Hemisphere(Immutable):
             if data is None or data[0] is None:
                 warn('Could not load fsaverage_sym retinotopy registration')
             else:
-                print 1
                 regs['retinotopy'] = data[0]
         return Topology(faces, regs)
     @staticmethod
@@ -1219,7 +1218,7 @@ def cortex_to_ribbon_map_lines(sub, hemi=None):
       each vertex (both in identical order).
 
     These associations are determined by projecting the vectors from the white surface vertices to 
-      the pial surface vertices into the the ribbon and weighting them by the fraction of the vector 
+      the pial surface vertices into the the ribbon and weighting them by the fraction of the vector
       that lies in the voxel.
 
     The following options are accepted:
