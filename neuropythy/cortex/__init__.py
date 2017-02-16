@@ -7,7 +7,7 @@ import numpy as np
 import scipy as sp
 import scipy.spatial as space
 import scipy.optimize as spopt
-from scipy.sparse import csr_matrix
+from scipy.sparse import (lil_matrix, csr_matrix)
 from numpy.linalg import lstsq, norm
 import neuropythy.geometry as geo
 from neuropythy.immutable import Immutable
@@ -850,64 +850,77 @@ def mesh_smooth(mesh, prop, smoothness=0.5,
     prop = mesh.prop(prop) if isinstance(prop, basestring) else prop
     if not isinstance(prop, np.ndarray):
         prop = [np.nan if x is None else x for x in prop]
-    prop = np.asarray(prop, dtype=np.float)
+    prop = np.array(prop, dtype=np.float)
+    # First, find the mask; these are values that can be included theoretically
     where_inf = np.where(np.isinf(prop))[0]
     where_nan = np.where(np.isnan(prop))[0]
     where_bad = np.union1d(where_inf, where_nan)
     where_ok  = np.setdiff1d(all_vertices, where_bad)
-    # make the mask...
-    mask = np.setdiff1d(all_vertices if mask is None else all_vertices[mask], where_nan)
-    mask_ok = np.intersect1d(mask, where_ok)
-    # parse the data range
-    if data_range is None: data_range = (np.min(prop[mask_ok]), np.max(prop[mask_ok]))
-    elif np.issubdtype(data_range, np.number): data_range = (0, data_range)
-    elif len(data_range) == 1: data_range = (0, data_range[0])
-    elif len(data_range) != 2: raise ValueError('data_range not recognized')
-    # deal with outliers...
-    outliers = np.union1d([] if outliers is None else all_vertices[outliers], where_inf)
-    outliers = np.union1d(outliers, where_ok[np.where(prop[where_ok] < data_range[0])[0]])
-    outliers = np.union1d(outliers, where_ok[np.where(prop[where_ok] > data_range[1])[0]])
+    # Whittle down the mask to what we are sure is in the minimization:
+    mask = np.setdiff1d(all_vertices if mask is None else all_vertices[mask],
+                        where_nan)
+    # Find the outliers: values specified as outliers or values with inf; will build this as we go
+    outliers = [] if outliers is None else all_vertices[outliers]
+    outliers = np.intersect1d(outliers, mask) # outliers not in the mask don't matter anyway
+    # If there's a data range argument, deal with how it affects outliers
+    if data_range is not None:
+        if hasattr(data_range, '__iter__'):
+            outliers = np.union1d(outliers, mask[np.where(prop[mask] < data_range[0])[0]])
+            outliers = np.union1d(outliers, mask[np.where(prop[mask] > data_range[1])[0]])
+        else:
+            outliers = np.union1d(outliers, mask[np.where(prop[mask] < 0)[0]])
+            outliers = np.union1d(outliers, mask[np.where(prop[mask] > data_range)[0]])
+    # no matter what, trim out the infinite values (even if inf was in the data range)
+    outliers = np.union1d(outliers, mask[np.where(np.isinf(prop[mask]))[0]])
     outliers = np.asarray(outliers, dtype=np.int)
     # here are the vertex sets we will use below
     tethered = np.setdiff1d(mask, outliers)
+    tethered = np.asarray(tethered, dtype=np.int)
+    mask = np.asarray(mask, dtype=np.int)
     maskset  = frozenset(mask)
     # Do the minimization ##########################################################################
     # start by looking at the edges
     el0 = mesh.indexed_edges
-    el = el0 if len(mask) == len(prop) else \
-         np.asarray([(a,b) for (a,b) in el0.T if a in maskset and b in maskset]).T
-    # okay, we have to build up our constraints; first, we want things to stay close to where they
-    # are if they aren't outliers (aka, tethered):
-    x0 = prop
-    # give all the outliers mean values:
-    x0[outliers] = np.mean(prop[tethered])
+    # give all the outliers mean values
+    prop[outliers] = np.mean(prop[tethered])
+    # x0 are the values we care about; also the starting values in the minimization
+    x0 = np.array(prop[mask])
+    # since we are just looking at the mask, look up indices that we need in it
+    mask_idx = {v:i for (i,v) in enumerate(mask)}
+    mask_tethered = np.asarray([mask_idx[u] for u in tethered])
+    el = np.asarray([(mask_idx[a], mask_idx[b]) for (a,b) in el0.T
+                     if a in maskset and b in maskset])
+    # These are the weights and objective function/gradient in the minimization
     (ks, ke) = (smoothness, 1.0 - smoothness)
+    e2v = lil_matrix((len(x0), len(el)), dtype=np.int)
+    for (i,(u,v)) in enumerate(el):
+        e2v[u,i] = 1
+        e2v[v,i] = -1
+    e2v = csr_matrix(e2v)
+    (us, vs) = el.T
     def _f(x):
-        rs = np.sum((x0[tethered] - x[tethered])**2)
-        re = np.sum((x[el[0]] - x[el[1]])**2)
+        rs = np.sum((x0[mask_tethered] - x[mask_tethered])**2)
+        re = np.sum((x[us] - x[vs])**2)
         return ks*rs + ke*re
     def _f_jac(x):
-        df = np.zeros(x.shape)
-        df[tethered] = 2*ks*(x[tethered] - x0[tethered])
-        for (u,v,dx) in zip(el[0], el[1], x[el[0]] - x[el[1]]):
-            df[u] += dx
-            df[v] -= dx
+        df = 2*ke*e2v.dot(x[us] - x[vs])
+        df[mask_tethered] += 2*ks*(x[mask_tethered] - x0[mask_tethered])
         return df
-    sm_prop = spopt.minimize(_f, prop, jac=_f_jac, method='L-BFGS-B').x
+    sm_prop = spopt.minimize(_f, x0, jac=_f_jac, method='L-BFGS-B').x
     # Apply output re-distributing if requested ####################################################
     if match_distribution is not None:
-        percentiles = 100.0 * np.argsort(np.argsort(sm_prop[mask])) / (float(len(mask)) - 1.0)
+        percentiles = 100.0 * np.argsort(np.argsort(sm_prop)) / (float(len(mask)) - 1.0)
         if match_distribution is True:
-            sm_prop[mask] = np.percentile(prop[mask], percentiles)
+            sm_prop = np.percentile(x0[mask_tethered], percentiles)
         elif hasattr(match_distribution, '__iter__'):
-            sm_prop[mask] = np.percentile(match_distribution, percentiles)
+            sm_prop = np.percentile(match_distribution, percentiles)
         elif hasattr(match_distribution, '__call__'):
-            sm_prop[mask] = map(match_distribution, percentiles / 100.0)
+            sm_prop = map(match_distribution, percentiles / 100.0)
         else:
             raise ValueError('Invalid match_distribution argument')
-    nonmask = np.setdiff1d(all_vertices, mask)
-    sm_prop[nonmask] = null
-    return sm_prop
+    result = np.full(len(prop), null, dtype=np.float)
+    result[mask] = sm_prop
+    return result
 
 # Plotting and Coloring Meshes #####################################################################
 # All of this requires matplotlib, so we try all and fail gracefully if we don't have it
