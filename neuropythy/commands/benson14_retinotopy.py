@@ -131,6 +131,16 @@ def benson14_retinotopy_command(*args):
                     img.to_filename(flnm)
                 else:
                     note('    - Not overwriting existing file: %s' % flnm)
+            for (t,dat) in rhdat.iteritems():
+                flnm = os.path.join(sub.directory, 'surf', 'rh.' + tr[t] + '.mgz')
+                if ow or not os.path.exist(flnm):
+                    note('    - Exporting RH prediction file: %s' % flnm)
+                    img = fsmgh.MGHImage(
+                        np.asarray([[dat]], dtype=(np.int32 if t == 'v123roi' else np.float32)),
+                        np.eye(4))
+                    img.to_filename(flnm)
+                else:
+                    note('    - Not overwriting existing file: %s' % flnm)
         # Export volumes
         if nve:
             note('   - Skipping volume export.')
