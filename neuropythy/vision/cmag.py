@@ -43,7 +43,7 @@ def _cmag_fill_result(mesh, idcs, vals):
     idcs = {idx:i for (i,idx) in enumerate(idcs)}
     return [vals[idcx[i]] if i in idcs else None for i in mesh.vertex_count]
 
-def neighborhood_cortical_magnification(mesh, coordinates, direction='area'):
+def neighborhood_cortical_magnification(mesh, coordinates):
     '''
     neighborhood_cortical_magnification(mesh, visual_coordinates) yields a list of neighborhood-
     based cortical magnification values for the vertices in the given mesh if their visual field
