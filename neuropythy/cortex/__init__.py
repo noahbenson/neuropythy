@@ -803,7 +803,7 @@ class CorticalMesh(Immutable):
         return CorticalMesh(coords, faces, source_file=file)
 
 # smooth a field on the cortical surface
-def mesh_smooth(mesh, prop, smoothness=0.5,
+def mesh_smooth(mesh, prop, smoothness=0.5, weights=None,
                 outliers=None, mask=None, null=np.nan,
                 data_range=None, match_distribution=None):
     '''
@@ -814,6 +814,9 @@ def mesh_smooth(mesh, prop, smoothness=0.5,
       or a list of property values.
     
     The following options are accepted:
+      * weights (default: None) specifies the weight on each individual vertex that is in the mesh;
+        this may be a property name or a list of weight values. Any weight that is <= 0 or None is
+        considered outside the mask.
       * smoothness (default: 0.5) specifies how much the function should care about the smoothness
         versus the original values when optimizing the surface smoothness. A value of 0 would result
         in no smoothing performed while a value of 1 indicates that only the smoothing (and not the
@@ -851,14 +854,21 @@ def mesh_smooth(mesh, prop, smoothness=0.5,
     if not isinstance(prop, np.ndarray):
         prop = [np.nan if x is None else x for x in prop]
     prop = np.array(prop, dtype=np.float)
+    # ...including the weights...
+    if weights is None: weights = np.ones(len(prop), dtype=np.float)
+    if not hasattr(weights, '__iter__') or len(weights) != len(prop):
+        raise ValueError('weights must be None or an iterable with 1 entry per vertex')
+    weights = np.asarray([0.0 if w is None or np.isnan(w) or w <= 0 else w for w in weights],
+                         dtype=np.float)
     # First, find the mask; these are values that can be included theoretically
     where_inf = np.where(np.isinf(prop))[0]
     where_nan = np.where(np.isnan(prop))[0]
     where_bad = np.union1d(where_inf, where_nan)
     where_ok  = np.setdiff1d(all_vertices, where_bad)
     # Whittle down the mask to what we are sure is in the minimization:
-    mask = np.setdiff1d(all_vertices if mask is None else all_vertices[mask],
-                        where_nan)
+    mask = np.union1d(
+        np.setdiff1d(all_vertices if mask is None else all_vertices[mask], where_nan),
+        np.where(np.isclose(weights, 0))[0])
     # Find the outliers: values specified as outliers or values with inf; will build this as we go
     outliers = [] if outliers is None else all_vertices[outliers]
     outliers = np.intersect1d(outliers, mask) # outliers not in the mask don't matter anyway
@@ -898,13 +908,14 @@ def mesh_smooth(mesh, prop, smoothness=0.5,
         e2v[v,i] = -1
     e2v = csr_matrix(e2v)
     (us, vs) = el.T
+    weights_tth = weights[tethered]
     def _f(x):
-        rs = np.sum((x0[mask_tethered] - x[mask_tethered])**2)
+        rs = np.dot(weights_tth, (x0[mask_tethered] - x[mask_tethered])**2)
         re = np.sum((x[us] - x[vs])**2)
         return ks*rs + ke*re
     def _f_jac(x):
         df = 2*ke*e2v.dot(x[us] - x[vs])
-        df[mask_tethered] += 2*ks*(x[mask_tethered] - x0[mask_tethered])
+        df[mask_tethered] += 2*ks*weights_tth*(x[mask_tethered] - x0[mask_tethered])
         return df
     sm_prop = spopt.minimize(_f, x0, jac=_f_jac, method='L-BFGS-B').x
     # Apply output re-distributing if requested ####################################################

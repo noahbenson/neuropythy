@@ -526,7 +526,8 @@ def register_retinotopy_initialize(hemi,
                                    max_predicted_eccen=85,
                                    partial_voluming_correction=True,
                                    prior='retinotopy',
-                                   resample='fsaverage_sym'):
+                                   resample='fsaverage_sym',
+                                   max_area=3):
     '''
     register_retinotopy_initialize(hemi, model) yields an fsaverage_sym LH hemisphere that has
     been prepared for retinotopic registration with the data on the given hemisphere, hemi. The
@@ -671,7 +672,7 @@ def register_retinotopy_initialize(hemi,
         # now convert the sub points into retinotopy points
         rmesh = proj_from_hemi.registration_mesh(d['registration'])
         pred = np.asarray(
-            [(p,e,l) if rl > 0 and rl < 4 and e <= max_predicted_eccen else (0.0, 0.0, 0)
+            [(p,e,l) if rl > 0 and rl <= max_area and e <= max_predicted_eccen else (0.0, 0.0, 0)
              for (p,e,l) in zip(*model.cortex_to_angle(rmesh))
              for rl in [round(l)]]).T
         pred = (np.asarray(pred[0], dtype=np.float32),

@@ -59,13 +59,13 @@ class SchiraModel(RetinotopyModel):
 
     # These are the accepted arguments to the model:
     default_parameters = {
-        'A': 0.5,
-        'B': 135.0,
-        'lambda': 1.0,
+        'A': 1.05,
+        'B': 90.0,
+        'lambda': 0.4,
         'psi': 0.15,
-        'scale': [7.0, 8.0],
-        'shear': [[1.0, -0.2], [0.0, 1.0]],
-        'center': [-7.0, -2.0],
+        'scale': [21.0, 21.0],
+        'shear': [[1.0, 0.0], [0.0, 1.0]],
+        'center': [-6.0, 0.0],
         'v1size': 1.2,
         'v2size': 0.6,
         'v3size': 0.4,
@@ -122,33 +122,38 @@ class SchiraModel(RetinotopyModel):
     def angle_to_cortex(self, theta, rho):
         iterTheta = hasattr(theta, '__iter__')
         iterRho = hasattr(rho, '__iter__')
+        jarr = None
         if iterTheta and iterRho:
             if len(theta) != len(rho):
                 raise RuntimeError('Arguments theta and rho must be the same length!')
-            return self._java_object.angleToCortex(to_java_doubles(theta), to_java_doubles(rho))
+            jarr = self._java_object.angleToCortex(to_java_doubles(theta), to_java_doubles(rho))
         elif iterTheta:
-            return self._java_object.angleToCortex(to_java_doubles(theta),
+            jarr = self._java_object.angleToCortex(to_java_doubles(theta),
                                                    to_java_doubles([rho for t in theta]))
         elif iterRho:
-            return self._java_object.angleToCortex(to_java_doubles([theta for r in rho]),
+            jarr = self._java_object.angleToCortex(to_java_doubles([theta for r in rho]),
                                                    to_java_doubles(rho))
         else:
             return self._java_object.angleToCortex(theta, rho)
+        return np.asarray([[c for c in r] for r in jarr])
     def cortex_to_angle(self, x, y):
         iterX = hasattr(x, '__iter__')
         iterY = hasattr(y, '__iter__')
+        jarr = None
         if iterX and iterY:
             if len(x) != len(y):
                 raise RuntimeError('Arguments x and y must be the same length!')
-            return self._java_object.cortexToAngle(to_java_doubles(x), to_java_doubles(y))
+            jarr = self._java_object.cortexToAngle(to_java_doubles(x), to_java_doubles(y))
         elif iterX:
-            return self._java_object.cortexToAngle(to_java_doubles(x),
+            jarr = self._java_object.cortexToAngle(to_java_doubles(x),
                                                    to_java_doubles([y for i in x]))
         elif iterY:
-            return self._java_object.cortexToAngle(to_java_doubles([x for i in y]),
+            jarr = self._java_object.cortexToAngle(to_java_doubles([x for i in y]),
                                                    to_java_doubles(y))
         else:
             return self._java_object.cortexToAngle(x, y)
+        return np.asarray([[c for c in r] for r in jarr])
+        
 
 class RetinotopyMeshModel(RetinotopyModel):
     '''
@@ -324,7 +329,8 @@ class RegisteredRetinotopyModel(RetinotopyModel):
                 else:
                     m = self.projection_data['forward_function'](args[0])
                     res = np.zeros((3, args[0].coordinates.shape[1]))
-                    res[:, m.vertex_labels] = self.cortex_to_angle(m.coordinates)
+                    c2a = np.asarray(self.cortex_to_angle(m.coordinates))
+                    res[:, m.vertex_labels] = c2a if len(c2a) == len(res) else c2a.T
                     return res
             elif isinstance(args[0], nfs.Hemisphere):
                 regname = self.projection_data['registration']
@@ -381,11 +387,23 @@ def load_fmm_model(filename, radius=math.pi/3.0, sphere_radius=100.0):
       * sphere_radius (default: 100) specifies the radius of the sphere that should be assumed by
         the model. Note that in Freesurfer, spheres have a radius of 100.
     '''
+    if not os.path.exists(filename):
+        models_path = os.path.join(os.path.dirname(__file__), '..', 'lib', 'models')
+        # we look for it in a number of ways:
+        fname = next((fnm
+                      for beg in ['', models_path] for end in ['', '.fmm', '.fmm.gz']
+                      for fnm0 in [filename + end]
+                      for fnm in [fnm0 if beg is None else os.path.join(beg, fnm0)]
+                      if os.path.exists(fnm)),
+                     None)
+        if fname is None:
+            raise ValueError('Given model/file name does not exist: %s' % filename)
+        filename = fname
     if not os.path.isfile(filename):
         raise ValueError('Given filename (%s) is not a file!' % filename)
-    gz = True if len(fname) > 3 and fname[-3:] == '.gz' else False
+    gz = True if len(filename) > 3 and filename[-3:] == '.gz' else False
     lines = None
-    with (gzip.open(fname, 'rb') if gz else open(fname, 'r')) as f:
+    with (gzip.open(filename, 'rb') if gz else open(filename, 'r')) as f:
         lines = f.read().split('\n')
     if len(lines) < 3 or lines[0] != 'Flat Mesh Model Version: 1.0':
         raise ValueError('Given file does not contain to a valid flat mesh model!')

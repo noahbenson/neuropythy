@@ -70,7 +70,8 @@ def neighborhood_cortical_magnification(mesh, coordinates):
         # areal is easy
         voronoi_vis = (pts_vis - x0col_vis) * 0.5 + x0col_vis
         voronoi_srf = (pts_srf - x0col_srf) * 0.5 + x0col_srf
-        area_vis = np.sum(triangle_area(x0_vis, voronoi_vis, np.roll(voronoi_vis, 1, axis=1)))
+        area_vis = np.sum([triangle_area(x0_vis, a, b)
+                           for (a,b) in zip(voronoi_vis.T, np.roll(voronoi_vis, 1, axis=1).T)])
         area_srf = np.sum([triangle_area(x0_srf, a, b)
                            for (a,b) in zip(voronoi_srf.T, np.roll(voronoi_srf, 1, axis=1).T)])
         res[idx,2] = np.inf if np.isclose(area_vis, 0) else area_srf/area_vis
@@ -103,14 +104,15 @@ def neighborhood_cortical_magnification(mesh, coordinates):
                 len_vis = np.linalg.norm(isects_vis[0] - isects_vis[1])
                 if np.isclose(len_vis, 0): res[idx,dirno] = np.inf
                 else:
-                    # we also need the distances on the surface: find the points by simple projection
+                    # we also need the distances on the surface: find the points by projection
                     fsegs_srf = segs_srf_t[isect_idcs]
                     fsegs_vis = segs_vis_t[isect_idcs]
                     s02lens_vis = np.linalg.norm(fsegs_vis[:,0] - fsegs_vis[:,1], axis=1)
                     s01lens_vis = np.linalg.norm(fsegs_vis[:,0] - isects_vis, axis=1)
                     vecs_srf = fsegs_srf[:,1] - fsegs_srf[:,0]
                     s02lens_srf = np.linalg.norm(vecs_srf, axis=1)
-                    isects_srf = fsegs_srf[:,0] + np.transpose([(s01lens_vis/s02lens_vis)]) * vecs_srf
+                    isects_srf = np.transpose([(s01lens_vis/s02lens_vis)]) * vecs_srf \
+                                 + fsegs_srf[:,0]
                     len_srf = np.sum(np.linalg.norm(isects_srf - x0_srf, axis=1))
                     res[idx,dirno] = len_srf / len_vis
     # That's it!
