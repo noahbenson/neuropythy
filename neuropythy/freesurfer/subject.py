@@ -177,7 +177,11 @@ class Hemisphere(Immutable):
         if self.subject.id == 'fsaverage_sym' and 'retinotopy' not in regs:
             flnm = os.path.join(os.path.dirname(os.path.dirname(__file__)),
                                 'lib', 'data', 'fsaverage_sym', 'surf',
-                                'lh.retinotopy.sphere.reg')
+                                'lh.retinotopy_benson17.sphere.reg')
+            if not os.path.exists(flnm):
+                flnm = os.path.join(os.path.dirname(os.path.dirname(__file__)),
+                                    'lib', 'data', 'fsaverage_sym', 'surf',
+                                    'lh.retinotopy_benson14.sphere.reg')
             data = self._load_surface_data_safe(flnm)
             if data is None or data[0] is None:
                 warn('Could not load fsaverage_sym retinotopy registration')
