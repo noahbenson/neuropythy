@@ -17,7 +17,7 @@ from neuropythy.freesurfer import (freesurfer_subject, add_subject_path,
                                    cortex_to_ribbon, cortex_to_ribbon_map,
                                    Hemisphere)
 from neuropythy.util import CommandLineParser
-from neuropythy.vision import (benson14_retinotopy)
+from neuropythy.vision import (predict_retinotopy)
 
 benson14_retinotopy_help = \
    '''
@@ -83,7 +83,8 @@ _benson14_parser_instructions = [
     ('e', 'eccen-tag',              'eccen_tag',         'eccen_benson14'),
     ('a', 'angle-tag',              'angle_tag',         'angle_benson14'),
     ('l', 'label-tag',              'label_tag',         'v123roi_benson14'),
-    ('d', 'subjects-dir',           'subjects_dir',      None)]
+    ('d', 'subjects-dir',           'subjects_dir',      None),
+    ('t', 'template',               'template',          'benson17']
 _benson14_parser = CommandLineParser(_benson14_parser_instructions)
 def benson14_retinotopy_command(*args):
     '''
@@ -109,13 +110,13 @@ def benson14_retinotopy_command(*args):
     nve = opts['no_vol_export']
     tr = {'polar_angle':  opts['angle_tag'],
           'eccentricity': opts['eccen_tag'],
-          'v123roi':      opts['label_tag']}
+          'visual_area':      opts['label_tag']}
     # okay, now go through the subjects...
     for subnm in args:
         note('Processing subject %s:' % subnm)
         sub = freesurfer_subject(subnm)
         note('   - Interpolating template...')
-        (lhdat, rhdat) = benson14_retinotopy(sub)
+        (lhdat, rhdat) = predict_retinotopy(sub, template=opts['template'])
         # Export surfaces
         if nse:
             note('   - Skipping surface export.')
@@ -126,7 +127,7 @@ def benson14_retinotopy_command(*args):
                 if ow or not os.path.exist(flnm):
                     note('    - Exporting LH prediction file: %s' % flnm)
                     img = fsmgh.MGHImage(
-                        np.asarray([[dat]], dtype=(np.int32 if t == 'v123roi' else np.float32)),
+                        np.asarray([[dat]], dtype=(np.int32 if t == 'visual_area' else np.float32)),
                         np.eye(4))
                     img.to_filename(flnm)
                 else:
@@ -136,7 +137,7 @@ def benson14_retinotopy_command(*args):
                 if ow or not os.path.exist(flnm):
                     note('    - Exporting RH prediction file: %s' % flnm)
                     img = fsmgh.MGHImage(
-                        np.asarray([[dat]], dtype=(np.int32 if t == 'v123roi' else np.float32)),
+                        np.asarray([[dat]], dtype=(np.int32 if t == 'visual_area' else np.float32)),
                         np.eye(4))
                     img.to_filename(flnm)
                 else:
@@ -154,7 +155,7 @@ def benson14_retinotopy_command(*args):
                     vol = cortex_to_ribbon(sub,
                                            (lhdat[t], rhdat[t]),
                                            map=surf2rib,
-                                           dtype=(np.int32 if t == 'v123roi' else np.float32))
+                                           dtype=(np.int32 if t == 'visual_area' else np.float32))
                     note('    - Exporting volume file: %s' % flnm)
                     vol.to_filename(flnm)
                 else:

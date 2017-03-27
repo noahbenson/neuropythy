@@ -9,7 +9,7 @@ import scipy as sp
 import scipy.spatial as space
 import nibabel.freesurfer.io as fsio
 from   nibabel.freesurfer.mghformat import load as mghload, MGHImage
-import os, math, copy
+import os, math, copy, re
 import itertools
 from   warnings import warn
 import pysistence
@@ -174,24 +174,19 @@ class Hemisphere(Immutable):
                     regs[fl[3:-11]] = data[0]
         # If this is the fsaverage_sym and we didn't find the retinotopy topology, we need to
         # load it out of the data directory
-        if self.subject.id == 'fsaverage_sym' and 'retinotopy_benson14' not in regs:
-            flnm = os.path.join(os.path.dirname(os.path.dirname(__file__)),
-                                'lib', 'data', 'fsaverage_sym', 'surf',
-                                'lh.retinotopy_benson14.sphere.reg')
-            data = self._load_surface_data_safe(flnm)
-            if data is None or data[0] is None:
-                warn('Could not load fsaverage_sym retinotopy_benson14 registration')
-            else:
-                regs['retinotopy'] = data[0]
-        if self.subject.id == 'fsaverage_sym' and 'retinotopy_benson17' not in regs:
-            flnm = os.path.join(os.path.dirname(os.path.dirname(__file__)),
-                                'lib', 'data', 'fsaverage_sym', 'surf',
-                                'lh.retinotopy_benson17.sphere.reg')
-            data = self._load_surface_data_safe(flnm)
-            if data is None or data[0] is None:
-                warn('Could not load fsaverage_sym retinotopy_benson17 registration')
-            else:
-                regs['retinotopy'] = data[0]
+        if self.subject.id == 'fsaverage_sym':
+            path = os.path.join(os.path.dirname(os.path.dirname(__file__)),
+                                'lib', 'data', 'fsaverage_sym', 'surf')
+            if os.path.exists(path):
+                regfls = {fl[3:-11]:os.path.join(path, fl) for fl in os.listdir(path)
+                          if re.match('^lh\.[^\.]*\.sphere\.reg$', fl) is not None}
+                for (regnm,regfl) in regfls.iteritems():
+                    if regnm in regs: continue
+                    data = self._load_surface_data_safe(regfl)
+                    if data is None or data[0] is None:
+                        warn('Could not load fsaverage_sym %s registration' % regnm)
+                    else:
+                        regs[regnm] = data[0]
         if self.subject.id == 'fsaverage_sym' and 'retinotopy' not in regs:
             if   'retinotopy_benson17' in regs: regs['retinotopy'] = regs['retinotopy_benson17']
             elif 'retinotopy_benson14' in regs: regs['retinotopy'] = regs['retinotopy_benson14']

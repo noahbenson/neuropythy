@@ -864,10 +864,10 @@ def register_retinotopy(hemi,
     return ppr if return_meta_data else ppr['registered_mesh']
 
 # Tools for registration-free retinotopy prediction:
-__benson14_templates = None
-def benson14_retinotopy(sub):
+_retinotopy_templates = {}
+def predict_retinotopy(sub, template='benson17'):
     '''
-    benson14_retinotopy(subject) yields a pair of dictionaries each with three keys: polar_angle,
+    predict_retinotopy(subject) yields a pair of dictionaries each with three keys: polar_angle,
     eccentricity, and v123roi; each of these keys maps to a numpy array with one entry per vertex.
     The first element of the yielded pair is the left hemisphere map and the second is the right
     hemisphere map. The values are obtained by resampling the Benson et al. 2014 anatomically
@@ -878,37 +878,38 @@ def benson14_retinotopy(sub):
     directory; these files are sym.template_angle.mgz, sym.template_eccen.mgz, and 
     sym.template_areas.mgz.
     '''
-    global __benson14_templates
-    if __benson14_templates is None:
+    global __retinotopy_templates
+    template = template.lower()
+    if template not in _retinotopy_templates:
         # Find a sym template that has the right data:
         sym_path = next((os.path.join(path0, 'fsaverage_sym')
                          for path0 in (subject_paths() +
                                        [os.path.join(os.path.dirname(os.path.dirname(__file__)),
                                                      'lib', 'data')])
                          for path in [os.path.join(path0, 'fsaverage_sym', 'surf')]
-                         if os.path.isfile(os.path.join(path, 'sym.benson14_angle.mgz'))     \
-                            and os.path.isfile(os.path.join(path, 'sym.benson14_eccen.mgz')) \
-                            and os.path.isfile(os.path.join(path, 'sym.benson14_v123roi.mgz'))),
+                         if os.path.isfile(os.path.join(path, 'sym.%s_angle.mgz' % template)) 
+                         if os.path.isfile(os.path.join(path, 'sym.%s_eccen.mgz' % template))
+                         if os.path.isfile(os.path.join(path, 'sym.%s_varea.mgz' % template))),
                         None)
         if sym_path is None:
-            raise ValueError('No fsaverage_sym subject found with surf/sym.benson14_*.mgz files!')
+            raise ValueError('No fsaverage_sym subj found with surf/sym.%s_*.mgz files!' % template)
         sym = freesurfer_subject('fsaverage_sym').LH
-        tmpl_path = os.path.join(sym_path, 'surf', 'sym.benson14_')
+        tmpl_path = os.path.join(sym_path, 'surf', 'sym.%s_' % template)
         # We need to load in the template data
-        __benson14_templates = {
+        _retinotopy_templates[template] = {
             'angle': fsmgh.load(tmpl_path + 'angle.mgz').get_data().flatten(),
             'eccen': fsmgh.load(tmpl_path + 'eccen.mgz').get_data().flatten(),
-            'v123r': fsmgh.load(tmpl_path + 'v123roi.mgz').get_data().flatten()}
+            'varea': fsmgh.load(tmpl_path + 'varea.mgz').get_data().flatten()}
     # Okay, we just need to interpolate over to this subject
     sym = freesurfer_subject('fsaverage_sym').LH
     return (
         {'polar_angle':  sub.LH.interpolate(sym,  __benson14_templates['angle'], apply=False),
          'eccentricity': sub.LH.interpolate(sym,  __benson14_templates['eccen'], apply=False),
-         'v123roi':      sub.LH.interpolate(sym,  __benson14_templates['v123r'], apply=False,
+         'visual_area':  sub.LH.interpolate(sym,  __benson14_templates['varea'], apply=False,
                                             method='nearest')},
         {'polar_angle':  sub.RHX.interpolate(sym, __benson14_templates['angle'], apply=False),
          'eccentricity': sub.RHX.interpolate(sym, __benson14_templates['eccen'], apply=False),
-         'v123roi':      sub.RHX.interpolate(sym, __benson14_templates['v123r'], apply=False,
+         'visual_area':  sub.RHX.interpolate(sym, __benson14_templates['varea'], apply=False,
                                              method='nearest')})
         
 
