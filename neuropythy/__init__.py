@@ -7,11 +7,11 @@ from freesurfer import (freesurfer_subject,
                         Subject    as FreeSurferSubject)
 from cortex     import (CorticalMesh, mesh_smooth)
 from vision     import (retinotopy_data, empirical_retinotopy_data, predicted_retinotopy_data,
-                        register_retinotopy, retinotopy_anchors, V123_model,
+                        register_retinotopy, retinotopy_anchors, retinotopy_model,
                         neighborhood_cortical_magnification)
 
 # Version information...
-__version__ = '0.2.12'
+__version__ = '0.2.13'
 
 description = 'Integrate Python environment with FreeSurfer and perform mesh registration'
 

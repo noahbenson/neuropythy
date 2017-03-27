@@ -25,8 +25,6 @@ from neuropythy.geometry     import (line_segment_intersection_2D, line_intersec
                                      point_in_triangle)
 from neuropythy.vision       import (extract_retinotopy_argument)
 
-from .retinotopy import (V123_model)
-
 # Three methods to calculate cortical magnification:
 # (1) local projection of the triangle neighborhood then comparison of path across it in the visual
 #     field versus on the cortical surface

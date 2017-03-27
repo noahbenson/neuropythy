@@ -17,7 +17,7 @@ from neuropythy.freesurfer import (freesurfer_subject, add_subject_path,
                                    cortex_to_ribbon, cortex_to_ribbon_map,
                                    Hemisphere)
 from neuropythy.util import CommandLineParser
-from neuropythy.vision import (register_retinotopy, V123_model)
+from neuropythy.vision import (register_retinotopy, retinotpy_model)
 
 
 register_retinotopy_help = \
@@ -226,7 +226,7 @@ def register_retinotopy_command(args):
             if opts['weight' + suffix] is not None: wgt = _guess_surf_file(opts['weight' + suffix])
             # Do the registration
             note('    - Running Registration...')
-            res[h] = register_retinotopy(hemi, V123_model(),
+            res[h] = register_retinotopy(hemi, retinotopy_model(),
                                          polar_angle=ang, eccentricity=ecc, weight=wgt,
                                          weight_cutoff=opts['weight_cutoff'],
                                          partial_voluming_correction=opts['part_vol_correct'],

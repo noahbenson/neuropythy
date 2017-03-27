@@ -417,6 +417,14 @@ def load_fmm_model(filename, radius=math.pi/3.0, sphere_radius=100.0):
     tx = np.asarray(
         [map(float, row.split(','))
          for row in lines[8].split(':')[1].strip(' \t[]').split(';')])
+    crds = []
+    for row in lines[9:(n+9)]:
+        try:
+            (left,right) = row.split(' :: ')
+            crds.append(map(float, left.split(',')))
+        except:
+            print row
+            raise
     crds = np.asarray([map(float, left.split(','))
                        for row in lines[9:(n+9)]
                        for (left,right) in [row.split(' :: ')]])

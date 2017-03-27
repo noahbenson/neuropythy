@@ -74,7 +74,7 @@ def predicted_retinotopy_data(hemi, retino_type):
 _retinotopy_names = {
     'polar_angle':  set(['polar_angle']),
     'eccentricity': set(['eccentricity']),
-    'visual_area':  set(['visual_area', 'v123roi']),
+    'visual_area':  set(['visual_area', 'visual_roi', 'visual_region', 'visual_label']),
     'weight':       set(['weight', 'variance_explained'])}
 
 def retinotopy_data(hemi, retino_type):
@@ -127,31 +127,33 @@ def extract_retinotopy_argument(obj, retino_type, arg, default='any'):
     return np.asarray(values)
 
 # Tools for retinotopy model loading:
-__loaded_V123_models = {}
-_V123_model_paths = [
+__loaded_retinotopy_models = {}
+_retinotopy_model_paths = [
     os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         'lib', 'models')]
-def V123_model(name='standard', radius=pi/3.0, sphere_radius=100., search_paths=None, update=False):
+def retinotopy_model(name='benson17',
+                     radius=pi/2.5, sphere_radius=100.0,
+                     search_paths=None, update=False):
     '''
-    V123_model() yields a standard retinotopy model of V1, V2, and V3. The model itself is a set of
-    meshes with values at the vertices that define the polar angle and eccentricity. These meshes
-    are loaded from files in the neuropythy lib directory. The model's class is
+    retinotopy_model() yields a standard retinotopy model of V1, V2, and V3. The model itself is a
+    set of meshes with values at the vertices that define the polar angle and eccentricity. These
+    meshes are loaded from files in the neuropythy lib directory. The model's class is
     RegisteredRetinotopyModel, so the details of the model's 2D projection onto the cortical surface
     are included in the model.
     
     The following options may be given:
-      * name (default: 'standard') indicates the name of the model to load; the standard model is
+      * name (default: 'benson17') indicates the name of the model to load; the Benson17 model is
         included with the neuropythy library. If name is a filename, this file is loaded (must be a
-        valid fmm file). Currently no other named models are supported.
-      * radius, sphere_radius (defaults: pi/3 and 100, respectively) specify the radius of the
+        valid fmm or fmm.gz file). Currently no other named models are supported.
+      * radius, sphere_radius (defaults: pi/2.5 and 100.0, respectively) specify the radius of the
         projection (on the surface of the sphere) and the radius of the sphere (100 is the radius
         for Freesurfer spheres). See neuropythy.registration.load_fmm_model for mode details.
       * search_paths (default: None) specifies directories in which to look for fmm model files. No
         matter what is included in these files, the neuropythy library's folders are searched last.
     '''
-    if name in __loaded_V123_models:
-        return __loaded_V123_models[name]
+    if name in __loaded_retinotopy_models:
+        return __loaded_retinotopy_models[name]
     if os.path.isfile(name):
         fname = name
         name = None
@@ -165,7 +167,7 @@ def V123_model(name='standard', radius=pi/3.0, sphere_radius=100., search_paths=
         else:
             fname = name + '.fmm'
         # Find it in the search paths...
-        spaths = (search_paths if search_paths is not None else []) + _V123_model_paths
+        spaths = (search_paths if search_paths is not None else []) + _retinotopy_model_paths
         fname = next(
             (os.path.join(path, nm0)
              for path in spaths
@@ -214,7 +216,7 @@ def V123_model(name='standard', radius=pi/3.0, sphere_radius=100., search_paths=
         radius=radius,
         sphere_radius=sphere_radius,
         chirality=hemi)
-    __loaded_V123_models[name] = mdl
+    __loaded_retinotopy_models[name] = mdl
     return mdl
 
 # Tools for retinotopy registration:
@@ -284,7 +286,7 @@ def retinotopy_mesh_field(mesh, mdl,
     Example:
      # The retinotopy_anchors function is intended for use with mesh_register, as follows:
      # Define our Schira Model:
-     model = neuropythy.V123_model()
+     model = neuropythy.retinotopy_model()
      # Make sure our mesh has polar angle, eccentricity, and weight data:
      mesh.prop('polar_angle',  polar_angle_vertex_data);
      mesh.prop('eccentricity', eccentricity_vertex_data);
@@ -297,7 +299,7 @@ def retinotopy_mesh_field(mesh, mdl,
         max_steps=2000)
     '''
     if isinstance(mdl, basestring):
-        mdl = V123_model(mdl)
+        mdl = retinotopy_model(mdl)
     if not isinstance(mdl, RetinotopyMeshModel):
         if isinstance(mdl, RegisteredRetinotopyModel):
             mdl = mdl.model
@@ -389,12 +391,12 @@ def retinotopy_anchors(mesh, mdl,
                        select='close'):
     '''
     retinotopy_anchors(mesh, model) is intended for use with the mesh_register function and the
-    V123_model() function and/or the RetinotopyModel class; it yields a description of the anchor
-    points that tie relevant vertices the given mesh to points predicted by the given model object.
-    Any instance of the RetinotopyModel class should work as a model argument; this includes
+    retinotopy_model() function and/or the RetinotopyModel class; it yields a description of the
+    anchor points that tie relevant vertices the given mesh to points predicted by the given model
+    object. Any instance of the RetinotopyModel class should work as a model argument; this includes
     SchiraModel objects as well as RetinotopyMeshModel objects such as those returned by the
-    V123_model() function. If the model given is a string, then it is passed to the V123_model()
-    function first.
+    retinotopy_model() function. If the model given is a string, then it is passed to the
+    retinotopy_model() function first.
 
     Options:
       * polar_angle (default None) specifies that the given data should be used in place of the
@@ -456,7 +458,7 @@ def retinotopy_anchors(mesh, mdl,
         max_steps=2000)
     '''
     if isinstance(mdl, basestring):
-        mdl = V123_model(mdl)
+        mdl = retinotopy_model(mdl)
     if not isinstance(mdl, RetinotopyModel):
         raise RuntimeError('given model is not a RetinotopyModel instance!')
     if not isinstance(mesh, CorticalMesh):
@@ -527,7 +529,7 @@ def register_retinotopy_initialize(hemi,
                                    partial_voluming_correction=True,
                                    prior='retinotopy',
                                    resample='fsaverage_sym',
-                                   max_area=3):
+                                   max_area=None):
     '''
     register_retinotopy_initialize(hemi, model) yields an fsaverage_sym LH hemisphere that has
     been prepared for retinotopic registration with the data on the given hemisphere, hemi. The
@@ -563,7 +565,7 @@ def register_retinotopy_initialize(hemi,
     else:
         data['sub_curvature'] = np.zeros((len(ang),))
     # Step 2: do alignment, if required ############################################################
-    if isinstance(model, basestring): model = V123_model(model)
+    if isinstance(model, basestring): model = retinotopy_model(model)
     if not isinstance(model, RegisteredRetinotopyModel):
         raise ValueError('model must be a RegisteredRetinotopyModel')
     data['model'] = model
@@ -672,15 +674,17 @@ def register_retinotopy_initialize(hemi,
         # now convert the sub points into retinotopy points
         rmesh = proj_from_hemi.registration_mesh(d['registration'])
         pred = np.asarray(
-            [(p,e,l) if rl > 0 and rl <= max_area and e <= max_predicted_eccen else (0.0, 0.0, 0)
+            [((p,e,l)
+              if r != 0 and (max_area is None or r <= max_area) and e <= max_predicted_eccen else
+              (0.0, 0.0, 0))
              for (p,e,l) in zip(*model.cortex_to_angle(rmesh))
-             for rl in [round(l)]]).T
+             for r in [abs(round(l))]]).T
         pred = (np.asarray(pred[0], dtype=np.float32),
                 np.asarray(pred[1], dtype=np.float32),
                 np.asarray(pred[2], dtype=np.int32))
         for i in (0,1,2): pred[i].flags.writeable = False
         pred = make_dict({p:v
-                          for (p,v) in zip(['polar_angle', 'eccentricity', 'V123_label'], pred)})
+                          for (p,v) in zip(['polar_angle', 'eccentricity', 'visual_area'], pred)})
         d['prediction'] = pred
         rmesh.prop(pred)
         d['registered_mesh'] = rmesh
@@ -689,7 +693,7 @@ def register_retinotopy_initialize(hemi,
     return data
 
 def register_retinotopy(hemi,
-                        retinotopy_model='standard',
+                        model='benson17',
                         polar_angle=None, eccentricity=None, weight=None, weight_cutoff=0.1,
                         partial_voluming_correction=True,
                         edge_scale=1.0, angle_scale=1.0, functional_scale=1.0,
@@ -781,9 +785,9 @@ def register_retinotopy(hemi,
                particular parameters of the registration are method, max_steps, and max_step_size.
 
     Options:
-      * retinotopy_model specifies the instance of the retinotopy model to use; this must be an
+      * model specifies the instance of the retinotopy model to use; this must be an
         instance of the RegisteredRetinotopyModel class or a string that can be passed to the
-        V123_model() function (default: 'standard').
+        retinotopy_model() function (default: 'standard').
       * polar_angle, eccentricity, and weight specify the property names for the respective
         quantities; these may alternately be lists or numpy arrays of values. If weight is not given
         or found, then unity weight for all vertices is assumed. By default, each will check the
@@ -822,12 +826,11 @@ def register_retinotopy(hemi,
         resampling is performed.
     '''
     # Step 1: prep the map for registration--figure out what properties we're using...
-    retinotopy_model = \
-        V123_model()                 if retinotopy_model is None                 else \
-        V123_model(retinotopy_model) if isinstance(retinotopy_model, basestring) else \
-        retinotopy_model
+    model = retinotopy_model()      if model is None                 else \
+            retinotopy_model(model) if isinstance(model, basestring) else \
+            model
     data = register_retinotopy_initialize(hemi,
-                                          model=retinotopy_model,
+                                          model=model,
                                           polar_angle=polar_angle,
                                           eccentricity=eccentricity,
                                           weight=weight,
@@ -844,7 +847,7 @@ def register_retinotopy(hemi,
             [['edge',      'harmonic',      'scale', edge_scale],
              ['angle',     'infinite-well', 'scale', angle_scale],
              ['perimeter', 'harmonic'],
-             retinotopy_anchors(data['map'], retinotopy_model,
+             retinotopy_anchors(data['map'], model,
                                 polar_angle='polar_angle',
                                 eccentricity='eccentricity',
                                 weight='weight',
