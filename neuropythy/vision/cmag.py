@@ -209,7 +209,7 @@ def path_cortical_magnification(mesh, path, mask=None, return_all=False,
             isect_idcs = np.where(np.isfinite(isect[0]))[0]
             isect = isect.T
             # take only the point closest to the destination that is not the source
-            isect_idcs = sorted([(d,i) for (i,x) in enumerate(isect) for d in [np.dot(x - pt, projdir)] 
+            isect_idcs = sorted([(d,i) for (i,x) in enumerate(isect) for d in [np.dot(x-pt,projdir)]
                                  if d > 0 and not np.isclose(d, 0, atol=atol)],
                                 key=lambda i: i[0])
             if len(isect_idcs) > 0:
@@ -237,7 +237,7 @@ def path_cortical_magnification(mesh, path, mask=None, return_all=False,
                     break
                 isect = isect[isect_idcs]
                 pts_by_nearness = sorted(
-                    [(i,isct,d) for (i,isct) in enumerate(isect) for d in [np.dot(isct - pt, projdir)]
+                    [(i,isct,d) for (i,isct) in enumerate(isect) for d in [np.dot(isct-pt, projdir)]
                      if d > 0 and not np.isclose(d, 0)],
                     key=lambda a: a[2])
                 if len(pts_by_nearness) > 0:
