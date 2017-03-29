@@ -901,15 +901,14 @@ def predict_retinotopy(sub, template='benson17'):
             'eccen': fsmgh.load(tmpl_path + 'eccen.mgz').get_data().flatten(),
             'varea': fsmgh.load(tmpl_path + 'varea.mgz').get_data().flatten()}
     # Okay, we just need to interpolate over to this subject
+    tmpl = _retinotopy_templates[template]
     sym = freesurfer_subject('fsaverage_sym').LH
     return (
-        {'polar_angle':  sub.LH.interpolate(sym,  __benson14_templates['angle'], apply=False),
-         'eccentricity': sub.LH.interpolate(sym,  __benson14_templates['eccen'], apply=False),
-         'visual_area':  sub.LH.interpolate(sym,  __benson14_templates['varea'], apply=False,
-                                            method='nearest')},
-        {'polar_angle':  sub.RHX.interpolate(sym, __benson14_templates['angle'], apply=False),
-         'eccentricity': sub.RHX.interpolate(sym, __benson14_templates['eccen'], apply=False),
-         'visual_area':  sub.RHX.interpolate(sym, __benson14_templates['varea'], apply=False,
-                                             method='nearest')})
+        {'polar_angle':  sub.LH.interpolate(sym,  tmpl['angle'], apply=False),
+         'eccentricity': sub.LH.interpolate(sym,  tmpl['eccen'], apply=False),
+         'visual_area':  sub.LH.interpolate(sym,  tmpl['varea'], apply=False, method='nearest')},
+        {'polar_angle':  sub.RHX.interpolate(sym, tmpl['angle'], apply=False),
+         'eccentricity': sub.RHX.interpolate(sym, tmpl['eccen'], apply=False),
+         'visual_area':  sub.RHX.interpolate(sym, tmpl['varea'], apply=False, method='nearest')})
         
 
