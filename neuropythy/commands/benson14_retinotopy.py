@@ -84,7 +84,8 @@ _benson14_parser_instructions = [
     ('a', 'angle-tag',              'angle_tag',         'angle_benson14'),
     ('l', 'label-tag',              'label_tag',         'v123roi_benson14'),
     ('d', 'subjects-dir',           'subjects_dir',      None),
-    ('t', 'template',               'template',          'benson17']
+    ('t', 'template',               'template',          'benson17')
+    ]
 _benson14_parser = CommandLineParser(_benson14_parser_instructions)
 def benson14_retinotopy_command(*args):
     '''
