@@ -17,7 +17,7 @@ from neuropythy.freesurfer import (freesurfer_subject, add_subject_path,
                                    cortex_to_ribbon, cortex_to_ribbon_map,
                                    Hemisphere)
 from neuropythy.util import CommandLineParser
-from neuropythy.vision import (register_retinotopy, retinotpy_model)
+from neuropythy.vision import (register_retinotopy, retinotopy_model)
 
 
 register_retinotopy_help = \
