@@ -174,9 +174,9 @@ class Hemisphere(Immutable):
                     regs[fl[3:-11]] = data[0]
         # If this is the fsaverage_sym and we didn't find the retinotopy topology, we need to
         # load it out of the data directory
-        if self.subject.id == 'fsaverage_sym':
+        if self.subject.id == 'fsaverage_sym' or self.subject.id == 'fsaverage':
             path = os.path.join(os.path.dirname(os.path.dirname(__file__)),
-                                'lib', 'data', 'fsaverage_sym', 'surf')
+                                'lib', 'data', self.subject.id, 'surf')
             if os.path.exists(path):
                 regfls = {fl[3:-11]:os.path.join(path, fl) for fl in os.listdir(path)
                           if re.match('^lh\.[^\.]*\.sphere\.reg$', fl) is not None}
@@ -184,13 +184,17 @@ class Hemisphere(Immutable):
                     if regnm in regs: continue
                     data = self._load_surface_data_safe(regfl)
                     if data is None or data[0] is None:
-                        warn('Could not load fsaverage_sym %s registration' % regnm)
+                        warn('Could not load %s %s registration' % (self.subject.id, regnm))
                     else:
                         regs[regnm] = data[0]
-        if self.subject.id == 'fsaverage_sym' and 'retinotopy' not in regs:
-            if   'retinotopy_benson17' in regs: regs['retinotopy'] = regs['retinotopy_benson17']
-            elif 'retinotopy_benson14' in regs: regs['retinotopy'] = regs['retinotopy_benson14']
-            else: warn('Could not load fsaverage_sym retinotopy registration!')
+            if 'retinotopy' not in regs:
+                retnames = ['retinotopy_' + r
+                            for r in ['benson17', 'benson14', 'benson17-uncorrected']]
+                retreg = next((r for r in retnames if r in regs), None)
+                if retreg is not None:
+                    regs['retinotopy'] = retreg
+                elif self.subject.id == 'fsaverage_sym':
+                    warn('Could not load fsaverage_sym retinotopy registration!')
         return Topology(faces, regs)
     @staticmethod
     def calculate_edge_data(faces):
