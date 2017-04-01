@@ -1,6 +1,7 @@
 include neuropythy/lib/nben/target/nben-standalone.jar
 include neuropythy/lib/models/v123.fmm.gz
 include neuropythy/lib/models/benson17.fmm.gz
+include neuropythy/lib/models/benson17-uncorrected.fmm.gz
 include neuropythy/lib/data/fsaverage_sym/surf/lh.retinotopy_benson14.sphere.reg
 include neuropythy/lib/data/fsaverage_sym/surf/sym.benson14_angle.mgz
 include neuropythy/lib/data/fsaverage_sym/surf/sym.benson14_eccen.mgz
@@ -9,3 +10,7 @@ include neuropythy/lib/data/fsaverage_sym/surf/lh.retinotopy_benson17.sphere.reg
 include neuropythy/lib/data/fsaverage_sym/surf/sym.benson17_angle.mgz
 include neuropythy/lib/data/fsaverage_sym/surf/sym.benson17_eccen.mgz
 include neuropythy/lib/data/fsaverage_sym/surf/sym.benson17_varea.mgz
+include neuropythy/lib/data/fsaverage_sym/surf/lh.retinotopy_benson17-uncorrected.sphere.reg
+include neuropythy/lib/data/fsaverage_sym/surf/sym.benson17-uncorrected_angle.mgz
+include neuropythy/lib/data/fsaverage_sym/surf/sym.benson17-uncorrected_eccen.mgz
+include neuropythy/lib/data/fsaverage_sym/surf/sym.benson17-uncorrected_varea.mgz
