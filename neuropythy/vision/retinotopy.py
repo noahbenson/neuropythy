@@ -127,6 +127,14 @@ def extract_retinotopy_argument(obj, retino_type, arg, default='any'):
     return np.array(values)
 
 # Tools for retinotopy model loading:
+_default_schira_model = RegisteredRetinotopyModel(
+    SchiraModel(),
+    registration='fsaverage_sym',
+    chirality='lh',
+    center=[-7.03000, -82.59000, -55.94000],
+    center_right=[58.58000, -61.84000, -52.39000],
+    radius=np.pi/2.5,
+    method='orthographic')
 __loaded_retinotopy_models = {}
 _retinotopy_model_paths = [
     os.path.join(
@@ -136,50 +144,61 @@ def retinotopy_model(name='benson17',
                      radius=pi/2.5, sphere_radius=100.0,
                      search_paths=None, update=False):
     '''
-    retinotopy_model() yields a standard retinotopy model of V1, V2, and V3. The model itself is a
-    set of meshes with values at the vertices that define the polar angle and eccentricity. These
-    meshes are loaded from files in the neuropythy lib directory. The model's class is
+    retinotopy_model() yields a standard retinotopy model of V1, V2, and V3 as well as other areas
+    (depending on the options). The model itself is represented as a RegisteredRetinotopyModel
+    object, which may internally store a set of meshes with values at the vertices that define the
+    polar angle and eccentricity, or as another object (such as with the SchiraModel). The mesh
+    models are loaded from files in the neuropythy lib directory. Because the model's class is
     RegisteredRetinotopyModel, so the details of the model's 2D projection onto the cortical surface
     are included in the model.
     
     The following options may be given:
       * name (default: 'benson17') indicates the name of the model to load; the Benson17 model is
-        included with the neuropythy library. If name is a filename, this file is loaded (must be a
-        valid fmm or fmm.gz file). Currently no other named models are supported.
+        included with the neuropythy library along with various others. If name is a filename, this
+        file is loaded (must be a valid fmm or fmm.gz file). Currently, models that are included
+        with neuropythy are: Benson17, Benson17-uncorrected, Schira10, and Benson14 (which is
+        identical to Schira10, as Schira10 was used by Benson14).
       * radius, sphere_radius (defaults: pi/2.5 and 100.0, respectively) specify the radius of the
         projection (on the surface of the sphere) and the radius of the sphere (100 is the radius
         for Freesurfer spheres). See neuropythy.registration.load_fmm_model for mode details.
       * search_paths (default: None) specifies directories in which to look for fmm model files. No
         matter what is included in these files, the neuropythy library's folders are searched last.
     '''
+    low = name.lower()
     if name in __loaded_retinotopy_models:
         return __loaded_retinotopy_models[name]
+    if low in __loaded_retinotopy_models:
+        return __loaded_retinotopy_models[low]
     if os.path.isfile(name):
         fname = name
         name = None
+    elif low in ['schira', 'schira10', 'schira2010', 'benson14', 'benson2014']:
+        return _default_schira_model
     else:
-        if len(name) > 4 and name[-4:] == '.fmm':
-            fname = name
-            name = name[:-4]
-        elif len(name) > 7 and name[-7:] == '.fmm.gz':
-            fname = name
-            name = name[:-7]
-        else:
-            fname = name + '.fmm'
-        # Find it in the search paths...
-        spaths = (search_paths if search_paths is not None else []) + _retinotopy_model_paths
-        fname = next(
-            (os.path.join(path, nm0)
-             for path in spaths
-             for nm0 in os.listdir(path)
-             for nm in [nm0[:-4] if len(nm0) > 4 and nm0[-4:] == '.fmm'    else \
-                        nm0[:-7] if len(nm0) > 7 and nm0[-7:] == '.fmm.gz' else \
-                        None]
-             if nm is not None and nm == name),
-            None)
-        if fname is None: raise ValueError('Cannot find an FFM file with the name %s' % name)
+        origname = name
+        for name in [origname, low]:
+            if len(name) > 4 and name[-4:] == '.fmm':
+                fname = name
+                name = name[:-4]
+            elif len(name) > 7 and name[-7:] == '.fmm.gz':
+                fname = name
+                name = name[:-7]
+            else:
+                fname = name + '.fmm'
+                # Find it in the search paths...
+                spaths = ([] if search_paths is None else search_paths) + _retinotopy_model_paths
+            fname = next(
+                (os.path.join(path, nm0)
+                 for path in spaths
+                 for nm0 in os.listdir(path)
+                 for nm in [nm0[:-4] if len(nm0) > 4 and nm0[-4:] == '.fmm'    else \
+                            nm0[:-7] if len(nm0) > 7 and nm0[-7:] == '.fmm.gz' else \
+                            None]
+                 if nm is not None and nm == name),
+                None)
+            if fname is not None: break
+        if fname is None: raise ValueError('Cannot find an FFM file with the name %s' % origname)
     # Okay, load the model...
-    
     gz = True if fname[-3:] == '.gz' else False
     lines = None
     with (gzip.open(fname, 'rb') if gz else open(fname, 'r')) as f:
@@ -522,7 +541,7 @@ def retinotopy_anchors(mesh, mdl,
             + ([] if suffix is None else suffix))
 
 def register_retinotopy_initialize(hemi,
-                                   model='standard',
+                                   model='benson17',
                                    polar_angle=None, eccentricity=None, weight=None,
                                    weight_cutoff=0.1,
                                    max_predicted_eccen=85,
