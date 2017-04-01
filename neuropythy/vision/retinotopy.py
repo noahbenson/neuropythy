@@ -124,7 +124,7 @@ def extract_retinotopy_argument(obj, retino_type, arg, default='any'):
     if len(values) != n:
         raise RuntimeError('Given %s data has incorrect length (%s instead of %s)!' \
                            % (retino_type, len(values), n))
-    return np.asarray(values)
+    return np.array(values)
 
 # Tools for retinotopy model loading:
 __loaded_retinotopy_models = {}
@@ -529,7 +529,8 @@ def register_retinotopy_initialize(hemi,
                                    partial_voluming_correction=True,
                                    prior='retinotopy',
                                    resample='fsaverage_sym',
-                                   max_area=None):
+                                   max_area=None,
+                                   max_eccentricity=None):
     '''
     register_retinotopy_initialize(hemi, model) yields an fsaverage_sym LH hemisphere that has
     been prepared for retinotopic registration with the data on the given hemisphere, hemi. The
@@ -554,6 +555,10 @@ def register_retinotopy_initialize(hemi,
                            else weight)]]
     # we also want to make sure weight is 0 where there are none values
     (ang, ecc, wgt) = _retinotopy_vectors_to_float(ang, ecc, wgt, weight_cutoff=weight_cutoff)
+    # if there's a max eccentricity, apply that to the weights
+    if max_eccentricity is not None:
+        wgt = np.array(wgt)
+        wgt[ecc > max_eccentricity] = 0
     # correct for partial voluming if necessary:
     if partial_voluming_correction is True: wgt *= (1.0 - np.asarray(hemi.partial_volume_factor()))
     # note these in the result dictionary:
@@ -695,6 +700,7 @@ def register_retinotopy_initialize(hemi,
 def register_retinotopy(hemi,
                         model='benson17',
                         polar_angle=None, eccentricity=None, weight=None, weight_cutoff=0.1,
+                        max_eccentricity=None,
                         partial_voluming_correction=True,
                         edge_scale=1.0, angle_scale=1.0, functional_scale=1.0,
                         sigma=Ellipsis,
@@ -795,6 +801,8 @@ def register_retinotopy(hemi,
         PRF_polar_angle, PRF_ecentricity, and PRF_variance_explained if possible.
       * weight_cutoff specifies the minimum value a vertex must have in the weight property in order
         to be considered as retinotopically relevant.
+      * max_eccentricity (default: None) specifies that any vertex whose eccentricity is too high
+        should be given a weight of 0 in the registration.
       * partial_voluming_correction (default: True), if True, specifies that the value
         (1 - hemi.partial_volume_factor()) should be applied to all weight values (i.e., weights
         should be down-weighted when likely to be affected by a partial voluming error).
@@ -835,6 +843,7 @@ def register_retinotopy(hemi,
                                           eccentricity=eccentricity,
                                           weight=weight,
                                           weight_cutoff=weight_cutoff,
+                                          max_eccentricity=max_eccentricity,
                                           partial_voluming_correction=partial_voluming_correction,
                                           max_predicted_eccen=max_predicted_eccen,
                                           prior=prior, resample=resample)
