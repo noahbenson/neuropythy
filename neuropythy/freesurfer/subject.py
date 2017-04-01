@@ -192,7 +192,7 @@ class Hemisphere(Immutable):
                             for r in ['benson17', 'benson14', 'benson17-uncorrected']]
                 retreg = next((r for r in retnames if r in regs), None)
                 if retreg is not None:
-                    regs['retinotopy'] = retreg
+                    regs['retinotopy'] = regs[retreg]
                 elif self.subject.id == 'fsaverage_sym':
                     warn('Could not load fsaverage_sym retinotopy registration!')
         return Topology(faces, regs)
