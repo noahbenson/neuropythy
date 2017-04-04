@@ -127,14 +127,22 @@ def extract_retinotopy_argument(obj, retino_type, arg, default='any'):
     return np.array(values)
 
 # Tools for retinotopy model loading:
-_default_schira_model = RegisteredRetinotopyModel(
-    SchiraModel(),
-    registration='fsaverage_sym',
-    chirality='lh',
-    center=[-7.03000, -82.59000, -55.94000],
-    center_right=[58.58000, -61.84000, -52.39000],
-    radius=np.pi/2.5,
-    method='orthographic')
+_default_schira_model = None
+def get_default_schira_model():
+    if _default_schira_model is None:
+        try:
+            _default_schira_model = RegisteredRetinotopyModel(
+                SchiraModel(),
+                registration='fsaverage_sym',
+                chirality='lh',
+                center=[-7.03000, -82.59000, -55.94000],
+                center_right=[58.58000, -61.84000, -52.39000],
+                radius=np.pi/2.5,
+                method='orthographic')
+        except:
+            pass
+    return _default_schira_model
+
 __loaded_retinotopy_models = {}
 _retinotopy_model_paths = [
     os.path.join(
@@ -173,7 +181,7 @@ def retinotopy_model(name='benson17',
         fname = name
         name = None
     elif low in ['schira', 'schira10', 'schira2010', 'benson14', 'benson2014']:
-        return _default_schira_model
+        return get_default_schira_model()
     else:
         origname = name
         for name in [origname, low]:

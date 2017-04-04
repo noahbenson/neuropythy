@@ -5,6 +5,7 @@
 
 import numpy                        as np
 import scipy                        as sp
+import scipy.sparse                 as spsparse
 import nibabel.freesurfer.io        as fsio
 import nibabel.freesurfer.mghformat as fsmgh
 
@@ -296,3 +297,167 @@ def path_cortical_magnification(mesh, path, mask=None, return_all=False,
     else:
         return np.inf if np.isclose(vis_d, 0) else srf_d/vis_d
     
+
+def isoangular_path(mesh, pathtype, val, mask=None, min_segment_length=4,
+                    polar_angle='polar_angle', eccentricity='eccentricity'):
+    '''
+    isoangular_path(mesh, pathtype, val) yields a list of isoangular paths, each of whichs is given
+      as a tuple (spath, vpath) of the points along the cortical surface (spath, n x 3) and the
+      points in the visual field (vpath, n x 2).  The path must be specified as either 'angle' or
+      'eccen' followed by a polar angle or eccentricity value.
+
+    The following options are accepted:
+      * mask (default: None) may be a boolean mask of vertices to include in the calculation.
+      * min_segment_length (default: 4) the minimum number of faces that need to be included in a
+        path segment in order to be included in the result.
+    '''
+    ang = extract_retinotopy_argument(mesh, 'polar_angle', polar_angle, default='predicted')
+    ecc = extract_retinotopy_argument(mesh, 'eccentricity', eccentricity, default='predicted')
+    srf = mesh.coordinates.T
+    ids = np.asarray(range(len(srf)))
+    if mask is not None:
+        msk = np.where(mask)[0]
+        ids = ids[msk]
+        ang = ang[msk]
+        ecc = ecc[msk]
+        srf = srf[msk]
+    # edit out values we can't use
+    okays = [k for (k,i,a,e) in zip(range(len(ids)), ids, ang, ecc)
+             if np.issubdtype(type(a), np.number)
+             if np.issubdtype(type(e), np.number)]
+    if len(okays) != len(ids):
+        ids = ids[okays]
+        ang = ang[okays]
+        ecc = ecc[okays]
+        srf = srf[okays]
+    # okay; now we have the subset we can use; lets get the appropriate triangles...
+    okays = set(ids)
+    tris = np.asarray([f for f in mesh.indexed_faces.T if all(a in okays for a in f)]).T
+    # in case anything wasn't connected by triangle:
+    okays = set(np.unique(tris))
+    idcs = [k for (k,i) in enumerate(ids) if i in okays]
+    ids = ids[idcs]
+    ang = ang[idcs]
+    ecc = ecc[idcs]
+    srf = srf[idcs]
+    okays = {i:k for (k,i) in enumerate(ids)}
+    # now we can recreate the triangles with proper id's
+    tris = np.asarray([[okays[a] for a in f] for f in tris.T]).T
+    # get the x/y coordinates in visual space
+    vis_coords = ecc * np.asarray([np.cos(np.pi/180*(90-ang)), np.sin(np.pi/180*(90-ang))])
+    vis_coords = vis_coords.T
+    # okay, setup the topology/registrations
+    topo = Topology(tris, {'surface':srf.T, 'visual':vis_coords.T})
+    # now the Great Work begins...
+    srf_reg = topo.registrations['surface']
+    vis_reg = topo.registrations['visual']
+    # Find all triangles that intersect this particular angle line
+    pathtype = pathtype.lower()
+    trisect = None
+    if pathtype in ['angle', 'polar_angle', 'radial', 'rad']:
+        vals = ang
+    elif pathtype in ['eccen', 'eccentricity', 'tangential', 'tan']:
+        vals = ecc
+    else:
+        raise ValueError('Unrecognized pathtype: %s' % pathtype)
+    angsides = (np.sign(vals - val) + 1).astype(np.bool)
+    angsides = angsides.astype(np.int)
+    tris = tris.T
+    trisides = np.sum([angsides[tt] for tt in tris.T], axis=0)
+    trii = np.intersect1d(np.where(trisides > 0)[0], np.where(trisides < 3)[0])
+    # Make an adjacency list of these intersecting triangles
+    tadj = {}
+    tmp = {}
+    for (u,v,i) in zip(np.hstack((tris[trii,0], tris[trii,0], tris[trii,1])),
+                       np.hstack((tris[trii,1], tris[trii,2], tris[trii,2])),
+                       np.hstack((trii, trii, trii))):
+        # if (u/v) doesn't cross the iso-line, ignore it
+        if angsides[u] == angsides[v] or vals[u] == val or vals[v] == val:
+            continue
+        elif (v,u) in tmp:
+            k = tmp[(v,u)]
+            del tmp[(v,u)]
+            tadj[(i,k)] = (u,v)
+            tadj[(k,i)] = (u,v)
+        else:
+            tmp[(u,v)] = i
+    # Okay, now we stitch these together into segments; this is basically a union-find problem
+    seg = {ti:[ti] for ti in trii} # cluster end triangle
+    cls = {ti:ti   for ti in trii}
+    def _find(k):
+        kc = cls[k]
+        if k == kc or cls[kc] == kc: return kc
+        kcc = _find(kc)
+        cls[k] = kcc
+        return kcc
+    def _union(u, v):
+        uc = _find(u)
+        vc = _find(v)
+        if uc == vc: return
+        us = seg[uc]
+        vs = seg[vc]
+        (u0,ue) = (us[0],us[-1])
+        (v0,ve) = (vs[0],vs[-1])
+        # either u or v must be adjacent to the end of the other
+        if   u0 == u and v0 == v: (a,b) = (reversed(us), vs)
+        elif u0 == u and ve == v: (a,b) = (reversed(us), reversed(vs))
+        elif ue == u and v0 == v: (a,b) = (us,           vs)
+        elif ue == u and ve == v: (a,b) = (us,           reversed(vs))
+        else: return # nothing joined; can't connect at intersection
+        a = list(a)
+        b = list(b)
+        for bb in b: a.append(bb)
+        seg[uc] = a
+        seg[vc] = a
+        cls[vc] = uc
+        cls[u] = uc
+        cls[v] = uc
+    for (ti, tj) in tadj.iterkeys(): _union(ti, tj)
+    for ti       in trii: _find(ti)
+    # Okay, we should have the segments now...
+    clarr = np.asarray([cls[ti] for ti in trii])
+    seg_ids = np.unique(clarr)
+    seg_vis = []
+    seg_srf = []
+    if min_segment_length < 2: min_segment_length = 2
+    srf_coords = srf_reg.coordinates
+    for sid in seg_ids:
+        s = seg[sid]
+        if len(s) < min_segment_length: continue
+        # Okay, we want to walk through the triangles in order; make a list of the ordered edges
+        # handle the first triangle/segment start point
+        (u,v) = tadj[(s[0], s[1])]
+        w = np.setdiff1d(tris[s[0]], (u,v))[0]
+        if vals[w] == val:
+            pts_vis = [vis_coords[w]]
+            pts_srf = [srf_coords[w]]
+        else:
+            if angsides[w] != angsides[v]: u = v
+            w_frac = (vals[w] - val) / (vals[w] - vals[u])
+            u_frac = 1.0 - w_frac
+            pts_vis = [w_frac*vis_coords[w] + u_frac*vis_coords[u]]
+            pts_srf = [w_frac*srf_coords[w] + u_frac*srf_coords[u]]
+        # Okay, walk along the adjacent edges
+        for (s0,s1) in zip(s[:-1], s[1:]):
+            (u,v) = tadj[(s0,s1)]
+            v_frac = (vals[v] - val) / (vals[v] - vals[u])
+            u_frac = 1.0 - v_frac
+            pts_vis.append(v_frac*vis_coords[v] + u_frac*vis_coords[u])
+            pts_srf.append(v_frac*srf_coords[v] + u_frac*srf_coords[u])
+        # And finally handle the end-point
+        (u,v) = tadj[(s[-2], s[-1])]
+        w = np.setdiff1d(tris[s[-1]], (u,v))[0]
+        if vals[w] == val:
+            pts_vis.append(vis_coords[w])
+            pts_srf.append(srf_coords[w])
+        else:
+            if angsides[w] != angsides[v]: u = v
+            w_frac = (vals[w] - val) / (vals[w] - vals[u])
+            u_frac = 1.0 - w_frac
+            pts_vis.append(w_frac*vis_coords[w] + u_frac*vis_coords[u])
+            pts_srf.append(w_frac*srf_coords[w] + u_frac*srf_coords[u])
+        # Just append these points
+        seg_vis.append(pts_vis)
+        seg_srf.append(pts_srf)
+    # That's it!
+    return (seg_srf, seg_vis)
