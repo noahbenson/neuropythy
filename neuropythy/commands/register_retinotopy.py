@@ -208,7 +208,7 @@ def register_retinotopy_command(args):
         print 'Mathematical angles and angles not in degrees are not yet supported.'
         return 1
     # The remainder of the args can wait for now; walk through the subjects:
-    tag_key = {'eccen': 'eccentricity', 'angle': 'polar_angle', 'label': 'V123_label'}
+    tag_key = {'eccen': 'eccentricity', 'angle': 'polar_angle', 'label': 'visual_area'}
     for subnm in args:
         sub = freesurfer_subject(subnm)
         note('Processing subject: %s' % sub.id)

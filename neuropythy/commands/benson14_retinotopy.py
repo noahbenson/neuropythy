@@ -68,6 +68,10 @@ benson14_retinotopy_help = \
     * --no-overwrite|-n
       This flag indicates that, when writing output files, no file should ever be
       replaced, should it already exist.
+    * --template=|-t
+      Specifies the specific template that should be applied. By default this is
+      'Benson17', the 2017 version of the template originally described in the paper
+      by Benson et al. (2014). The option 'benson14' is also accepted.
     * --
       This token, by itself, indicates that the arguments that remain should not be
       processed as flags or options, even if they begin with a -.
@@ -80,9 +84,9 @@ _benson14_parser_instructions = [
     ('z', 'no-surface-export',      'no_surf_export',    False),
     ('n', 'no-overwrite',           'no_overwrite',      False),
     # Options                       
-    ('e', 'eccen-tag',              'eccen_tag',         'eccen_benson14'),
-    ('a', 'angle-tag',              'angle_tag',         'angle_benson14'),
-    ('l', 'label-tag',              'label_tag',         'v123roi_benson14'),
+    ('e', 'eccen-tag',              'eccen_tag',         'benson14_eccen'),
+    ('a', 'angle-tag',              'angle_tag',         'benson14_angle'),
+    ('l', 'label-tag',              'label_tag',         'benson14_varea'),
     ('d', 'subjects-dir',           'subjects_dir',      None),
     ('t', 'template',               'template',          'benson17')
     ]
