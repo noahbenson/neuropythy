@@ -274,6 +274,7 @@ def register_retinotopy_command(args):
                                            (res['LH'].prop(tag_key[dim]),
                                             res['RH'].prop(tag_key[dim])),
                                            map=surf2rib,
+                                           method=('max'   if dim == 'label' else 'weighted'),
                                            dtype=(np.int32 if dim == 'label' else np.float32))
                     note('    - Exporting volume file: %s' % flnm)
                     vol.to_filename(flnm)

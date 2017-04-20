@@ -160,6 +160,7 @@ def benson14_retinotopy_command(*args):
                     vol = cortex_to_ribbon(sub,
                                            (lhdat[t], rhdat[t]),
                                            map=surf2rib,
+                                           method=('max' if t == 'visual_area' else 'weighted'),
                                            dtype=(np.int32 if t == 'visual_area' else np.float32))
                     note('    - Exporting volume file: %s' % flnm)
                     vol.to_filename(flnm)
