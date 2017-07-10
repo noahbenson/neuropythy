@@ -3,22 +3,19 @@
 # Simple tools for dealing with the cortical surface in Python
 # By Noah C. Benson
 
-import numpy as np
-import scipy as sp
-import scipy.spatial as space
-import scipy.optimize as spopt
-from scipy.sparse import (lil_matrix, csr_matrix)
-from numpy.linalg import lstsq, norm
-import neuropythy.geometry as geo
+import numpy                  as np
+import scipy                  as sp
+import scipy.spatial          as space
+import scipy.optimize         as spopt
+import nibabel.freesurfer.io  as fsio
+import neuropythy.geometry    as geo
 from neuropythy.immutable import Immutable
-import nibabel.freesurfer.io as fsio
-import os, math
-from numbers import (Number, Integral)
-from types import DictType
-import itertools, collections
-from pysistence import make_dict
-import pysistence
-import colorsys
+from scipy.sparse         import (lil_matrix, csr_matrix)
+from numpy.linalg         import lstsq, norm
+from numbers              import (Number, Integral)
+from types                import DictType
+from pysistence           import make_dict
+import os, math, itertools, collections, pysistence, colorsys
 
 class CorticalMesh(Immutable):
     '''CorticalMesh is a class that handles properties of the cortical surface mesh. 
