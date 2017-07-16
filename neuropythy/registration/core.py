@@ -33,7 +33,9 @@ _parse_field_data_types = {
     'mesh': ['newStandardMeshPotential', ['edge_scale', 1.0], ['angle_scale', 1.0], 'F', 'X'],
     'edge': {
         'harmonic':      ['newHarmonicEdgePotential',   ['scale', 1.0], ['order', 2.0], 'F', 'X'],
-        'lennard-jones': ['newLJEdgePotential',         ['scale', 1.0], ['order', 2.0], 'F', 'X']},
+        'lennard-jones': ['newLJEdgePotential',         ['scale', 1.0], ['order', 2.0], 'F', 'X'],
+        'infinite-well': ['newWellEdgePotential',       ['scale', 1.0], ['order', 0.5], 
+                                                        ['min',   0.5], ['max',   3.0], 'E', 'X']},
     'angle': {
         'harmonic':      ['newHarmonicAnglePotential',  ['scale', 1.0], ['order', 2.0], 'F', 'X'],
         'lennard-jones': ['newLJAnglePotential',        ['scale', 1.0], ['order', 2.0], 'F', 'X'],
@@ -51,12 +53,14 @@ _parse_field_data_types = {
     'perimeter': {
         'harmonic':   ['newHarmonicPerimeterPotential', ['scale', 1.0], ['shape', 2.0], 'F', 'X']}};
         
-def _parse_field_function_argument(argdat, args, faces, coords):
+def _parse_field_function_argument(argdat, args, faces, edges, coords):
     # first, see if this is an easy one...
     if argdat == 'F':
         return faces
     elif argdat == 'X':
         return coords
+    elif argdat == 'E':
+        return edges
     elif isinstance(argdat, (int, long)):
         return to_java_array(args[argdat])
     # okay, none of those; must be a list with a default arg
@@ -71,7 +75,7 @@ def _parse_field_function_argument(argdat, args, faces, coords):
     # did not find the arg; use the default:
     return argdflt
 
-def _parse_field_argument(instruct, faces, coords):
+def _parse_field_argument(instruct, faces, edges, coords):
     _java = java_link()
     if isinstance(instruct, basestring):
         insttype = instruct
@@ -96,16 +100,17 @@ def _parse_field_argument(instruct, faces, coords):
     # okay, we have a list of instructions... find the java method we are going to call...
     java_method = getattr(_java.jvm.nben.mesh.registration.Fields, instdata[0])
     # and parse the arguments into a list...
-    java_args = [_parse_field_function_argument(a, instargs, faces, coords) for a in instdata[1:]]
+    java_args = [_parse_field_function_argument(a, instargs, faces, edges, coords)
+                 for a in instdata[1:]]
     # and call the function...
     return java_method(*java_args)
 
 # parse a field potential argument and return a java object that represents it
-def _parse_field_arguments(arg, faces, coords):
+def _parse_field_arguments(arg, faces, edges, coords):
     '''See mesh_register.'''
     if not isinstance(arg, list):
         raise RuntimeError('field argument must be a list of instructions')
-    pot = [_parse_field_argument(instruct, faces, coords) for instruct in arg]
+    pot = [_parse_field_argument(instruct, faces, edges, coords) for instruct in arg]
     # make a new Potential sum unless the length is 1
     if len(pot) <= 1:
         return pot[0]
@@ -122,8 +127,10 @@ def java_potential_term(mesh, instructions):
       not a series of descriptions.
     '''
     faces  = to_java_ints(mesh.indexed_faces)
+    edges  = to_java_ints(mesh.indexed_edges)
+    print (mesh.indexed_edges.shape, mesh.indexed_faces.shape)
     coords = to_java_doubles(mesh.coordinates)
-    return _parse_field_arguments([instructions], faces, coords)
+    return _parse_field_arguments([instructions], faces, edges, coords)
     
 # The mesh_register function
 def mesh_register(mesh, field, max_steps=2000, max_step_size=0.05, max_pe_change=1,
@@ -238,9 +245,10 @@ def mesh_register(mesh, field, max_steps=2000, max_step_size=0.05, max_pe_change
     max_steps = int(max_steps)
     max_step_size = float(max_step_size)
     # Parse the field argument.
-    faces  = to_java_ints([mesh.index[frow] for frow in mesh.faces])
+    faces  = to_java_ints(mesh.indexed_faces)
+    edges  = to_java_ints(mesh.indexed_edges)
     coords = to_java_doubles(mesh.coordinates)
-    potential = _parse_field_arguments(field, faces, coords)
+    potential = _parse_field_arguments(field, faces, edges, coords)
     # Okay, that's basically all we need to do the minimization...
     minimizer = java_link().jvm.nben.mesh.registration.Minimizer(potential, coords)
     if method == 'pure':
