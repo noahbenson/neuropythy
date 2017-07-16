@@ -878,10 +878,14 @@ def register_retinotopy(hemi,
     if max_steps == 0:
         r = data['map'].coordinates
     else:
+        emin = 0.25 * data['map'].edge_lengths
+        emax = 3.00 * data['map'].edge_lengths
         r = mesh_register(
             data['map'],
             [['edge',      'harmonic',      'scale', edge_scale],
-             ['angle',     'infinite-well', 'scale', angle_scale],
+             ['angle',     'harmonic',      'scale', angle_scale],
+             ['edge',      'infinite-well', 'min', emin, 'max', emax],
+             ['angle',     'infinite-well'],
              ['perimeter', 'harmonic'],
              retinotopy_anchors(data['map'], model,
                                 polar_angle='polar_angle',
