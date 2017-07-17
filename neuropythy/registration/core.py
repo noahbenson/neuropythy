@@ -128,7 +128,6 @@ def java_potential_term(mesh, instructions):
     '''
     faces  = to_java_ints(mesh.indexed_faces)
     edges  = to_java_ints(mesh.indexed_edges)
-    print (mesh.indexed_edges.shape, mesh.indexed_faces.shape)
     coords = to_java_doubles(mesh.coordinates)
     return _parse_field_arguments([instructions], faces, edges, coords)
     
