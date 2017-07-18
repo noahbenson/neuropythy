@@ -129,6 +129,7 @@ def extract_retinotopy_argument(obj, retino_type, arg, default='any'):
 # Tools for retinotopy model loading:
 _default_schira_model = None
 def get_default_schira_model():
+    global _default_schira_model
     if _default_schira_model is None:
         try:
             _default_schira_model = RegisteredRetinotopyModel(
