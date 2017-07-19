@@ -731,6 +731,7 @@ def register_retinotopy(hemi,
                         max_eccentricity=None,
                         partial_voluming_correction=True,
                         edge_scale=1.0, angle_scale=1.0, functional_scale=1.0,
+                        edge_max_compression=0.25, edge_max_stretch=3.0,
                         sigma=Ellipsis,
                         select='close',
                         prior='retinotopy',
@@ -843,6 +844,10 @@ def register_retinotopy(hemi,
       * max_steps (default 30,000) specifies the maximum number of registration steps to run.
       * max_step_size (default 0.05) specifies the maxmim distance a single vertex is allowed to
         move in a single step of the minimization.
+      * edge_max_compression (default 0.25) specifies the minimum fraction of its length that an
+        edge should be allowed to be compressed to.
+      * edge_max_stretch (default 3.0) specifies the maximum fraction of its length that an edge
+        should be allowed to be stretched to.
       * method (default 'random') is the method argument passed to mesh_register. This should be
         'random', 'pure', or 'nimble'. Generally, 'random' is recommended.
       * return_meta_data (default: False) specifies whether the return value should be the new
@@ -879,23 +884,28 @@ def register_retinotopy(hemi,
     if max_steps == 0:
         r = data['map'].coordinates
     else:
-        emin = 0.25 * data['map'].edge_lengths
-        emax = 3.00 * data['map'].edge_lengths
+        elens = data['map'].edge_lengths
+        if edge_min_compression is None and edge_max_stretch is None:
+            edge_well_potential = []
+        else: 
+            emin = 0 if edge_max_compression is None else edge_min_compression * elens
+            emax = (10**6) * elens if edge_max_stretch is None else edge_max_stretch * elens
+            edge_well_potential = [['edge', 'infinite-well', 'min', emin, 'max', emax]]
         r = mesh_register(
             data['map'],
-            [['edge',      'harmonic',      'scale', edge_scale],
-             ['angle',     'harmonic',      'scale', angle_scale],
-             ['edge',      'infinite-well', 'min', emin, 'max', emax],
-             ['angle',     'infinite-well'],
-             ['perimeter', 'harmonic'],
-             retinotopy_anchors(data['map'], model,
-                                polar_angle='polar_angle',
-                                eccentricity='eccentricity',
-                                weight='weight',
-                                weight_cutoff=0, # taken care of above
-                                scale=functional_scale,
-                                select=select,
-                                **({} if sigma is Ellipsis else {'sigma':sigma}))],
+            edge_well_potential + [
+                ['angle',     'infinite-well'],
+                ['edge',      'harmonic',      'scale', edge_scale],
+                ['angle',     'harmonic',      'scale', angle_scale],
+                ['perimeter', 'harmonic'],
+                retinotopy_anchors(data['map'], model,
+                                   polar_angle='polar_angle',
+                                   eccentricity='eccentricity',
+                                   weight='weight',
+                                   weight_cutoff=0, # taken care of above
+                                   scale=functional_scale,
+                                   select=select,
+                                   **({} if sigma is Ellipsis else {'sigma':sigma}))],
             method=method,
             max_steps=max_steps,
             max_step_size=max_step_size)
