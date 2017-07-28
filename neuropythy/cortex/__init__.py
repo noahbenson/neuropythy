@@ -863,9 +863,10 @@ def mesh_smooth(mesh, prop, smoothness=0.5, weights=None,
     where_bad = np.union1d(where_inf, where_nan)
     where_ok  = np.setdiff1d(all_vertices, where_bad)
     # Whittle down the mask to what we are sure is in the minimization:
-    mask = np.union1d(
-        np.setdiff1d(all_vertices if mask is None else all_vertices[mask], where_nan),
-        np.where(np.isclose(weights, 0))[0])
+    mask = reduce(np.setdiff1d,
+                  [all_vertices if mask is None else all_vertices[mask],
+                   where_nan,
+                   np.where(np.isclose(weights, 0))[0]])
     # Find the outliers: values specified as outliers or values with inf; will build this as we go
     outliers = [] if outliers is None else all_vertices[outliers]
     outliers = np.intersect1d(outliers, mask) # outliers not in the mask don't matter anyway
