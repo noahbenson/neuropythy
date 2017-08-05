@@ -313,7 +313,39 @@ class RegisteredRetinotopyModel(RetinotopyModel):
             sub = nfs.freesurfer_subject(projection_params['registration'])
             hemi = sub.LH if chirality.upper() == 'LH' else sub.RH
             self.projection_data = hemi.projection_data(**projection_params)
-        
+
+    def save(self, f):
+        '''
+        model.save(filename) saves an FMM-formatted file to the given filename; the FMM format is
+        used by neuropythy to save and load registered retinotopy models; it can be loaded with the
+        load_fmm_model function.
+        model.save(file) will write the text directly to the given file.
+        '''
+        if not isinstance(self.model, RetinotopyMeshModel):
+            raise ValueError('Only RetinotopyMeshModels can be saved to an fmm file')
+        if isinstance(f, basestring):
+            with open(f, 'w') as fl:
+                self.save(fl)
+            return f
+        m = self.model
+        x0 = self.projection_data['center']
+        x1 = self.projection_data['center_right']
+        tx = np.eye(3) if m.transform is None else m.transform
+        for ln in ['Flat Mesh Model Version: 1.0',
+                   'Points: %d' % m.forward.coordinates.shape[0],
+                   'Triangles: %d' % m.forward.triangles.shape[0],
+                   'Registration: %s' % self.projection_data['registration'],
+                   'Hemisphere: %s' % self.projection_data['hemi'].upper(),
+                   'Center: %f,%f,%f' % (x0[0], x0[1], x0[2]),
+                   'OnXAxis: %f,%f,%f' % (x1[0], x1[1], x1[2]),
+                   'Method: %s' % self.projection_data['method'].capitalize(),
+                   'Transform: [%f,%f,%f;%f,%f,%f;%f,%f,%f]' % tuple(tuple(x) for x in tx)]:
+            f.write(ln + '\n')
+        for (x,y,t,r,a) in zip(**[m.data[u] for u in ['x','y', 'polar_angle','eccentricity','id']]):
+            f.write('%f,%f :: %f,%f,%f\n' % (x,y,t,r,a))
+        for (a,b,c) in zip(**(m.triangles.T + 1)):
+            f.write('%d,%d,%d\n' % (a,b,c))
+        return f
     def cortex_to_angle(self, *args):
         '''
         The cortex_to_angle method of the RegisteredRetinotopyModel class is identical to that
@@ -446,3 +478,4 @@ def load_fmm_model(filename, radius=math.pi/3.0, sphere_radius=100.0):
         sphere_radius=sphere_radius,
         chirality=hemi)
     return mdl
+
