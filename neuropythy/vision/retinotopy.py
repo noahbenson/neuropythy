@@ -885,10 +885,10 @@ def register_retinotopy(hemi,
         r = data['map'].coordinates
     else:
         elens = data['map'].edge_lengths
-        if edge_min_compression is None and edge_max_stretch is None:
+        if edge_max_compression is None and edge_max_stretch is None:
             edge_well_potential = []
         else: 
-            emin = 0 if edge_max_compression is None else edge_min_compression * elens
+            emin = 0 if edge_max_compression is None else edge_max_compression * elens
             emax = (10**6) * elens if edge_max_stretch is None else edge_max_stretch * elens
             edge_well_potential = [['edge', 'infinite-well', 'min', emin, 'max', emax]]
         r = mesh_register(
