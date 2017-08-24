@@ -27,7 +27,7 @@ setup(
     url='https://github.com/noahbenson/neuropythy',
     download_url='https://github.com/noahbenson/neuropythy',
     license='GPLv3',
-    classifiers=['Development Status :: 2 - Pre-Alpha',
+    classifiers=['Development Status :: 3 - Alpha',
                  'Intended Audience :: Science/Research',
                  'Intended Audience :: Developers',
                  'License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)',
