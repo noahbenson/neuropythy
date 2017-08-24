@@ -76,8 +76,24 @@ be passed for further information about each command.
    template applied is not actually the template shown in the paper but is a similar updated
    version.
  * **register_retinotopy**. This command fits a retinotopic model of V1, V2, and V3 to retinotopy
-   data for a subject and saves the predicted retinotopic maps that result. This command is
-   currently experimental.
+   data for a subject and saves the predicted retinotopic maps that result. Running this command
+   requires some retinotopic measurements that have already been transferred to the subject's
+   FreeSurfer surface. These files can either be specified on the command line (see the
+   `register_retinotopy --help` documentation) or placed in the subject's `surf/` directory and
+   named as follows:
+    * lh.prf_angle.mgz (subject's LH polar angle, 0-180 degrees refers to UVM -> RHM -> LVM)
+    * rh.prf_angle.mgz (subject's RH polar angle, 0-180 degrees refers to UVM -> LHM -> RVM)
+    * lh.prf_eccen.mgz (subject's LH eccentricity, in degrees)
+    * rh.prf_eccen.mgz (subject's RH eccentricity, in degrees)
+    * lh.prf_vexpl.mgz (the varaince explained of each vertex's pRF solution for the LH; 0-1 values)
+    * rh.prf_vexpl.mgz (the varaince explained of each vertex's pRF solution for the RH; 0-1 values)
+   To be clear, both the left and right hemispheres' angle files should specify the polar angle in
+   positive degrees; for the right hemisphere, positive refers to the left visual hemi-field; for
+   the left hemisphere, positive values refer to the right visual hemi-field. In both cases, 0
+   represents the upper vertical meridian and 180 represents the lower vertical meridian. Each MGZ
+   file should contain a 1x1xn (or 1x1x1xn) volume where n is the number of vertices in the relevant
+   hemisphere and the vertex ordering is that used by FreeSurfer.
+   
 
 If neuropythy is installed on your machine, then you can execute a command like so:
 
