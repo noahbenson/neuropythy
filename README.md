@@ -87,6 +87,7 @@ be passed for further information about each command.
     * rh.prf_eccen.mgz (subject's RH eccentricity, in degrees)
     * lh.prf_vexpl.mgz (the varaince explained of each vertex's pRF solution for the LH; 0-1 values)
     * rh.prf_vexpl.mgz (the varaince explained of each vertex's pRF solution for the RH; 0-1 values)
+
    To be clear, both the left and right hemispheres' angle files should specify the polar angle in
    positive degrees; for the right hemisphere, positive refers to the left visual hemi-field; for
    the left hemisphere, positive values refer to the right visual hemi-field. In both cases, 0
