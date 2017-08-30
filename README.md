@@ -31,11 +31,11 @@ python setup.py install
 ## Dependencies ####################################################################################
 
 The neuropythy library depends on a few other libraries, all freely available:
- * [numpy](http://numpy.scipy.org/) >= 1.2
- * [scipy](http://www.scipy.org/) >= 0.7.0
- * [nibabel](https://github.com/nipy/nibabel) >= 1.2
- * [pysistence](https://pythonhosted.org/pysistence/) >= 0.4.0
- * [py4j](https://www.py4j.org/) >= 0.9
+ * [numpy](http://numpy.scipy.org/) &ge; 1.2
+ * [scipy](http://www.scipy.org/) &ge; 0.7.0
+ * [nibabel](https://github.com/nipy/nibabel) &ge; 1.2
+ * [pysistence](https://pythonhosted.org/pysistence/) &ge; 0.4.0
+ * [py4j](https://www.py4j.org/) &ge; 0.9
 
 These libaries should be installed automatically for you if you use pip or setuptools (see above),
 and they must be found on your PYTHONPATH in order to use neuropythy.
@@ -49,7 +49,8 @@ and they must be found on your PYTHONPATH in order to use neuropythy.
    are defined in the neuropythy.cortex package. These are not defined if matplotlib is not imported
    successfully. The functions in question are cortex_plot, vertex_angle_color, vertex_eccen_color,
    and a few helper functions.
- * **Java** (version &ge; 1.8). The registration algorithm employed by the register_retinotopy command is performed by
+ * **[Java &ge; 1.8](http://www.oracle.com/technetwork/java/javase/downloads/index.html)**.
+   The registration algorithm employed by the register_retinotopy command is performed by
    a Java library embedded in the neuropythy Python library. This library is the
    [nben](https://github.com/noahbenson/nben) library, and is included as a submodule of this
    GitHub repository, found in neuropythy/lib/nben; a standalone jar-file is also distributed as
