@@ -32,27 +32,34 @@ from py4j.java_gateway import (launch_gateway, JavaGateway, GatewayParameters)
 _parse_field_data_types = {
     'mesh': ['newStandardMeshPotential', ['edge_scale', 1.0], ['angle_scale', 1.0], 'F', 'X'],
     'edge': {
-        'harmonic':      ['newHarmonicEdgePotential',   ['scale', 1.0], ['order', 2.0], 'F', 'X'],
-        'lennard-jones': ['newLJEdgePotential',         ['scale', 1.0], ['order', 2.0], 'F', 'X'],
-        'infinite-well': ['newWellEdgePotential',       ['scale', 1.0], ['order', 0.5], 
-                                                        ['min',   0.5], ['max',   3.0], 'E', 'X']},
+       'harmonic':      ['newHarmonicEdgePotential',      ['scale', 1.0], ['order', 2.0], 'F', 'X'],
+       'harmonic-log':  ['newHarmonicLogEdgePotential',   ['scale', 1.0], ['order', 2.0], 'F', 'X'],        
+       'lennard-jones': ['newLJEdgePotential',            ['scale', 1.0], ['order', 2.0], 'F', 'X'],
+       'infinite-well': ['newWellEdgePotential',          ['scale', 1.0], ['order', 0.5],
+                                                          ['min',   0.5], ['max',   3.0],
+                                                          'E', 'X']},
     'angle': {
-        'harmonic':      ['newHarmonicAnglePotential',  ['scale', 1.0], ['order', 2.0], 'F', 'X'],
-        'lennard-jones': ['newLJAnglePotential',        ['scale', 1.0], ['order', 2.0], 'F', 'X'],
-        'infinite-well': ['newWellAnglePotential',      ['scale', 1.0], ['order', 0.5], 
-                                                        ['min',   0.0], ['max',   pi],  'F', 'X']},
+       'harmonic':      ['newHarmonicAnglePotential',     ['scale', 1.0], ['order', 2.0], 'F', 'X'],
+       'harmonic-log':  ['newHarmonicLogAnglePotential',  ['scale', 1.0], ['order', 2.0], 'F', 'X'],
+       'lennard-jones': ['newLJAnglePotential',           ['scale', 1.0], ['order', 2.0], 'F', 'X'],
+       'infinite-well': ['newWellAnglePotential',         ['scale', 1.0], ['order', 0.5], 
+                                                          ['min',   0.0], ['max',   pi],
+                                                          'F', 'X']},
     'anchor': {
-        'harmonic':      ['newHarmonicAnchorPotential', ['scale', 1.0], ['shape', 2.0], 0, 1, 'X'],
-        'gaussian':      ['newGaussianAnchorPotential', ['scale', 1.0], ['sigma', 2.0], 
-                                                        ['shape', 2.0], 0, 1, 'X']},
+       'harmonic':      ['newHarmonicAnchorPotential',    ['scale', 1.0], ['shape', 2.0], 0, 1, 'X'],
+       'gaussian':      ['newGaussianAnchorPotential',    ['scale', 1.0], ['sigma', 2.0], 
+                                                          ['shape', 2.0], 0, 1, 'X']},
     'mesh-field': {
-        'harmonic':      ['newHarmonicMeshPotential',   ['scale', 1.0], ['order', 2.0], 0, 1, 2,
-                                                        3, 4, 'X'],
-        'gaussian':      ['newGaussianMeshPotential',   ['scale', 1.0], ['sigma', 0.5],
-                                                        ['order', 2.0], 0, 1, 2, 3, 4, 'X']},
+       'harmonic':      ['newHarmonicMeshPotential',      ['scale', 1.0], ['order', 2.0], 0, 1, 2,
+                                                          3, 4, 'X'],
+       'harmonic-log':  ['newHarmonicLogMeshPotential',   ['scale', 1.0], ['order', 2.0], 0, 1, 2,
+                                                          3, 4, 'X'],
+       'gaussian':      ['newGaussianMeshPotential',      ['scale', 1.0], ['sigma', 0.5],
+                                                          ['order', 2.0], 0, 1, 2, 3, 4, 'X']},
     'perimeter': {
-        'harmonic':   ['newHarmonicPerimeterPotential', ['scale', 1.0], ['shape', 2.0], 'F', 'X']}};
-        
+       'harmonic':      ['newHarmonicPerimeterPotential', ['scale', 1.0], ['shape', 2.0],
+                                                          'F', 'X']}};
+
 def _parse_field_function_argument(argdat, args, faces, edges, coords):
     # first, see if this is an easy one...
     if argdat == 'F':

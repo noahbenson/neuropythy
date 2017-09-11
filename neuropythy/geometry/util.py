@@ -369,24 +369,57 @@ def triangle_unaddress(fx, tr):
     return np.asarray([ax + tr[1]*(abx + tr[0]*bcx) for (ax, bcx, abx) in zip(fx[0], bc, ab)])
 
 def point_in_triangle(tri, pt):
-    if len(pt) == 2:
-        tol = 1e-13
-        v0 = tri[2] - tri[0]
-        v1 = tri[1] - tri[0]
-        v2 = pt - tri[0]
-        d00 = np.dot(v0, v0)
-        d01 = np.dot(v0, v1)
-        d02 = np.dot(v0, v2)
-        d11 = np.dot(v1, v1)
-        d12 = np.dot(v1, v2)
-        invDenom = (d00*d11 - d01*d01)
-        if np.isclose(invDenom, 0): return False
-        s = (d11*d02 - d01*d12) / invDenom
-        if (s + tol) < 0 or (s - tol) >= 1: return False
-        t = (d00*d12 - d01*d02) / invDenom
-        return False if (t + tol) < 0 or (s + t - tol) > 1 else True
+    tri = np.asarray(tri)
+    pt  = np.asarray(pt)
+    if len(tri.shape) == 2 and len(pt.shape) == 1:
+        if len(pt) == 2:
+            tol = 1e-13
+            v0 = tri[2] - tri[0]
+            v1 = tri[1] - tri[0]
+            v2 = pt - tri[0]
+            d00 = np.dot(v0, v0)
+            d01 = np.dot(v0, v1)
+            d02 = np.dot(v0, v2)
+            d11 = np.dot(v1, v1)
+            d12 = np.dot(v1, v2)
+            invDenom = (d00*d11 - d01*d01)
+            if np.isclose(invDenom, 0): return False
+            s = (d11*d02 - d01*d12) / invDenom
+            if (s + tol) < 0 or (s - tol) >= 1: return False
+            t = (d00*d12 - d01*d02) / invDenom
+            return False if (t + tol) < 0 or (s + t - tol) > 1 else True
+        else:
+            return (np.dot(pt - tri[0], np.cross(tri[0], tri[1] - tri[0])) >= 0 and
+                    np.dot(pt - tri[1], np.cross(tri[1], tri[2] - tri[1])) >= 0 and
+                    np.dot(pt - tri[2], np.cross(tri[2], tri[0] - tri[2])) >= 0)
+    elif len(tri.shape) == 3 and len(pt.shape) == 2:
+        if len(pt) != len(tri):
+            raise ValueError('the number of triangles and points must be equal')
+        if pt.shape[1] == 2:
+            tol = 1e-13
+            v0 = tri[:,2] - tri[:,0]
+            v1 = tri[:,1] - tri[:,0]
+            v2 = pt - tri[:,0]
+            d00 = np.sum(v0*v0, axis=1)
+            d01 = np.sum(v0*v1, axis=1)
+            d02 = np.sum(v0*v2, axis=1)
+            d11 = np.sum(v1*v1, axis=1)
+            d12 = np.sum(v1*v2, axis=1)
+            invDenom = (d00*d11 - d01*d01)
+            zeros = np.isclose(invDenom, 0)
+            invDenom[zeros] = 1.0
+            s = (d11*d02 - d01*d12) / invDenom
+            t = (d00*d12 - d01*d02) / invDenom
+            return ~((s + tol < 0) | (s - tol >= 1) | (t + tol < 0) | (s + t - tol > 1) | zeros)
+        else:
+            x0 = np.sum((pt - tri[:,0]) * np.cross(tri[:,0], tri[:,1] - tri[:,0], axis=1), axis=1)
+            x1 = np.sum((pt - tri[:,1]) * np.cross(tri[:,1], tri[:,2] - tri[:,1], axis=1), axis=1)
+            x2 = np.sum((pt - tri[:,2]) * np.cross(tri[:,2], tri[:,0] - tri[:,2], axis=1), axis=1)
+            return ((x0 >= 0) & (x1 >= 0) & (x2 >= 0))
+    elif len(tri.shape) == 3 and len(pt.shape) == 1:
+        return point_in_triangle(tri, np.asarray([pt for _ in tri]))
+    elif len(tri.shape) == 2 and len(pt.shape) == 1:
+        return point_in_triangle(np.asarray([tri for _ in pt]), pt)
     else:
-        return (np.dot(pt - tri[0], np.cross(tri[0], tri[1] - tri[0])) >= 0 and
-                np.dot(pt - tri[1], np.cross(tri[1], tri[2] - tri[1])) >= 0 and
-                np.dot(pt - tri[2], np.cross(tri[2], tri[0] - tri[2])) >= 0)
-    
+        raise ValueError('triangles and pts do not have parallel shapes')
+

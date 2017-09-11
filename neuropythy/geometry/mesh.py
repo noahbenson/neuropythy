@@ -65,7 +65,12 @@ class Mesh(Immutable):
 
     # True if the point is in the triangle, otherwise False; tri_no is an index into the triangle
     def _point_in_triangle(self, tri_no, pt):
-        tri = self.coordinates[self.triangles[tri_no]]
+        pt = np.asarray(pt)
+        tri_no = np.asarray(tri_no)
+        if len(tri_no) == 0:
+            tri = self.coordinates[self.triangles[tri_no]]
+        else:
+            tri = np.transpose([self.coordinates[t] for t in self.triangles[tri_no].T], (1,0,2))
         return point_in_triangle(tri, pt)
 
     def _find_triangle_search(self, x, k=24, searched=set([])):
@@ -145,19 +150,50 @@ class Mesh(Immutable):
         mesh.container(pt) yields the id number of the nearest triangle in the given
         mesh to the given point pt. If pt is an (n x dims) matrix of points, an id is given
         for each column of pt.
+
+        Implementation Note:
+          This method will fail to find the container triangle of a point if you have a very odd
+          geometry; the requirement for this condition is that, for a point p contained in a
+          triangle t with triangle center x0, there are at least n triangles whose centers are
+          closer to p than x0 is to p. The value n depends on your starting parameter k, but is
+          approximately 256.
         '''
         pt = np.asarray(pt, dtype=np.float32)
-        (d, near) = self.triangle_hash.query(pt, k=k) #n_jobs fails?
         if len(pt.shape) == 1:
+            (d, near) = self.triangle_hash.query(pt, k=k) #n_jobs fails?
             tri_no = next((kk for kk in near if self._point_in_triangle(kk, pt)), None)
             return (tri_no if tri_no is not None
                     else self._find_triangle_search(pt, k=(2*k), searched=set(near)))
         else:
-            return [(tri_no if tri_no is not None
-                     else self._find_triangle_search(x, k=(2*k), searched=set(near_i)))
-                    for (x, near_i) in zip(pt, near)
-                    for tri_no in [next((kk for kk in near_i if self._point_in_triangle(kk, x)),
-                                        None)]]
+            tcount = self.triangles.shape[0]
+            max_k = 256 if tcount > 256 else tcount
+            if k > tcount: k = tcount
+            def try_nearest(sub_pts, cur_k=k, top_i=0, near=None):
+                res = np.full(len(sub_pts), None)
+                if k != cur_k and cur_k > max_k: return res
+                if near is None:
+                    near = self.triangle_hash.query(sub_pts, k=cur_k)[1]
+                # we want to try the nearest then recurse on those that didn't match...
+                guesses = near[:, top_i]
+                in_tri_q = self._point_in_triangle(guesses, sub_pts)
+                res[in_tri_q] = guesses[in_tri_q]
+                if in_tri_q.all(): return res
+                # recurse, trying the next nearest points
+                out_tri_q = ~in_tri_q
+                sub_pts = sub_pts[out_tri_q]
+                top_i += 1
+                res[out_tri_q] = (try_nearest(sub_pts, cur_k*2, top_i, None)
+                                  if top_i == cur_k else
+                                  try_nearest(sub_pts, cur_k, top_i, near[out_tri_q]))
+                return res
+            res = np.full(len(pt), None)
+            # filter out points that aren't close enough to be in a triangle:
+            (dmins, dmaxs) = [[f(x) for x in self.coordinates.T] for f in [np.min, np.max]]
+            inside_q = reduce(np.logical_and,
+                              [(x >= mn)&(x <= mx) for (x,mn,mx) in zip(pt.T,dmins,dmaxs)])
+            if not inside_q.any(): return res
+            res[inside_q] = try_nearest(pt[inside_q])
+            return res
 
     def interpolate(self, x, data, 
                     smoothing=1, mask=None, null=None, method='automatic', n_jobs=1,
@@ -210,8 +246,8 @@ class Mesh(Immutable):
         # Okay, switch on method:
         if method == 'nearest':
             data = self._interpolate_nearest(x, data, mask, null, n_jobs)
-        elif method == 'automatic':
-            data = self._interpolate_linear(x, data, mask, null, smoothing, 12, n_jobs)
+        elif method == 'automatic' or method == 'linear':
+            data = self._interpolate_linear(x, data, mask, null, smoothing, n_jobs)
         data = np.asarray(data)
         return data.T if data_t else data
 
@@ -224,21 +260,66 @@ class Mesh(Immutable):
         else:
             return [data[i] if mask[i] == 1 else null for i in nei]
     # perform linear interpolation
-    def _interpolate_linear(self, coords, data, mask, null, smoothing, check_no, n_jobs):
+    def _interpolate_linear(self, coords, data, mask, null, smoothing, n_jobs):
         # first, find the triangle containing each point...
         tris = self.triangles
-        ## we only query the nearest check_no triangles; otherwise we don't fine the container
-        containers = self.container(coords, k=check_no, n_jobs=n_jobs)
+        # get the containers
+        containers = self.container(coords, n_jobs=n_jobs)
         # Okay, now we interpolate for each triangle
-        nulls = [null for _ in range(data.shape[1])] if len(data.shape) > 1 else null
-        if mask is None:
-            return [(nulls if tri_no is None
-                     else self._interpolate_triangle(x, data, tris[tri_no], smoothing, nulls))
-                    for (x, tri_no) in zip(coords, containers)]
-        else:
-            return [(nulls if tri_no is None or any(mask[u] == 0 for u in tris[tri_no])
-                     else self._interpolate_triangle(x, data, tris[tri_no], smoothing, nulls))
-                    for (x, tri_no) in zip(coords, containers)]
+        res = np.full(len(coords) if len(data.shape) == 1 else (len(coords), data.shape[1]), null)
+        # what's in a triangle at all...
+        contained_q = np.asarray([x is not None for x in containers], dtype=np.bool)
+        contained_idcs = np.where(contained_q)[0]
+        # what's in the mask
+        mask_q = np.array(contained_q)
+        if mask:
+            mask_prod = np.prod([mask[u] for u in tris[containers].T], axis=0)
+            mask_q[contained_idcs] = mask_prod.astype(np.bool)
+        mask_idcs = np.where(mask_q)[0]
+        # interpolate for these points
+        tris = tris[containers[mask_idcs].astype(np.int)].T
+        (data, corners) = [np.transpose([v[t] for t in tris],
+                                        (1,0) if len(v.shape) == 1 else (1,0,2))
+                           for v in (data, self.coordinates)]
+        coords = coords[mask_idcs]
+        if coords.shape[1] == 3:
+            import traceback
+            u01 = corners[:,1] - corners[:,0]
+            u02 = corners[:,2] - corners[:,0]
+            (l01,l02) = [np.sqrt(np.sum(x**2, axis=1)) for x in (u01,u02)]
+            nzidcs = np.where(~(np.isclose(l01, 0) | np.isclose(l02, 0)))[0]
+            if len(nzidcs) < len(coords):
+                (u01,u02,l01,l02,mask_idcs,corners,data) = [
+                    x[nzidcs] for z in (u01,u02,l01,l02,mask_idcs,corners,data)]
+            (u01,u02) = [(uu.T/ll).T for (uu,ll) in zip((u01,u02),(l01,l02))]
+            unorm = np.cross(u01, u02, axis=1)
+            nzidcs = np.where(~np.isclose(np.sqrt(np.sum(unorm**2, axis=1)), 0))[0]
+            if len(nzidcs) < len(coords):
+                (u01,u02,unorm,mask_idcs,corners,data) = [
+                    x[nzidcs] for z in (u01,u02,l01,l02,mask_idcs,corners,data)]
+            yax = np.cross(unorm, u01, axis=1)
+            corners = np.transpose(
+                [(np.sum((corner - coords) * u01, axis=1),
+                  np.sum((corner - coords) * yax, axis=1))
+                 for corner in np.transpose(corners, (1,0,2))],
+                (2,0,1))
+            coords = np.full((len(mask_idcs), 2), 0.0)
+        # get the mini-triangles' areas
+        a_area = triangle_area(coords, corners[:,1], corners[:,2]) ** smoothing
+        b_area = triangle_area(coords, corners[:,2], corners[:,0]) ** smoothing
+        c_area = triangle_area(coords, corners[:,0], corners[:,1]) ** smoothing
+        tot = a_area + b_area + c_area
+        # where the tot is close to 0, we cannot go
+        nzero_q = ~np.isclose(tot, 0)
+        nzero_idcs = np.where(nzero_q)[0]
+        if len(nzero_idcs) < len(mask_idcs):
+            (mask_idcs, data, tot, a_area, b_area, c_area) = [
+                a[nzero_idcs] for a in (mask_idcs, data, tot, a_area, b_area, c_area)]
+        if len(data.shape) > 2:
+            data = np.transpose(data, (0,2,1))
+        tdat = reduce(np.add, [a*d for (a,d) in zip([a_area,b_area,c_area], data.T)])
+        res[mask_idcs] = (tdat / tot).T
+        return res
     def _interpolate_triangle(self, x, data, tri_vertices, smoothing, nulls):
         # we'll want to project things down to 2 dimensions:
         if len(x) == 3:

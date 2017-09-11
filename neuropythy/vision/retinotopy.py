@@ -149,7 +149,7 @@ _retinotopy_model_paths = [
     os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         'lib', 'models')]
-def retinotopy_model(name='benson17',
+def retinotopy_model(name='benson17', hemi=None,
                      radius=pi/2.5, sphere_radius=100.0,
                      search_paths=None, update=False):
     '''
@@ -167,12 +167,17 @@ def retinotopy_model(name='benson17',
         file is loaded (must be a valid fmm or fmm.gz file). Currently, models that are included
         with neuropythy are: Benson17, Benson17-uncorrected, Schira10, and Benson14 (which is
         identical to Schira10, as Schira10 was used by Benson14).
+      * hemi (default: None) specifies that the model should go with a particular hemisphere, either
+        'lh' or 'rh'. Generally, model files are names lh.<model>.fmm.gz or rh.<model>.fmm.gz, but
+        models intended for the fsaverage_sym don't necessarily get a prefix. Note that you can
+        leave this as none and just specify that the model name is 'lh.model' instead.
       * radius, sphere_radius (defaults: pi/2.5 and 100.0, respectively) specify the radius of the
         projection (on the surface of the sphere) and the radius of the sphere (100 is the radius
         for Freesurfer spheres). See neuropythy.registration.load_fmm_model for mode details.
       * search_paths (default: None) specifies directories in which to look for fmm model files. No
         matter what is included in these files, the neuropythy library's folders are searched last.
     '''
+    origname = name
     low = name.lower()
     if name in __loaded_retinotopy_models:
         return __loaded_retinotopy_models[name]
@@ -184,8 +189,8 @@ def retinotopy_model(name='benson17',
     elif low in ['schira', 'schira10', 'schira2010', 'benson14', 'benson2014']:
         return get_default_schira_model()
     else:
-        origname = name
         for name in [origname, low]:
+            name = name if hemi is None else ('%s.%s' % (hemi.lower(), name))
             if len(name) > 4 and name[-4:] == '.fmm':
                 fname = name
                 name = name[:-4]
@@ -413,6 +418,7 @@ def retinotopy_mesh_field(mesh, mdl,
 def retinotopy_anchors(mesh, mdl,
                        polar_angle=None, eccentricity=None,
                        weight=None, weight_cutoff=0.1,
+                       model_hemi=Ellipsis,
                        scale=1,
                        shape='Gaussian', suffix=None,
                        sigma=[0.05, 1.0, 2.0],
@@ -459,7 +465,7 @@ def retinotopy_anchors(mesh, mdl,
         select=['close', [k]] indicates that any anchor more than k times the average edge-length in
         the mesh should be excluded; a value of just ['close', k] on the other hand indicates that
         any anchor more than k distance from the vertex should be exlcuded. The default value,
-        'close', is equivalent to ['close', [20]].
+        'close', is equivalent to ['close', [40]].
       * sigma (default [0.05, 1.0, 2.0]) specifies how the sigma parameter should be handled; if
         None, then no sigma value is specified; if a single number, then all sigma values are
         assigned that value; if a list of three numbers, then the first is the minimum sigma value,
@@ -486,7 +492,28 @@ def retinotopy_anchors(mesh, mdl,
         max_steps=2000)
     '''
     if isinstance(mdl, basestring):
-        mdl = retinotopy_model(mdl)
+        hemi = None
+        if model_hemi is Ellipsis:
+            md = mesh.meta_data
+            sub = md.get('subject', None)
+            hemi_obj = md.get('hemisphere', None)
+            hemi = None               if sub      and sub.name == 'fsaverage_sym'  else \
+                   hemi_obj.chirality if hemi_obj and isinstance(hemi, Hemisphere) else \
+                   hemi_obj           if isinstance(hemi_obj, basestring)          else \
+                   None
+        elif model_hemi is None:
+            hemi = None
+        elif isinstance(model_hemi, basestring):
+            model_hemi = model_hemi.upper()
+            hemnames = {k:h
+                        for (h,als) in [('LH', ['LH','L','LEFT','RHX','RX']),
+                                        ('RH', ['RH','R','RIGHT','LHX','LX'])]
+                        for k in als}
+            if model_hemi in hemnames: hemi = hemnames[model_hemi]
+            else: raise ValueError('Unrecognized hemisphere name: %s' % model_hemi)
+        else:
+            raise ValueError('model_hemi must be a string, Ellipsis, or None')
+        mdl = retinotopy_model(mdl, hemi=hemi)
     if not isinstance(mdl, RetinotopyModel):
         raise RuntimeError('given model is not a RetinotopyModel instance!')
     if not isinstance(mesh, CorticalMesh):
@@ -510,8 +537,8 @@ def retinotopy_anchors(mesh, mdl,
         weight_cutoff=weight_cutoff)
     idcs = [i for (i,w) in enumerate(weight) if w > 0]
     # Interpret the select arg if necessary (but don't apply it yet)
-    select = ['close', [20]] if select == 'close'   else \
-             ['close', [20]] if select == ['close'] else \
+    select = ['close', [40]] if select == 'close'   else \
+             ['close', [40]] if select == ['close'] else \
              select
     if select is None:
         select = lambda a,b: b
@@ -550,23 +577,24 @@ def retinotopy_anchors(mesh, mdl,
             + ([] if suffix is None else suffix))
 
 def register_retinotopy_initialize(hemi,
-                                   model='benson17',
+                                   model='benson17', model_hemi=Ellipsis,
                                    polar_angle=None, eccentricity=None, weight=None,
                                    weight_cutoff=0.1,
                                    max_predicted_eccen=85,
                                    partial_voluming_correction=True,
                                    prior='retinotopy',
-                                   resample='fsaverage_sym',
+                                   resample=Ellipsis,
                                    max_area=None,
                                    max_eccentricity=None):
     '''
-    register_retinotopy_initialize(hemi, model) yields an fsaverage_sym LH hemisphere that has
-    been prepared for retinotopic registration with the data on the given hemisphere, hemi. The
+    register_retinotopy_initialize(hemi, model) yields an fsaverage or fsaverage_sym hemisphere that
+    has been prepared for retinotopic registration with the data on the given hemisphere, hemi. The
     options polar_angle, eccentricity, weight, and weight_cutoff are accepted, as are the
     prior and resample options; all are documented in help(register_retinotopy).
     The return value of this function is actually a dictionary with the element 'map' giving the
     resulting map projection, and additional entries giving other meta-data calculated along the
-    way.
+    way. Note that the hemisphere will only be fsaverage_sym if the option model_hemi is set to
+    None.
     '''
     # Step 0: Initialization of variables ##########################################################
     prop_names = ['polar_angle', 'eccentricity', 'weight']
@@ -598,7 +626,11 @@ def register_retinotopy_initialize(hemi,
     else:
         data['sub_curvature'] = np.zeros((len(ang),))
     # Step 2: do alignment, if required ############################################################
-    if isinstance(model, basestring): model = retinotopy_model(model)
+    if isinstance(model, basestring):
+        h = hemi.name.lower() if model_hemi is Ellipsis else \
+            None              if model_hemi is None     else \
+            model_hemi
+        model = retinotopy_model(model, hemi=h)
     if not isinstance(model, RegisteredRetinotopyModel):
         raise ValueError('model must be a RegisteredRetinotopyModel')
     data['model'] = model
@@ -608,7 +640,7 @@ def register_retinotopy_initialize(hemi,
     if model_reg == 'fsaverage_sym':
         proj_from_hemi = hemi if hemi.chirality == 'LH' else hemi.subject.RHX
     else:
-        if model_chiraliry is not None and hemi.chirality != model_chiraliry:
+        if model_chirality is not None and hemi.chirality != model_chirality:
             raise ValueError('Inverse-chirality hemisphere cannot be registered to model')
         proj_from_hemi = hemi
     # make sure we are registered to the model space
@@ -648,6 +680,8 @@ def register_retinotopy_initialize(hemi,
     data['prior_registration'] = prior_reg
     data['prior_hemisphere'] = prior_hemi
     # Step 3: resample, if need be
+    if resample is Ellipsis:
+        resample = 'fsaverage_sym' if model_hemi is None else 'fsaverage'
     data['resample'] = resample
     if resample is None:
         tohem = proj_from_hemi
@@ -726,7 +760,7 @@ def register_retinotopy_initialize(hemi,
     return data
 
 def register_retinotopy(hemi,
-                        model='benson17',
+                        model='benson17', model_hemi=Ellipsis,
                         polar_angle=None, eccentricity=None, weight=None, weight_cutoff=0.1,
                         max_eccentricity=None,
                         partial_voluming_correction=True,
@@ -735,7 +769,7 @@ def register_retinotopy(hemi,
                         sigma=Ellipsis,
                         select='close',
                         prior='retinotopy',
-                        resample='fsaverage_sym',
+                        resample=Ellipsis,
                         max_steps=2000, max_step_size=0.05, method='random',
                         max_predicted_eccen=90,
                         return_meta_data=False,
@@ -823,6 +857,10 @@ def register_retinotopy(hemi,
       * model specifies the instance of the retinotopy model to use; this must be an
         instance of the RegisteredRetinotopyModel class or a string that can be passed to the
         retinotopy_model() function (default: 'standard').
+      * model_hemi specifies the hemisphere of the model; generally you shouldn't have to set this
+        unless you are using an fsaverage_sym model, in which case it should be set to None; in all
+        other cases, the default value (Ellipsis) instructs the function to auto-detect the
+        hemisphere.
       * polar_angle, eccentricity, and weight specify the property names for the respective
         quantities; these may alternately be lists or numpy arrays of values. If weight is not given
         or found, then unity weight for all vertices is assumed. By default, each will check the
@@ -862,9 +900,10 @@ def register_retinotopy(hemi,
         the predicted retinotopy values.
       * prior (default: 'retinotopy') specifies the prior that should be used, if found, in the 
         topology registrations for the subject associated with the retinotopy_model's registration.
-      * resample (default: 'fsaverage_sym') specifies that the data should be resampled to one of
+      * resample (default: Ellipsis) specifies that the data should be resampled to one of
         the uniform meshes, 'fsaverage' or 'fsaverage_sym', prior to registration; if None then no
-        resampling is performed.
+        resampling is performed; if Ellipsis, then auto-detect either fsaverage or fsaverage_sym
+        based on the model_hemi option (if it is None, fsaverage_sym, else fsaverage).
     '''
     # Step 1: prep the map for registration--figure out what properties we're using...
     model = retinotopy_model()      if model is None                 else \
@@ -872,6 +911,7 @@ def register_retinotopy(hemi,
             model
     data = register_retinotopy_initialize(hemi,
                                           model=model,
+                                          model_hemi=model_hemi,
                                           polar_angle=polar_angle,
                                           eccentricity=eccentricity,
                                           weight=weight,
@@ -893,19 +933,19 @@ def register_retinotopy(hemi,
             edge_well_potential = [['edge', 'infinite-well', 'min', emin, 'max', emax]]
         r = mesh_register(
             data['map'],
-            edge_well_potential + [
-                ['angle',     'infinite-well'],
-                ['edge',      'harmonic',      'scale', edge_scale],
-                ['angle',     'harmonic',      'scale', angle_scale],
-                ['perimeter', 'harmonic'],
-                retinotopy_anchors(data['map'], model,
-                                   polar_angle='polar_angle',
-                                   eccentricity='eccentricity',
-                                   weight='weight',
-                                   weight_cutoff=0, # taken care of above
-                                   scale=functional_scale,
-                                   select=select,
-                                   **({} if sigma is Ellipsis else {'sigma':sigma}))],
+            #edge_well_potential + [
+            [#['angle',     'infinite-well'],
+             ['edge',      'harmonic-log', 'scale', edge_scale],
+             ['angle',     'harmonic-log', 'scale', angle_scale],
+             ['perimeter', 'harmonic'],
+             retinotopy_anchors(data['map'], model,
+                                polar_angle='polar_angle',
+                                eccentricity='eccentricity',
+                                weight='weight',
+                                weight_cutoff=0, # taken care of above
+                                scale=functional_scale,
+                                select=select,
+                                **({} if sigma is Ellipsis else {'sigma':sigma}))],
             method=method,
             max_steps=max_steps,
             max_step_size=max_step_size)
