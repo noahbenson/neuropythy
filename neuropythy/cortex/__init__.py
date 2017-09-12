@@ -799,6 +799,126 @@ class CorticalMesh(Immutable):
         (coords, faces) = fsio.read_geometry(file)
         return CorticalMesh(coords, faces, source_file=file)
 
+def mesh_property(mesh, prop,
+                  dtype=Ellipsis,
+                  outliers=None,  data_range=None,   clipped=np.inf,
+                  weight=None,    weight_min=0,      weight_transform=Ellipsis,
+                  mask=None,      valid_range=None,  null=np.nan,
+                  transform=None, yield_weight=False):
+    '''
+    mesh_property(mesh, prop) yields the given property from the mesh after performing a set of
+      filters on the property, as specified by the options. In the property array that is returned,
+      the values that are considered outliers (data out of some range) are indicated by numpy.inf,
+      and values that are not in the optionally-specified mask are given the value numpy.nan;
+      these may be changed with the clipped and null, respectively.
+
+    The property argument prop may be either specified as a string (a property name in the mesh) or
+    as an array itself. The weight option may also be specified this way.
+
+    Options:
+      * outliers (default: None) specifies the vertices that should be considered outliers in the
+        mesh registration; this may be either None (no outliers explicitly specified), a list of
+        indices, or a boolean mask.
+      * data_range (default: None) specifies the acceptable data range for values in the property;
+        if None then this paramter is ignored. If specified as a pair of numbers (min, max), then
+        data that is less than the min or greater than the max is marked as an outlier (in addition
+        to other explicitly specified outliers). The values np.inf or -np.inf can be specified to
+        indicate a one-sided range.
+      * clipped (default: np.inf) specifies the value to be used to mark an out-of-range value in
+        the returned array.
+      * mask (default: None) specifies the vertices that should be included in the property array;
+        values are specified in the mask similarly to the outliers option, except that mask values
+        are included rather than excluded. The mask takes precedence over the outliers, in that a
+        null (out-of-mask) value is always marked as null rather than clipped.
+      * valid_range (default: None) specifies the range of values that are considered valid; i.e.,
+        values outside of the range are marked as null. Specified the same way as data_range.
+      * null (default: np.nan) specifies the value marked in the array as out-of-mask.
+      * transform (default: None) may optionally provide a function to be passed the array prior to
+        being returned (after null and clipped values are marked).
+      * dtype (defaut: Ellipsis) specifies the type of the array that should be returned. Ellipsis
+        indicates that the type of the given property should be used. If None, then a normal Python
+        array is returned. Otherwise, should be a numpy type such as numpy.real64 or
+        numpy.complex128.
+      * weight (default: None) specifies the property or property array that should be examined as
+        the weight.
+      * weight_min (default: 0) specifies the value at-or-below which the weight is considered 
+        insignificant and the value is marked as clipped.
+      * weight_transform (default: None) specifies a function that should be applied to the weight
+        array before being used in the function.
+      * yield_weight (default: False) specifies, if True, that instead of yielding prop, yield the
+        tuple (prop, weight).
+    '''
+    # First, get the property array, as an array:
+    if isinstance(prop, basestring):
+        prop = mesh.prop(prop)
+    elif not hasattr(prop, '__iter__'):
+        raise ValueError('prop must be a string or a list-like object')
+    elif dtype is Ellipsis:
+        dtype = prop.dtype
+    if not np.isnan(null):
+        prop = [np.nan if x is null else x for x in prop]
+    if dtype is Ellipsis:
+        prop = (np.array(prop, dtype=prop.dtype) if isinstance(prop, np.ndarray) else
+                np.array(prop))
+    else:
+        prop = np.array(prop, dtype=dtype)
+    # Next, do the same for weight:
+    if isinstance(weight, basestring):
+        weight = mesh.prop(weight)
+    elif not hasattr(prop, '__iter__'):
+        raise ValueError('weight must be a string or a list-like object')
+    if weight is None or (weight_min is None and not yield_weight):
+        low_weight = []
+    else:
+        weight = np.array(weight, dtype=np.float)
+        if weight_transform is Ellipsis:   weight[np.isclose(weight, 0)] = 0
+        elif weight_transform is not None: weight = weight_transform(weight)
+        low_weight = [] if weight_min is None else np.where(weight <= weight_min)[0]
+    # Next, find the mask; these are values that can be included theoretically;
+    all_vertices = np.asarray(range(mesh.vertex_count), dtype=np.int)
+    where_nan = np.where(np.isnan(prop))[0]
+    where_inf = np.where(np.isinf(prop))[0]
+    where_ok  = reduce(np.setdiff1d, [all_vertices, where_nan, where_inf])
+    # look at the valid_range...
+    where_inv = [] if valid_range is None else \
+                where_ok[(prop[where_ok] < valid_range[0]) | (prop[where_ok] > valid_range[1])]
+    # Whittle down the mask to what we are sure is in the spec:
+    where_nan = np.union1d(where_nan, where_inv)
+    mask = np.setdiff1d(all_vertices if mask is None else all_vertices[mask], where_nan)
+    # Find the outliers: values specified as outliers or values with inf; will build this as we go
+    outliers = [] if outliers is None else all_vertices[outliers]
+    outliers = np.intersect1d(outliers, mask) # outliers not in the mask don't matter anyway
+    outliers = np.union1d(outliers, low_weight) # low-weight vertices are treated as outliers
+    # If there's a data range argument, deal with how it affects outliers
+    if data_range is not None:
+        if hasattr(data_range, '__iter__'):
+            outliers = np.union1d(outliers, mask[np.where(prop[mask] < data_range[0])[0]])
+            outliers = np.union1d(outliers, mask[np.where(prop[mask] > data_range[1])[0]])
+        else:
+            outliers = np.union1d(outliers, mask[np.where(prop[mask] < 0)[0]])
+            outliers = np.union1d(outliers, mask[np.where(prop[mask] > data_range)[0]])
+    # no matter what, trim out the infinite values (even if inf was in the data range)
+    outliers = np.union1d(outliers, mask[np.where(np.isinf(prop[mask]))[0]])
+    # Okay, mark everything in the prop:
+    where_nan = np.asarray(where_nan, dtype=np.int)
+    outliers = np.asarray(outliers, dtype=np.int)
+    prop[where_nan] = null
+    prop[outliers]  = clipped
+    if yield_weight:
+        weight[where_nan] = 0
+        weight[outliers] = 0
+    # transform?
+    if transform: prop = transform(prop)
+    # That's it, just return
+    return (prop, weight) if yield_weight else prop
+    
+def mesh_minimize(mesh, *spec, **kwargs):
+    '''
+    mesh_minimize(mesh, spec..., props...) yields a dictionary of property arrays for the given mesh
+      after the minimization specified by the argument spec have been performed.
+    '''
+    pass
+    
 # smooth a field on the cortical surface
 def mesh_smooth(mesh, prop, smoothness=0.5, weights=None,
                 outliers=None, mask=None, null=np.nan,
