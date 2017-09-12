@@ -189,8 +189,15 @@ class Mesh(Immutable):
             res = np.full(len(pt), None)
             # filter out points that aren't close enough to be in a triangle:
             (dmins, dmaxs) = [[f(x) for x in self.coordinates.T] for f in [np.min, np.max]]
-            inside_q = reduce(np.logical_and,
-                              [(x >= mn)&(x <= mx) for (x,mn,mx) in zip(pt.T,dmins,dmaxs)])
+            finpts = np.isfinite(np.sum(pt, axis=1))
+            if finpts.sum() == 0:
+                inside_q = reduce(np.logical_and,
+                                  [(x >= mn)&(x <= mx) for (x,mn,mx) in zip(pt.T,dmins,dmaxs)])
+            else:
+                inside_q = np.full(len(pt), False)
+                inside_q[finpts] = reduce(
+                    np.logical_and,
+                    [(x >= mn)&(x <= mx) for (x,mn,mx) in zip(pt[finpts].T,dmins,dmaxs)])
             if not inside_q.any(): return res
             res[inside_q] = try_nearest(pt[inside_q])
             return res
@@ -359,9 +366,12 @@ class Mesh(Immutable):
             tx = self.coordinates[self.triangles[face_id]]
         else:
             data = data if data.shape[1] == 3 or data.shape[1] == 2 else data.T
-            face_id = self.container(data)
-            faces = self.triangles[face_id]
-            tx = np.transpose(np.asarray([self.coordinates[f] for f in faces]), (0,1,2))
+            face_id = np.asarray(self.container(data))
+            faces = self.triangles
+            null = np.full((faces.shape[1], self.coordinates.shape[1]), np.nan)
+            tx = np.transpose(np.asarray([self.coordinates[faces[f]] if f else null
+                                          for f in face_id]),
+                              (0,1,2))
         bc = cartesian_to_barycentric_3D(tx, data) if self.coordinates.shape[1] == 3 else \
              cartesian_to_barycentric_2D(tx, data)
         return {'face_id': face_id, 'coordinates': bc}
@@ -377,9 +387,14 @@ class Mesh(Immutable):
         if 'coordinates' not in data: raise ValueError('address must contain coordinates')
         face_id = data['face_id']
         coords = data['coordinates']
+        faces = self.triangles
         if all(hasattr(x, '__iter__') for x in (face_id, coords)):
-            faces = self.triangles[face_id].T
-            tx = np.transpose(np.asarray([self.coordinates[f] for f in faces]), (0,2,1))
+            null = np.full((faces.shape[1], self.coordinates.shape[1]), np.nan)
+            tx = np.transpose(np.asarray([self.coordinates[faces[f]] if f else null
+                                          for f in face_id]),
+                              (0,2,1))
+        elif face_id is None:
+            return np.full(self.coordinates.shape[1], np.nan)
         else:
             tx = np.asarray(self.coordinates[self.triangles[face_id]])
         return barycentric_to_cartesian(tx, coords)

@@ -572,7 +572,11 @@ def retinotopy_anchors(mesh, mdl,
         raise ValueError('sigma must be a number or a list of 3 numbers')
     # okay, we've partially parsed the data that was given; now we can construct the final list of
     # instructions:
-    return (['anchor', shape, idcs, ancs, 'scale', wgts]
+    return (['anchor',
+             np.asarray(shape, dtype=np.float64),
+             np.asarray(idcs, dtype=np.int),
+             np.asarray(ancs, dtype=np.float64),
+             'scale', np.asarray(wgts, dtype=np.float64)]
             + ([] if sigs is None else ['sigma', sigs])
             + ([] if suffix is None else suffix))
 
