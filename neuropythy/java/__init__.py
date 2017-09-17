@@ -82,6 +82,7 @@ def to_java_array(m):
     to_java_array(m) yields to_java_ints(m) if m is an array of integers and to_java_doubles(m) if
     m is anything else. The numpy array m is tested via numpy.issubdtype(m.dtype, numpy.int64).
     '''
+    if not hasattr(m, '__iter__'): return m
     m = np.asarray(m)
     if np.issubdtype(m.dtype, np.int) or all(isinstance(x, num.Integral) for x in m):
         return to_java_ints(m)

@@ -256,9 +256,12 @@ class Hemisphere(Immutable):
                                      sub.RHX.sym_surface_data      if sub.RHX is not None       else
                                      (None,None))),
         'faces':                (('sphere_surface_data',), lambda dat: dat[1].T),
+        'face_count':           (('faces',), lambda F: F.shape[1]),
         'edge_data':            (('faces',), lambda F: Hemisphere.calculate_edge_data(F)),
         'edges':                (('edge_data',), lambda ED: ED[0]),
         'edge_face_index':      (('edge_data',), lambda ED: ED[1]),
+        'edge_count':           (('edge_data',), lambda ED: ED[0].shape[1]),
+        
 
         'sphere_surface':       (('_load_surface','subject','sphere_surface_data','topology'), 
                                  lambda f,sub,dat,topo: f(

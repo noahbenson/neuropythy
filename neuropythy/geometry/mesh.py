@@ -188,7 +188,8 @@ class Mesh(Immutable):
                 return res
             res = np.full(len(pt), None)
             # filter out points that aren't close enough to be in a triangle:
-            (dmins, dmaxs) = [[f(x) for x in self.coordinates.T] for f in [np.min, np.max]]
+            (dmins, dmaxs) = [[f(x[np.isfinite(x)]) for x in self.coordinates.T]
+                              for f in [np.min, np.max]]
             finpts = np.isfinite(np.sum(pt, axis=1))
             if finpts.sum() == 0:
                 inside_q = reduce(np.logical_and,

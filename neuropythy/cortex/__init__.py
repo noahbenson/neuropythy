@@ -257,15 +257,15 @@ class CorticalMesh(Immutable):
         elif type(val) is list:
             x = np.array(val)
         else:
-            raise ValueError('faces must be an integer metrix of faces')
+            raise ValueError('faces must be an integer matrix of faces')
         # Faces must be an integer array
         if not issubclass(x.dtype.type, np.integer):
-            raise ValueError('faces must be an integer metrix of faces')
+            raise ValueError('faces must be an integer matrix of faces')
         # Faces must be n x 3 or 3 x n
         if x.shape[1] == 3:
             x = x.transpose()
         elif x.shape[0] != 3:
-            raise ValueError('faces must be an integer metrix of faces')
+            raise ValueError('faces must be an integer matrix of faces')
         if not x.flags['WRITEABLE']:
             x = x.copy()
             x.setflags(write=False)
@@ -331,15 +331,17 @@ class CorticalMesh(Immutable):
         'edge_data':       (('faces',), lambda F: CorticalMesh.calculate_edge_data(F)),
         'edges':           (('edge_data',), lambda ED: ED[0]),
         'edge_index':      (('edge_data',), lambda ED: ED[1]),
+        'edge_count':      (('edge_data',), lambda ED: ED[0].shape[1]),
         'indexed_edges':   (('edges','vertex_index'), 
                             lambda E,I: np.asarray([[I[u] for u in E[0]], [I[v] for v in E[1]]])),
         'edge_face_index': (('edge_data',), lambda ED: ED[2]),
 
-        'face_index': (('faces',), lambda F: CorticalMesh.calculate_face_data(F)),
-        'indexed_faces': (('faces','vertex_index'), 
-                          lambda F,VI: np.asarray([[VI[a] for a in F[0]],
-                                                   [VI[b] for b in F[1]],
-                                                   [VI[c] for c in F[2]]])),
+        'face_index':      (('faces',), lambda F: CorticalMesh.calculate_face_data(F)),
+        'indexed_faces':   (('faces','vertex_index'), 
+                            lambda F,VI: np.asarray([[VI[a] for a in F[0]],
+                                                     [VI[b] for b in F[1]],
+                                                     [VI[c] for c in F[2]]])),
+        'face_count':      (('faces',), lambda F: F.shape[1]),
 
         'index': (
             ('vertex_index', 'edge_index', 'face_index'),
@@ -514,9 +516,9 @@ class CorticalMesh(Immutable):
             np.union1d([], [l for idcs in self.vertex_faces(vincl)
                               for l in idcs
                               if fs[0,l] in vincl and fs[1,l] in vincl and fs[2,l] in vincl]))
-        vincl = np.asarray([int(i) for i in sorted(list(vincl))])
-        eincl = np.asarray([int(i) for i in sorted(list(eincl))])
-        fincl = np.asarray([int(i) for i in sorted(list(fincl))])
+        vincl = np.asarray([int(i) for i in sorted(list(vincl))], dtype=np.int)
+        eincl = np.asarray([int(i) for i in sorted(list(eincl))], dtype=np.int)
+        fincl = np.asarray([int(i) for i in sorted(list(fincl))], dtype=np.int)
         # Make the subsets
         I = self.index[vincl]
         X = self.coordinates[:, I]
@@ -911,13 +913,6 @@ def mesh_property(mesh, prop,
     if transform: prop = transform(prop)
     # That's it, just return
     return (prop, weight) if yield_weight else prop
-    
-def mesh_minimize(mesh, *spec, **kwargs):
-    '''
-    mesh_minimize(mesh, spec..., props...) yields a dictionary of property arrays for the given mesh
-      after the minimization specified by the argument spec have been performed.
-    '''
-    pass
     
 # smooth a field on the cortical surface
 def mesh_smooth(mesh, prop, smoothness=0.5, weights=None,

@@ -35,14 +35,14 @@ register_retinotopy_help = \
       surface-data files such as surf/lh.white.
     * surf/lh.angle_predict.mgz   surf/rh.angle_predict.mgz
       surf/lh.eccen_predict.mgz   surf/rh.eccen_predict.mgz
-      surf/lh.v123roi_predict.mgz surf/rh.v123roi_predict.mgz
+      surf/lh.varea_predict.mgz   surf/rh.varea_predict.mgz
       These files contain predictions of polar angle, eccentricity, and visual-area
       label for each hemisphere. The files are mgz format, so contain volumes;
       however, the volumes in each of these files is (1 x 1 x n) where n is the
       number of vertices in the hemisphere's Freesurfer meshes.
     * mri/angle_predict.mgz
       mri/eccen_predict.mgz
-      mri/v123roi_predict.mgz
+      mri/varea_predict.mgz
       These contain the data from the above surface data projected into the
       subject's 3D volume. Note that the volumes are oriented like Freesurfer's
       mri/brain.mgz file; if you want to convert this to the orientation of your
@@ -106,7 +106,7 @@ register_retinotopy_help = \
       --label-tag=|-l<tag>
       These options specify the output tag to use for the predicted measurement
       that results from the registration. By default, these are
-      'eccen_predict', 'angle_predict', and 'v123roi_predict'.
+      'eccen_predict', 'angle_predict', and 'varea_predict'.
       The output files have the name <hemi>.<tag>.mgz
     * --registration-name=|-u<string>
       This parameter indicates that the registration file, by default named 
@@ -167,7 +167,7 @@ _retinotopy_parser_instructions = [
     ['p', 'prior',                  'prior',             'retinotopy'],
     ['y', 'eccen-tag',              'eccen_tag',         'eccen_predict'],
     ['t', 'angle-tag',              'angle_tag',         'angle_predict'],
-    ['l', 'label-tag',              'label_tag',         'v123roi_predict'],
+    ['l', 'label-tag',              'label_tag',         'varea_predict'],
     ['u', 'registration-name',      'registration_name', 'retinotopy_sym'],
     ['M', 'max-output-eccen',       'max_out_eccen',     '90'],
     ['d', 'subjects-dir',           'subjects_dir',      None]]

@@ -8,14 +8,14 @@ import scipy                        as sp
 import nibabel.freesurfer.io        as fsio
 import nibabel.freesurfer.mghformat as fsmgh
 
-import os, sys, gzip
+import os, sys, gzip, abc
 
 from numpy.linalg import norm
 from math         import pi
 from numbers      import Number
 from pysistence   import make_dict
 
-from neuropythy.cortex       import (CorticalMesh)
+from neuropythy.cortex       import (CorticalMesh, mesh_property)
 from neuropythy.freesurfer   import (freesurfer_subject, add_subject_path,
                                      cortex_to_ribbon, cortex_to_ribbon_map,
                                      Hemisphere, subject_paths)
@@ -49,7 +49,7 @@ def empirical_retinotopy_data(hemi, retino_type):
     '''
     dat = _empirical_retinotopy_names[retino_type.lower()]
     hdat = {s.lower(): s for s in hemi.property_names}
-    return next((hemi.prop(hdat[s]) for s in dat if s.lower() in hdat), None)
+    return next((hemi.prop(hdat[s.lower()]) for s in dat if s.lower() in hdat), None)
 
 _predicted_retinotopy_names = {
     'polar_angle':  ['predicted_polar_angle',   'model_polar_angle',
@@ -122,9 +122,353 @@ def extract_retinotopy_argument(obj, retino_type, arg, default='any'):
         raise RuntimeError('No %s retinotopy data found given argument: %s' % (retino_type, arg))
     n = obj.vertex_count
     if len(values) != n:
-        raise RuntimeError('Given %s data has incorrect length (%s instead of %s)!' \
-                           % (retino_type, len(values), n))
+        found = False
+        # could be that we were given a mesh data-field for a map
+        try:
+            s = obj.meta_data['source_mesh']
+            if s.vertex_count == len(values):
+                values = np.asarray(values)[obj.vertex_list]
+                found = True
+        except: pass
+        if not found:
+            raise RuntimeError('Given %s data has incorrect length (%s instead of %s)!' \
+                               % (retino_type, len(values), n))
     return np.array(values)
+
+_default_polar_angle_units = {
+    'polar_angle': 'deg',
+    'polar angle': 'deg',
+    'angle':       'rad',
+    'theta':       'rad',
+    'polang':      'deg',
+    'ang':         'rad'}
+_default_polar_angle_axis = {
+    'polar_angle': 'UVM',
+    'polar angle': 'UVM',
+    'angle':       'RHM',
+    'theta':       'RHM',
+    'polang':      'UVM',
+    'ang':         'RHM'}
+_default_polar_angle_dir = {
+    'polar_angle': 'cw',
+    'polar angle': 'cw',
+    'angle':       'ccw',
+    'theta':       'ccw',
+    'polang':      'cw',
+    'ang':         'ccw'}
+_default_eccentricity_units = {
+    'eccentricity': 'deg',
+    'eccen':        'deg',
+    'rho':          'rad',
+    'ecc':          'deg',
+    'radius':       'rad'}
+_default_x_units = {
+    'x':            'rad',
+    'longitude':    'deg',
+    'lon':          'deg'}
+_default_y_units = {
+    'y':            'rad',
+    'latitude':     'deg',
+    'lat':          'deg'}
+_default_z_units = {
+    'z':            'rad',
+    'complex':      'deg',
+    'complex-rad':  'rad',
+    'coordinate':   'deg'}
+def _clean_angle_deg(polang):
+    polang = np.asarray(polang)
+    clean = np.mod(polang + 180, 360) - 180
+    is180 = np.isclose(polang, -180)
+    clean[is180] = np.abs(clean[is180]) * np.sign(polang[is180])
+    return clean
+def _clean_angle_rad(polang):
+    polang = np.asarray(polang)
+    clean = np.mod(polang + np.pi, np.pi*2) - np.pi
+    return clean
+_retinotopy_style_fns = {
+    'visual':       lambda t,e: (_clean_angle_deg(90.0 - 180.0/np.pi * t), e),
+    'visual-rad':   lambda t,e: (_clean_angle_rad(np.pi/2 - t), e * np.pi/180.0),
+    'spherical':    lambda t,e: (_clean_angle_rad(t), e*np.pi/180.0),
+    'standard':     lambda t,e: (_clean_angle_rad(t), e),
+    'cartesian':    lambda t,e: (np.pi/180.0 * e * np.cos(t), np.pi/180.0 * e * np.sin(t)),
+    'geographical': lambda t,e: (e * np.cos(t), e * np.sin(t)),
+    'complex':      lambda t,e: e * np.exp(t * 1j),
+    'complex-rad':  lambda t,e: np.pi/180.0 * e * np.exp(t * 1j),
+    'z':            lambda t,e: np.pi/180.0 * e * np.exp(t * 1j)}
+
+def as_retinotopy(data, output_style='visual', units=Ellipsis, prefix=None, suffix=None):
+    '''
+    as_retinotopy(data) converts the given data, if possible, into a 2-tuple, (polar_angle, eccen),
+      both in degrees, with 0 degrees of polar angle corresponding to the upper vertical meridian
+      and negative values corresponding to the left visual hemifield.
+    as_retinotopy(data, output_style) yields the given retinotopy data in the given output_style;
+      as_retinotopy(data) is equivalent to as_retinotopy(data, 'visual').
+
+    This function is intended as a general conversion routine between various sources of retinotopy
+    data. All lookups are done in a case insensitive manner. Data may be specified in any of the
+    following ways:
+      * A cortical mesh containing recognized properties (such as 'polar_angle' and 'eccentricity'
+        or 'latitude' and 'longitude'.
+      * A dict with recognized fields.
+      * A tuple of (polar_angle, eccentricity) (assumed to be in 'visual' style).
+      * A numpy vector of complex numbers (assumed in 'complex' style).
+      * An n x 2 or 2 x n matrix whose rows/columns are (polar_angle, eccentricity) values (assumed
+        in 'visual' style).
+
+    The following output_styles are accepted:
+      * 'visual':       polar-axis:         upper vertical meridian
+                        positive-direction: clockwise
+                        fields:             ['polar_angle' (degrees), 'eccentricity' (degrees)]
+      * 'spherical':    polar-axis:         right horizontal meridian
+                        positive-direction: counter-clockwise
+                        fields:             ['theta' (radians), 'rho' (radians)]
+      * 'standard':     polar-axis:         right horizontal meridian
+                        positive-direction: counter-clockwise
+                        fields:             ['angle' (radians), 'eccentricity' (degrees)]
+      * 'cartesian':    axes:               x/y correspond to RHM/UVM
+                        positive-direction: left/up
+                        fields:             ('x' (radians), 'y' (radians))
+      * 'geographical': axes:               x/y correspond to RHM/UVM
+                        positive-direction: left/up
+                        fields:             ('longitude' (degrees), 'latitude' (degrees))
+      * 'complex':      axes:               x/y correspond to RHM/UVM
+                        positive-direction: left/up
+                        fields:             longitude (degrees) + I*latitude (degrees)
+      * 'complex-rad':  axes:               x/y correspond to RHM/UVM
+                        positive-direction: left/up
+                        fields:             longitude (radians) + I*latitude (radians)
+      * 'visual-rad':   polar-axis:         upper vertical meridian
+                        positive-direction: clockwise
+                        fields:             ['angle' (radians), 'eccentricity' (radians)]
+
+    The following options may be given:
+      * units (Ellipsis) specifies the unit that should be assumed (degrees or radians);
+        if Ellipsis is given, then auto-detect the unit if possible. This may be a map whose keys are
+        'polar_angle' and 'eccentricity' (or the equivalent titles in data) and whose keys are the
+        individual units.
+      * prefix (None) specifies a prefix that is required for any keys or property names.
+      * suffix (None) specifies a suffix that is required for any keys or property names.
+    '''
+    # simple sanity check:
+    output_style = output_style.lower()
+    if output_style not in _retinotopy_style_fns:
+        raise ValueError('Unrecognized output style: %s' % output_style)
+    # First step: get the retinotopy into a format we can deal with easily
+    if isinstance(data, tuple) and len(data) == 2:
+        data = {'polar_angle': data[0], 'eccentricity': data[1]}
+    if isinstance(data, list):
+        data = np.asarray(data)
+    if isinstance(data, np.ndarray):
+        if len(data.shape) == 1 and np.issubdtype(data.dtype, np.complex):
+            data = {'complex': data}
+        else:
+            if data.shape[1] == 2: data = data.T
+            data = {'polar_angle': data[0], 'eccentricity': data[1]}
+    # We now assume that data is a dict type; or is a mesh;
+    # figure out the data we have and make it into theta/rho
+    if isinstance(data, CorticalMesh) or isinstance(data, Hemisphere):
+        pnames = {k.lower():k for k in data.property_names}
+        mem_dat = lambda k: k in pnames
+        get_dat = lambda k: data.prop(pnames[k])
+    else:
+        data = {k.lower():v for (k,v) in data.iteritems()}
+        mem_dat = lambda k: k in data
+        get_dat = lambda k: data[k]
+    # Check in a particular order:
+    suffix = '' if suffix is None else suffix.lower()
+    prefix = '' if prefix is None else prefix.lower()
+    (angle_key, eccen_key, x_key, y_key, z_key) = [
+        next((k for k in aliases if mem_dat(prefix + k + suffix)), None)
+        for aliases in [['polar_angle', 'polar angle', 'angle', 'ang', 'polang', 'theta'],
+                        ['eccentricity', 'eccen', 'ecc', 'rho'],
+                        ['x', 'longitude', 'lon'], ['y', 'latitude', 'lat'],
+                        ['z', 'complex', 'complex-rad', 'coordinate']]]
+    rad2deg = 180.0 / np.pi
+    deg2rad = np.pi / 180.0
+    (hpi, dpi) = (np.pi / 2.0, np.pi * 2.0)
+    if angle_key and eccen_key:
+        akey = prefix + angle_key + suffix
+        ekey = prefix + eccen_key + suffix
+        theta = np.asarray(get_dat(akey))
+        rho   = np.asarray(get_dat(ekey))
+        theta = theta * (deg2rad if _default_polar_angle_units[angle_key]  == 'deg' else 1)
+        rho   = rho   * (rad2deg if _default_eccentricity_units[eccen_key] == 'rad' else 1)
+        if _default_polar_angle_axis[angle_key] == 'UVM': theta = theta - hpi
+        if _default_polar_angle_dir[angle_key] == 'cw':   theta = -theta
+        ok = np.where(np.isfinite(theta))[0]
+        theta[ok[theta[ok] < -np.pi]] += dpi
+        theta[ok[theta[ok] >  np.pi]] -= dpi
+    elif x_key and y_key:
+        (x,y) = [np.asarray(get_dat(prefix + k + suffix)) for k in [x_key, y_key]]
+        if _default_x_units[x_key] == 'rad': x *= rad2deg
+        if _default_y_units[y_key] == 'rad': y *= rad2deg
+        theta = np.arctan2(y, x)
+        rho   = np.sqrt(x*x + y*y)
+    elif z_key:
+        z = get_dat(prefix + z_key + suffix)
+        theta = np.angle(z)
+        rho   = np.abs(z)
+        if _default_z_units[z_key] == 'rad': rho *= rad2deg
+    else:
+        raise ValueError('could not identify a valid retinotopic representation in data')
+    # Now, we just have to convert to the requested output style
+    f = _retinotopy_style_fns[output_style]
+    return f(theta, rho)
+
+def mesh_retinotopy(m, source='any'):
+    '''
+    mesh_retinotopy(m) yields a dict containing a retinotopy dataset the keys 'polar_angle',
+      'eccentricity', and any other related fields for the given retinotopy type; for example,
+      'pRF_size' and 'variance_explained' may be included for measured retinotopy datasets and
+      'visual_area' may be included for atlas or model datasets. The coordinates are always in the
+      'visual' retinotopy style, but can be reinterpreted with as_retinotopy.
+    mesh_retinotopy(m, source) may be used to specify a particular source for the data; this may be
+      either 'empirical', 'model', or 'any'; or it may be a prefix or suffix beginning or ending with
+      an _ character.
+    '''
+    source = source.lower()
+    model_rets = ['predicted', 'model', 'template', 'atlas', 'inferred']
+    empir_rets = ['empirical', 'measured', 'prf', 'data']
+    wild = False
+    extra_fields = {'empirical': [('variance_explained', ['varexp', 'vexpl', 'weight']),
+                                  ('radius', ['size', 'prf_size', 'prf_radius'])],
+                    'model':     [('visual_area', ['visual_roi', 'visual_label']),
+                                  ('radius', ['size', 'radius', 'prf_size', 'prf_radius'])]}
+    check_fields = []
+    if source in empir_rets:
+        fixes = empir_rets
+        check_fields = extra_fields['empirical']
+    elif source in model_rets:
+        fixes = model_rets
+        check_fields = extra_fields['model']
+    elif source in ['any', '*', 'all']:
+        fixes = model_rets + empir_rets
+        check_fields = extra_fields['model'] + extra_fields['empirical']
+        wild = True
+    elif source in ['none', 'basic']:
+        fixes = []
+        check_fields = extra_fields['model'] + extra_fields['empirical']
+        wild = True
+    else: fixes = []
+    # first, try all the fixes as prefixes then suffixes
+    (z, prefix, suffix) = (None, None, None)
+    if wild:
+        try: z = as_retinotopy(m, 'visual')
+        except: pass
+    for fix in fixes:
+        if z: break
+        try:
+            z = as_retinotopy(m, 'visual', prefix=(fix + '_'))
+            prefix = fix + '_'
+        except: pass
+    for fix in fixes:
+        if z: break
+        try:
+            z = as_retinotopy(m, 'visual', suffix=('_' + fix))
+            suffix = fix + '_'
+        except: pass
+    # if none of those worked, try with no prefix/suffix
+    if not z:
+        try:
+            z = as_retinotopy(m, 'visual', prefix=(source + '_'))
+            prefix = source + '_'
+        except:
+            try:
+                z = as_retinotopy(m, 'visual', suffix=('_' + source))
+                suffix = source + '_'
+            except: pass
+    # if still not z... we couldn't figure it out
+    if not z: raise ValueError('Could not find an interpretation for source %s' % source)
+    # okay, we found it; make it into a dict
+    res = {'polar_angle': z[0], 'eccentricity': z[1]}
+    # check for extra fields if relevant
+    pnames = {k.lower():k for k in m.property_names} if check_fields else {}
+    for (fname, aliases) in check_fields:
+        for f in [fname] + aliases:
+            if prefix: f = prefix + f
+            if suffix: f = f + suffix
+            f = f.lower()
+            if f in pnames: res[fname] = m.prop(pnames[f])
+    # That's it
+    return res
+
+_Kay2013_pRF_data = {k.lower():v for (k,v) in {
+    "V1":  {'m':0.168833, 'b':0.021791}, "V2":  {'m':0.169119, 'b':0.147386},
+    "V3":  {'m':0.263966, 'b':0.342211}, "hV4": {'m':0.529626, 'b':0.445005},
+    "V3a": {'m':0.357224, 'b':1.00189},  "V3b": {'m':0.357224, 'b':1.00189},
+    "VO1": {'m':0.685053, 'b':0.479878}, "VO2": {'m':0.93893,  'b':0.261769},
+    "LO1": {'m':0.856446, 'b':0.3614},   "LO2": {'m':0.74762,  'b':0.458872},
+    "TO1": {'m':1.37441,  'b':0.172395}, "TO2": {'m':1.65694,  'b':0.0}}.iteritems()}
+_pRF_data = {'kay2013': _Kay2013_pRF_data}
+def predict_pRF_radius(eccentricity, visual_area='V1', source='Kay2013'):
+    '''
+    predict_pRF_radius(eccentricity) yields an estimate of the pRF size for a patch of cortex at the
+      given eccentricity in V1.
+    predict_pRF_radius(eccentricity, area) yields an estimate in the given visual area (may be given
+      by the keyword visual_area).
+    predict_pRF_radius(eccentricity, area, source) uses the given source to estimate the pRF size
+      (may be given by the keyword source).
+
+    The following visual areas can be specified:
+      * 'V1' (default), 'V2', 'V3'
+      * 'hV4'
+      * 'V3a', 'V3b'
+      * 'VO1', 'VO2'
+      * 'LO1', 'LO2'
+      * 'TO1', 'TO2'
+
+    The following sources may be given:
+      * 'Kay2013': Kay KN, Winawer J, Mezer A, Wandell BA (2013) Compressive spatial summation in
+                   human visual cortex. J Neurophysiol. 110(2):481-94.
+    '''
+    visual_area = visual_area.lower()
+    source = source.lower()
+    dat = _pRF_data[source]
+    adat = dat[visual_area]
+    return dat['m']*eccentricity + dat['b']
+
+def _retinotopic_field_sign_triangles(m, retinotopy):
+    # get the polar angle and eccen data as a complex number in degrees
+    if isinstance(retinotopy, basestring):
+        (x,y) = as_retinotopy(mesh_retinotopy(m, retinotopy), 'geographical')
+    elif retinotopy is Ellipsis:
+        (x,y) = as_retinotopy(mesh_retinotopy(m, 'any'), 'geographical')
+    else:
+        (x,y) = as_retinotopy(retinotopy, 'geographical')
+    # Okay, now we want to make some coordinates...
+    coords = np.asarray([x, y])
+    us = coords[:, m.indexed_faces[1]] - coords[:, m.indexed_faces[0]]
+    vs = coords[:, m.indexed_faces[2]] - coords[:, m.indexed_faces[0]]
+    (us,vs) = [np.concatenate((xs, np.full((1, m.face_count), 0.0))) for xs in [us,vs]]
+    xs = np.cross(us, vs, axis=0)[2]
+    xs[np.isclose(xs, 0)] = 0
+    return np.sign(xs)
+
+def retinotopic_field_sign(m, element='vertices', retinotopy=Ellipsis, invert_field=False):
+    '''
+    retinotopic_field_sign(mesh) yields a property array of the field sign of every vertex in the 
+    mesh m; this value may not be exactly 1 (same as VF) or -1 (mirror-image) but some value
+    in-between; this is because the field sign is calculated exactly (1, 0, or -1) for each triangle
+    in the mesh then is average onto the vertices. To get only the triangle field signs, use
+    retinotopic_field_sign(m, 'triangles').
+
+    The following options are accepted:
+      * element ('vertices') may be 'vertices' to specify that the vertex signs should be returned
+        or 'triangles' (or 'faces') to specify that the triangle field signs should be returned.
+      * retinotopy (Ellipsis) specifies the retinotopic dataset to be used. If se to 'empirical' or
+        'predicted', the retinotopy data is auto-detected from the given categories; if set to
+        Ellipsis, a property pair like 'polar_angle' and 'eccentricity' or 'lat' and 'lon' are
+        searched for using the as_retinotopy function; otherwise, this may be a retinotopy dataset
+        recognizable by as_retinotopy.
+      * invert_field (False) specifies that the inverse of the field sign should be returned.
+    '''
+    tsign = _retinotopic_field_sign_triangles(m, retinotopy)
+    if invert_field: tsign = -tsign
+    element = element.lower()
+    if element == 'triangles' or element == 'faces': return tsign
+    fidx = m.vertex_face_index
+    vfs = np.asarray([np.mean(tsign[ii]) if len(ii) > 0 else 0 for ii in fidx])
+    return vfs    
 
 # Tools for retinotopy model loading:
 _default_schira_model = None
@@ -418,6 +762,9 @@ def retinotopy_mesh_field(mesh, mdl,
 def retinotopy_anchors(mesh, mdl,
                        polar_angle=None, eccentricity=None,
                        weight=None, weight_cutoff=0.1,
+                       field_sign=None,
+                       field_sign_weight=0,
+                       model_field_sign=None,
                        model_hemi=Ellipsis,
                        scale=1,
                        shape='Gaussian', suffix=None,
@@ -548,16 +895,28 @@ def retinotopy_anchors(mesh, mdl,
     # Okay, apply the model:
     res = mdl.angle_to_cortex(polar_angle[idcs], eccentricity[idcs])
     # Organize the data; trim out those not selected
-    data = [[[i for _ in r], r]
+    data = [[[i for _ in r], r, [ksidx[tuple(a)] for a in r]]
             for (i,r0) in zip(idcs, res)
             if r0[0] is not None
+            for ksidx in [{tuple(a):k for (k,a) in enumerate(r0)}]
             for r in [select(i, r0)]
             if len(r) > 0]
     # Flatten out the data into arguments for Java
     idcs = [int(i) for d in data for i in d[0]]
     ancs = np.asarray([pt for d in data for pt in d[1]]).T
+    labs = np.asarray([ii for d in data for ii in d[2]]).T
     # Get just the relevant weights and the scale
-    wgts = weight[idcs] * (1 if scale is None else scale)
+    wgts = np.asarray(weight[idcs] * (1 if scale is None else scale))
+    # add in the field-sign weights if requested here
+    if not np.isclose(field_sign_weight, 0) and model_field_sign is not None:
+        if field_sign is True or field_sign is Ellipsis or field_sign is None:
+            field_sign = retinotopic_field_sign(mesh, retinotopy={'polar_angle':  polar_angle,
+                                                                  'eccentricity': eccentricity})
+        elif isinstance(field_sign, basestring): field_sign = mesh.prop(field_sign)
+        field_sign = np.asarray(field_sign)
+        fswgts = 1.0 - 0.25 * np.asarray([(fs - model_field_sign[l+1])
+                                          for (l,fs) in zip(labs, field_sign[idcs])])**2
+        wgts *= fswgts * field_sign_weight + (1 - field_sign_weight)
     # Figure out the sigma parameter:
     if sigma is None: sigs = None
     elif isinstance(sigma, Number) or np.issubdtype(type(sigma), np.float): sigs = sigma
@@ -565,20 +924,20 @@ def retinotopy_anchors(mesh, mdl,
         [minsig, mult, maxsig] = sigma
         sigs = np.clip(
             [mult*min([norm(a0 - a) for a in anchs if a is not a0]) if len(iii) > 1 else maxsig
-             for (iii,anchs) in data
+             for (iii,anchs,_) in data
              for a0 in anchs],
             minsig, maxsig)
     else:
         raise ValueError('sigma must be a number or a list of 3 numbers')
     # okay, we've partially parsed the data that was given; now we can construct the final list of
     # instructions:
-    return (['anchor',
-             np.asarray(shape, dtype=np.float64),
+    tmp =  (['anchor', shape,
              np.asarray(idcs, dtype=np.int),
              np.asarray(ancs, dtype=np.float64),
              'scale', np.asarray(wgts, dtype=np.float64)]
             + ([] if sigs is None else ['sigma', sigs])
             + ([] if suffix is None else suffix))
+    return tmp
 
 def register_retinotopy_initialize(hemi,
                                    model='benson17', model_hemi=Ellipsis,
@@ -754,8 +1113,7 @@ def register_retinotopy_initialize(hemi,
                 np.asarray(pred[1], dtype=np.float32),
                 np.asarray(pred[2], dtype=np.int32))
         for i in (0,1,2): pred[i].flags.writeable = False
-        pred = make_dict({p:v
-                          for (p,v) in zip(['polar_angle', 'eccentricity', 'visual_area'], pred)})
+        pred = make_dict({p:v for (p,v) in zip(['polar_angle','eccentricity','visual_area'], pred)})
         d['prediction'] = pred
         rmesh.prop(pred)
         d['registered_mesh'] = rmesh
@@ -1007,3 +1365,259 @@ def predict_retinotopy(sub, template='benson17'):
          'visual_area':  sub.RHX.interpolate(sym, tmpl['varea'], apply=False, method='nearest')})
         
 
+def clean_retinotopy(obj, retinotopy='empirical', output_style='visual', weight=Ellipsis,
+                     equality_sigma=0.15, equality_scale=10.0,
+                     smoothness_scale=0.04, orthogonality_scale=0,
+                     yield_report=False):
+    '''
+    clean_retinotopy(mesh) attempts to cleanup the retinotopic maps on the given cortical mesh by
+      minimizing an objective function that tracks the smoothness of the fields, the orthogonality
+      of polar angle to eccentricity, and the deviation of the values from the measured values; the
+      yielded result is the smoothed retinotopy, as would be returned by
+      as_retinotopy(..., 'visual').
+    clean_retinotopy(hemi) performs the identical operation on the hemisphere's white surface.
+    
+    The following options are accepted:
+      * retinotopy ('empirical') specifies the retinotopy data; this should be understood by the
+        mesh_retinotopy function or the as_retinotopy function.
+      * output_style ('visual') specifies the style of the output data that should be returned;
+        this should be a string understood by as_retinotopy.
+      * yield_report (False) may be set to True, in which case a tuple (retino, report) is returned,
+        where the report is the return value of the scipy.optimization.minimize function.
+    '''
+    from scipy.optimize import minimize
+    from scipy.sparse import (lil_matrix, csr_matrix)
+    if isinstance(obj, Hemisphere): obj = obj.white_surface
+    # get the retinotopy first:
+    if isinstance(retinotopy, basestring):
+        retinotopy = mesh_retinotopy(obj, retinotopy.lower())
+    (theta0, eccen0) = as_retinotopy(retinotopy, 'visual')
+    # we want to scale eccen by a log-transform; this is the inverse of the cortical magnification
+    # function in Horton & Hoyt 1991
+    def _hh_ecc2cd(ecc):
+        return 17.3 * (0.287682 + np.log(0.75 + ecc))
+    def _hh_cd2ecc(d):
+        return 0.75*(np.exp(0.0578035*d) - 1)
+    rho_max = _hh_ecc2cd(90.0)
+    rho0    = _hh_ecc2cd(eccen0) / rho_max # range from 0-1
+    # We scale theta down to +/- pi
+    theta0 *= np.pi/180.0
+
+    # our x0 value is just a joining of theta with rho:
+    x0 = np.concatenate((theta0, rho0))
+    n = len(theta0)
+    es = obj.indexed_edges
+    fcs = obj.indexed_faces
+    m = es.shape[1]
+    p = fcs.shape[1]
+    ninv = 1.0 / n
+    minv = 1.0 / m
+
+    # figure out the weights...
+    if weight is Ellipsis:
+        varexp_aliases = ['variance_explained', 'varexp', 'vexpl', 'weight']
+        wgt = next((retinotopy[x] for x in varexp_aliases if x in retinotopy), ninv)
+    elif weight is None:
+        wgt = ninv
+    elif isinstance(weight, basestring):
+        wgt = obj.prop(weight)
+    else:
+        wgt = weight
+    wgt = np.asarray(wgt / np.sum(wgt))
+    ww  = wgt if wgt.shape is () else np.concatenate((wgt, wgt))
+
+    # Next, setup the potential functions
+
+    # PE1: equality; we use a Gaussian function so that patches of noise do not drive the potential
+    # too strongly...
+    (hpi, tau) = (0.5*np.pi, 2.0*np.pi)
+    sig = equality_sigma if hasattr(equality_sigma, '__iter__') else (equality_sigma,equality_sigma)
+    sig_tht = sig[0] * np.pi
+    sig_rho = sig[1]
+    f1_coef = ww
+    d1_coef = ww / np.concatenate([np.full(n, s**2) for s in [sig_tht,sig_rho]])
+    def _f_equal(x):
+        theta = x[0:n]
+        rho   = x[n:]
+        # differences...
+        dtht  = theta - theta0
+        drho  = rho - rho0
+        dtht2 = (dtht / sig_tht)**2
+        drho2 = (drho / sig_rho)**2
+        # okay, the equation itself
+        fexp  = np.exp(-0.5 * np.concatenate((dtht2, drho2)))
+        f     = np.sum(f1_coef * (1.0 - fexp))
+        # and the derivative
+        df    = d1_coef * fexp * np.concatenate((dtht, drho))
+        # That's it:
+        return (f, df)
+
+
+    # PE2: smoothness; we want the change along any edge to be minimal
+    # setup a fast edge-to-vertex summation:
+    e2v = lil_matrix((n, m))
+    for (k,(u,v)) in enumerate(es.T):
+        e2v[u,k] = 1.0
+        e2v[v,k] = -1.0
+    e2v = csr_matrix(e2v)
+    els = obj.edge_lengths
+    elsuu = np.isclose(els, 0)
+    els2inv = (1 + elsuu) / (els**2 + elsuu)
+    def _f_smooth(x):
+        theta = x[0:n]
+        rho   = x[n:]
+        # edge-values:
+        etht1 = theta[es[0]]
+        etht2 = theta[es[1]]
+        erho1 = rho[es[0]]
+        erho2 = rho[es[1]]
+        # differences along edges:
+        dtht  = (etht1 - etht2)
+        drho  = (erho1 - erho2)
+        dtht_r2 = dtht * els2inv
+        drho_r2 = drho * els2inv
+        # the potential is just the sum of squares of these
+        f = 0.5 * minv * (np.sum(dtht_r2*dtht) + np.sum(drho_r2*drho))
+        # for the derivative, we have to convert from edges back to vertices
+        df = minv * np.concatenate((e2v.dot(dtht_r2), e2v.dot(drho_r2)))
+        return (f, df)
+
+    # PE3: orthogonality; we want eccentricity and polar angle to be orthogonal
+    # at every triangle
+    # We need to calculate some constants beforehand...
+    fx = np.asarray([obj.coordinates[:,ii] for ii in fcs])
+    ## side lengths:
+    (s0_2,s1_2,s2_2) = [np.sum(dx**2, axis=0) for dx in (fx[2]-fx[1], fx[0]-fx[2], fx[1]-fx[0])]
+    ## height of the triangle (from a point in side 12 to point 0
+    (s0,s1,s2) = [np.sqrt(s) for s in (s0_2, s1_2, s2_2)]
+    s0uu = np.isclose(s0_2, 0)
+    inv_s0 = (1 - s0uu) / (s0 + s0uu)
+    part12 = (s0_2 - s1_2 + s2_2) * (0.5 * inv_s0)
+    height = np.sqrt(2*s0_2*(s1_2 + s2_2) - s0_2**2 - (s1_2 - s2_2)**2) * (0.5 * inv_s0)
+    heightuu = np.isclose(height, 0)
+    inv_h = (1 - heightuu) / (height + heightuu)
+    ## convenience function for calculating gradients wrt the faces and such
+    def _face_retino_grads(fs_tht, fs_rho):
+        # We can use the height and fraction of side 1-2 to find gradient vectors relative to the
+        # ad-hoc axes formed by traingle side 1-2 (x-axis) and the perpendicular to it (y-axis):
+        (gtht, grho) = [np.asarray([dx, (z[0] - (z[1] + dx*part12))*inv_h])
+                        for z  in [fs_tht, fs_rho]
+                        for dx in [(z[2] - z[1])*inv_s0]]
+        # find the norms of the gradients
+        (ntht_2, nrho_2) = [np.sum(gr**2, axis=0) for gr  in (gtht, grho)]
+        (ntht,   nrho)   = [np.sqrt(nz2)          for nz2 in (ntht_2, nrho_2)]
+        # dot product vecotrs, u, can now be calculated:
+        (utht, urho) = [gz * ((1 - uu)/(nz + uu))
+                        for (gz,nz) in [(gtht,ntht), (grho,nrho)]
+                        for uu in [np.isclose(nz, 0)]]
+        return (gtht,utht,ntht,ntht_2, grho,urho,nrho,nrho_2)
+    ## We need to know the initial gradient lengths
+    (fs_tht0, fs_rho0) = [[z0[ii] for ii in fcs] for z0 in [theta0, rho0]]
+    (_,_,ntht0,ntht0_2, _,_,nrho0,nrho0_2) = _face_retino_grads(fs_tht0, fs_rho0)
+    fidcs = np.where(~np.isclose(ntht0_2 * nrho0_2, 0))[0]
+    ## we are only interested in faces whose initial gradients are not near 0; this prevents
+    ## discontinuities in the potential. Go ahead and filter these:
+    (fcs, fs_tht0, fs_rho0)             = [np.asarray(z)[:,fidcs] for z in (fcs, fs_tht0, fs_rho0)]
+    (s0, s1, s2, inv_h, inv_s0, part12, ntht0_2, nrho0_2) = [
+        np.asarray(z)[fidcs]
+        for z in (s0, s1, s2, inv_h, inv_s0, part12, ntht0_2, nrho0_2)]
+    ## we now know the number of triangles and can calculate our normalization constants:
+    p = len(fidcs)
+    pinv = 1.0 / p
+    invtot = ninv + minv + pinv
+    (ninv, minv, pinv) = (ninv/invtot, minv/invtot, pinv/invtot)
+    ## we can also pre-calculate a part of the jacobian:
+    #jac_gr_z = [[height, 0], [height*(part12/s0 - 1), -1.0/s0], [-height*part12/s0, 1.0/s0]]
+    jac_gr_z_T = [[0,       inv_h],
+                  [-inv_s0, (part12 - s0)*inv_h*inv_s0],
+                  [inv_s0,  -part12*inv_s0*inv_h]]
+    ## We also need some data about how to get from faces to vertices
+    f2vs = []
+    for frow in fcs:
+        lm = lil_matrix((n,p))
+        for (f,u) in enumerate(frow):
+            lm[u,f] = 1
+        f2vs.append(csr_matrix(lm))
+    def _f_ortho(x):
+        # This calculation is a bit opaque; the actual value computed is the square of the dot
+        # product of the normalized normal vector of the triangle for each field...
+        # This can be found by decomposing the derivative of the dot product using the
+        # multiplication rule:
+        theta = x[0:n]
+        rho   = x[n:]
+        # separate out by triangle:
+        fs_tht = np.asarray([theta[ii] for ii in fcs])
+        fs_rho = np.asarray([rho[ii]   for ii in fcs])
+        # get the face data:
+        (gtht,utht,ntht,ntht_2, grho,urho,nrho,nrho_2) = _face_retino_grads(fs_tht, fs_rho)
+        # the angle cosine is just this:
+        cos_phi = np.sum(utht * urho, axis=0)
+        # now, we consider the jacobian; first, we already calculated the jacobian of gtht and grho
+        # above (jac_gr_z); we also need the jacobian of the normalized grads in terms of the grads:
+        (ntht_3_inv, nrho_3_inv) = [(1 - uu) / (v + uu)
+                                    for v  in [ntht*ntht_2, nrho*nrho_2]
+                                    for uu in [np.isclose(v, 0)]]
+        (jac_norm_tht, jac_norm_rho) = [
+            np.asarray([[z[1]**2 * inz3,           -z01],
+                        [          -z01, z[0]**2 * inz3]])
+            for (z,inz3)  in [(gtht,ntht_3_inv), (grho,nrho_3_inv)]
+            for z01           in [z[0]*z[1]*inz3]]
+        # Okay, we can stick together the jacobians:
+        (jac_tht, jac_rho) = [
+            np.asarray([j0*u0 + j1*u1 for (j0,j1) in jac_gr_z_T])
+            for (jac_gz, gw) in [(jac_norm_tht, urho), (jac_norm_rho, utht)]
+            for (u0,u1)      in [(jac_gz[0,0]*gw[0] + jac_gz[0,1]*gw[1],
+                                  jac_gz[1,0]*gw[0] + jac_gz[1,1]*gw[1])]]
+        # last, we just need to move these over to vertices:
+        (jac_tht, jac_rho) = [np.sum([m.dot(cos_phi * jz) for (m,jz) in zip(f2vs,jac_z)], axis=0)
+                              for jac_z in [jac_tht, jac_rho]]
+        # That's it, there is just dressing to put on the first part:
+        f_ang  = 0.5 * pinv * np.sum(cos_phi**2)
+        df_ang = pinv * np.concatenate((jac_tht, jac_rho))
+        # The second part of the gradient is the part that prevents flat 0-gradients:
+        # 1/2(log(1/2 |grad t|/|grad t0|)^2 + log(1/2 |grad r|/|grad r0|)^2)
+        if np.isclose(ntht_2, 0).any() or np.isclose(nrho_2, 0).any():
+            return (np.inf, 0)
+        log_tht = np.log(ntht_2 / ntht0_2)
+        log_rho = np.log(nrho_2 / nrho0_2)
+        # potential is now easy...
+        f_flt = 0.25 * pinv * (np.sum(log_tht**2) + np.sum(log_rho**2))
+        # we need to calculate the gradient:
+        (cc_tht, cc_rho) = [lgz / rz for (lgz,rz) in [(log_tht,ntht_2), (log_rho,nrho_2)]]
+        (lg_tht, lg_rho) = [np.asarray([cc_z * (j0*uz[0] + j1*uz[1]) for (j0,j1) in jac_gr_z_T])
+                            for (uz,cc_z) in [(utht,cc_tht), (urho,cc_rho)]]
+        df_flt = pinv * np.concatenate([np.sum([m.dot(gzrow) for (gzrow,m) in zip(gz,f2vs)], axis=0)
+                                        for gz in (lg_tht, lg_rho)])
+        return (f_ang + f_flt, df_ang + df_flt)
+
+    # Okay, mix these together!
+    def _f(x):
+        (fe, dfe) = _f_equal(x)  if equality_scale != 0      else (0,0)
+        (fs, dfs) = _f_smooth(x) if smoothness_scale != 0    else (0,0)
+        (fo, dfo) = _f_ortho(x)  if orthogonality_scale != 0 else (0,0)
+        #print np.asarray([[equality_scale*fe, smoothness_scale*fs, orthogonality_scale*fo],
+        #                  [equality_scale*np.sqrt(np.sum(dfe**2)),
+        #                   smoothness_scale*np.sqrt(np.sum(dfs**2)),
+        #                   orthogonality_scale*np.sqrt(np.sum(dfo**2))]])
+        scales = [equality_scale, smoothness_scale, orthogonality_scale]
+        if not np.isfinite([fe,fs,fo]).all():
+            return (np.inf, np.full(len(x), np.inf))
+        f  = equality_scale*fe + smoothness_scale*fs + orthogonality_scale*fo
+        df = np.sum([d*s for (d,s) in zip([dfe,dfs,dfo],
+                                          [equality_scale,smoothness_scale,orthogonality_scale])],
+                    axis=0)
+        return (f, df)
+
+    # That's our potential; now we can do the minimization
+    res = minimize(_f, x0, jac=True, method='L-BFGS-B')
+    #return (x0, _f, (_f_equal, _f_smooth, _f_ortho))
+    theta = res.x[0:n]
+    rho = res.x[n:]
+    # rescale rho
+    eccen = _hh_cd2ecc(rho * rho_max)
+    angle = theta*180.0/np.pi
+    if yield_report is True:
+        return (as_retinotopy({'polar_angle':angle, 'eccentricity':eccen}, output_style), res)
+    else:
+        return as_retinotopy({'polar_angle':angle, 'eccentricity':eccen}, output_style)
+            

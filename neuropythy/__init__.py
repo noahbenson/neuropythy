@@ -5,10 +5,11 @@
 from freesurfer import (freesurfer_subject,
                         Hemisphere as FreeSurferHemisphere,
                         Subject    as FreeSurferSubject)
-from cortex     import (CorticalMesh, mesh_smooth)
+from cortex     import (CorticalMesh, mesh_smooth, mesh_property)
 from vision     import (retinotopy_data, empirical_retinotopy_data, predicted_retinotopy_data,
                         register_retinotopy, retinotopy_anchors, retinotopy_model,
-                        neighborhood_cortical_magnification)
+                        neighborhood_cortical_magnification,
+                        as_retinotopy, mesh_retinotopy)
 
 # Version information...
 __version__ = '0.3.0'
