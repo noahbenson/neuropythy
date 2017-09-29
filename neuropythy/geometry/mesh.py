@@ -169,7 +169,7 @@ class Mesh(Immutable):
             max_k = 256 if tcount > 256 else tcount
             if k > tcount: k = tcount
             def try_nearest(sub_pts, cur_k=k, top_i=0, near=None):
-                res = np.full(len(sub_pts), None)
+                res = np.full(len(sub_pts), None, dtype=np.object)
                 if k != cur_k and cur_k > max_k: return res
                 if near is None:
                     near = self.triangle_hash.query(sub_pts, k=cur_k)[1]
@@ -186,7 +186,7 @@ class Mesh(Immutable):
                                   if top_i == cur_k else
                                   try_nearest(sub_pts, cur_k, top_i, near[out_tri_q]))
                 return res
-            res = np.full(len(pt), None)
+            res = np.full(len(pt), None, dtype=np.object)
             # filter out points that aren't close enough to be in a triangle:
             (dmins, dmaxs) = [[f(x[np.isfinite(x)]) for x in self.coordinates.T]
                               for f in [np.min, np.max]]
@@ -195,7 +195,7 @@ class Mesh(Immutable):
                 inside_q = reduce(np.logical_and,
                                   [(x >= mn)&(x <= mx) for (x,mn,mx) in zip(pt.T,dmins,dmaxs)])
             else:
-                inside_q = np.full(len(pt), False)
+                inside_q = np.full(len(pt), False, dtype=np.bool)
                 inside_q[finpts] = reduce(
                     np.logical_and,
                     [(x >= mn)&(x <= mx) for (x,mn,mx) in zip(pt[finpts].T,dmins,dmaxs)])
@@ -274,7 +274,8 @@ class Mesh(Immutable):
         # get the containers
         containers = self.container(coords, n_jobs=n_jobs)
         # Okay, now we interpolate for each triangle
-        res = np.full(len(coords) if len(data.shape) == 1 else (len(coords), data.shape[1]), null)
+        res = np.full(len(coords) if len(data.shape) == 1 else (len(coords), data.shape[1]), null
+                      dtype=(np.object if null is None else np.asarray(null).dtype)))
         # what's in a triangle at all...
         contained_q = np.asarray([x is not None for x in containers], dtype=np.bool)
         contained_idcs = np.where(contained_q)[0]
