@@ -538,66 +538,49 @@ class Hemisphere(Immutable):
     
     # This [private] function and this variable set up automatic properties from the FS directory
     # in order to be auto-loaded, a property must appear in this dictionary:
-    _auto_properties = {
-        'sulc':             ('convexity',              lambda f: fsio.read_morph_data(f)),
-        'thickness':        ('thickness',              lambda f: fsio.read_morph_data(f)),
-        'area':             ('white_surface_area',     lambda f: fsio.read_morph_data(f)),
-        'area.mid':         ('midgray_surface_area',   lambda f: fsio.read_morph_data(f)),
-        'area.pial':        ('pial_surface_area',      lambda f: fsio.read_morph_data(f)),
-        'curv':             ('curvature',              lambda f: fsio.read_morph_data(f)),
-
-        'prf_eccen':        ('PRF_eccentricity',       lambda f: fsio.read_morph_data(f)),
-        'prf_angle':        ('PRF_polar_angle',        lambda f: fsio.read_morph_data(f)),
-        'prf_size':         ('PRF_size',               lambda f: fsio.read_morph_data(f)),
-        'prf_varex':        ('PRF_variance_explained', lambda f: fsio.read_morph_data(f)),
-
-        'retinotopy_eccen': ('eccentricity',           lambda f: fsio.read_morph_data(f)),
-        'retinotopy_angle': ('polar_angle',            lambda f: fsio.read_morph_data(f)),
-        'retinotopy_areas': ('visual_area',            lambda f: fsio.read_morph_data(f)),
-
-        'retino_eccen':     ('eccentricity',           lambda f: fsio.read_morph_data(f)),
-        'retino_angle':     ('polar_angle',            lambda f: fsio.read_morph_data(f)),
-        'retino_areas':     ('visual_area',            lambda f: fsio.read_morph_data(f))}
-
+    _auto_retino_names = {
+        (tag + sep + name): (ptag + pname) for
+        (tag,ptag) in [('', ''), ('rf', 'rf_'), ('prf', 'prf_'),
+                       ('meas', 'measured_'), ('measured', 'measured_'),
+                       ('emp', 'empirical_'), ('empirical', 'empirical_'),
+                       ('trn', 'training_'), ('train', 'training_'), ('training', 'training'),
+                       ('val', 'validation_'), ('valide', 'validation'),
+                       ('validation', 'validation_'), ('test', 'validation_'), ('gold', 'gold_'),
+                       ('retinotopy', ''), ('retino_', ''),
+                       ('predict', 'predicted_'), ('pred', 'predicted_'), ('model', 'model_'),
+                       ('mdl', 'model_'), ('inferred', 'inferred_'), ('bayes', 'inferred_'),
+                       ('inf', 'inferred_'), ('benson14', 'benson14_'), ('benson17', 'benson17_'),
+                       ('atlas', 'atlas_'), ('template', 'template_')]
+        for sep in (['_', '.', '-'] if len(tag) > 0 else [''])
+        for (name, pname) in [
+                ('eccen',  'eccentricity'      ),
+                ('angle',  'polar_angle'       ),
+                ('theta',  'theta'             ),
+                ('rho',    'rho'               ),
+                ('prfsz',  'size'              ),
+                ('size',   'size'              ),
+                ('radius', 'radius'            ),
+                ('sigma',  'sigma'             ),
+                ('varex',  'variance_explained'),
+                ('vexpl',  'variance_explained'),
+                ('varexp', 'variance_explained'),
+                ('weight', 'weight'            ),
+                ('varea',  'visual_area'       ),
+                ('vsroi',  'visual_area'       ),
+                ('vroi',   'visual_area'       ),
+                ('vslab',  'visual_area'       )]}
+    _auto_properties = {k: (a, lambda f: fsio.read_morph_data(f))
+                        for d in [{'sulc':      'convexity',
+                                   'thickness': 'thickness',
+                                   'area':      'white_surface_area',
+                                   'area.mid':  'midgray_surface_area',
+                                   'area.pial': 'pial_surface_area',
+                                   'curv':      'curvature'},
+                                  _auto_retino_names]
+                        for (k,a) in d.iteritems()}
+    _mgh_properties  = {k: (a, lambda f: mghload(f).get_data().flatten())
+                        for (k,a) in _auto_retino_names.iteritems()}
     # properties grabbed out of MGH or MGZ files
-    _mgh_properties = {
-        'prf_eccen':         ('PRF_eccentricity',       lambda f: mghload(f).get_data().flatten()),
-        'prf_angle':         ('PRF_polar_angle',        lambda f: mghload(f).get_data().flatten()),
-        'prf_size':          ('PRF_size',               lambda f: mghload(f).get_data().flatten()),
-        'prf_varex':         ('PRF_variance_explained', lambda f: mghload(f).get_data().flatten()),
-        'prf_vexpl':         ('PRF_variance_explained', lambda f: mghload(f).get_data().flatten()),
-
-        'retinotopy_eccen':  ('eccentricity',           lambda f: fsio.read_morph_data(f)),
-        'retinotopy_angle':  ('polar_angle',            lambda f: fsio.read_morph_data(f)),
-        'retinotopy_areas':  ('visual_area',            lambda f: fsio.read_morph_data(f)),
-        'retino_eccen':      ('eccentricity',           lambda f: fsio.read_morph_data(f)),
-        'retino_angle':      ('polar_angle',            lambda f: fsio.read_morph_data(f)),
-        'retino_areas':      ('visual_area',            lambda f: fsio.read_morph_data(f)),
-
-        'predicted_eccen':   ('predicted_eccentricity', lambda f: mghload(f).get_data().flatten()),
-        'predicted_angle':   ('predicted_polar_angle',  lambda f: mghload(f).get_data().flatten()),
-        'predicted_areas':   ('predicted_visual_area',  lambda f: mghload(f).get_data().flatten()),
-        'predicted_v123roi': ('predicted_visual_area',  lambda f: mghload(f).get_data().flatten()),
-
-        'predict_eccen':     ('predicted_eccentricity', lambda f: mghload(f).get_data().flatten()),
-        'predict_angle':     ('predicted_polar_angle',  lambda f: mghload(f).get_data().flatten()),
-        'predict_areas':     ('predicted_visual_area',  lambda f: mghload(f).get_data().flatten()),
-        'predict_v123roi':   ('predicted_visual_area',  lambda f: mghload(f).get_data().flatten()),
-
-        'benson14_eccen':    ('benson14_eccentricity',  lambda f: mghload(f).get_data().flatten()),
-        'benson14_angle':    ('benson14_polar_angle',   lambda f: mghload(f).get_data().flatten()),
-        'benson14_areas':    ('benson14_visual_area',   lambda f: mghload(f).get_data().flatten()),
-        'benson14_v123roi':  ('benson14_visual_area',   lambda f: mghload(f).get_data().flatten()),
-
-        'eccen_predict':     ('predicted_eccentricity', lambda f: mghload(f).get_data().flatten()),
-        'angle_predict':     ('predicted_polar_angle',  lambda f: mghload(f).get_data().flatten()),
-        'areas_predict':     ('predicted_visual_area',  lambda f: mghload(f).get_data().flatten()),
-        'v123roi_predict':   ('predicted_visual_area',  lambda f: mghload(f).get_data().flatten()),
-
-        'eccen_benson14':    ('benson14_eccentricity',  lambda f: mghload(f).get_data().flatten()),
-        'angle_benson14':    ('benson14_polar_angle',   lambda f: mghload(f).get_data().flatten()),
-        'areas_benson14':    ('benson14_visual_area',   lambda f: mghload(f).get_data().flatten()),
-        'v123roi_benson14':  ('benson14_visual_area',   lambda f: mghload(f).get_data().flatten())}
     
     # funciton for initializing the auto-loading properties
     def __init_properties(self):
