@@ -274,7 +274,7 @@ class Mesh(Immutable):
         # get the containers
         containers = self.container(coords, n_jobs=n_jobs)
         # Okay, now we interpolate for each triangle
-        res = np.full(len(coords) if len(data.shape) == 1 else (len(coords), data.shape[1]), null
+        res = np.full(len(coords) if len(data.shape) == 1 else (len(coords), data.shape[1]), null,
                       dtype=(np.object if null is None else np.asarray(null).dtype)))
         # what's in a triangle at all...
         contained_q = np.asarray([x is not None for x in containers], dtype=np.bool)
