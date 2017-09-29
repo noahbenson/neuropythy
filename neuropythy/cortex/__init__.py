@@ -1060,19 +1060,101 @@ try:
 
     def vertex_curvature_color(m):
         return [0.2,0.2,0.2,1.0] if m['curvature'] > -0.025 else [0.7,0.7,0.7,1.0]
+    _vertex_angle_empirical_prefixes = ['prf_', 'measured_', 'empiirical_']
+    _vertex_angle_model_prefixes = ['model_', 'predicted_', 'inferred_', 'template_', 'atlas_',
+                                    'benson14_', 'benson17_']
+    _vertex_angle_prefixes = ([''] + _vertex_angle_model_prefixes + _vertex_angle_model_prefixes)
     def vertex_weight(m):
-        return m['weight']                 if 'weight'                 in m else \
-               m['variance_explained']     if 'variance_explained'     in m else \
-               m['PRF_variance_explained'] if 'PRF_variance_explained' in m else \
-               1.0
-    def vertex_angle_color(m, weight_cutoff=0.2, weighted=True):
+        return next((m[k]
+                     for name in ['weight', 'variance_explained']
+                     for pref in ([''] + _vertex_angle_empirical_prefixes)
+                     for k in [pref + name]
+                     if k in m),
+                    1.0)
+    def vertex_angle(m):
+        ang0 = next((m[kk] for k in _vertex_angle_prefixes for kk in [k + 'polar_angle'] if kk in m),
+                    None)
+        if ang0 is not None: return ang0
+        ang0 = next((m[kk]
+                     for name in ['angle', 'theta']
+                     for k in _vertex_angle_prefixes for kk in [k + name]
+                     if kk in m),
+                    None)
+        if ang0 is not None:
+            return np.mod(90.0 - 180.0/np.pi*ang0 + 180, 360) - 180
+        return None
+    def vertex_eccen(m):
+        ecc0 = next((m[k]
+                     for kk in _vertex_angle_prefixes
+                     for k in [kk + 'eccentricity']
+                     if k in m),
+                    None)
+        if ecc0 is not None: return ecc0
+        ecc0 = next((m[k]
+                     for kk in _vertex_angle_prefixes
+                     for k in [kk + 'rho']
+                     if k in m),
+                    None)
+        if ecc0 is not None:
+            return 180.0/np.pi*ecc0
+        return None
+    _angle_cmap = matplotlib.colors.LinearSegmentedColormap(
+        'polar_angle',
+        {'red':   ((-180.0/180.0, 0.0,   0.0),
+                   (-90.0/180.0,  0.5,   0.5),
+                   (0.0,          1.0,   1.0),
+                   (45.0/180.0,   0.833, 0.833),
+                   (90.0/180.0,   0.0,   0.0),
+                   (135.0/180.0,  0.0,   0.0),
+                   (180.0/180.0,  0.0,   0.0)),
+         'green': ((-180.0/180.0, 0.0,   0.0),
+                   (-90.0/180.0,  0.0,   0.0),
+                   (0.0,          0.0,   0.0),
+                   (45.0/180.0,   0.833, 0.833),
+                   (90.0/180.0,   0.667, 0.667),
+                   (135.0/180.0,  0.833, 0.833),
+                   (180.0/180.0,  0.0,   0.0)),
+         'blue':  ((-180.0/180.0, 1.0,   1.0),
+                   (-90.0/180.0,  0.5,   0.5),
+                   (0.0,          0.0,   0.0),
+                   (45.0/180.0,   0.0,   0.0),
+                   (90.0/180.0,   0.0,   0.0),
+                   (135.0/180.0,  0.833, 0.833),
+                   (180.0/180.0,  1.0,   1.0))})
+    def vertex_angle_color(m, weight_cutoff=0.2, weighted=True, hemi=None, property_name=Ellipsis,
+                           null_color='curvature'):
+        global _angle_cmap
+        if m is Ellipsis:
+            return lambda x: vertex_angle_color(x, weight_cutoff=0.2, weighted=weighted, hemi=hemi,
+                                                property_name=property_name, null_color=null_color)
+        if isinstance(null_color, basestring):
+            null_color = null_color.lower()
+            if null_color == 'curvature' or null_color == 'curv':
+                nullColor = np.asarray(vertex_curvature_color(m))
+            else:
+                raise ValueError('bad null color: %s' % null_color)
+        else:
+            nullColor = np.asarray(null_color)
+        if property_name is Ellipsis or property_name is None:
+            ang = vertex_angle(m)
+        else:
+            ang = m[property_name]
+        if ang is None: return nullColor
+        if isinstance(hemi, basestring):
+            hemi = hemi.lower()
+            if hemi == 'lh' or hemi == 'left':
+                ang = ang
+            elif hemi == 'rh' or hemi == 'right':
+                ang = -ang
+            elif hemi == 'abs':
+                ang = np.abs(ang)
+            else: raise ValueError('bad hemi argument: %s' % hemi)
         w = vertex_weight(m)
-        curvColor = np.asarray(vertex_curvature_color(m))
-        if weighted and w < weight_cutoff: return curvColor
-        angColor = colorsys.hsv_to_rgb(0.666667*(1 - m['polar_angle']/180), 1, 1)
-        angColor = np.asarray(angColor + (1,))
+        if weighted and (not isinstance(w, (Number, np.ndarray)) or w < weight_cutoff):
+            return nullColor
+        angColor = _angle_cmap(ang/180.0)
         if weighted:
-            return angColor*w + curvColor*(1-w)
+            return angColor*w + nullColor*(1-w)
         else:
             return angColor
     _eccen_cmap = matplotlib.colors.LinearSegmentedColormap(
@@ -1098,22 +1180,98 @@ try:
                    (20.0/90.0, 0.0, 0.0),
                    (40.0/90.0, 1.0, 1.0),
                    (90.0/90.0, 1.0, 1.0))})
-    def vertex_eccen_color(m, weight_cutoff=0.2, weighted=True):
+    def vertex_eccen_color(m, weight_cutoff=0.2, weighted=True,
+                           property_name=Ellipsis, null_color='curvature'):
         global _eccen_cmap
+        if m is Ellipsis:
+            return lambda x: vertex_eccen_color(x, weight_cutoff=0.2, weighted=weighted,
+                                                property_name=property_name, null_color=null_color)
+        if isinstance(null_color, basestring):
+            null_color = null_color.lower()
+            if null_color == 'curvature' or null_color == 'curv':
+                nullColor = np.asarray(vertex_curvature_color(m))
+            else:
+                raise ValueError('bad null color: %s' % null_color)
+        else:
+            nullColor = np.asarray(null_color)
+        if property_name is Ellipsis or property_name is None:
+            ecc = vertex_eccen(m)
+        else:
+            ecc = m[property_name]
+        if ecc is None: return nullColor
         w = vertex_weight(m)
-        curvColor = np.asarray(vertex_curvature_color(m))
-        if weighted and w < weight_cutoff: return curvColor
-        eccColor = np.asarray(_eccen_cmap(m['eccentricity']/90.0))
+        if weighted and (not isinstance(w, (Number, np.ndarray)) or w < weight_cutoff):
+            return nullColor
+        eccColor = _eccen_cmap(ecc/90.0)
         if weighted:
-            return eccColor*w + curvColor*(1-w)
+            return eccColor*w + nullColor*(1-w)
         else:
             return eccColor
     def curvature_colors(m):
         return np.asarray(m.map_vertices(vertex_curvature_color))
-    def angle_colors(m):
-        return np.asarray(m.map_vertices(vertex_angle_color))
-    def eccen_colors(m):
-        return np.asarray(m.map_vertices(vertex_eccen_color))
+    def angle_colors(*args, **kwargs):
+        '''
+        angle_colors(mesh) yields an array of colors for the polar angle map of the given mesh.
+        angle_colors(hemi) yields an array of colors for the polar angle map of the given hemisphere.
+        angle_colors(dict) yields an array of the color for the particular vertex property dict.
+        angle_colors() yields a functor version of angle_colors that can be called with one of the
+          above arguments; note that this is useful precisely because the returned function preserves
+          the arguments passed; e.g. angle_colors(weighted=False)(mesh) is equivalent to
+          angle_colors(mesh, weighted=False).
+
+        The following options are accepted:
+          * weighted (True) specifies whether to use weight as opacity.
+          * weight_cutoff (0.2) specifies that below this weight value, the curvature (or null color)
+            should be plotted.
+          * property_name (Ellipsis) specifies the specific property that should be used as the
+            polar angle value; if Ellipsis, will attempt to auto-detect this value.
+          * null_color ('curvature') specifies a color that should be used as the background.
+        '''
+        from neuropythy.freesurfer import Hemisphere
+        if len(args) == 0:
+            def _angle_color_pass(*args, **new_kwargs):
+                return angle_colors(*args, **{k:(new_kwargs[k] if k in new_kwargs else kwargs[k])
+                                              for k in set(kwargs.keys() + new_kwargs.keys())})
+            return _angle_color_pass
+        elif len(args) > 1:
+            raise ValueError('angle_colors accepts at most one argument')
+        m = args[0]
+        if isinstance(m, (CorticalMesh, Hemisphere)):
+            return np.asarray(m.map_vertices(vertex_angle_color(**kwargs)))
+        else:
+            return vertex_angle_color(m, **kwargs)
+    def eccen_colors(*args, **kwargs):
+        '''
+        eccen_colors(mesh) yields an array of colors for the eccentricity map of the given mesh.
+        eccen_colors(hemi) yields an array of colors for the eccentricity map of the given
+          hemisphere.
+        eccen_colors(dict) yields an array of the color for the particular vertex property dict.
+        eccen_colors() yields a functor version of eccen_colors that can be called with one of the
+          above arguments; note that this is useful precisely because the returned function preserves
+          the arguments passed; e.g. eccen_colors(weighted=False)(mesh) is equivalent to
+          eccen_colors(mesh, weighted=False).
+
+        The following options are accepted:
+          * weighted (True) specifies whether to use weight as opacity.
+          * weight_cutoff (0.2) specifies that below this weight value, the curvature (or null color)
+            should be plotted.
+          * property_name (Ellipsis) specifies the specific property that should be used as the
+            eccentricity value; if Ellipsis, will attempt to auto-detect this value.
+          * null_color ('curvature') specifies a color that should be used as the background.
+        '''
+        from neuropythy.freesurfer import Hemisphere
+        if len(args) == 0:
+            def _eccen_color_pass(*args, **new_kwargs):
+                return eccen_colors(*args, **{k:(new_kwargs[k] if k in new_kwargs else kwargs[k])
+                                              for k in set(kwargs.keys() + new_kwargs.keys())})
+            return _eccen_color_pass
+        elif len(args) > 1:
+            raise ValueError('eccen_colors accepts at most one argument')
+        m = args[0]
+        if isinstance(m, (CorticalMesh, Hemisphere)):
+            return np.asarray(m.map_vertices(vertex_eccen_color(**kwargs)))
+        else:
+            return vertex_eccen_color(m, **kwargs)
     def colors_to_cmap(colors):
         colors = np.asarray(colors)
         if colors.shape[1] == 3:
