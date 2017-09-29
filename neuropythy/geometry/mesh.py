@@ -264,9 +264,9 @@ class Mesh(Immutable):
         # lookup the neighbors...
         (d, nei) = self.vertex_hash.query(x, k=1) #n_jobs fails? version problem?
         if mask is None:
-            return [data[i] for i in nei]
+            return [data[i] if i < len(data) else null for i in nei]
         else:
-            return [data[i] if mask[i] == 1 else null for i in nei]
+            return [data[i] if mask[i] == 1 and i < len(data) else null for i in nei]
     # perform linear interpolation
     def _interpolate_linear(self, coords, data, mask, null, smoothing, n_jobs):
         # first, find the triangle containing each point...
@@ -391,9 +391,7 @@ class Mesh(Immutable):
         faces = self.triangles
         if all(hasattr(x, '__iter__') for x in (face_id, coords)):
             null = np.full((faces.shape[1], self.coordinates.shape[1]), np.nan)
-            tx = np.transpose(np.asarray([self.coordinates[faces[f]] if f else null
-                                          for f in face_id]),
-                              (0,2,1))
+            tx = np.asarray([self.coordinates[faces[f]] if f else null for f in face_id])
         elif face_id is None:
             return np.full(self.coordinates.shape[1], np.nan)
         else:
