@@ -1098,32 +1098,56 @@ try:
         if ecc0 is not None:
             return 180.0/np.pi*ecc0
         return None
+    _angle_cmap_withneg = matplotlib.colors.LinearSegmentedColormap(
+        'polar_angle_full',
+        {'red':   ((0.000, 1.0,   1.0),
+                   (0.250, 0.5,   0.5),
+                   (0.500, 0.0,   0.0),
+                   (0.625, 0.0,   0.0),
+                   (0.750, 0.0,   0.0),
+                   (0.875, 0.833, 0.833),
+                   (1.000, 1.0,   1.0)),
+         'green': ((0.000, 0.0,   0.0),
+                   (0.250, 0.0,   0.0),
+                   (0.500, 0.0,   0.0),
+                   (0.625, 0.833, 0.833),
+                   (0.750, 0.667, 0.667),
+                   (0.875, 0.833, 0.833),
+                   (1.000, 0.0,   0.0)),
+         'blue':  ((0.000, 0.0,   0.0),
+                   (0.250, 0.5,   0.5),
+                   (0.500, 1.0,   1.0),
+                   (0.625, 0.833, 0.833),
+                   (0.750, 0.0,   0.0),
+                   (0.875, 0.0,   0.0),
+                   (1.000, 0.0,   0.0))})
     _angle_cmap = matplotlib.colors.LinearSegmentedColormap(
         'polar_angle',
-        {'red':   ((-180.0/180.0, 0.0,   0.0),
-                   (-90.0/180.0,  0.5,   0.5),
-                   (0.0,          1.0,   1.0),
-                   (45.0/180.0,   0.833, 0.833),
-                   (90.0/180.0,   0.0,   0.0),
-                   (135.0/180.0,  0.0,   0.0),
-                   (180.0/180.0,  0.0,   0.0)),
-         'green': ((-180.0/180.0, 0.0,   0.0),
-                   (-90.0/180.0,  0.0,   0.0),
-                   (0.0,          0.0,   0.0),
-                   (45.0/180.0,   0.833, 0.833),
-                   (90.0/180.0,   0.667, 0.667),
-                   (135.0/180.0,  0.833, 0.833),
-                   (180.0/180.0,  0.0,   0.0)),
-         'blue':  ((-180.0/180.0, 1.0,   1.0),
-                   (-90.0/180.0,  0.5,   0.5),
-                   (0.0,          0.0,   0.0),
-                   (45.0/180.0,   0.0,   0.0),
-                   (90.0/180.0,   0.0,   0.0),
-                   (135.0/180.0,  0.833, 0.833),
-                   (180.0/180.0,  1.0,   1.0))})
+        {'red':   ((0.000, 1.0,   1.0),
+                   (0.250, 0.5,   0.5),
+                   (0.500, 0.0,   0.0),
+                   (0.625, 0.0,   0.0),
+                   (0.750, 0.0,   0.0),
+                   (0.875, 0.833, 0.833),
+                   (1.000, 1.0,   1.0)),
+         'green': ((0.000, 0.0,   0.0),
+                   (0.250, 0.0,   0.0),
+                   (0.500, 0.0,   0.0),
+                   (0.625, 0.833, 0.833),
+                   (0.750, 0.667, 0.667),
+                   (0.875, 0.833, 0.833),
+                   (1.000, 0.0,   0.0)),
+         'blue':  ((0.000, 0.0,   0.0),
+                   (0.250, 0.5,   0.5),
+                   (0.500, 1.0,   1.0),
+                   (0.625, 0.833, 0.833),
+                   (0.750, 0.0,   0.0),
+                   (0.875, 0.0,   0.0),
+                   (1.000, 0.0,   0.0))})
+
     def vertex_angle_color(m, weight_cutoff=0.2, weighted=True, hemi=None, property_name=Ellipsis,
                            null_color='curvature'):
-        global _angle_cmap
+        global _angle_cmap_withneg
         if m is Ellipsis:
             return lambda x: vertex_angle_color(x, weight_cutoff=0.2, weighted=weighted, hemi=hemi,
                                                 property_name=property_name, null_color=null_color)
@@ -1152,7 +1176,7 @@ try:
         w = vertex_weight(m)
         if weighted and (not isinstance(w, (Number, np.ndarray)) or w < weight_cutoff):
             return nullColor
-        angColor = _angle_cmap(ang/180.0)
+        angColor = np.asarray(_angle_cmap_withneg((ang + 180.0) / 360.0))
         if weighted:
             return angColor*w + nullColor*(1-w)
         else:
@@ -1202,7 +1226,7 @@ try:
         w = vertex_weight(m)
         if weighted and (not isinstance(w, (Number, np.ndarray)) or w < weight_cutoff):
             return nullColor
-        eccColor = _eccen_cmap(ecc/90.0)
+        eccColor = np.asarray(_eccen_cmap((ecc if 0 < ecc < 90 else 0 if ecc < 0 else 90)/90.0))
         if weighted:
             return eccColor*w + nullColor*(1-w)
         else:
