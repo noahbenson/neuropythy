@@ -392,15 +392,20 @@ def mesh_retinotopy(m, source='any'):
     # That's it
     return res
 
-_Kay2013_pRF_data = {k.lower():v for (k,v) in {
-    "V1":  {'m':0.168833, 'b':0.021791}, "V2":  {'m':0.169119, 'b':0.147386},
-    "V3":  {'m':0.263966, 'b':0.342211}, "hV4": {'m':0.529626, 'b':0.445005},
-    "V3a": {'m':0.357224, 'b':1.00189},  "V3b": {'m':0.357224, 'b':1.00189},
-    "VO1": {'m':0.685053, 'b':0.479878}, "VO2": {'m':0.93893,  'b':0.261769},
-    "LO1": {'m':0.856446, 'b':0.3614},   "LO2": {'m':0.74762,  'b':0.458872},
-    "TO1": {'m':1.37441,  'b':0.172395}, "TO2": {'m':1.65694,  'b':0.0}}.iteritems()}
-_pRF_data = {'kay2013': _Kay2013_pRF_data}
-def predict_pRF_radius(eccentricity, visual_area='V1', source='Kay2013'):
+pRF_data_Wandell2015 = make_dict(
+    {k.lower():v
+     for (k,v) in {
+             "V1":  {'m':0.16883, 'b':0.02179}, "V2":  {'m':0.16912, 'b':0.14739},
+             "V3":  {'m':0.26397, 'b':0.34221}, "hV4": {'m':0.52963, 'b':0.44501},
+             "V3a": {'m':0.35722, 'b':1.00189}, "V3b": {'m':0.35722, 'b':1.00189},
+             "VO1": {'m':0.68505, 'b':0.47988}, "VO2": {'m':0.93893, 'b':0.26177},
+             "LO1": {'m':0.85645, 'b':0.36149}, "LO2": {'m':0.74762, 'b':0.45887},
+             "TO1": {'m':1.37441, 'b':0.17240}, "TO2": {'m':1.65694, 'b':0.00000}}.iteritems()})
+pRF_data_Kay2013 = make_dict(
+    {k.lower():{'m':v, 'b':0.5}
+     for (k,v) in {'V1':0.16, 'V2':0.18, 'V3':0.25, 'hV4':0.36}.iteritems()})
+pRF_data = make_dict({'wandell2015':pRF_data_Wandell2015, 'kay2013':pRF_data_Kay2013})
+def predict_pRF_radius(eccentricity, visual_area='V1', source='Wandell2015'):
     '''
     predict_pRF_radius(eccentricity) yields an estimate of the pRF size for a patch of cortex at the
       given eccentricity in V1.
@@ -418,12 +423,18 @@ def predict_pRF_radius(eccentricity, visual_area='V1', source='Kay2013'):
       * 'TO1', 'TO2'
 
     The following sources may be given:
-      * 'Kay2013': Kay KN, Winawer J, Mezer A, Wandell BA (2013) Compressive spatial summation in
-                   human visual cortex. J Neurophysiol. 110(2):481-94.
+      * 'Wandell2015': Wandell BA, Winawer J (2015) Computational neuroimaging and population
+                       receptive fields. Trends Cogn Sci. 19(6):349-57.
+                       doi:10.1016/j.tics.2015.03.009.
+      * 'Kay2013: Kay KN, Winawer J, Mezer A, Wandell BA (2013) Compressive spatial summation in
+                  human visual cortex. J Neurophysiol. 110(2):481-94.
+    The default source is 'Wandell2015'.
     '''
     visual_area = visual_area.lower()
     source = source.lower()
-    dat = _pRF_data[source]
+    if source not in pRF_data:
+        raise ValueError('Given source (%s) not found in pRF-size database' % source)
+    dat = pRF_data[source]
     adat = dat[visual_area]
     return dat['m']*eccentricity + dat['b']
 
