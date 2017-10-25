@@ -2,9 +2,11 @@
 # neuropythy/util/command.py
 # This file implements the command-line tools that are available as part of neuropythy.
 
-from types      import (ListType, TupleType)
-from pysistence import make_dict
+from   types      import (ListType, TupleType)
+import pyrsistent as     pyr
+import pimms
 
+@pimms.immutable
 class CommandLineParser(object):
     '''
     CommandLineParser(instructions) yields a command line parser object, which acts as a function,
@@ -58,12 +60,52 @@ class CommandLineParser(object):
             else:
                 if c is not None: cargs[c] = var
                 if w is not None: wargs[w] = var
-        self.default_values = make_dict(defaults)
-        self.flag_words = make_dict(wflags)
-        self.flag_characters = make_dict(cflags)
-        self.option_words = make_dict(wargs)
-        self.option_characters = make_dict(cargs)
-
+        self.default_values = pyr.pmap(defaults)
+        self.flag_words = pyr.pmap(wflags)
+        self.flag_characters = pyr.pmap(cflags)
+        self.option_words = pyr.pmap(wargs)
+        self.option_characters = pyr.pmap(cargs)
+    def default_values(dv):
+        '''
+        clp.default_values yields the persistent map of default values for the given command-line
+          parser clp.
+        '''
+        if pimms.is_pmap(dv): return dv
+        elif pimms.is_map(dv): return pyr.pmap(dv)
+        else: raise ValueError('default_value must be a mapping')
+    def flag_words(u):
+        '''
+        clp.flag_words yields the persistent map of optional flag words recognized by the given
+          command-line parser clp.
+        '''
+        if pimms.is_pmap(u): return u
+        elif pimms.is_map(u): return pyr.pmap(u)
+        else: raise ValueError('flag_words must be a mapping')
+    def flag_characters(u):
+        '''
+        clp.flag_characters yields the persistent map of the flag characters recognized by the given
+          command-line parser clp.
+        '''
+        if pimms.is_pmap(u): return u
+        elif pimms.is_map(u): return pyr.pmap(u)
+        else: raise ValueError('flag_characters must be a mapping')
+    def option_words(u):
+        '''
+        clp.option_words yields the persistent map of optional words recognized by the given
+          command-line parser clp.
+        '''
+        if pimms.is_pmap(u): return u
+        elif pimms.is_map(u): return pyr.pmap(u)
+        else: raise ValueError('option_words must be a mapping')
+    def option_characters(u):
+        '''
+        clp.option_characters yields the persistent map of optional characters recognized by the
+          given command-line parser clp.
+        '''
+        if pimms.is_pmap(u): return u
+        elif pimms.is_map(u): return pyr.pmap(u)
+        else: raise ValueError('option_characters must be a mapping')
+        
     def __call__(self, *args):
         if len(args) > 0 and not isinstance(args[0], basestring) and \
            isinstance(args[0], (ListType, TupleType)):
