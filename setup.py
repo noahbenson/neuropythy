@@ -72,6 +72,8 @@ setup(
     install_requires=['numpy>=1.2',
                       'scipy>=0.7',
                       'nibabel>=2.0',
-                      'pysistence>=0.4',
+                      'pyrsistent>=0.11',
+                      'pint>=0.7',
+                      'pimms>=0.2',
                       #'python-igraph>=0.7.1',
                       'py4j>=0.10'])
