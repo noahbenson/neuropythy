@@ -1,23 +1,306 @@
 ####################################################################################################
-# neuropythy/geometry/mesh.ph
+# neuropythy/geometry/mesh.py
 # Tools for interpolating from meshes.
 # By Noah C. Benson
 
-import numpy as np
-import numpy.matlib as npml
-import scipy as sp
-import scipy.spatial as space
-import scipy.sparse  as sps
-import os, math, itertools
-import pyrsistent as pyr
-import pimms
-from numpy.linalg import norm
-from .util import (triangle_area, triangle_address, alignment_matrix_3D,
-                   cartesian_to_barycentric_3D, cartesian_to_barycentric_2D,
-                   barycentric_to_cartesian, point_in_triangle)
+import numpy          as np
+import numpy.matlib   as npml
+import scipy          as sp
+import scipy.spatial  as space
+import scipy.sparse   as sps
+import scipy.optimize as spopt
+import pyrsistent     as pyr
+import sys, six, pimms
+
 if sys.version_info[0] == 3: from   collections import abc as colls
 else:                        import collections            as colls
 
+from .util import (triangle_area, triangle_address, alignment_matrix_3D,
+                   cartesian_to_barycentric_3D, cartesian_to_barycentric_2D,
+                   barycentric_to_cartesian, point_in_triangle)
+from functools import reduce
+
+@pimms.immutable
+class VertexSet(object):
+    '''
+    VertexSet is a class that tracks a number of vertices, including properties for them. This class
+    is intended as a base class for Tesselation and Mesh, both of which track vertex properties.
+    Note that all VertexSet objects add/overwrite the keys 'index' and 'label' in their itables in
+    order to store the vertex indices and labels as properties.
+    '''
+
+    def __init__(self, labels, properties=None, meta_data=None):
+        self._properties = properties
+        self.labels = labels
+        self.meta_data = meta_data
+
+    @pimms.param
+    def meta_data(md):
+        '''
+        tess.meta_data is a persistent map of meta-data provided to the given tesselation.
+        '''
+        if md is None: return pyr.m()
+        return md if pimms.is_pmap(md) else pyr.pmap(md)
+    @pimms.param
+    def labels(lbls):
+        '''
+        vset.labels is an array of the integer vertex labels.
+        '''
+        return pimms.imm_array(lbls)
+    @pimms.param
+    def _properties(props):
+        '''
+        obj._properties is an itable of property values given to the vertex-set obj; this is a
+        pre-processed input version of the value obj.properties.
+        '''
+        if props is None: return None
+        if pimms.is_itable(props): return props
+        elif pimms.is_map(props): return pimms.itable(props)
+        else: raise ValueError('provided properties data must be a mapping')
+    @pimms.value
+    def vertex_count(labels):
+        '''
+        vset.vertex_count is the number of vertices in the given vertex set vset.
+        '''
+        return len(labels)
+    @pimms.value
+    def indices(vertex_count):
+        '''
+        vset.indices is the list of vertex indices for the given vertex-set vset.
+        '''
+        return pimms.imm_array(range(vertex_count), dtype=np.int)
+    @pimms.require
+    def validate_vertex_properties_size(_properties, vertex_count):
+        '''
+        validate_vertex_properties_size requires that _properties have the same number of rows as
+        the vertex_count (unless _properties is empty).
+        '''
+        if   _properties is None: return True
+        elif _properties.row_count == 0: return True
+        elif _properties.row_count == vertex_count: return True
+        else: raise ValueError('_properties.row_count and vertex_count must be equal')
+    # The idea here is that _properties may be provided by the overloading class, then properties
+    # can be overloaded by that class to add unmodifiable properties to the object; e.g., meshes
+    # want coordinates to be a property that cannot be updated.
+    @pimms.value
+    def properties(_properties, labels, indices):
+        '''
+        obj.properties is an itable of property values given to the vertex-set obj.
+        '''
+        return _properties.set('index', indices).set('label', labels)
+    @pimms.value
+    def repr(vertex_count):
+        '''
+        obj.repr is the representation string returned by obj.__repr__().
+        '''
+        return 'VertexSet(<%d vertices>)' % self.vertex_count
+
+    # Normal Methods
+    def __repr__(self):
+        return self.repr
+    
+    def meta(self, name):
+        '''
+        vset.meta(x) is equivalent to vset.meta_data[x].
+        '''
+        return self.meta_data[name]
+    def with_meta(self, *args, **kwargs):
+        '''
+        vset.with_meta(...) collapses the given arguments with pimms.merge into the vset's current
+        meta_data map and yields a new vset with the new meta-data.
+        '''
+        md = pimms.merge(self.meta_data, *args, **kwargs)
+        if md is self.meta_data: return self
+        else: return self.copy(meta_data=md)
+    def wout_meta(self, *args, **kwargs):
+        '''
+        vset.wout_meta(...) removes the given arguments (keys) from the vset's current meta_data
+        map and yields a new vset with the new meta-data.
+        '''
+        md = self.meta_data
+        for a in args:
+            if pimms.is_vector(a):
+                for u in a:
+                    md = md.discard(u)
+            else:
+                md = md.discard(a)
+        return self if md is self.meta_data else self.copy(meta_data=md)
+
+    def prop(self, name):
+        '''
+        obj.prop(name) yields the vertex property in the given object with the given name.
+        obj.prop(data) yields data if data is a valid vertex property list for the given object.
+        obj.prop([p1, p2...]) yields a (d x n) vector of properties where d is the number of
+          properties given and n is obj.properties.row_count.
+        obj.prop(set([name1, name2...])) yields a mapping of the given names mapped to the
+          appropriate property values.
+        '''
+        if pimms.is_str(name):
+            return self.properties[name]
+        elif isinstance(name, colls.Set):
+            return pyr.pmap({nm:self.properties[nm] for nm in name})
+        elif pimms.is_vector(name):
+            if len(name) == self.properties.row_count:
+                return name
+            else:
+                return np.asarray([self.prop(nm) for nm in name])
+        else:
+            raise ValueError('unrecognized property')
+    def with_prop(self, *args, **kwargs):
+        '''
+        obj.with_prop(...) yields a duplicate of the given object with the given properties added to
+          it. The properties may be specified as a sequence of mapping objects followed by any
+          number of keyword arguments, all of which are merged into a single dict left-to-right
+          before application.
+        '''
+        pp = self._properties.merge(*args, **kwargs)
+        return self if pp is self._properties else self.copy(_properties=pp)
+    def wout_prop(self, *args):
+        '''
+        obj.wout_property(...) yields a duplicate of the given object with the given properties
+          removed from it. The properties may be specified as a sequence of column names or lists of
+          column names.
+        '''
+        pp = self._properties
+        for a in args:
+            if pimms.is_vector(a):
+                for u in a:
+                    pp = pp.discard(u)
+            else:
+                pp = pp.discard(a)
+        return self if pp is self._properties else self.copy(_properties=pp)
+    def property(self, prop,
+                 dtype=Ellipsis,
+                 outliers=None,  data_range=None,    clipped=np.inf,
+                 weights=None,   weight_min=0,       weight_transform=Ellipsis,
+                 mask=None,      valid_range=None,   null=np.nan,
+                 transform=None, yield_weighst=False):
+        '''
+        obj.property(prop) yields the given property from obj after performing a set of filters
+          on the property, as specified by the options. In the property array that is returned, the
+          values that are considered outliers (data out of some range) are indicated by numpy.inf,
+          and values that are not in the optionally-specified mask are given the value numpy.nan;
+          these may be changed with the clipped and null options, respectively.
+
+        The property argument prop may be either specified as a string (a property name in the
+        object) or as an array itself. The weights option may also be specified this way.
+
+        The following options are accepted:
+          * outliers (default:None) specifies the vertices that should be considered outliers; this
+            may be either None (no outliers explicitly specified), a list of indices, or a boolean
+            mask.
+          * data_range (default:None) specifies the acceptable data range for values in the
+            property; if None then this paramter is ignored. If specified as a pair of numbers
+            (min, max), then data that is less than the min or greater than the max is marked as an
+            outlier (in addition to other explicitly specified outliers). The values np.inf or 
+            -np.inf can be specified to indicate a one-sided range.
+          * clipped (default:np.inf) specifies the value to be used to mark an out-of-range value in
+            the returned array.
+          * mask (default:None) specifies the vertices that should be included in the property 
+            array; values are specified in the mask similarly to the outliers option, except that
+            mask values are included rather than excluded. The mask takes precedence over the 
+            outliers, in that a null (out-of-mask) value is always marked as null rather than
+            clipped.
+          * valid_range (default: None) specifies the range of values that are considered valid; 
+            i.e., values outside of the range are marked as null. Specified the same way as
+            data_range.
+          * null (default: np.nan) specifies the value marked in the array as out-of-mask.
+          * transform (default:None) may optionally provide a function to be passed the array prior
+            to being returned (after null and clipped values are marked).
+          * dtype (defaut:Ellipsis) specifies the type of the array that should be returned.
+            Ellipsis indicates that the type of the given property should be used. If None, then a
+            normal Python array is returned. Otherwise, should be a numpy type such as numpy.real64
+            or numpy.complex128.
+          * weights (default:Ellipsis) specifies the property or property array that should be
+            examined as the weights. The default, Ellipsis, simply chops values that are close to or
+            less than 0 such that they are equal to 0. None specifies that no transformation should
+            be applied.
+          * weight_min (default:0) specifies the value at-or-below which the weight is considered 
+            insignificant and the value is marked as clipped.
+          * weight_transform (default:None) specifies a function that should be applied to the
+            weight array before being used in the function.
+          * yield_weights (default:False) specifies, if True, that instead of yielding prop, yield
+            the tuple (prop, weights).
+        '''
+        # First, get the property array, as an array:
+        prop = self.prop(prop) if pimms.is_str(prop) else np.asarray(prop)
+        if dtype is Ellipsis:
+            dtype = prop.dtype
+        if not np.isnan(null):
+            prop = np.asarray([np.nan if x is null else x for x in prop])
+        prop = np.asarray(prop, dtype=dtype)
+        # Next, do the same for weight:
+        weight = weights
+        weight = None              if weight is None       else \
+                 self.prop(weight) if pimms.is_str(weight) else \
+                 weight
+        weight_orig = weight
+        if weight is None or weight_min is None:
+            low_weight = []
+        else:
+            if weight_transform is Ellipsis:
+                weight = np.array(weight, dtype=np.float)
+                weight[weight < 0] = 0
+                weight[np.isclose(weight, 0)] = 0
+            elif weight_transform is not None:
+                weight = weight_transform(np.asarray(weight))
+            low_weight = [] if weight_min is None else np.where(weight <= weight_min)[0]
+        # Next, find the mask; these are values that can be included theoretically;
+        all_vertices = np.asarray(range(self.properties.row_count), dtype=np.int)
+        where_nan = np.where(np.isnan(prop))[0]
+        where_inf = np.where(np.isinf(prop))[0]
+        where_ok  = reduce(np.setdiff1d, [all_vertices, where_nan, where_inf])
+        # look at the valid_range...
+        where_inv = [] if valid_range is None else \
+                    where_ok[(prop[where_ok] < valid_range[0]) | (prop[where_ok] > valid_range[1])]
+        # Whittle down the mask to what we are sure is in the spec:
+        where_nan = np.union1d(where_nan, where_inv)
+        mask = np.setdiff1d(all_vertices if mask is None else all_vertices[mask], where_nan)
+        # Find the outliers: values specified as outliers or inf values; will build this as we go
+        outliers = [] if outliers is None else all_vertices[outliers]
+        outliers = np.intersect1d(outliers, mask) # outliers not in the mask don't matter anyway
+        outliers = np.union1d(outliers, low_weight) # low-weight vertices are treated as outliers
+        # If there's a data range argument, deal with how it affects outliers
+        if data_range is not None:
+            if hasattr(data_range, '__iter__'):
+                outliers = np.union1d(outliers, mask[np.where(prop[mask] < data_range[0])[0]])
+                outliers = np.union1d(outliers, mask[np.where(prop[mask] > data_range[1])[0]])
+            else:
+                outliers = np.union1d(outliers, mask[np.where(prop[mask] < 0)[0]])
+                outliers = np.union1d(outliers, mask[np.where(prop[mask] > data_range)[0]])
+        # no matter what, trim out the infinite values (even if inf was in the data range)
+        outliers = np.union1d(outliers, mask[np.where(np.isinf(prop[mask]))[0]])
+        # Okay, mark everything in the prop:
+        where_nan = np.asarray(where_nan, dtype=np.int)
+        outliers = np.asarray(outliers, dtype=np.int)
+        prop[where_nan] = null
+        prop[outliers]  = clipped
+        if yield_weight:
+            weight = np.array(weight, dtype=np.float)
+            weight[where_nan] = 0
+            weight[outliers] = 0
+        # transform?
+        if transform: prop = transform(prop)
+        # That's it, just return
+        return (prop, weight) if yield_weight else prop
+
+    def map(self, f):
+        '''
+        tess.map(f) is equivalent to tess.properties.map(f).
+        '''
+        return self.properties.map(f)
+    def where(self, f, indices=False):
+        '''
+        obj.where(f) yields a list of vertex labels l such that f(p[l]) yields True, where p is the
+          properties value for the vertex-set obj (i.e., p[l] is the property map for the vertex
+          with label l. The function f should operate on a dict p which is identical to that passed
+          to the method obj.properties.map().
+        The optional third parameter indices (default: False) may be set to True to indicate that
+        indices should be returned instead of labels.
+        '''
+        idcs = np.where(self.map(f))[0]
+        return idcs if indices else self.labels[idcs]
+    
 @pimms.immutable
 class TesselationIndex(object):
     '''
@@ -35,12 +318,15 @@ class TesselationIndex(object):
 
     @pimms.param
     def vertex_index(vi):
+        if not pimms.is_pmap(vi): vi = pyr.pmap(vi)
         return vi
     @pimms.param
     def edge_index(ei):
+        if not pimms.is_pmap(ei): ei = pyr.pmap(ei)
         return ei
     @pimms.param
     def face_index(fi):
+        if not pimms.is_pmap(fi): fi = pyr.pmap(fi)
         return fi
     
     def __repr__(self):
@@ -77,12 +363,16 @@ class TesselationIndex(object):
             return self.vertex_index[index]
 
 @pimms.immutable
-class Tesselation(object):
+class Tesselation(VertexSet):
     '''
     A Tesselation object represents a triangle mesh with no particular coordinate embedding.
+    Tesselation inherits from the immutable class VertexSet, which provides functionality for
+    tracking the properties of the tesselation's vertices.
     '''
-    def __init__(faces, properties=None, meta_data=None):
+    def __init__(self, faces, properties=None, meta_data=None):
         self.faces = faces
+        # we don't call VertexSet.__init__ because it sets vertex labels, which we have changed in
+        # this class to a value instead of a param; instead we just set _properties directly
         self._properties = properties
         self.meta_data = meta_data
 
@@ -100,38 +390,15 @@ class Tesselation(object):
             if tris.shape[0] != 3:
                 raise ValueError('faces must be a (3 x m) or (m x 3) matrix')
         return tris
-    @pimms.param
-    def _properties(props):
-        '''
-        tess.properties is a pimms ITable instance containing the vertex properties of the given
-          tesselation object.
-        '''
-        if props is None: return pimms.itable()
-        if pimms.is_itable(props): return props
-        elif pimms.is_map(props): return pimms.itable(props)
-        else: raise ValueError('tesselation _properties must be a mapping')
-    @pimms.param
-    def meta_data(md):
-        '''
-        tess.meta_data is a persistent map of meta-data provided to the given tesselation.
-        '''
-        return pyr.pmap(md)
 
     # The immutable values:
     @pimms.value
-    def vertex_labels(faces):
+    def labels(faces):
         '''
-        tess.vertex_labels is an array of the integer vertex labels; by default this is equivalent
-        to range(tess.vertex_count), but sub-sampling of tesselations may cause this to be
-        different.
+        tess.labels is an array of the integer vertex labels; subsampling the tesselation object
+        will maintain vertex labels (but not indices).
         '''
-        return np.unique(faces)
-    @pimms.value
-    def vertex_count(vertex_labels):
-        '''
-        tess.vertex_count is the number of vertices in the given tesselation.
-        '''
-        return len(vertex_labels)
+        return pimms.imm_array(np.unique(faces))
     @pimms.value
     def face_count(faces):
         '''
@@ -211,11 +478,19 @@ class Tesselation(object):
         '''
         return edge_data['edge_face_index']
     @pimms.value
-    def vertex_index(vertex_labels):
+    def edge_faces(edges, edge_face_index):
+        '''
+        tess.edge_faces is a tuple that contains one element per edge; each element
+        tess.edge_faces[i] is a tuple of the 1 or two face indices of the faces that contain the
+        edge with edge index i.
+        '''
+        return tuple([edge_face_index[e] for e in zip(*edges)])
+    @pimms.value
+    def vertex_index(indices, labels):
         '''
         tess.vertex_index is an index of vertex-label to vertex index for the given tesselation.
         '''
-        return pyr.pmap({v:i for (i,v) in enumerate(vertex_labels)})
+        return pyr.pmap({v:i for (i,v) in zip(indices, labels)})
     @pimms.value
     def index(vertex_index, edge_index, face_index):
         '''
@@ -236,7 +511,8 @@ class Tesselation(object):
         sized vector (for vertices) or matrix (for edges and faces), and the result will be a list
         of the appropriate indices or an identically-sized array with the vertex indices.
         '''
-        return TesselationIndex(vertex_index, edge_index, face_index)
+        idx = TesselationIndex(vertex_index, edge_index, face_index)
+        return idx.persist()
     @pimms.value
     def indexed_edges(edges, vertex_index):
         '''
@@ -250,35 +526,44 @@ class Tesselation(object):
         '''
         return pimms.imm_array([[vertex_index[u] for u in row] for row in faces])
     @pimms.value
-    def vertex_edge_index(vertex_labels, edges):
+    def vertex_edge_index(labels, edges):
         '''
         tess.vertex_edge_index is a map whose keys are vertices and whose values are tuples of the
         edge indices of the edges that contain the relevant vertex.
         '''
-        d = {k:[] for _ in vertex_labels}
+        d = {k:[] for _ in labels}
         for (i,(u,v)) in enumerate(edges.T):
             d[u].append(i)
             d[v].append(i)
         return pyr.pmap({k:tuple(v) for (k,v) in six.iteritems(d)})
     @pimms.value
-    def vertex_face_index(vertex_labels, faces):
+    def vertex_edges(labels, vertex_edge_index):
+        '''
+        tess.vertex_edges is a tuple whose elements are tuples of the edge indices of the edges
+        that contain the relevant vertex; i.e., for vertex u with vertex index i,
+        tess.vertex_edges[i] will be a tuple of the edges indices that contain vertex u.
+        '''
+        return tuple([vertex_edge_index[u] for u in labels])
+    @pimms.value
+    def vertex_face_index(labels, faces):
         '''
         tess.vertex_face_index is a map whose keys are vertices and whose values are tuples of the
         edge indices of the faces that contain the relevant vertex.
         '''
-        d = {k:[] for _ in vertex_labels}
+        d = {k:[] for _ in labels}
         for (i,(u,v,w)) in enumerate(faces.T):
             d[u].append(i)
             d[v].append(i)
             d[w].append(i)
         return pyr.pmap({k:tuple(v) for (k,v) in six.iteritems(d)})
     @pimms.value
-    def vertex_faces(vertex_labels, vertex_face_index):
+    def vertex_faces(labels, vertex_face_index):
         '''
-        tess.vertex_faces is a tuple whose elements are tuples of the edge indices of the faces
-        that contain the relevant vertex.
+        tess.vertex_faces is a tuple whose elements are tuples of the face indices of the faces
+        that contain the relevant vertex; i.e., for vertex u with vertex index i,
+        tess.vertex_faces[i] will be a tuple of the face indices that contain vertex u.
         '''
-        return tuple([vertex_face_index[u] for u in vertex_labels])
+        return tuple([vertex_face_index[u] for u in labels])
     @staticmethod
     def _order_neighborhood(edges):
         res = [edges[0][1]]
@@ -289,7 +574,7 @@ class Tesselation(object):
                     break
         return tuple(res)
     @pimms.value
-    def neighborhoods(vertex_labels, faces, vertex_faces):
+    def neighborhoods(labels, faces, vertex_faces):
         '''
         tess.neighborhoods is a tuple whose contents are the neighborhood of each vertex in the
         tesselation.
@@ -297,7 +582,7 @@ class Tesselation(object):
         faces = faces.T
         nedges = [[((f[0], f[1]) if f[2] == u else (f[1], f[2]) if f[0] == u else (f[2], f[0]))
                    for f in faces[fs]]
-                  for (u, fs) in zip(vertex_labels, vertex_faces)]
+                  for (u, fs) in zip(labels, vertex_faces)]
         return tuple([Tesselation._order_neighborhood(nei) for nei in nedges])
     @pimms.value
     def indexed_neighborhoods(vertex_index, neighborhoods):
@@ -307,6 +592,8 @@ class Tesselation(object):
         indices where tess.neighborhoods gives the vertex labels.
         '''
         return tuple([tuple([vertex_index[u] for u in nei]) for nei in neighborhoods])
+
+    # Requirements/checks
     @pimms.require
     def validate_properties(vertex_count, _properties):
         '''
@@ -321,53 +608,15 @@ class Tesselation(object):
 
     # Normal Methods
     def __repr__(self):
-        return 'Tesselation(<%d triangles>, <%d vertices>)' % (self.face_count, self.vertex_count)
-
-    # functions for handling properties...
-    def prop(self, name):
+        return 'Tesselation(<%d faces>, <%d vertices>)' % (self.face_count, self.vertex_count)
+    def make_mesh(self, coords, properties=None, meta_data=None):
         '''
-        tess.prop(name) yields the vertex property in the given tesselation with the given name.
-        tess.prop(data) yields data if data is a valid vertex property list for the given tess.
-        tess.prop([p1, p2...]) yields a (d x n) vector of properties where d is the number of
-          properties given and n is tess.vertex_count.
-        tess.prop(set([name1, name2...])) yields a mapping of the given names mapped to the
-          appropriate property values.
+        tess.make_mesh(coords) yields a Mesh object with the given coordinates and with the
+          meta_data and properties inhereted from the given tesselation tess.
         '''
-        if pimms.is_str(name):
-            return self.properties[name]
-        elif isinstance(name, colls.Set):
-            return pyr.pmap({nm:self.properties[nm] for nm in name})
-        elif pimms.is_vector(name):
-            if len(name) == self.vertex_count:
-                return name
-            else:
-                return np.asarray([self[nm] for nm in name])
-        else:
-            raise ValueError('unrecognized property')
-    def with_prop(self, *args, **kwargs):
-        '''
-        tess.with_prop(...) yields a duplicate of the given tesselation with the given properties
-          added to it. The properties may be specified as a sequence of mapping objects followed by
-          any number of keyword arguments, all of which are merged into a single dict left-to-right
-          before application.
-        '''
-        pp = self._properties.merge(*args, **kwargs)
-        return self if pp is self._properties else self.copy(_properties=pp)
-    def wout_prop(self, *args):
-        '''
-        tess.wout_property(...) yields a duplicate of the given tesselation with the given
-          properties removed from it. The properties may be specified as a sequence of column names
-          or lists of column names.
-        '''
-        pp = self._properties
-        for a in args:
-            if pimms.is_vector(a):
-                for u in a:
-                    pp = pp.discard(u)
-            else:
-                pp = pp.discard(a)
-        return self if pp is self._properties else self.copy(_properties=pp)
-
+        md = self.meta_data
+        if meta_data is not None: md = pimms.merge(md, meta_data)
+        return geo.Mesh(self.tess, coords, meta_data=md, properties=properties)
     def subtess(self, vertices, tag=None):
         '''
         tess.subtess(vertices) yields a sub-tesselation of the given tesselation object that only
@@ -384,23 +633,36 @@ class Tesselation(object):
             tmp = self.index(vertices)
             vertices = np.zeros(self.vertex_count)
             vertices[tmp] = 1
-        vidcs = np.asarray(range(self.vertex_count))[vertices]
-        if len(vidcs) == len(vertices): return self
+        vidcs = self.indices[vertices]
+        if len(vidcs) == self.vertex_count: return self
         fsum = np.sum([vertices[f] for f in self.indexed_faces], axis=0)
         fids = np.where(fsum == 3)[0]
         faces = self.faces[:,fids]
-        props = self.properties[vidcs]
+        props = self._properties
+        if props is not None and len(props) > 1: props = props[vidcs]
         md = self.meta_data.set(tag, self) if pimms.is_str(tag)   else \
              self.meta_data.set('supertess', self) if tag is True else \
              self.meta_data
-        dat = {'faces': faces, '_properties': props}
+        dat = {'faces': faces}
+        if props is not self._properties: dat['_properties'] = props
         if md is not self.meta_data: dat['meta_data'] = md
-        return self.copy(**opts)
-    
+        return self.copy(**dat)
+    def select(self, fn, tag=None):
+        '''
+        tess.select(fn) is equivalent to tess.subtess(tess.properties.map(fn)); any vertex whose
+          property data yields True or 1 will be included in the new subtess and all other vertices
+          will be excluded.
+        The optional parameter tag is used identically as in tess.subtess().
+        '''
+        return self.subtess(self.map(fn), tag=tag)
+
 @pimms.immutable
 class Mesh(object):
     '''
     A Mesh object represents a triangle mesh in either 2D or 3D space.
+    To construct a mesh object, use Mesh(tess, coords), where tess is either a Tesselation object or
+    a matrix of face indices and coords is a coordinate matrix for the vertices in the given
+    tesselation or face matrix.
     '''
 
     def __init__(self, faces, coordinates, meta_data=None, properties=None):
@@ -431,31 +693,31 @@ class Mesh(object):
         if not isinstance(tris, Tesselation):
             try: tris = Tesselation(tris)
             except: raise ValueError('mesh.tess must be a Tesselation object')
-        return tris
-    @pimms.param
-    def meta_data(md):
-        '''
-        mesh.meta_data is a persistent map of meta-data provided to the given mesh.
-        '''
-        return pyr.pmap(md)
-    @pimms.param
-    def _properties(props):
-        '''
-        mesh._properties is the properties argument that was given the the mesh constructor;
-        see mesh.properties.
-        '''
-        if props is None: return pimms.itable()
-        elif pimms.is_itable(props): return props
-        elif pimms.is_map(props): return pimms.itable(props)
-        else: raise ValueError('tesselation _properties must be a mapping')
+        return tris.persist()
 
     # The immutable values:
-    @pimms.param
-    def properties(tess, _properties):
+    @pimms.value
+    def labels(tess):
+        '''
+        mesh.labels is the list of vertex labels for the given mesh.
+        '''
+        return tess.labels
+    @pimms.value
+    def indices(tess):
+        '''
+        mesh.indices is the list of vertex indicess for the given mesh.
+        '''
+        return tess.indices
+    @pimms.value
+    def properties(_properties, tess, coordinates):
         '''
         mesh.properties is the pimms Itable object of properties known to the given mesh.
         '''
-        return pimms.merge(tess.properties, _properties)
+        # note that tess.properties always already has labels and indices included
+        if _properties is tess.properties:
+            return pimms.merge(_properties, coordinates=coordinates.T)
+        else:
+            return pimms.merge(tess.properties, _properties, coordinates=coordinates.T)
     @pimms.value
     def edge_coordinates(tess, coordinates):
         '''
@@ -498,12 +760,20 @@ class Mesh(object):
             u01 = np.concatenate((u01,zz))
             u02 = np.concatenate((u02,zz))
         xp = np.cross(u01, u02, axisa=0, axisb=0).T
-        xpnorms = np.sqrt(np.sum(xp**2, axis=0))
-        zero = np.isclose(xpnorms, 0)
-        zero_idcs = np.where(zero)
-        xp[:,zeros_idcs] = 0
-        return pimms.imm_array(xp / (xpnorms + zero))
-
+        norms = np.sqrt(np.sum(xp**2, axis=0))
+        wz = np.isclose(norms, 0)
+        return pimms.imm_array(xp * ((~wz) / (norms + wz)))
+    @pimms.value
+    def vertex_normals(face_normals, vertex_faces):
+        '''
+        mesh.vertex_normals is the (3 x n) array of the outward-facing normal vectors of each
+          vertex in the given mesh. If mesh is a 2D mesh, these are all either [0,0,1] or
+          [0,0,-1].
+        '''
+        tmp = np.array([np.sum(face_normals[:,fs], axis=1) for fs in vertex_faces]).T
+        norms = np.sqrt(np.sum(tmp ** 2, axis=0))
+        wz = np.isclose(norms, 0)
+        return pimms.imm_array(tmp * ((~wz) / (norms + wz)))
     @pimms.value
     def face_angle_cosines(face_coordinates):
         '''
@@ -516,10 +786,9 @@ class Mesh(object):
                         for x  in [X[1] - X[0], X[2] - X[1], X[0] - X[2]]
                         for xl in [np.sqrt(np.sum(x**2, axis=0))]
                         for zs in [np.isclose(xl, 0)]])
-        dps = [(X[0] * (-X[2])).sum(0),
-               (X[1] * (-X[0])).sum(0),
-               (X[2] * (-X[1])).sum(0)]
-        return np.asarray(dps)
+        dps = np.asarray([np.sum(x1*x2, axis=0) for (x1,x2) in zip(X, -np.roll(X, 1, axis=0))])
+        dps.setflags(write=False)
+        return dps
     @pimms.value
     def face_angles(face_angle_cosines):
         '''
@@ -527,7 +796,9 @@ class Mesh(object):
         d is the number of dimensions of the mesh embedding and n is the number of faces in the
         mesh.
         '''
-        return np.arccos(face_angle_cosines)
+        tmp = np.arccos(face_angle_cosines)
+        tmp.setflags(write=False)
+        return tmp
     @pimms.value
     def face_areas(face_coordinates):
         '''
@@ -539,26 +810,23 @@ class Mesh(object):
         '''
         mesh.edge_lengths is a numpy array of the lengths of each edge in the given mesh.
         '''
-        return pimms.imm_array(
-            np.sqrt(np.sum((edge_coordinates[1] - edge_coordinates[0])**2, axis=0)))
+        tmp = np.sqrt(np.sum((edge_coordinates[1] - edge_coordinates[0])**2, axis=0))
+        tmp.setflags(write=False)
+        return tmp
     @pimms.value
     def face_hash(face_centers):
         '''
         mesh.face_hash yields the scipy spatial hash of triangle centers in the given mesh.
         '''
-        try:
-            return space.cKDTree(face_centers.T)
-        except:
-            return space.KDTree(face_centers.T)
+        try:    return space.cKDTree(face_centers.T)
+        except: return space.KDTree(face_centers.T)
     @pimms.value
     def vertex_hash(coordinates):
         '''
         mesh.vertex_hash yields the scipy spatial hash of the vertices of the given mesh.
         '''
-        try:
-            return space.cKDTree(coordinates.T)
-        except:
-            return space.KDTree(coordinates.T)
+        try:    return space.cKDTree(coordinates.T)
+        except: return space.KDTree(coordinates.T)
 
     # requirements/validators
     @pimms.require
@@ -572,58 +840,53 @@ class Mesh(object):
         if d != 2 and d != 3:
             raise ValueError('Only 2D and 3D meshes are supported')
         return True
+    @pimms.value
+    def repr(coordinates, vertex_count, tess):
+        '''
+        mesh.repr is the representation string returned by mesh.__repr__().
+        '''
+        args = (coordinates.shape[0], tess.face_count, vertex_count)
+        return 'Mesh(<%dD>, <%d faces>, <%d vertices>)' % args
 
     # Normal Methods
     def __repr__(self):
-        return 'Mesh(<%dD>, <%d faces>, <%d vertices>)' % (self.coordinates.shape[0],
-                                                           self.tess.face_count,
-                                                           self.tess.vertex_count)
+        return self.repr
 
-    # functions for handling properties...
-    # functions for handling properties...
-    def prop(self, name):
+    def submesh(self, vertices, tag=None, tag_tess=Ellipsis):
         '''
-        mesh.prop(name) yields the vertex property in the given mesh with the given name.
-        mesh.prop(data) yields data if data is a valid vertex property list for the given mesh.
-        mesh.prop([p1, p2...]) yields a (d x n) vector of properties where d is the number of
-          properties given and n is mesh.vertex_count.
-        mesh.prop(set([name1, name2...])) yields a mapping of the given names mapped to the
-          appropriate property values.
+        mesh.submesh(vertices) yields a sub-mesh of the given mesh object that only contains the
+          given vertices, which may be specified as a boolean vector or as a list of vertex labels.
+          Faces and edges are trimmed automatically, but the vertex labels for the new vertices
+          remain the same as in the original graph.
+        The optional argument tag may be set to True, in which case the new mesh's meta-data
+        will contain the key 'supermesh' whose value is the original tesselation tess; alternately
+        tag may be a string in which case it is used as the key name in place of 'supermesh'.
+        Additionally, the optional argument tess_tag is the equivalent to the tag option except that
+        it is passed along to the mesh's tesselation object; the value Ellipsis (default) can be
+        given in order to specify that tag_tess should take the same value as tag.
         '''
-        if pimms.is_str(name):
-            return self.properties[name]
-        elif isinstance(name, colls.Set):
-            return pyr.pmap({nm:self.properties[nm] for nm in name})
-        elif pimms.is_vector(name):
-            if len(name) == self.vertex_count:
-                return name
-            else:
-                return np.asarray([self[nm] for nm in name])
-        else:
-            raise ValueError('unrecognized property')
-    def with_prop(self, *args, **kwargs):
+        subt = tess.subtess(vertices, tag=tag_tess)
+        if subt is self.tess: return self
+        vidcs = self.index(subt.labels)
+        props = self._properties
+        if props is not None and props.row_count > 0:
+            props = props[vidcs]
+        coords = self.coordinates[:,vidcs]
+        md = self.meta_data.set(tag, self) if pimms.is_str(tag)   else \
+             self.meta_data.set('supermesh', self) if tag is True else \
+             self.meta_data
+        dat = {'coordinates': coords, 'tess': subt}
+        if props is not self._properties: dat['_properties'] = props
+        if md is not self.meta_data: dat['meta_data'] = md
+        return self.copy(**dat)
+    def select(self, fn, tag=None, tag_tess=Ellipsis):
         '''
-        mesh.with_prop(...) yields a duplicate of the given mesh object with the given properties
-          added to it. The properties may be specified as a sequence of mapping objects followed by
-          any number of keyword arguments, all of which are merged into a single dict left-to-right
-          before application.
+        mesh.select(fn) is equivalent to mesh.subtess(mesh.map(fn)); any vertex whose
+          property data yields True or 1 will be included in the new submesh and all other vertices
+          will be excluded.
+        The optional parameters tag and tag_tess is used identically as in mesh.submesh().
         '''
-        pp = self._properties.merge(*args, **kwargs)
-        return self if pp is self._properties else self.copy(_properties=pp)
-    def wout_prop(self, *args):
-        '''
-        mesh.wout_property(...) yields a duplicate of the given mesh with the given properties
-          removed from it. The properties may be specified as a sequence of column names or lists of
-          column names.
-        '''
-        pp = self._properties
-        for a in args:
-            if pimms.is_vector(a):
-                for u in a:
-                    pp = pp.discard(u)
-            else:
-                pp = pp.discard(a)
-        return self if pp is self._properties else self.copy(_properties=pp)
+        return self.submesh(self.map(fn), tag=tag, tag_tess=tag_tess)
     
     # True if the point is in the triangle, otherwise False; tri_no is an index into the faces
     def is_point_in_face(self, tri_no, pt):
@@ -950,7 +1213,8 @@ class Mesh(object):
             def _make_lambda(kk): return lambda:self.apply_interpolation(interp, data[kk])
             return pimms.lazy_map({k:_make_lambda(k) for k in data.iterkeys()})
         elif pimms.is_map(data):
-            return pyr.pmap({k:self.apply_interpolation(interp, data[k]) for k in data.iterkeys()})
+            return pyr.pmap({k:self.apply_interpolation(interp, data[k])
+                             for k in six.iterkeys(data)})
         elif pimms.is_matrix(data):
             data = np.asarray(data)
             if data.shape[0] == n:
@@ -980,9 +1244,9 @@ class Mesh(object):
     def interpolate(self, x, data, mask=None, weights=None, method='automatic', n_jobs=1):
         '''
         mesh.interpolate(x, data) yields a numpy array of the data interpolated from the given
-        array, data, which must contain the same number of elements as there are points in the Mesh
-        object mesh, to the coordinates in the given point matrix x. Note that if x is a vector
-        instead of a matrix, then just one value is returned.
+          array, data, which must contain the same number of elements as there are points in the
+          Mesh object mesh, to the coordinates in the given point matrix x. Note that if x is a
+          vector instead of a matrix, then just one value is returned.
         
         The following options are accepted:
           * mask (default: None) indicates that the given True/False or 0/1 valued list/array should
@@ -1001,6 +1265,7 @@ class Mesh(object):
           * n_jobs (default: 1) is passed along to the cKDTree.query method, so may be set to an
             integer to specify how many processors to use, or may be -1 to specify all processors.
         '''
+        if isinstance(x, Mesh): x = x.coordinates
         if method is None: method = 'auto'
         method = method.lower()
         if method == 'linear':
@@ -1028,7 +1293,7 @@ class Mesh(object):
             if pimms.is_str(data) and data.lower() == 'all':
                 data = self.properties
             if pimms.is_map(data):
-                return pyr.pmap({k:_apply_interp(data[k]) for k in data.iterkeys()})
+                return pyr.pmap({k:_apply_interp(data[k]) for k in six.iterkeys(data)})
             elif pimms.is_matrix(data):
                 data = np.asarray(data)
                 if data.shape[0] == n:
@@ -1065,7 +1330,7 @@ class Mesh(object):
             faces = self.tess.faces
             null = np.full((faces.shape[0], self.coordinates.shape[0]), np.nan)
             tx = np.asarray([self.coordinates[:,faces[:,f]].T if f else null
-                             for f in face_id]))
+                             for f in face_id])
         bc = cartesian_to_barycentric_3D(tx, data) if self.coordinates.shape[0] == 3 else \
              cartesian_to_barycentric_2D(tx, data)
         return {'face_id': face_id, 'coordinates': bc}
@@ -1091,4 +1356,278 @@ class Mesh(object):
             tx = np.asarray(self.coordinates[:,self.tess.faces[:,face_id]].T)
         return barycentric_to_cartesian(tx, coords)
 
+    # smooth a field on the cortical surface
+    def smooth(self, prop, smoothness=0.5, weights=None, weight_min=None, weight_transform=None,
+               outliers=None, data_range=None, mask=None, valid_range=None, null=np.nan,
+               match_distribution=None, transform=None):
+        '''
+        mesh.smooth(prop) yields a numpy array of the values in the mesh property prop after they
+          have been smoothed on the cortical surface. Smoothing is done by minimizing the square
+          difference between the values in prop and the smoothed values simultaneously with the
+          difference between values connected by edges. The prop argument may be either a property
+          name or a list of property values.
+        
+        The following options are accepted:
+          * weights (default: None) specifies the weight on each individual vertex that is in the
+            mesh; this may be a property name or a list of weight values. Any weight that is <= 0 or
+            None is considered outside the mask.
+          * smoothness (default: 0.5) specifies how much the function should care about the
+            smoothness versus the original values when optimizing the surface smoothness. A value of
+            0 would result in no smoothing performed while a value of 1 indicates that only the
+            smoothing (and not the original values at all) matter in the solution.
+          * outliers (default: None) specifies which vertices should be considered 'outliers' in
+            that, when performing minimization, their values are counted in the smoothness term but
+            not in the original-value term. This means that any vertex marked as an outlier will
+            attempt to fit its value smoothly from its neighbors without regard to its original
+            value. Outliers may be given as a boolean mask or a list of indices. Additionally, all
+            vertices whose values are either infinite or outside the given data_range, if any, are
+            always considered outliers even if the outliers argument is None.
+          * mask (default: None) specifies which vertices should be included in the smoothing and
+            which vertices should not. A mask of None includes all vertices by default; otherwise
+            the mask may be a list of vertex indices of vertices to include or a boolean array in
+            which True values indicate inclusion in the smoothing. Additionally, any vertex whose
+            value is either NaN or None is always considered outside of the mask.
+          * data_range (default: None) specifies the range of the data that should be accepted as
+            input; any data outside the data range is considered an outlier. This may be given as
+            (min, max), or just max, in which case 0 is always considered the min.
+          * match_distribution (default: None) allows one to specify that the output values should
+            be distributed according to a particular distribution. This distribution may be None (no
+            transform performed), True (match the distribution of the input data to the output,
+            excluding outliers), a collection of values whose distribution should be matched, or a 
+            function that accepts a single real-valued argument between 0 and 1 (inclusive) and
+            returns the appropriate value for that quantile.
+          * null (default: numpy.nan) specifies what value should be placed in elements of the
+            property that are not in the mask or that were NaN to begin with. By default, this is
+            NaN, but 0 is often desirable.
+        '''
+        # Do some argument processing ##############################################################
+        n = self.tess.vertex_count
+        all_vertices = np.asarray(range(n), dtype=np.int)
+        # Parse the property data and the weights...
+        (prop,weights) = self.property(prop, outliers=outliers, data_range=data_range,
+                                       mask=mask, valid_range=valid_range,
+                                       weights=weights, weight_min=weight_min
+                                       weight_transform=weight_transform, transform=transform,
+                                       yield_weights=True)
+        prop = np.array(prop)
+        if not pimms.is_vector(prop, np.number):
+            raise ValueError('non-numerical properties cannot be smoothed')
+        # First, find the mask; these are values that can be included theoretically
+        where_inf = np.where(np.isinf(prop))[0]
+        where_nan = np.where(np.isnan(prop))[0]
+        where_bad = np.union1d(where_inf, where_nan)
+        where_ok  = np.setdiff1d(all_vertices, where_bad)
+        # Whittle down the mask to what we are sure is in the minimization:
+        mask = reduce(np.setdiff1d,
+                      [all_vertices if mask is None else all_vertices[mask],
+                       where_nan,
+                       np.where(np.isclose(weights, 0))[0]])
+        # Find the outliers: values specified as outliers or inf values; we'll build this as we go
+        outliers = [] if outliers is None else all_vertices[outliers]
+        outliers = np.intersect1d(outliers, mask) # outliers not in the mask don't matter anyway
+        # no matter what, trim out the infinite values (even if inf was in the data range)
+        outliers = np.union1d(outliers, mask[np.where(np.isinf(prop[mask]))[0]])
+        outliers = np.asarray(outliers, dtype=np.int)
+        # here are the vertex sets we will use below
+        tethered = np.setdiff1d(mask, outliers)
+        tethered = np.asarray(tethered, dtype=np.int)
+        mask = np.asarray(mask, dtype=np.int)
+        maskset  = frozenset(mask)
+        # Do the minimization ######################################################################
+        # start by looking at the edges
+        el0 = self.tess.indexed_edges
+        # give all the outliers mean values
+        prop[outliers] = np.mean(prop[tethered])
+        # x0 are the values we care about; also the starting values in the minimization
+        x0 = np.array(prop[mask])
+        # since we are just looking at the mask, look up indices that we need in it
+        mask_idx = {v:i for (i,v) in enumerate(mask)}
+        mask_tethered = np.asarray([mask_idx[u] for u in tethered])
+        el = np.asarray([(mask_idx[a], mask_idx[b]) for (a,b) in el0.T
+                         if a in maskset and b in maskset])
+        # These are the weights and objective function/gradient in the minimization
+        (ks, ke) = (smoothness, 1.0 - smoothness)
+        e2v = lil_matrix((len(x0), len(el)), dtype=np.int)
+        for (i,(u,v)) in enumerate(el):
+            e2v[u,i] = 1
+            e2v[v,i] = -1
+        e2v = csr_matrix(e2v)
+        (us, vs) = el.T
+        weights_tth = weights[tethered]
+        def _f(x):
+            rs = np.dot(weights_tth, (x0[mask_tethered] - x[mask_tethered])**2)
+            re = np.sum((x[us] - x[vs])**2)
+            return ks*rs + ke*re
+        def _f_jac(x):
+            df = 2*ke*e2v.dot(x[us] - x[vs])
+            df[mask_tethered] += 2*ks*weights_tth*(x[mask_tethered] - x0[mask_tethered])
+            return df
+        sm_prop = spopt.minimize(_f, x0, jac=_f_jac, method='L-BFGS-B').x
+        # Apply output re-distributing if requested ################################################
+        if match_distribution is not None:
+            percentiles = 100.0 * np.argsort(np.argsort(sm_prop)) / (float(len(mask)) - 1.0)
+            if match_distribution is True:
+                sm_prop = np.percentile(x0[mask_tethered], percentiles)
+            elif hasattr(match_distribution, '__iter__'):
+                sm_prop = np.percentile(match_distribution, percentiles)
+            elif hasattr(match_distribution, '__call__'):
+                sm_prop = map(match_distribution, percentiles / 100.0)
+            else:
+                raise ValueError('Invalid match_distribution argument')
+        result = np.full(len(prop), null, dtype=np.float)
+        result[mask] = sm_prop
+        return result
 
+@pimms.immutable
+class Topology(VertexSet):
+    '''
+    A Topology object object represents a tesselation and a number of registered meshes; the
+    registered meshes (registrations) must all share the same tesselation object; these are
+    generally provided via vertex coordinates and not actualized Mesh objects.
+    This class should only be instantiated by the neuropythy library and should generally not be
+    constructed directly. See Hemisphere.topology objects to access a subject's topology objects.
+    A Topology is a VertexSet that inherits its properties from its tess object; accordingly it
+    can be used as a source of properties.
+    '''
+
+    def __init__(self, tess, registrations, properties=None, meta_data=None):
+        VertexSet.__init__(self, tess.labels, tess.properties)
+        self.tess = tess
+        self._registrations = registrations
+        self._properties = properties
+        self.meta_data = meta_data
+
+    @pimms.param
+    def tess(t):
+        '''
+        topo.tess is the tesselation object tracked by the given topology topo.
+        '''
+        if not isinstance(t, Tesselation):
+            t = Tesselation(tess)
+        return t.persist()
+    @pimms.param
+    def _registrations(regs):
+        '''
+        topo._registrations is the list of registration coordinates provided to the given topology.
+        See also topo.registrations.
+        '''
+        return regs if pimms.is_lazy_map(regs) or pimms.is_pmap(regs) else pyr.pmap(regs)
+    @pimms.value
+    def registrations(_registrations, tess):
+        '''
+        topo.registrations is a persistent map of the mesh objects for which the given topology
+        object is the tracker; this is generally a lazy map whose values are instantiated as 
+        they are requested.
+        '''
+        # okay, it's possible that some of the objects in the _registrations map are in fact
+        # already-instantiated meshes of tess; if so, we need to leave them be; at the same time
+        # we can't assume that a value is correct without checking it...
+        lazyq = pimms.is_lazy_map(_registrations)
+        def _reg_check(key):
+            if lazyq and _registrations.is_lazy(key):
+                def _lambda_reg_check():
+                    val = _registrations[key]
+                    if isinstance(val, Mesh):
+                        return val if val.tess is tess else val.copy(tess=tess)
+                    else:
+                        return Mesh(tess, val).persist()
+                return _lambda_reg_check
+            elif isinstance(val, Mesh):
+                return val if val.tess is tess else val.copy(tess=tess)
+            else:
+                return Mesh(tess, val)
+        return pimms.lazy_map({k:_reg_check(k) for k in six.iterkeys(_registrations)})
+    @pimms.value
+    def labels(tess):
+        '''
+        topo.labels is the list of vertex labels for the given topology topo.
+        '''
+        return tess.labels
+    @pimms.value
+    def indices(tess):
+        '''
+        topo.indices is the list of vertex indicess for the given topology topo.
+        '''
+        return tess.indices
+    @pimms.value
+    def properties(_properties, tess):
+        '''
+        topo.properties is the pimms Itable object of properties known to the given topology topo.
+        '''
+        # note that tess.properties always already has labels and indices included
+        return (_properties  if _properties is tess.properties else 
+                pimms.merge(tess.properties, _properties))
+    @pimms.value
+    def repr(tess):
+        '''
+        topo.repr is the representation string yielded by topo.__repr__().
+        '''
+        return 'Topology(<%d faces>, <%d vertices>)' % (tess.face_count, tess.vertex_count)
+    
+    def __repr__(self):
+        return self.repr
+    def make_mesh(self, coords, properties=None, meta_data=None):
+        '''
+        topo.make_mesh(coords) yields a Mesh object with the given coordinates and with the
+          tesselation, meta_data, and properties inhereted from the topology topo.
+        '''
+        md = self.meta_data.set('topology', self)
+        if meta_data is not None:
+            md = pimms.merge(md, meta_data)
+        ps = self.properties
+        if properties is not None:
+            ps = pimms.merge(ps, properties)
+        return geo.Mesh(self.tess, coords, meta_data=md, properties=ps)
+    def register(self, name, coords):
+        '''
+        topology.register(name, coordinates) returns a new topology identical to topo that 
+        additionally contains the new registration given by name and coordinates. If the argument
+        coordinates is in fact a Mesh and this mesh is already in the topology with the given name
+        then topology itself is returned.
+        '''
+        if not isinstance(coords, Mesh):
+            coords = Mesh(self.tess, coords)
+        elif name in self.registrations and not self.registrations.is_lazy(name):
+            if self.registrations[name] is coords:
+                return self
+        return self.copy(_registrations=self.registrations.set(name, coords))
+    def interpolate(self, x, data, mask=None, weights=None, method='automatic', n_jobs=1):
+        '''
+        topology.interpolate(topo, data) yields a numpy array of the data interpolated from the
+          given array, data, which must contain the same number of elements as there are vertices
+          tracked by the topology object (topology), to the coordinates in the given topology
+          (topo). In order to perform interpolation, the topologies topology and topo must share at
+          least one registration by name.
+        
+        The following options are accepted:
+          * mask (default: None) indicates that the given True/False or 0/1 valued list/array should
+            be used; any point whose nearest neighbor (see below) is in the given mask will, instead
+            of an interpolated value, be set to the null value (see null option).
+          * method (default: 'automatic') specifies what method to use for interpolation. The only
+            currently supported methods are 'automatic', 'linear', or 'nearest'. The 'nearest'
+            method does not  actually perform a nearest-neighbor interpolation but rather assigns to
+            a destination vertex the value of the source vertex whose veronoi-like polygon contains
+            the destination vertex; note that the term 'veronoi-like' is used here because it uses
+            the Voronoi diagram that corresponds to the triangle mesh and not the true delaunay
+            triangulation. The 'linear' method uses linear interpolation; though if the given data
+            is non-numerical, then nearest interpolation is used instead. The 'automatic' method
+            uses linear interpolation for any floating-point data and nearest interpolation for any
+            integral or non-numeric data.
+          * n_jobs (default: 1) is passed along to the cKDTree.query method, so may be set to an
+            integer to specify how many processors to use, or may be -1 to specify all processors.
+        '''
+        reg_names = [k for k in topo.registrations.iterkeys() if k in self.registrations]
+        if not reg_names:
+            raise RuntimeError('Topologies do not share a matching registration!')
+        res = None
+        for reg_name in reg_names:
+            try:
+                res = self.registrations[reg_name].interpolate(
+                    topo.registrations[reg_name], data,
+                    mask=mask, method=method, n_jobs=n_jobs);
+                break
+            except:
+                pass
+        if res is None:
+            raise ValueError('All shared topologies raised errors during interpolation!')
+        return res

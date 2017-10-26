@@ -3,8 +3,15 @@
 # This file defines common rotation functions that are useful with cortical mesh spheres, such as
 # those produced with FreeSurfer.
 
-import numpy as np
-import math
+'''
+The neuropythy.geometry package contains a number of utility functions for calculating 2D and 3D
+geometrical values as well as three classes: Mesh, Tesselation, and Topology. The Tesselation
+class stores information about triangle meshes---essentially all the information except the 2D or 3D
+coordinates of the vertices and that information which requires those coordinates. The Mesh class
+simply reifies the Tesselation class with these coordinates and the relevant values that can be
+derived from them. Finally, the Topology class tracks a Tesselation object and a set of Meshes that
+share that tesselation in common.
+'''
 
 from .util import (
     normalize,
@@ -24,5 +31,5 @@ from .util import (
     triangle_address,
     triangle_unaddress,
     point_in_triangle)
-from .mesh import Mesh
+from .mesh import (VertexSet, Tesselation, Mesh, Topology)
 
