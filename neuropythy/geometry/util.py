@@ -49,6 +49,19 @@ def vector_angle(u, v, direction=None):
             axis2 = -axis2
         return np.arctan2(np.dot(axis2, v), np.dot(axis1, v))
 
+def spherical_distance(pt0, pt1):
+    '''
+    spherical_distance(a, b) yields the angular distance between points a and b, both of which
+      should be expressed in spherical coordinates as (longitude, latitude).
+    If a and/or b are (2 x n) matrices, then the calculation is performed over all columns.
+    The spherical_distance function uses the Haversine formula; accordingly it may suffer from
+    rounding errors in the case of nearly antipodal points.
+    '''
+    dtheta = pt1[0] - pt0[0]
+    dphi   = pt1[1] - pt0[1]
+    a = np.sin(dphi/2)**2 + np.cos(pt0[1]) * np.cos(pt1[1]) * np.sin(dtheta/2)**2
+    return 2 * np.arcsin(np.sqrt(a))
+    
 def rotation_matrix_3D(u, th):
     """
     rotation_matrix_3D(u, t) yields a 3D numpy matrix that rotates any vector about the axis u

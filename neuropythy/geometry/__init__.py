@@ -17,6 +17,7 @@ from .util import (
     normalize,
     vector_angle_cos,
     vector_angle,
+    spherical_distance,
     rotation_matrix_3D,
     rotation_matrix_2D,
     alignment_matrix_3D,
@@ -31,5 +32,5 @@ from .util import (
     triangle_address,
     triangle_unaddress,
     point_in_triangle)
-from .mesh import (VertexSet, Tesselation, Mesh, Topology)
+from .mesh import (VertexSet, Tesselation, Mesh, Topology, MapProjection)
 

@@ -5,6 +5,7 @@
 
 import numpy          as np
 import numpy.matlib   as npml
+import numpy.linalg   as npla
 import scipy          as sp
 import scipy.spatial  as space
 import scipy.sparse   as sps
@@ -1479,6 +1480,452 @@ class Mesh(object):
         return result
 
 @pimms.immutable
+class MapProjection(object):
+    '''
+    A MapProjection object stores information about the projection of a spherical 3D mesh to a
+    flattened 2D mesh. This process involves a number of steps:
+      * selection of the appropriate sub-mesh
+      * alignment of the mesh to the appropriate coordinate system
+      * projection of the mesh to 2D
+    Additionally, MapProjection objects store the relevant data for reversing a projection; i.e.,
+    a map projection object can be used to transfer points from the 2D to the 3D object and vice
+    versa.
+    '''
+
+    ################################################################################################
+    # The precise 3d -> 2d and 2d -> 3d functions
+    @staticmethod
+    def orthographic_projection_forward(X, sphere_radius=100.0):
+        X = np.asarray(X)
+        X = X if X.shape[0] == 3 else X.T
+        return X[1:3]
+    @staticmethod
+    def orthographic_projection_inverse(X, sphere_radius=100.0):
+        X = np.asarray(X)
+        X = X if X.shape[0] == 2 else X.T
+        Xnorm = X / sphere_radius
+        return np.asarray([sphere_radius * np.sqrt(1.0 - (Xnorm ** 2).sum(0)), X[0], X[1]])
+    @staticmethod
+    def equirectangular_projection_forward(X, sphere_radius=100.0):
+        X = np.asarray(X)
+        X = X if X.shape[0] == 3 else X.T
+        X = X / np.sqrt((X ** 2).sum(0))
+        return sphere_radius / np.pi * np.asarray([np.arctan2(X[1], X[0]), np.arcsin(X[2])])
+    @staticmethod
+    def equirectangular_projection_inverse(X, sphere_radius=100.0):
+        X = np.asarray(X)
+        X = X if X.shape[0] == 2 else X.T
+        X = np.pi / sphere_radius * X
+        cos1 = np.cos(X[1])
+        return np.asarray([cos1 * np.cos(X[0]) * sphere_radius, 
+                           cos1 * np.sin(X[0]) * sphere_radius,
+                           np.sin(X[1]) * sphere_radius])
+    @staticmethod
+    def mercator_projection_forward(X, sphere_radius=100.0):
+        X = np.asarray(X)
+        X = X if X.shape[0] == 3 else X.T
+        X = X / np.sqrt((X ** 2).sum(0))
+        return sphere_radius * np.asarray([np.arctan2(X[1], X[0]),
+                                           np.log(np.tan(0.25 * np.pi + 0.5 * np.arcsin(X[2])))])
+    @staticmethod
+    def mercator_projection_inverse(X, sphere_radius=100.0):
+        X = np.asarray(X)
+        X = X if X.shape[0] == 2 else X.T
+        X = X / sphere_radius
+        return sphere_radius * np.asarray([np.cos(X[0]), np.sin(X[0]),
+                                           np.sin(2 * (np.arctan(np.exp(X[1])) - 0.25*np.pi))])
+    @staticmethod
+    def sinusoidal_projection_forward(X, sphere_radius=100.0):
+        X = np.asarray(X)
+        X = X if X.shape[0] == 3 else X.T
+        X = X / np.sqrt((X ** 2).sum(0))
+        phi = np.arcsin(X[2])
+        return sphere_radius / np.pi * np.asarray([np.arctan2(X[1], X[0]) * np.cos(phi), phi])
+    @staticmethod
+    def sinusoidal_projection_inverse(X, sphere_radius=100.0):
+        X = np.asarray(X)
+        X = X if X.shape[0] == 2 else X.T
+        X = np.pi * X / sphere_radius
+        z = np.sin(X[1])
+        cosphi = np.cos(X[1])
+        return np.asarray([np.cos(X[0] / cosphi) * sphere_radius,
+                           np.sin(X[0] / cosphi) * sphere_radius,
+                           np.sin(X[1]) * sphere_radius])
+    projection_forward_methods = pyr.m(
+        orthographic    = MapProjection.orthographic_projection_forward,
+        equirectangular = MapProjection.equirectangular_projection_forward,
+        mercator        = MapProjection.mercator_projection_forward,
+        sinusoidal      = MapProjection.sinusoidal_projection_forward)
+    projection_inverse_methods = pyr.m(
+        orthographic    = MapProjection.orthographic_projection_inverse,
+        equirectangular = MapProjection.equirectangular_projection_inverse,
+        mercator        = MapProjection.mercator_projection_inverse,
+        sinusoidal      = MapProjection.sinusoidal_projection_inverse)
+
+    def __init__(self,
+                 center=None, center_right=None, radius=None, method='equirectangular',
+                 registration='native', chirality=None, sphere_radius=None,
+                 pre_affine=None, post_affine=None):
+        self.center = center
+        self.center_right = center_right
+        self.radius = radius
+        self.method = method
+        self.registration = registration
+        self.chirality = chirality
+        self.sphere_radius = sphere_radius
+        self.pre_affine = pre_affine
+        self.post_affine = post_affine
+
+    @pimms.param
+    def mesh(m):
+        '''
+        proj.mesh is the mesh on which the given projection was performed; this mesh should be a 3D
+        spherical mesh. If proj.mesh is None, then this projection has not yet been reified with a
+        mesh object.
+        '''
+        if m is None: return None
+        if not isinstance(m, geo.Mesh):
+            raise ValueError('projection mesh must be a Mesh object')
+        return m
+    @pimms.param
+    def center(c):
+        '''
+        proj.center is the (x,y,z) coordinate of the center of the given projection on the sphere.
+        '''
+        if c is None: return None
+        if not pimms.is_vector(c) or len(c) != 3:
+            raise ValueError('map projection center must be a 3D coordinate')
+        return pimms.imm_array(c)
+    @pimms.param
+    def center_right(cr):
+        '''
+        proj.center_right is the (x,y,z) coordinate of any point that should appear on the positive
+        x-axis of the resulting map projection.
+        '''
+        if cr is None: return None
+        if not pimms.is_vector(cr) or len(cr) != 3:
+            raise ValueError('map projection center_right must be a 3D coordinate')
+        return pimms.imm_array(cr)
+    @pimms.param
+    def radius(r):
+        '''
+        proj.radius is the radius of inclusion for the given map projection; this may be an value
+        given as a number or a quantity in terms of radians, turns, or degrees (e.g.,
+        pimms.quant(30, 'deg') will create a map projection all points within 30 degrees of the
+        center).
+        '''
+        if r is None: return None
+        if not pimms.is_real(r) or r <= 0:
+            raise ValueError('radius must be a real number that is greater than 0')
+        if pimms.is_quantity(r) and not pimms.like_units(r, 'radians'):
+            raise ValueError('radius must be a real number or a quantity with rotation units')
+        return r
+    @pimms.param
+    def method(m):
+        '''
+        proj.method is the name of the method used to create the map projection proj.
+        '''
+        if not pimms.is_str(m):
+            raise ValueError('projection method must be a string')
+        m = m.lower()
+        if m not in MapProjection.projection_forward_methods:
+            raise ValueError('inrecognized map projection: %s' % m)
+        return m
+    @pimms.param
+    def registration(r):
+        '''
+        proj.registration is either None or the name of a registration that should be used as the
+        base sphere for the given map projection; note that None and 'native' are equivalent.
+        '''
+        if r is None: return 'native'
+        if not pimms.is_str(r):
+            raise ValueError('projection registration must be a string')
+        return r
+    @pimms.param
+    def chirality(ch):
+        '''
+        proj.chirality is either 'lh', 'rh', or None, and specifies whether the given map projection
+        is valid only for LH or RH chiralities; None indicates that the projection does not care
+        about chirality.
+        '''
+        if ch is None: return None
+        if not pimms.is_str(ch):
+            raise ValueError('projection chirality must be either None or \'lh\' or \rh\'')
+        ch = ch.lower()
+        if ch in ['lh', 'rh']:
+            raise ValueError('projection chirality must be either None or \'lh\' or \rh\'')
+        return ch
+    @pimms.param
+    def sphere_radius(sr):
+        '''
+        proj.sphere_radius is either None or the radius of the initial sphere. Generally this is
+        left as None until projection is performed so that the sphere_radius can be deduced from
+        the mesh that serves as the projection domain. Because the MapProjection object that is
+        attached to the meta-data of the resulting map is modified to have this value filled in,
+        inverse projetions do not require that this value be set explicitly.
+        '''
+        if sr is None: return None
+        if not pimms.is_real(sr) or sr <= 0:
+            raise ValueError('sphere_radius must be a positive real number or None')
+        return sr
+    @pimms.param
+    def pre_affine(pa):
+        '''
+        proj.pre_affine is a 4x4 matrix of the affine transformation that should be applied to the
+        coordinates of the spherical mesh prior to projection via the rest of the standard map
+        projection methods. This may be None to indicate no initial transformation.
+        '''
+        if pa is None: return None
+        if isinstance(pa, types.TupleType):
+            # allowed to be (mtx, offset)
+            if (len(pa) != 2                       or
+                not pimms.is_matrix(pa[0], 'real') or
+                not pimms.is_vector(pa[1], 'real')):
+                raise ValueError('affine transforms must be matrices or (mtx,offset) tuples')
+            mtx = np.asarray(pa[0])
+            off = np.asarray(pa[1])
+            if mtx.shape[0] != 3 or mtx.shape[1] != 3:
+                raise ValueError('3D affine matrix must be 3x3')
+            if off.shape[1] != 3:
+                raise ValueError('3D affine offset must have length 3')
+            aff = np.zeros((4,4), dtype=np.float)
+            aff[3,3] = 1
+            aff[0:3,0:3] = mtx
+            aff[:,3] = off
+            return pimms.imm_array(aff)
+        if not pimms.is_matrix(pa, 'real'):
+            raise ValueError('affine transforms must be matrices or (mtx, offset) tuples')
+        mtx = np.asarray(pa)
+        if mtx.shape[0] == 3:
+            mtx = np.concatenate((mtx, [[0,0,0,1]]))
+        if mtx.shape[1] != 4 or mtx.shape[0] != 4:
+            raise ValueError('3D affine matrix must be 3x4 or 4x4')
+        return pimms.imm_array(mtx)
+    @pimms.param
+    def post_affine(pa):
+        '''
+        proj.post_affine is a 3x3 matrix of the affine transformation that should be applied to the
+        coordinates of the flat map after projection via the rest of the standard map projection
+        methods. This may be None to indicate no final transformation.
+        '''
+        if pa is None: return None
+        if isinstance(pa, types.TupleType):
+            # allowed to be (mtx, offset)
+            if (len(pa) != 2                       or
+                not pimms.is_matrix(pa[0], 'real') or
+                not pimms.is_vector(pa[1], 'real')):
+                raise ValueError('affine transforms must be matrices or (mtx,offset) tuples')
+            mtx = np.asarray(pa[0])
+            off = np.asarray(pa[1])
+            if mtx.shape[0] != 2 or mtx.shape[1] != 2:
+                raise ValueError('2D affine matrix must be 2x2')
+            if off.shape[1] != 2:
+                raise ValueError('2D affine offset must have length 2')
+            aff = np.zeros((4,4), dtype=np.float)
+            aff[2,2] = 1
+            aff[0:2,0:2] = mtx
+            aff[:,2] = off
+            return pimms.imm_array(aff)
+        if not pimms.is_matrix(pa, 'real'):
+            raise ValueError('affine transforms must be matrices or (mtx, offset) tuples')
+        mtx = np.asarray(pa)
+        if mtx.shape[0] == 2:
+            mtx = np.concatenate((mtx, [[0,0,1]]))
+        if mtx.shape[1] != 3 or mtx.shape[0] != 3:
+            raise ValueError('2D affine matrix must be 2x3 or 3x3')
+        return pimms.imm_array(mtx)
+    @pimms.value
+    def alignment_matrix(pre_affine, center, center_right):
+        '''
+        proj.alignment_matrix is a 4x4 matrix that aligns the 3D spherical mesh such that the center
+        of the projection lies on the positive x-axis and the center_right of the projection lies in
+        the x-y plane.
+        '''
+        mtx = np.eye(4) if pre_affine is None else pre_affine
+        cmtx = np.eye(4)
+        if center is not None:
+            tmp = geo.alignment_matrix_3D(center, [1,0,0])
+            cmtx[0:3,0:3] = tmp
+            mtx = cmtx.dot(mtx)
+        crmtx = np.eye(4)
+        if center_right is not None:
+            # Tricky: we need to run this coordinate through the center transform then align it with
+            # the x-y plane:
+            cr = cmtx[0:3,0:3].dot(center_right)
+            # what angle do we need to rotate this?
+            ang = np.arctan2(cr[2], cr[1])
+            crmtx[0:3,0:3] = geo.rotation_matrix_3D([1,0,0], -ang)
+            mtx = crmtx.dot(mtx)
+        # That's all that actually needs to be done in preprocessing
+        return pimms.imm_array(mtx)
+    @pimms.value
+    def inverse_alignment_matrix(alignment_matrix):
+        '''
+        proj.inverse_alignment_matrix is a 4x4 matrix that is the inverse of proj.alignment_matrix.
+        '''
+        return None if alingment_matrix is None else pimms.imm_array(npla.inv(alignment_matrix))
+    @pimms.value
+    def inverse_post_affine(post_affine):
+        '''
+        proj.inverse_post_affine is a 4x4 matrix that is the inverse of proj.post_affine.
+        '''
+        return None if post_affine is None else pimms.imm_array(npla.inv(post_affine))
+    @pimms.value
+    def _sphere_radius(mesh, sphere_radius):
+        '''
+        proj._sphere_radius is identical to proj.sphere_radius unless proj.sphere_radius is None and
+        proj.mesh is not None, in which case proj._sphere_radius is deduced from the mesh. For this
+        reason, _sphere_radius is used internally.
+        If both sphere_radius and mesh are None, then the default sphere radius is 100.
+        '''
+        if sphere_radius is not None: return sphere_radius
+        if mesh is None: return 100.0
+        rs = np.sqrt(np.sum(mesh.coordinates**2, axis=0))
+        mu = np.mean(rs)
+        sd = np.std(rs)
+        if sd/mu > 0.05: warnings.war('Given mesh does not appear to be a sphere centered at 0')
+        return mu
+    @pimms.value
+    def repr(chirality, registration):
+        '''
+        proj.repr is the representation string yielded by proj.__repr__().
+        '''
+        ch = 'XH' if chirality is None else chirality.upper()
+        reg = 'native' if registration is None else registration
+        return 'MapProjection(<%s>, <%s>)' % (ch, reg)
+    
+    def __repr__(self):
+        return self.repr
+    def in_domain(self, x):
+        '''
+        proj.in_domain(x) yields a boolean array whose elements indicate whether the coordinates in
+          x are part of the domain of the given map projection. The argument x may be either a
+          coordinate matrix, a coordinate vector, or a mesh (in which case this is equivalent to
+          proj.in_domain(x.coordinates).
+        '''
+        x = x.coordinates if isinstance(x, Mesh) else np.asarray(x)
+        if pimms.is_vector(x): return np.asarray(self.where_domain([x])[0], dtype=np.bool)
+        if x.shape[0] != 3: x = x.T
+        # no radius means we don't actually do any trimming
+        if self.radius is None: return np.ones(x.shape[1], dtype=np.bool)
+        # put the coordinates through the initial transformation:
+        x = self.alignment_matrix.dot(np.concatenate((x, np.ones((1,x.shape[1])))))
+        # okay, we want the angle of the vertex [1,0,0] to these points...
+        th = np.arccos(x[0])
+        # and we want to know what points are within the angle given by the radius; if the radius
+        # is a radian-like quantity, we use th itself; otherwise, we convert it to a distance
+        if pimms.is_quantity(self.radius):
+            rad = pimms.mag(radius, 'radians')
+        else:
+            th *= self._sphere_radius
+            rad = radius
+        return (th < rad)
+    def select_domain(self, x):
+        '''
+        proj.select_domain(x) yields a subset of the coordinates in x that lie in the domain of
+          the given map projection proj, assuming x is a 3D coordinate matrix.
+        proj.select_domain(x0) yields either the point x0 or None.
+        proj.select_domain(mesh) yields a copy of mesh that has been sub-sampled using
+          mesh.submesh().
+        '''
+        inq = self.in_domain(x)
+        if   isinstance(x, Mesh): return x.submesh(inq)
+        elif pimms.is_vector(x):  return (None if inq[0] else x)
+        x = np.asarray(x)
+        return x[:,inq] if x.shape[0] == 3 else x[inq]            
+    def forward(self, x):
+        '''
+        proj.forward(x) yields the result of projecting the given 3D coordinate or coordinates in x
+          through the map projection proj; the result will be a 2D vector or matrix with the same
+          shape as x (up to conversion of 3D to 2D).
+        proj.forward(mesh) yeilds the 2D mesh that results from the projection.
+
+        Note that proj.forward does not perform any trimming w.r.t. the radius parameter; this is
+        intentional. For a full-featured projection with trimming use proj(x) or proj(mesh); this
+        is equivalent to proj.forward(proj.select_domain(x)).
+        '''
+        if   pimms.is_vector(x, 'real'):     return self.forward([x])[0]
+        elif isinstance(x, Mesh):            return x.copy(coordinates=self.forward(x.coordinates))
+        elif not pimms.is_matrix(x, 'real'): raise ValueError('invalid input coordinates')
+        x = np.asarray(x)
+        if x.shape[0] != 3:
+            if x.shape[1] != 3: raise ValueError('coordinates are not 3D')
+            else: return self.forward(x.T).T
+        ones = np.ones((1, x.shape[1]))
+        # apply the alignment matrix first:
+        aff0 = self.alignment_matrix
+        x = aff0.dot(np.concatenate((x, ones)))[0:3]
+        # okay, next call the transformation function...
+        fwd = MapProjection.projection_forward_methods[self.method]
+        x = fwd(x, sphere_radius=self._sphere_radius)
+        # next, apply the post-transform
+        ptx = self.post_affine
+        if ptx is not None:
+            x = ptx.dot(np.concatenate((x, ones)))[0:2]
+        # that's it!
+        return x
+    def inverse(self, x):
+        '''
+        proj.inverse(x) yields the result of unprojecting the given 2D coordinate or coordinates in
+          x back to the original 3D sphere. See also proj.forward().
+        '''
+        if   pimms.is_vector(x, 'real'):     return self.inverse([x])[0]
+        elif isinstance(x, Mesh):            return x.copy(coordinates=self.inverse(x.coordinates))
+        elif not pimms.is_matrix(x, 'real'): raise ValueError('invalid input coordinates')
+        x = np.asarray(x)
+        if x.shape[0] != 2:
+            if x.shape[1] != 2: raise ValueError('coordinates are not 2D')
+            else: return self.forward(x.T).T
+        ones = np.ones((1, x.shape[1]))
+        # first, un-apply the post-transform
+        ptx = self.inverse_post_affine
+        if ptx is not None:
+            x = ptx.dot(np.concatenate((x, ones)))[0:2]
+        # okay, next call the inverse transformation function...
+        inv = MapProjection.projection_inverse_methods[self.method]
+        x = inv(x, sphere_radius=self._sphere_radius)
+        # apply the alignment matrix first:
+        aff0 = self.inverse_alignment_matrix
+        x = aff0.dot(np.concatenate((x, ones)))[0:3]
+        # that's it!
+        return x
+    def __call__(self, obj, tag='projection'):
+        '''
+        proj(x) performs the map projection proj on the given coordinate or coordinate matrix x and
+          yields the resulting coordinate or coordinate matrix. If no coordinates in x are part of
+          the domain, then an empty matrix is returned; if only one coordinate was provided, and it
+          is not in the domain, then None is returned.
+        proj(mesh) yields a 2D mesh that is the result of the given projection; in this case, the
+          meta_data of the newly created mesh includes the tag 'projection', which will contain the
+          projection used to create the map; this projection will have been reified with mesh. The
+          optional argument tag may be used to change the name of 'projection'; None indicates that
+          no tag should be included.
+        proj(topo) yields a 2D mesh that is derived from one of the registrations in the given
+          topology topo, determined by the proj.registration parameter.
+        '''
+        if isinstance(obj, Topology):
+            # check the chiralities
+            if obj.chirality is not None and self.chirality is not None:
+                if obj.chirality != self.chirality:
+                    raise ValueError('given topology is the wrong chirality for projection')
+            # We need to figure out if there is a matching registration
+            reg = self.registration
+            if self.registration is None: reg = 'native'
+            if reg in topo.registrations:
+                return self(obj.registrations[reg], tag=tag)
+            else:
+                raise ValueError('given topology does not include the registration %s' % reg)
+        elif isinstance(obj, Mesh):
+            proj = self if self.mesh is obj else self.copy(mesh=obj)
+            submesh = self.select_domain(obj)
+            res = self.forward(submesh)
+            return res if tag is None else res.with_meta(tag, proj)
+        elif pimms.is_vector(obj):
+            return self.forward(obj) if self.in_domain(obj) else None
+        else:
+            return self.forward(self.select_domain(obj))
+    
+@pimms.immutable
 class Topology(VertexSet):
     '''
     A Topology object object represents a tesselation and a number of registered meshes; the
@@ -1490,9 +1937,10 @@ class Topology(VertexSet):
     can be used as a source of properties.
     '''
 
-    def __init__(self, tess, registrations, properties=None, meta_data=None):
+    def __init__(self, tess, registrations, properties=None, meta_data=None, chirality=None):
         VertexSet.__init__(self, tess.labels, tess.properties)
         self.tess = tess
+        self.chirality = chirality
         self._registrations = registrations
         self._properties = properties
         self.meta_data = meta_data
@@ -1505,6 +1953,17 @@ class Topology(VertexSet):
         if not isinstance(t, Tesselation):
             t = Tesselation(tess)
         return t.persist()
+    @pimms.param
+    def chirality(ch):
+        '''
+        topo.chirality gives the chirality ('lh' or 'rh') for the given topology; this may be None
+        if no chirality has been specified.
+        '''
+        if ch is None: return None
+        ch = ch.lower()
+        if ch != 'lh' and ch != 'rh':
+            raise ValueError('chirality must be \'lh\' or \'rh\'')
+        return ch
     @pimms.param
     def _registrations(regs):
         '''
@@ -1558,11 +2017,12 @@ class Topology(VertexSet):
         return (_properties  if _properties is tess.properties else 
                 pimms.merge(tess.properties, _properties))
     @pimms.value
-    def repr(tess):
+    def repr(chirality, tess):
         '''
         topo.repr is the representation string yielded by topo.__repr__().
         '''
-        return 'Topology(<%d faces>, <%d vertices>)' % (tess.face_count, tess.vertex_count)
+        ch = 'XH' if chirality is None else chirality.upper()
+        return 'Topology(<%s>, <%d faces>, <%d vertices>)' % (ch,tess.face_count,tess.vertex_count)
     
     def __repr__(self):
         return self.repr
@@ -1631,3 +2091,20 @@ class Topology(VertexSet):
         if res is None:
             raise ValueError('All shared topologies raised errors during interpolation!')
         return res
+    def projection(self,
+                   center=None, center_right=None, radius=None, method='equirectangular',
+                   registration='native', chirality=Ellipsis, sphere_radius=None,
+                   pre_affine=None, post_affine=None, tag='projection'):
+        '''
+        topo.projection(...) is equivalent to MapProjection(...)(topo); effectively, this creates
+          a map projection object, applies it to the topology topo (yielding a 2D mesh), and
+          returns this mesh. To obtain the projection object itself, it is contained in the
+          meta_data of the returned mesh (see also MapProjection).
+        '''
+        if chirality is Ellipsis: chirality = self.chirality
+        proj = MapProjection(center=center, center_right=center_right, radius=radius,
+                             method=method, registration=registration, chirality=chirality,
+                             sphere_radius=sphere_radius,
+                             pre_affine=pre_affine, post_affine=post_affine)
+        return proj(self, tag=tag)
+
