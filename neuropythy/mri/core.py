@@ -46,7 +46,6 @@ def _vertex_to_voxel_line_interpolation(hemi, gray_indices, vertex_to_voxel_matr
     # Okay; get the transformed coordinates for white and pial surfaces:
     pialX = txcoord(hemi.pial_surface.coordinates)
     whiteX = txcoord(hemi.white_surface.coordinates)
-    
     # make a list of voxels through which each vector passes:
     min_idx = np.min(idcs, axis=1)
     max_idx = np.max(idcs, axis=1)
@@ -57,7 +56,6 @@ def _vertex_to_voxel_line_interpolation(hemi, gray_indices, vertex_to_voxel_matr
                   for k in range(int(np.floor(min(xs[2], xe[2]))), int(np.ceil(max(xs[2], xe[2]))))
                   for olap in [_line_voxel_overlap((i,j,k), xs, xe)]
                   if olap > 0]
-    
     # and accumulate these lists... first group by voxel index then sum across these
     first_fn = lambda x: x[0]
     vox_byidx = {vox: ([q[0] for q in dat], [q[1] for q in dat])
@@ -85,7 +83,7 @@ def _vertex_to_voxel_nearest_interpolation(hemi, gray_indices, voxel_to_vertex_m
     (dp, np)  = hemi.pial_surface.vertex_hash.query(xyz, 1)
     oth = dp < dw
     nw[oth] = np[oth]
-    interp = sps.lil_matrix((len(gray_index[0], hemi.vertex_count)), dtype=np.float)
+    interp = sps.lil_matrix((len(gray_index[0]), hemi.vertex_count), dtype=np.float)
     for (ii,n) in enumerate(nw):
         interp[ii,n] = 1
     return interp.tocsr()
@@ -331,7 +329,6 @@ class Subject(ObjectWithMetaData):
         '''
         return _vertex_to_voxel_nearest_interpolation(rh, rh_gray_indices, voxel_to_vertex_matrix)
     
-    
     @pimms.value
     def repr(name, path):
         '''
@@ -353,6 +350,92 @@ class Subject(ObjectWithMetaData):
         sub.path_join(args...) is equivalent to os.path.join(sub.path, args...).
         '''
         return os.path.join(sub.path, *args)
+    def cortex_to_image(data, hemi=None, method='lines', fill=0, dtype=None):
+        '''
+        sub.cortex_to_ribbon(data, hemi) projects the given cortical-surface data to the given
+          subject's gray-matter voxels of the given hemisphere and returns the resulting numpy
+          array.
+        sub.cortex_to_ribbon((lh_data, rh_data)) projects into both hemispheres.
+    
+        The following options may be given:
+          * method (default: 'lines') specifies that a particular method should be used; valid
+            options are 'lines' and 'nearest'. The 'lines' method uses the
+            sub.lh_vertex_to_voxel_line_interpolation and sub.rh_vertex_to_voxel_line_interpolation
+            matrices while 'nearest' uses the nearest-neighbor interpolation. The 'lines' method is
+            generally preferred.
+          * fill (default: 0) specifies the value to be assigned to all voxels not in the gray mask.
+          * dtype (default: None) specifies the data type that should be exported. If None, this
+            will be automatically set to np.float32 for floating-point data and np.int32 for integer
+            data.
+        '''
+        # what hemisphere(s)?
+        hemi = 'both' if hemi is None else hemi.lower()
+        if hemi == 'both': hemi = ('lh', 'rh')
+        elif hemi == 'lh': hemi = ('lh', None)
+        elif hemi == 'rh': hemi = (None, 'rh')
+        else: raise ValueError('unrecognized hemi argument: %s' % hemi)
+        # Make the data match this format...
+        if pimms.is_map(data):
+            if   hemi[0] is None: data = (None, data['rh'])
+            elif hemi[1] is None: data = (data['lh'], None)
+            else: data = (data['lh'], data['rh'])
+        elif pimms.is_matrix(data):
+            data = np.asarray(data)
+            if data.shape[0] != 2: data = data.T
+        else:
+            if   hemi[0] is None: data = (data, None)
+            elif hemi[1] is None: data = (None, data)
+            else: raise ValueError('1 data vector but 2 hemispheres given')
+        # Make sure we have all the data...
+        for (dat,h,ii) in zip(data, hemi, [0,1]):
+            if h is None: continue
+            if dat is None: raise ValueError('hemisphere %s requested but data not provided' % h)
+            dat = np.asarray(dat)
+            hem = getattr(sub, h)
+            if not pimms.is_matrix(dat) and not pimms.is_vector(dat):
+                raise ValueError('data given for %s is neither a vector nor a matrix' % h)
+            if pimms.is_matrix(dat) and dat.shape[0] != hem.vertex_count: dat = dat.T
+            if dat.shape[0] != hem.vertex_count:
+                raise ValueError('vertex data for %s does not match number of vertices' % h)
+            data[ii] = dat
+        # data can be a matrix, but both datas must be the same if so; also figure out the number
+        # of frames in case matrices were provided:
+        if data[0] is not None and data[1] is not None:
+            if not pimms.is_matrix(data[0]):
+                if pimms.is_matrix(data[1]):
+                    raise ValueError('hemisphere data shapes must match in non-vertex dimension')
+                else: frames = 1
+            elif not pimms.is_matrix(data[1]):
+                raise ValueError('hemisphere data shapes must match in non-vertex dimension')
+            elif data[0].shape[1] != data[1].shape[1]:
+                raise ValueError('hemisphere data shapes must match in non-vertex dimension')
+            else:
+                frames = data[0].shape[1]
+        elif data[0] is None:
+            frames = data[1].shape[1] if pimms.is_matrix(data[1]) else 1
+        else:
+            frames = data[0].shape[1] if pimms.is_matrix(data[0]) else 1
+        # what method? specifically, what matrices to use?
+        method = 'lines' if method is None else method.lower()
+        attr_patt = '%s_vertex_to_voxel_%s_interpolation'
+        interp = [None if h is None else getattr(self, attr_patt % (h, method)) for h in hemi]
+        # we should also get the indices list
+        indices = [None if h is None else getattr(self, '%s_gray_indices' % h) for h in hemi]
+        # Figure out the dtype
+        if dtype is None:
+            # check the input...
+            if all(d is None or not np.is_vector(d, 'inexact') for d in data):
+                dtype = np.int32
+            else: dtype = np.float32
+        # make our output array
+        dims = self.image_dimensions
+        if frames > 1: dims = dims + (frames,)
+        arr = np.full(dims, fill, dtype=dtype)
+        for (mtx,idcs,dat) in zip(interp, indices, data):
+            if dat is None: continue
+            arr[idcs] = mtx.dot(dat)
+        # That's everything!
+        return arr
 
 @pimms.immutable
 class Cortex(geo.Topology):
