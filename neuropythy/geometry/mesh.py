@@ -19,10 +19,11 @@ else:                        import collections            as colls
 from .util import (triangle_area, triangle_address, alignment_matrix_3D,
                    cartesian_to_barycentric_3D, cartesian_to_barycentric_2D,
                    barycentric_to_cartesian, point_in_triangle)
+from neuropythy.util import (ObjectWithMetaData, to_affine)
 from functools import reduce
 
 @pimms.immutable
-class VertexSet(object):
+class VertexSet(ObjectWithMetaData):
     '''
     VertexSet is a class that tracks a number of vertices, including properties for them. This class
     is intended as a base class for Tesselation and Mesh, both of which track vertex properties.
@@ -35,13 +36,6 @@ class VertexSet(object):
         self.labels = labels
         self.meta_data = meta_data
 
-    @pimms.param
-    def meta_data(md):
-        '''
-        tess.meta_data is a persistent map of meta-data provided to the given tesselation.
-        '''
-        if md is None: return pyr.m()
-        return md if pimms.is_pmap(md) else pyr.pmap(md)
     @pimms.param
     def labels(lbls):
         '''
@@ -99,34 +93,6 @@ class VertexSet(object):
     # Normal Methods
     def __repr__(self):
         return self.repr
-    
-    def meta(self, name):
-        '''
-        vset.meta(x) is equivalent to vset.meta_data[x].
-        '''
-        return self.meta_data[name]
-    def with_meta(self, *args, **kwargs):
-        '''
-        vset.with_meta(...) collapses the given arguments with pimms.merge into the vset's current
-        meta_data map and yields a new vset with the new meta-data.
-        '''
-        md = pimms.merge(self.meta_data, *args, **kwargs)
-        if md is self.meta_data: return self
-        else: return self.copy(meta_data=md)
-    def wout_meta(self, *args, **kwargs):
-        '''
-        vset.wout_meta(...) removes the given arguments (keys) from the vset's current meta_data
-        map and yields a new vset with the new meta-data.
-        '''
-        md = self.meta_data
-        for a in args:
-            if pimms.is_vector(a):
-                for u in a:
-                    md = md.discard(u)
-            else:
-                md = md.discard(a)
-        return self if md is self.meta_data else self.copy(meta_data=md)
-
     def prop(self, name):
         '''
         obj.prop(name) yields the vertex property in the given object with the given name.
@@ -658,7 +624,7 @@ class Tesselation(VertexSet):
         return self.subtess(self.map(fn), tag=tag)
 
 @pimms.immutable
-class Mesh(object):
+class Mesh(VertexSet):
     '''
     A Mesh object represents a triangle mesh in either 2D or 3D space.
     To construct a mesh object, use Mesh(tess, coords), where tess is either a Tesselation object or
@@ -1480,7 +1446,7 @@ class Mesh(object):
         return result
 
 @pimms.immutable
-class MapProjection(object):
+class MapProjection(ObjectWithMetaData):
     '''
     A MapProjection object stores information about the projection of a spherical 3D mesh to a
     flattened 2D mesh. This process involves a number of steps:
@@ -1565,7 +1531,7 @@ class MapProjection(object):
     def __init__(self,
                  center=None, center_right=None, radius=None, method='equirectangular',
                  registration='native', chirality=None, sphere_radius=None,
-                 pre_affine=None, post_affine=None):
+                 pre_affine=None, post_affine=None, meta_data=None):
         self.center = center
         self.center_right = center_right
         self.radius = radius
@@ -1575,6 +1541,7 @@ class MapProjection(object):
         self.sphere_radius = sphere_radius
         self.pre_affine = pre_affine
         self.post_affine = post_affine
+        self.meta_data = meta_data
 
     @pimms.param
     def mesh(m):
@@ -1675,32 +1642,7 @@ class MapProjection(object):
         coordinates of the spherical mesh prior to projection via the rest of the standard map
         projection methods. This may be None to indicate no initial transformation.
         '''
-        if pa is None: return None
-        if isinstance(pa, types.TupleType):
-            # allowed to be (mtx, offset)
-            if (len(pa) != 2                       or
-                not pimms.is_matrix(pa[0], 'real') or
-                not pimms.is_vector(pa[1], 'real')):
-                raise ValueError('affine transforms must be matrices or (mtx,offset) tuples')
-            mtx = np.asarray(pa[0])
-            off = np.asarray(pa[1])
-            if mtx.shape[0] != 3 or mtx.shape[1] != 3:
-                raise ValueError('3D affine matrix must be 3x3')
-            if off.shape[1] != 3:
-                raise ValueError('3D affine offset must have length 3')
-            aff = np.zeros((4,4), dtype=np.float)
-            aff[3,3] = 1
-            aff[0:3,0:3] = mtx
-            aff[:,3] = off
-            return pimms.imm_array(aff)
-        if not pimms.is_matrix(pa, 'real'):
-            raise ValueError('affine transforms must be matrices or (mtx, offset) tuples')
-        mtx = np.asarray(pa)
-        if mtx.shape[0] == 3:
-            mtx = np.concatenate((mtx, [[0,0,0,1]]))
-        if mtx.shape[1] != 4 or mtx.shape[0] != 4:
-            raise ValueError('3D affine matrix must be 3x4 or 4x4')
-        return pimms.imm_array(mtx)
+        return pa if pa is None else pimms.imm_array(to_affine(pa, 3))
     @pimms.param
     def post_affine(pa):
         '''
@@ -1708,32 +1650,7 @@ class MapProjection(object):
         coordinates of the flat map after projection via the rest of the standard map projection
         methods. This may be None to indicate no final transformation.
         '''
-        if pa is None: return None
-        if isinstance(pa, types.TupleType):
-            # allowed to be (mtx, offset)
-            if (len(pa) != 2                       or
-                not pimms.is_matrix(pa[0], 'real') or
-                not pimms.is_vector(pa[1], 'real')):
-                raise ValueError('affine transforms must be matrices or (mtx,offset) tuples')
-            mtx = np.asarray(pa[0])
-            off = np.asarray(pa[1])
-            if mtx.shape[0] != 2 or mtx.shape[1] != 2:
-                raise ValueError('2D affine matrix must be 2x2')
-            if off.shape[1] != 2:
-                raise ValueError('2D affine offset must have length 2')
-            aff = np.zeros((4,4), dtype=np.float)
-            aff[2,2] = 1
-            aff[0:2,0:2] = mtx
-            aff[:,2] = off
-            return pimms.imm_array(aff)
-        if not pimms.is_matrix(pa, 'real'):
-            raise ValueError('affine transforms must be matrices or (mtx, offset) tuples')
-        mtx = np.asarray(pa)
-        if mtx.shape[0] == 2:
-            mtx = np.concatenate((mtx, [[0,0,1]]))
-        if mtx.shape[1] != 3 or mtx.shape[0] != 3:
-            raise ValueError('2D affine matrix must be 2x3 or 3x3')
-        return pimms.imm_array(mtx)
+        return pa if pa is None else pimms.imm_array(to_affine(pa, 2))
     @pimms.value
     def alignment_matrix(pre_affine, center, center_right):
         '''

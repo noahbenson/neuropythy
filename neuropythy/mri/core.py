@@ -4,16 +4,355 @@
 # By Noah C. Benson
 
 import numpy               as np
+import numpy.linalg        as npla
+import scipy               as sp
+import scipy.sparse        as sps
 import neuropythy.geometry as geo
 import pyrsistent          as pyr
-import pimms
+import os, types, pimms
+
+from neuropythy.util import (ObjectWithMetaData, to_affine)
+
+if sys.version_info[0] == 3: from   collections import abc as colls
+else:                        import collections            as colls
+
+def _line_voxel_overlap(vx, xs, xe):
+    '''
+    _line_voxel_overlap((i,j,k), xs, xe) yields the fraction of the vector from xs to xe that
+      overlaps with the voxel (i,j,k); i.e., the voxel that starts at (i,j,k) and ends at
+      (i,j,k) + 1.
+    '''
+    # We want to consider the line segment from smaller to larger coordinate:
+    seg = [(x0,x1) if x0 <= x1 else (x1,x0) for (x0,x1) in zip(xs,xe)]
+    # First, figure out intersections of start and end values
+    isect = [(min(seg_end, vox_end), max(seg_start, vox_start))
+             if seg_end >= vox_start and seg_start <= vox_end else None
+             for ((seg_start,seg_end), (vox_start,vox_end)) in zip(seg, [(x,x+1) for x in vx])]
+    # If any of these are None, we can't possibly overlap
+    if None in isect or any(a == b for (a,b) in isect): return 0.0
+    return npla.norm([e - s for (s,e) in isect]) / npla.norm([e - s for (s,e) in zip(xs,xe)])
+
+def _vertex_to_voxel_line_interpolation(hemi, gray_indices, vertex_to_voxel_matrix):
+    # 1-based indexing is assumed:
+    idcs = np.transpose(gray_indices) + 1
+    # we also need the transformation from surface to voxel
+    tmtx = vertex_to_voxel_matrix
+    # given that the voxels assume 1-based indexing, this means that the center of each voxel
+    # is at (i,j,k) for integer (i,j,k) > 0; we want the voxels to start and end at integer
+    # values with respect to the vertex positions, so we subtract 1/2 from the vertex
+    # positions, which should make the range 0-1, for example, cover the vertices in the first
+    # voxel
+    txcoord = lambda mtx: np.dot(tmtx[0:3], np.vstack((mtx, np.ones(mtx.shape[1])))) + 1.5
+    # Okay; get the transformed coordinates for white and pial surfaces:
+    pialX = txcoord(hemi.pial_surface.coordinates)
+    whiteX = txcoord(hemi.white_surface.coordinates)
+    
+    # make a list of voxels through which each vector passes:
+    min_idx = np.min(idcs, axis=1)
+    max_idx = np.max(idcs, axis=1)
+    vtx_voxels = [((i,j,k), (id, olap))
+                  for (id, (xs, xe)) in enumerate(zip(whiteX.T, pialX.T))
+                  for i in range(int(np.floor(min(xs[0], xe[0]))), int(np.ceil(max(xs[0], xe[0]))))
+                  for j in range(int(np.floor(min(xs[1], xe[1]))), int(np.ceil(max(xs[1], xe[1]))))
+                  for k in range(int(np.floor(min(xs[2], xe[2]))), int(np.ceil(max(xs[2], xe[2]))))
+                  for olap in [_line_voxel_overlap((i,j,k), xs, xe)]
+                  if olap > 0]
+    
+    # and accumulate these lists... first group by voxel index then sum across these
+    first_fn = lambda x: x[0]
+    vox_byidx = {vox: ([q[0] for q in dat], [q[1] for q in dat])
+                 for (vox,xdat) in itertools.groupby(sorted(vtx_voxels,key=first_fn), key=first_fn)
+                 for dat in [[q[1] for q in xdat]]}
+    v2v_map = {tuple([i-1 for i in idx]): (ids, np.array(olaps) / np.sum(olaps))
+               for idx in idcs
+               if idx in vox_byidx
+               for (ids, olaps) in [vox_byidx[idx]]}
+    # we just need to put these into a matrix; we need a voxel-ijk-to-index translation
+    ijk2idx = {tuple(ijk):idx for (idx,ijk) in enumerate(zip(*gray_indices))}
+    # we now just need to put things in order:
+    interp = sps.lil_matrix((len(gray_index[0]), hemi.vertex_count), dtype=np.float)
+    for (ijk,dat) in six.iteritems(ijk2idx):
+        ijk = ijk2idx[ijk]
+        for (idx,olap) in zip(*dat):
+            interp[idx, ijk] = olap
+    return interp.tocsr()
+
+def _vertex_to_voxel_nearest_interpolation(hemi, gray_indices, voxel_to_vertex_matrix):
+    xyz = voxel_to_vertex_matrix.dot(np.vstack((np.asarray(gray_indices) + 1,
+                                                np.ones(len(gray_indices[0]))))).T
+    # find the nearest to the white and pial layers
+    (dw, nw) = hemi.white_surface.vertex_hash.query(xyz, 1)
+    (dp, np)  = hemi.pial_surface.vertex_hash.query(xyz, 1)
+    oth = dp < dw
+    nw[oth] = np[oth]
+    interp = sps.lil_matrix((len(gray_index[0], hemi.vertex_count)), dtype=np.float)
+    for (ii,n) in enumerate(nw):
+        interp[ii,n] = 1
+    return interp.tocsr()
 
 @pimms.immutable
-class Subject(object):
+class Subject(ObjectWithMetaData):
     '''
     Subject is a class that tracks information about an individual subject. A Subject object keeps
-    track of hemispheres (Cortex objects) as well as some 
+    track of hemispheres (Cortex objects) as well as some information about the voxels (e.g., the
+    gray_mask).
+
+    When declaring a subject, the hemispheres argument (hemis) should always include at least the
+    keys 'lh' and 'rh'.
+    Images should, at a minimum, include the following in their images dictionary:
+      * lh_gray_mask
+      * rh_gray_mask
+      * lh_white_mask
+      * rh_white_mask
+    Alternately, the values with the same names may be overloaded in a daughter class.
+
+    Subject respects laziness in the hemis and images classes, and this mechanism is recommended
+    as a way to lazily load subject data (see pimms.lazy_map).
     '''
+    def __init__(self, name=None, path=None, hemis=None, images=None, meta_data=None,
+                 voxel_to_vertex_matrix=None):
+        self.name                   = name
+        self.path                   = path
+        self.hemis                  = hemis
+        self.images                 = images
+        self.voxel_to_vertex_matrix = voxel_to_vertex_matrix
+        self.meta_data              = meta_data
+
+    @pimms.param
+    def name(nm):
+        '''
+        sub.name is the name of the subject sub.
+        '''
+        if nm is None or pimms.is_str(nm): return nm
+        else: raise ValueError('subject names must be strings or None')
+    @pimms.param
+    def path(p):
+        '''
+        sub.path is the path of the subject's data directory, if any.
+        '''
+        if p is None or pimms.is_str(p): return p
+        else: raise ValueError('subject paths must be strings or None')
+    @pimms.param
+    def hemis(h):
+        '''
+        sub.hemis is a persistent map of hemisphere names ('lh', 'rh', possibly others) for the
+        given subject sub.
+        '''
+        if    h is None:       return pyr.m()
+        elif pimms.is_pmap(h): return h
+        elif pimms.is_map(h):  return pyr.pmap(h)
+        else: raise ValueError('hemis must be a mapping')
+    @pimms.param
+    def images(imgs):
+        '''
+        sub.images is a persistent map of MRImages tracked by the given subject subject sub.
+        '''
+        if   imgs is None:        return pyr.m()
+        elif pimms.is_pmap(imgs): return imgs
+        elif pimms.is_map(imgs):  return pyr.pmap(imgs)
+        else: raise ValueError('images must be a mapping')
+    @pimms.param
+    def voxel_to_vertex_matrix(mtx):
+        '''
+        sub.voxel_to_vertex_matrix is the 4x4 affine transformation matrix that converts from
+        (i,j,k) indices in the subject's image/voxel space to (x,y,z) coordinates in the subject's
+        cortical surface space.
+        '''
+        return pimms.imm_array(to_affine(mtx, 3))
+    @pimms.value
+    def vertex_to_voxel_matrix(voxel_to_vertex_matrix):
+        '''
+        sub.vertex_to_voxel_matrix is the inverse matrix of sub.voxel_to_vertex_matrix.
+        '''
+        return npla.inv(voxel_to_vertex_matrix)
+
+    # Aliases for hemispheres
+    @pimms.value
+    def LH(hemis):
+        '''
+        sub.LH is an alias for sub.hemis['lh'].
+        '''
+        return hemis.get('lh', None)
+    @pimms.value
+    def RH(hemis):
+        '''
+        sub.RH is an alias for sub.hemis['rh'].
+        '''
+        return hemis.get('rh', None)
+    @pimms.value
+    def lh(hemis):
+        '''
+        sub.lh is an alias for sub.hemis['lh'].
+        '''
+        return hemis.get('lh', None)
+    @pimms.value
+    def rh(hemis):
+        '''
+        sub.rh is an alias for sub.hemis['rh'].
+        '''
+        return hemis.get('rh', None)
+
+    # Aliases for images
+    @pimms.value
+    def lh_gray_mask(images):
+        '''
+        sub.lh_gray_mask is an alias for sub.images['lh_gray_mask'].
+        '''
+        return images.get('lh_gray_mask', None)
+    @pimms.value
+    def rh_gray_mask(images):
+        '''
+        sub.rh_gray_mask is an alias for sub.images['rh_gray_mask'].
+        '''
+        return images.get('rh_gray_mask', None)
+    @pimms.value
+    def lh_white_mask(images):
+        '''
+        sub.lh_white_mask is an alias for sub.images['lh_white_mask'].
+        '''
+        return images.get('lh_white_mask', None)
+    @pimms.value
+    def rh_white_mask(images):
+        '''
+        sub.rh_white_mask is an alias for sub.images['rh_white_mask'].
+        '''
+        return images.get('rh_white_mask', None)
+
+    @pimms.value
+    def lh_gray_indices(lh_gray_mask):
+        '''
+        sub.lh_gray_indices is equivalent to numpy.where(sub.lh_gray_mask).
+        '''
+        return tuple([pimms.imm_array(x) for x in np.where(lh_gray_mask)])
+    @pimms.value
+    def rh_gray_indices(rh_gray_mask):
+        '''
+        sub.rh_gray_indices is equivalent to numpy.where(sub.rh_gray_mask).
+        '''
+        return tuple([pimms.imm_array(x) for x in np.where(rh_gray_mask)])
+    @pimms.value
+    def gray_indices(lh_gray_indices, rh_gray_indices):
+        '''
+        sub.gray_indices is a frozenset of the indices of the gray voxels in the given subject
+        represented as 3-tuples.
+        '''
+        if   lh_gray_indices is None and rh_gray_indices is None: return None
+        if lh_gray_indices is None: lh_gray_indices = frozenset([])
+        else: lh_gray_indices = frozenset([tuple(idx) for idx in np.transpose(lh_gray_indices)])
+        if rh_gray_indices is None: rh_gray_indices = frozenset([])
+        else: rh_gray_indices = frozenset([tuple(idx) for idx in np.transpose(rh_gray_indices)])
+        return frozenset(lh_gray_indices | rh_gray_indices)
+    @pimms.value
+    def lh_white_indices(lh_white_mask):
+        '''
+        sub.lh_white_indices is a frozenset of the indices of the white voxels in the given
+        subject's lh, represented as 3-tuples.
+        '''
+        if lh_white_mask is None: return None
+        idcs = np.transpose(np.where(lh_white_mask))
+        return frozenset([tuple(row) for row in idcs])
+    @pimms.value
+    def rh_white_indices(rh_white_mask):
+        '''
+        sub.rh_white_indices is a frozenset of the indices of the white voxels in the given
+        subject's rh, represented as 3-tuples.
+        '''
+        if rh_white_mask is None: return None
+        idcs = np.transpose(np.where(rh_white_mask))
+        return frozenset([tuple(row) for row in idcs])
+    @pimms.value
+    def white_indices(lh_white_indices, rh_white_indices):
+        '''
+        sub.white_indices is a frozenset of the indices of the white voxels in the given subject
+        represented as 3-tuples.
+        '''
+        if   lh_white_indices is None and rh_white_indices is None: return None
+        elif lh_white_indices is None: return rh_white_indices
+        elif rh_white_indices is None: return lh_white_indices
+        else return frozenset(lh_white_indices | rh_white_indices)
+    @pimms.value
+    def image_dimensions(images):
+        '''
+        sub.image_dimensions is a tuple of the size of an anatomical image for the given subject.
+        '''
+        if images is None or len(images) == 0: return None
+        if pimms.is_lazy_map(images):
+            # look for an image that isn't lazy...
+            key = next((k for k in images.iterkeys() if not images.is_lazy(k)), None)
+            if key is None: key = next(images.iterkeys(), None)
+        else:
+            key = next(images.iterkeys(), None)
+        img = images[key]
+        if img is None: return None
+        return np.asarray(img).shape
+
+    @pimms.value
+    def lh_vertex_to_voxel_line_interpolation(lh_gray_indices, lh, vertex_to_voxel_matrix):
+        '''
+        sub.lh_gray_vertex_to_voxel_line_interpolation is a scipy sparse matrix representing the
+          interpolation from the vertices into the voxels; the ordering of the voxels that is
+          produced by the dot-product of this matrix with the vector of vertex-values is the same
+          as the ordering used in sub.lh_gray_indices.
+        The method works by projecting the vectors from the white surface vertices to the pial
+        surface vertices into the the ribbon and weighting them by the fraction of the vector that
+        lies in the voxel.
+        '''
+        return _vertex_to_voxel_line_interpolation(lh, lh_gray_indices, vertex_to_voxel_matrix)
+    @pimms.value
+    def rh_vertex_to_voxel_line_interpolation(rh_gray_indices, rh, vertex_to_voxel_matrix):
+        '''
+        sub.rh_gray_vertex_to_voxel_line_interpolation is a scipy sparse matrix representing the
+          interpolation from the vertices into the voxels; the ordering of the voxels that is
+          produced by the dot-product of this matrix with the vector of vertex-values is the same
+          as the ordering used in sub.rh_gray_indices.
+        The method works by projecting the vectors from the white surface vertices to the pial
+        surface vertices into the the ribbon and weighting them by the fraction of the vector that
+        lies in the voxel.
+        '''
+        return _vertex_to_voxel_line_interpolation(rh, rh_gray_indices, vertex_to_voxel_matrix)
+    @pimms.value
+    def lh_vertex_to_voxel_nearest_interpolation(lh_gray_indices, lh, voxel_to_vertex_matrix):
+        '''
+        sub.lh_gray_vertex_to_voxel_nearest_interpolation is a scipy sparse matrix representing the
+          interpolation from the vertices into the voxels; the ordering of the voxels that is
+          produced by the dot-product of this matrix with the vector of vertex-values is the same
+          as the ordering used in sub.lh_gray_indices.
+        The method used is nearest-neighbors to either the closest pial or white surface vertex.
+        '''
+        return _vertex_to_voxel_nearest_interpolation(lh, lh_gray_indices, voxel_to_vertex_matrix)
+    @pimms.value
+    def rh_vertex_to_voxel_nearest_interpolation(rh_gray_indices, rh, voxel_to_vertex_matrix):
+        '''
+        sub.rh_gray_vertex_to_voxel_nearest_interpolation is a scipy sparse matrix representing the
+          interpolation from the vertices into the voxels; the ordering of the voxels that is
+          produced by the dot-product of this matrix with the vector of vertex-values is the same
+          as the ordering used in sub.lh_gray_indices.
+        The method used is nearest-neighbors to either the closest pial or white surface vertex.
+        '''
+        return _vertex_to_voxel_nearest_interpolation(rh, rh_gray_indices, voxel_to_vertex_matrix)
+    
+    
+    @pimms.value
+    def repr(name, path):
+        '''
+        sub.repr is the representation string returned by sub.__repr__().
+        '''
+        if name is None and path is None:
+            return 'Subject(<?>)'
+        elif name is None:
+            return 'Subject(<\'%s\'>)' % path
+        elif path is None:
+            return 'Subject(<%s>)' % name
+        else:
+            return 'Subject(<%s>, <\'%s\'>)' % (name, path)
+
+    def __repr__(self):
+        return self.repr
+    def path_join(self, *args):
+        '''
+        sub.path_join(args...) is equivalent to os.path.join(sub.path, args...).
+        '''
+        return os.path.join(sub.path, *args)
 
 @pimms.immutable
 class Cortex(geo.Topology):
