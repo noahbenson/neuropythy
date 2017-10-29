@@ -1,5 +1,5 @@
 ####################################################################################################
-# neuropythy/freesurfer/subject.py
+# neuropythy/freesurfer/core.py
 # Simple tools for use with FreeSurfer in Python
 # By Noah C. Benson
 

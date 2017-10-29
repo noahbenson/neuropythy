@@ -136,14 +136,14 @@ class Subject(ObjectWithMetaData):
         sub.hemis is a persistent map of hemisphere names ('lh', 'rh', possibly others) for the
         given subject sub.
         '''
-        if    h is None:       return pyr.m()
+        if   h is None:        return pyr.m()
         elif pimms.is_pmap(h): return h
         elif pimms.is_map(h):  return pyr.pmap(h)
         else: raise ValueError('hemis must be a mapping')
     @pimms.param
     def images(imgs):
         '''
-        sub.images is a persistent map of MRImages tracked by the given subject subject sub.
+        sub.images is a persistent map of MRImages tracked by the given subject sub.
         '''
         if   imgs is None:        return pyr.m()
         elif pimms.is_pmap(imgs): return imgs
@@ -455,10 +455,11 @@ class Cortex(geo.Topology):
     registrations includes the key 'native' this is taken to be the default registration for the
     particular cortex object.
     '''
-    def __init__(self, chirality, tess, surfaces, registrations):
+    def __init__(self, chirality, tess, surfaces, registrations, meta_data=None):
         Topology.__init__(self, tess, registrations)
         self.chirality = chirality
         self.surfaces = surfaces
+        self.meta_data = meta_data
 
     @pimms.param
     def chirality(ch):
@@ -502,6 +503,14 @@ class Cortex(geo.Topology):
         '''
         return surfaces['pial']
     @pimms.value
+    def midgray_surface(white_surface, pial_surface):
+        '''
+        cortex.midgray_surface is the mesh representing the midgray surface half way between the
+        white and pial surfaces.
+        '''
+        midgray_coords = 0.5*(white_surface.coordinates + pial_surface.coordinates)
+        return white_surface.copy(coordinates=midgray_coords)
+    @pimms.value
     def white_to_pial_vectors(white_surface, pial_surface):
         '''
         cortex.white_to_pial_vectors is a (3 x n) matrix of the unit direction vectors that point
@@ -534,6 +543,8 @@ class Cortex(geo.Topology):
         cortex.surface([dist]) yields the layer that is the given distance from the white surface.
         '''
         if pimms.is_str(name):
+            if name.lower() == 'midgray' and 'midgray' not in self.surfaces:
+                return self.migray_surface # in case it's been provided via overloading
             return self.surfaces[name]
         elif pimms.is_vector(name, 'real') and len(name) == 1:
             x0 = self.white_surface
