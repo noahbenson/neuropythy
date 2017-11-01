@@ -9,7 +9,7 @@ import scipy               as sp
 import scipy.sparse        as sps
 import neuropythy.geometry as geo
 import pyrsistent          as pyr
-import os, types, pimms
+import os, sys, types, pimms
 
 from neuropythy.util import (ObjectWithMetaData, to_affine)
 
@@ -267,7 +267,7 @@ class Subject(ObjectWithMetaData):
         if   lh_white_indices is None and rh_white_indices is None: return None
         elif lh_white_indices is None: return rh_white_indices
         elif rh_white_indices is None: return lh_white_indices
-        else return frozenset(lh_white_indices | rh_white_indices)
+        else: return frozenset(lh_white_indices | rh_white_indices)
     @pimms.value
     def image_dimensions(images):
         '''

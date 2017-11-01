@@ -9,7 +9,7 @@ import nibabel.freesurfer.mghformat as fsmgh
 import pyrsistent                   as pyr
 import neuropythy.geometry          as geo
 import neuropythy.mri               as mri
-import os, six
+import os, six, pimms
 
 ####################################################################################################
 # Subject Directory and where to find Subjects
@@ -47,6 +47,7 @@ def add_subject_path(path, index=0):
     only if all paths were successfully inserted.
     See also subject_paths.
     '''
+    global _subjects_dirs
     paths = [p for p in path.split(':') if len(p) > 0]
     if len(paths) > 1:
         tests = [add_subject_path(p, index=index) for p in reversed(paths)]
@@ -81,8 +82,8 @@ def is_freesurfer_subject_path(path):
     A path is considered to be freesurfer-subject-like if it contains the directories mri/, surf/,
     and label/.
     '''
-    if not os.path.isdir(path) return False
-    else return all(os.path.isdir(os.path.join(path, d)) for d in ['mri', 'surf', 'label'])
+    if not os.path.isdir(path): return False
+    else: return all(os.path.isdir(os.path.join(path, d)) for d in ['mri', 'surf', 'label'])
 
 def find_subject_path(sub):
     '''
@@ -159,16 +160,16 @@ class FreeSurferSubject(mri.Subject):
                 ('vsroi',  'visual_area'       ),
                 ('vroi',   'visual_area'       ),
                 ('vslab',  'visual_area'       )]})
-    _auto_properties = pimms.pmap({k: (a, lambda f: fsio.read_morph_data(f))
-                                   for d in [{'sulc':      'convexity',
-                                              'thickness': 'thickness',
-                                              'volume':    'volume',
-                                              'area':      'white_surface_area',
-                                              'area.mid':  'midgray_surface_area',
-                                              'area.pial': 'pial_surface_area',
-                                              'curv':      'curvature'},
-                                             _auto_retino_names]
-                                   for (k,a) in d.iteritems()})
+    _auto_properties = pyr.pmap({k: (a, lambda f: fsio.read_morph_data(f))
+                                 for d in [{'sulc':      'convexity',
+                                            'thickness': 'thickness',
+                                            'volume':    'volume',
+                                            'area':      'white_surface_area',
+                                            'area.mid':  'midgray_surface_area',
+                                            'area.pial': 'pial_surface_area',
+                                            'curv':      'curvature'},
+                                           _auto_retino_names]
+                                 for (k,a) in d.iteritems()})
     @staticmethod
     def _cortex_from_path(chirality, name, surf_path, data_path):
         '''
@@ -302,4 +303,22 @@ class FreeSurferSubject(mri.Subject):
                 ims[tr] = _make_accessor(k)
         return pimms.lazy_map(ims)
 
-
+def freesurfer_subject(name):
+    '''
+    freesurfer_subject(name) yields a freesurfer Subject object for the subject with the given name.
+    Subjects are cached and not reloaded.
+    Note that subects returned by freesurfer_subject() are always persistent Immutable objects; this
+    means that you must create a transient version of the subject to modify it via the member
+    function sub.transient().
+    '''
+    import os
+    subpath = find_subject_path(name)
+    if subpath is None: return None
+    fpath = '/' + os.path.relpath(subpath, '/')
+    if fpath in freesurfer_subject._cache:
+        return freesurfer_subject._cache[fpath]
+    else:
+        sub = FreeSurferSubject(subpath).persist()
+        if isinstance(sub, FreeSurferSubject): freesurfer_subject._cache[fpath] = sub
+        return sub
+freesurfer_subject._cache = {}

@@ -15,4 +15,4 @@ for interacting with cortical data. The primary data include:
 from .core import (Subject, Cortex,
                    vertex_curvature_color, vertex_weight,
                    vertex_angle, vertex_eccen, vertex_angle_color, vertex_eccen_color,
-                   angle_colors, eccen_colors, curvature_colors, cortex_plot))
+                   angle_colors, eccen_colors, curvature_colors, cortex_plot)

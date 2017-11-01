@@ -170,6 +170,11 @@ class ObjectWithMetaData(object):
     ObjectWithMetaData is a class that stores a few useful utilities and the param meta_data, all of
     which assist in tracking a persistent map of meta-data with an object.
     '''
+    def __init__(self, meta_data=None):
+        if meta_data is None:
+            self.meta_data = pyr.m()
+        else:
+            self.meta_data = meta_data
     @pimms.option(pyr.m())
     def meta_data(md):
         '''
@@ -187,7 +192,7 @@ class ObjectWithMetaData(object):
         obj.with_meta(...) collapses the given arguments with pimms.merge into the object's current
         meta_data map and yields a new object with the new meta-data.
         '''
-        md = pimms.merge(self.meta_data, *args, **kwargs)
+        md = pimms.merge(self.meta_data, *(args + (kwargs,)))
         if md is self.meta_data: return self
         else: return self.copy(meta_data=md)
     def wout_meta(self, *args, **kwargs):

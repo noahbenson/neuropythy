@@ -120,7 +120,7 @@ class VertexSet(ObjectWithMetaData):
           number of keyword arguments, all of which are merged into a single dict left-to-right
           before application.
         '''
-        pp = self._properties.merge(*args, **kwargs)
+        pp = self._properties.merge(*(args + (kwargs,)))
         return self if pp is self._properties else self.copy(_properties=pp)
     def wout_prop(self, *args):
         '''
@@ -682,9 +682,9 @@ class Mesh(VertexSet):
         '''
         # note that tess.properties always already has labels and indices included
         if _properties is tess.properties:
-            return pimms.merge(_properties, coordinates=coordinates.T)
+            return pimms.merge(_properties, {'coordinates': coordinates.T})
         else:
-            return pimms.merge(tess.properties, _properties, coordinates=coordinates.T)
+            return pimms.merge(tess.properties, _properties, {'coordinates': coordinates.T})
     @pimms.value
     def edge_coordinates(tess, coordinates):
         '''
@@ -1253,13 +1253,16 @@ class Mesh(VertexSet):
             def _apply_interp(dat):
                 if pimms.is_str(dat):
                     return _apply_interp(self.properties[dat])
-                elif pimms.is_vector(dat, np.integer) or not pimms.is_vector(dat, np.number):
-                    return self.apply_interpolation(interps['nearest'], dat)
-                else:
+                elif pimms.is_vector(dat, np.inexact):
                     return self.apply_interpolation(interps['linear'], dat)
+                else:
+                    return self.apply_interpolation(interps['nearest'], dat)
             if pimms.is_str(data) and data.lower() == 'all':
                 data = self.properties
-            if pimms.is_map(data):
+            if pimms.is_lazy_map(data):
+                def _make_lambda(kk): return lambda:_apply_interp(data[kk])
+                return pyr.lazy_map({k:_make_lambda(k) for k in six.iterkeys(data)})
+            elif pimms.is_map(data):
                 return pyr.pmap({k:_apply_interp(data[k]) for k in six.iterkeys(data)})
             elif pimms.is_matrix(data):
                 data = np.asarray(data)
@@ -1373,7 +1376,7 @@ class Mesh(VertexSet):
         # Parse the property data and the weights...
         (prop,weights) = self.property(prop, outliers=outliers, data_range=data_range,
                                        mask=mask, valid_range=valid_range,
-                                       weights=weights, weight_min=weight_min
+                                       weights=weights, weight_min=weight_min,
                                        weight_transform=weight_transform, transform=transform,
                                        yield_weights=True)
         prop = np.array(prop)
@@ -1517,16 +1520,9 @@ class MapProjection(ObjectWithMetaData):
         return np.asarray([np.cos(X[0] / cosphi) * sphere_radius,
                            np.sin(X[0] / cosphi) * sphere_radius,
                            np.sin(X[1]) * sphere_radius])
-    projection_forward_methods = pyr.m(
-        orthographic    = MapProjection.orthographic_projection_forward,
-        equirectangular = MapProjection.equirectangular_projection_forward,
-        mercator        = MapProjection.mercator_projection_forward,
-        sinusoidal      = MapProjection.sinusoidal_projection_forward)
-    projection_inverse_methods = pyr.m(
-        orthographic    = MapProjection.orthographic_projection_inverse,
-        equirectangular = MapProjection.equirectangular_projection_inverse,
-        mercator        = MapProjection.mercator_projection_inverse,
-        sinusoidal      = MapProjection.sinusoidal_projection_inverse)
+    # These are given actual values just below the class definition
+    projection_forward_methods = {}
+    projection_inverse_methods = {}
 
     def __init__(self,
                  center=None, center_right=None, radius=None, method='equirectangular',
@@ -1841,7 +1837,18 @@ class MapProjection(ObjectWithMetaData):
             return self.forward(obj) if self.in_domain(obj) else None
         else:
             return self.forward(self.select_domain(obj))
-    
+MapProjection.projection_forward_methods = pyr.m(
+    orthographic    = MapProjection.orthographic_projection_forward,
+    equirectangular = MapProjection.equirectangular_projection_forward,
+    mercator        = MapProjection.mercator_projection_forward,
+    sinusoidal      = MapProjection.sinusoidal_projection_forward)
+MapProjection.projection_inverse_methods = pyr.m(
+    orthographic    = MapProjection.orthographic_projection_inverse,
+    equirectangular = MapProjection.equirectangular_projection_inverse,
+    mercator        = MapProjection.mercator_projection_inverse,
+    sinusoidal      = MapProjection.sinusoidal_projection_inverse)
+
+        
 @pimms.immutable
 class Topology(VertexSet):
     '''

@@ -2,14 +2,15 @@
 
 '''Tools for analyzing and registering cortical meshes.'''
 
-from freesurfer import (freesurfer_subject,
-                        Hemisphere as FreeSurferHemisphere,
-                        Subject    as FreeSurferSubject)
-from cortex     import (CorticalMesh, mesh_smooth, mesh_property)
-from vision     import (retinotopy_data, empirical_retinotopy_data, predicted_retinotopy_data,
-                        register_retinotopy, retinotopy_anchors, retinotopy_model,
-                        neighborhood_cortical_magnification,
-                        as_retinotopy, mesh_retinotopy)
+from mri        import (Cortex)
+#from vision     import (retinotopy_data, empirical_retinotopy_data, predicted_retinotopy_data,
+#                        register_retinotopy, retinotopy_anchors, retinotopy_model,
+#                        neighborhood_cortical_magnification,
+#                        as_retinotopy, mesh_retinotopy)
+
+import freesurfer
+from   freesurfer import freesurfer_subject
+
 
 # Version information...
 __version__ = '0.4.0'
@@ -23,16 +24,15 @@ def reload_neuropythy():
     neuropythy module.
     '''
     import sys
-    mdls = ('neuropythy.immutable',
-            'neuropythy.util.command',
+    mdls = ('neuropythy.util.core'
             'neuropythy.util',
             'neuropythy.java',
             'neuropythy.geometry.util',
             'neuropythy.geometry.mesh',
             'neuropythy.geometry',
-            'neuropythy.topology',
-            'neuropythy.cortex',
-            'neuropythy.freesurfer.subject',
+            'neuropythy.mri.core',
+            'neuropythy.mri',
+            'neuropythy.freesurfer.core',
             'neuropythy.freesurfer',
             'neuropythy.registration.core',
             'neuropythy.registration',

@@ -4,24 +4,15 @@
 # By Noah C. Benson
 
 import numpy                        as np
-import scipy                        as sp
-import nibabel.freesurfer.io        as fsio
+import numpy.linalg                 as npla
 import nibabel.freesurfer.mghformat as fsmgh
+import os, sys, gzip, six, pimms
 
-import os, sys, gzip, abc
-
-from numpy.linalg import norm
-from math         import pi
-from numbers      import Number
-from pysistence   import make_dict
-
-from neuropythy.cortex       import (CorticalMesh, mesh_property)
-from neuropythy.freesurfer   import (freesurfer_subject, add_subject_path,
-                                     cortex_to_ribbon, cortex_to_ribbon_map,
-                                     Hemisphere, subject_paths)
-from neuropythy.topology     import (Registration)
-from neuropythy.registration import (mesh_register, java_potential_term)
-from neuropythy.java         import (to_java_doubles, to_java_ints)
+import neuropythy.geometry           as geo
+import neuropythy.freesurfer         as nyfs
+import neuropythy.mri                as mri
+from   neuropythy.registration   import (mesh_register, java_potential_term)
+from   neuropythy.java           import (to_java_doubles, to_java_ints)
 
 from .models import (RetinotopyModel, SchiraModel, RetinotopyMeshModel, RegisteredRetinotopyModel,
                      load_fmm_model)
@@ -41,14 +32,14 @@ _empirical_retinotopy_names = {
 # handy function for picking out properties automatically...
 def empirical_retinotopy_data(hemi, retino_type):
     '''
-    empirical_retinotopy_data(hemi, t) yields a numpy array of data for the given hemisphere object
+    empirical_retinotopy_data(hemi, t) yields a numpy array of data for the given cortex object hemi
     and retinotopy type t; it does this by looking at the properties in hemi and picking out any
     combination that is commonly used to denote empirical retinotopy data. These common names are
     stored in _empirical_retintopy_names, in order of preference, which may be modified.
     The argument t should be one of 'polar_angle', 'eccentricity', 'weight'.
     '''
     dat = _empirical_retinotopy_names[retino_type.lower()]
-    hdat = {s.lower(): s for s in hemi.property_names}
+    hdat = {s.lower(): s for s in six.iterkeys(hemi.properties)}
     return next((hemi.prop(hdat[s.lower()]) for s in dat if s.lower() in hdat), None)
 
 _predicted_retinotopy_names = {
@@ -61,14 +52,14 @@ _predicted_retinotopy_names = {
 
 def predicted_retinotopy_data(hemi, retino_type):
     '''
-    predicted_retinotopy_data(hemi, t) yields a numpy array of data for the given hemisphere object
+    predicted_retinotopy_data(hemi, t) yields a numpy array of data for the given cortex object hemi
     and retinotopy type t; it does this by looking at the properties in hemi and picking out any
     combination that is commonly used to denote empirical retinotopy data. These common names are
     stored in _predicted_retintopy_names, in order of preference, which may be modified.
     The argument t should be one of 'polar_angle', 'eccentricity', 'visual_area'.
     '''
     dat = _predicted_retinotopy_names[retino_type.lower()]
-    hdat = {s.lower(): s for s in hemi.property_names}
+    hdat = {s.lower(): s for s in six.iterkeys(hemi.properties)}
     return next((hemi.prop(hdat[s]) for s in dat if s.lower() in hdat), None)
 
 _retinotopy_names = {
@@ -79,7 +70,7 @@ _retinotopy_names = {
 
 def retinotopy_data(hemi, retino_type):
     '''
-    retinotopy_data(hemi, t) yields a numpy array of data for the given hemisphere object
+    retinotopy_data(hemi, t) yields a numpy array of data for the given cortex object hemi
     and retinotopy type t; it does this by looking at the properties in hemi and picking out any
     combination that is commonly used to denote empirical retinotopy data. These common names are
     stored in _predicted_retintopy_names, in order of preference, which may be modified.
@@ -89,7 +80,7 @@ def retinotopy_data(hemi, retino_type):
     find a valid property.
     '''
     dat = _retinotopy_names[retino_type.lower()]
-    val = next((hemi.prop(s) for s in hemi.property_names if s.lower() in dat), None)
+    val = next((hemi.prop(s) for s in six.iterkeys(hemi.properties) if s.lower() in dat), None)
     if val is None and retino_type.lower() != 'weight':
         val = predicted_retinotopy_data(hemi, retino_type)
     if val is None and retino_type.lower() != 'visual_area':
@@ -111,29 +102,25 @@ def extract_retinotopy_argument(obj, retino_type, arg, default='any'):
     that the empirical_retinotopy_data and predicted_retinotopy_data functions should be used,
     respectively.
     '''
-    if isinstance(arg, basestring): values = obj.prop(arg)
-    elif hasattr(arg, '__iter__'):  values = arg
-    elif arg is not None:           raise ValueError('cannot interpret retinotopy arg: %s' % arg)
-    elif default == 'predicted':    values = predicted_retinotopy_data(obj, retino_type)
-    elif default == 'empirical':    values = empirical_retinotopy_data(obj, retino_type)
-    elif default == 'any':          values = retinotopy_data(obj, retino_type)
-    else:                           raise ValueError('bad default retinotopy: %s' % default)
+    if   pimms.is_str(obj):        values = obj.prop(arg)
+    elif hasattr(arg, '__iter__'): values = arg
+    elif arg is not None:          raise ValueError('cannot interpret retinotopy arg: %s' % arg)
+    elif default == 'predicted':   values = predicted_retinotopy_data(obj, retino_type)
+    elif default == 'empirical':   values = empirical_retinotopy_data(obj, retino_type)
+    elif default == 'any':         values = retinotopy_data(obj, retino_type)
+    else:                          raise ValueError('bad default retinotopy: %s' % default)
     if values is None:
         raise RuntimeError('No %s retinotopy data found given argument: %s' % (retino_type, arg))
     n = obj.vertex_count
+    values = np.asarray(values)
     if len(values) != n:
         found = False
         # could be that we were given a mesh data-field for a map
         try:
-            s = obj.meta_data['source_mesh']
-            if s.vertex_count == len(values):
-                values = np.asarray(values)[obj.vertex_list]
-                found = True
-        except: pass
-        if not found:
-            raise RuntimeError('Given %s data has incorrect length (%s instead of %s)!' \
-                               % (retino_type, len(values), n))
-    return np.array(values)
+            values = values[obj.vertex_labels]
+        except:
+            raise RuntimeError('%s data: length %s should be %s' % (retino_type, len(values), n))
+    return values
 
 _default_polar_angle_units = {
     'polar_angle': 'deg',
@@ -243,9 +230,9 @@ def as_retinotopy(data, output_style='visual', units=Ellipsis, prefix=None, suff
 
     The following options may be given:
       * units (Ellipsis) specifies the unit that should be assumed (degrees or radians);
-        if Ellipsis is given, then auto-detect the unit if possible. This may be a map whose keys are
-        'polar_angle' and 'eccentricity' (or the equivalent titles in data) and whose keys are the
-        individual units.
+        if Ellipsis is given, then auto-detect the unit if possible. This may be a map whose keys
+        are 'polar_angle' and 'eccentricity' (or the equivalent titles in data) and whose keys are
+        the individual units.
       * prefix (None) specifies a prefix that is required for any keys or property names.
       * suffix (None) specifies a suffix that is required for any keys or property names.
     '''
@@ -258,16 +245,16 @@ def as_retinotopy(data, output_style='visual', units=Ellipsis, prefix=None, suff
         data = {'polar_angle': data[0], 'eccentricity': data[1]}
     if isinstance(data, list):
         data = np.asarray(data)
-    if isinstance(data, np.ndarray):
-        if len(data.shape) == 1 and np.issubdtype(data.dtype, np.complex):
+    if pimms.is_nparray(data):
+        if pimms.is_vector(data, 'complex'):
             data = {'complex': data}
         else:
-            if data.shape[1] == 2: data = data.T
+            if data.shape[0] != 2: data = data.T
             data = {'polar_angle': data[0], 'eccentricity': data[1]}
     # We now assume that data is a dict type; or is a mesh;
     # figure out the data we have and make it into theta/rho
-    if isinstance(data, CorticalMesh) or isinstance(data, Hemisphere):
-        pnames = {k.lower():k for k in data.property_names}
+    if isinstance(data, geo.VertexSet):
+        pnames = {k.lower():k for k in six.iterkeys(data.properties)}
         mem_dat = lambda k: k in pnames
         get_dat = lambda k: data.prop(pnames[k])
     else:
@@ -323,7 +310,7 @@ def mesh_retinotopy(m, source='any'):
       'visual_area' may be included for atlas or model datasets. The coordinates are always in the
       'visual' retinotopy style, but can be reinterpreted with as_retinotopy.
     mesh_retinotopy(m, source) may be used to specify a particular source for the data; this may be
-      either 'empirical', 'model', or 'any'; or it may be a prefix or suffix beginning or ending with
+      either 'empirical', 'model', or 'any'; or it may be a prefix/suffix beginning/ending with
       an _ character.
     '''
     source = source.lower()
@@ -439,17 +426,18 @@ def predict_pRF_radius(eccentricity, visual_area='V1', source='Wandell2015'):
     return dat['m']*eccentricity + dat['b']
 
 def _retinotopic_field_sign_triangles(m, retinotopy):
+    t = m.tess if isinstance(m, geo.Mesh) or isinstance(m, geo.Topology) else m
     # get the polar angle and eccen data as a complex number in degrees
-    if isinstance(retinotopy, basestring):
+    if pimms.is_str(retinotopy):
         (x,y) = as_retinotopy(mesh_retinotopy(m, retinotopy), 'geographical')
     elif retinotopy is Ellipsis:
-        (x,y) = as_retinotopy(mesh_retinotopy(m, 'any'), 'geographical')
+        (x,y) = as_retinotopy(mesh_retinotopy(m, 'any'),      'geographical')
     else:
-        (x,y) = as_retinotopy(retinotopy, 'geographical')
+        (x,y) = as_retinotopy(retinotopy,                     'geographical')
     # Okay, now we want to make some coordinates...
     coords = np.asarray([x, y])
-    us = coords[:, m.indexed_faces[1]] - coords[:, m.indexed_faces[0]]
-    vs = coords[:, m.indexed_faces[2]] - coords[:, m.indexed_faces[0]]
+    us = coords[:, t.indexed_faces[1]] - coords[:, t.indexed_faces[0]]
+    vs = coords[:, t.indexed_faces[2]] - coords[:, t.indexed_faces[0]]
     (us,vs) = [np.concatenate((xs, np.full((1, m.face_count), 0.0))) for xs in [us,vs]]
     xs = np.cross(us, vs, axis=0)[2]
     xs[np.isclose(xs, 0)] = 0
@@ -474,12 +462,13 @@ def retinotopic_field_sign(m, element='vertices', retinotopy=Ellipsis, invert_fi
       * invert_field (False) specifies that the inverse of the field sign should be returned.
     '''
     tsign = _retinotopic_field_sign_triangles(m, retinotopy)
+    t = m.tess if isinstance(m, geo.Mesh) or isinstance(m, geo.Topology) else m
     if invert_field: tsign = -tsign
     element = element.lower()
     if element == 'triangles' or element == 'faces': return tsign
-    fidx = m.vertex_face_index
+    fidx = t.vertex_face_index
     vfs = np.asarray([np.mean(tsign[ii]) if len(ii) > 0 else 0 for ii in fidx])
-    return vfs    
+    return vfs
 
 # Tools for retinotopy model loading:
 _default_schira_model = None
@@ -489,14 +478,14 @@ def get_default_schira_model():
         try:
             _default_schira_model = RegisteredRetinotopyModel(
                 SchiraModel(),
-                registration='fsaverage_sym',
-                chirality='lh',
-                center=[-7.03000, -82.59000, -55.94000],
-                center_right=[58.58000, -61.84000, -52.39000],
-                radius=np.pi/2.5,
-                method='orthographic')
-        except:
-            pass
+                geo.MapProjection(
+                    registration='fsaverage_sym',
+                    chirality='lh',
+                    center=[-7.03000, -82.59000, -55.94000],
+                    center_right=[58.58000, -61.84000, -52.39000],
+                    radius=np.pi/2.5,
+                    method='orthographic'))
+        except: pass
     return _default_schira_model
 
 __loaded_retinotopy_models = {}
@@ -568,51 +557,15 @@ def retinotopy_model(name='benson17', hemi=None,
             if fname is not None: break
         if fname is None: raise ValueError('Cannot find an FFM file with the name %s' % origname)
     # Okay, load the model...
-    gz = True if fname[-3:] == '.gz' else False
-    lines = None
-    with (gzip.open(fname, 'rb') if gz else open(fname, 'r')) as f:
-        lines = f.read().split('\n')
-    if len(lines) < 3 or lines[0] != 'Flat Mesh Model Version: 1.0':
-        raise ValueError('Given name does not correspond to a valid flat mesh model file')
-    n = int(lines[1].split(':')[1].strip())
-    m = int(lines[2].split(':')[1].strip())
-    reg = lines[3].split(':')[1].strip()
-    hemi = lines[4].split(':')[1].strip().upper()
-    center = map(float, lines[5].split(':')[1].strip().split(','))
-    onxaxis = map(float, lines[6].split(':')[1].strip().split(','))
-    method = lines[7].split(':')[1].strip().lower()
-    tx = np.asarray(
-        [map(float, row.split(','))
-         for row in lines[8].split(':')[1].strip(' \t[]').split(';')])
-    crds = np.asarray([map(float, left.split(','))
-                       for row in lines[9:(n+9)]
-                       for (left,right) in [row.split(' :: ')]])
-    vals = np.asarray([map(float, right.split(','))
-                       for row in lines[9:(n+9)]
-                       for (left,right) in [row.split(' :: ')]])
-    tris = -1 + np.asarray(
-        [map(int, row.split(','))
-         for row in lines[(n+9):(n+m+9)]])
-    mdl = RegisteredRetinotopyModel(
-        RetinotopyMeshModel(tris, crds,
-                            90 - 180/pi*vals[:,0], vals[:,1], vals[:,2],
-                            transform=tx),
-        registration=reg,
-        center=center,
-        center_right=onxaxis,
-        method=method,
-        radius=radius,
-        sphere_radius=sphere_radius,
-        chirality=hemi)
+    mdl = load_fmm_model(fname)
     __loaded_retinotopy_models[name] = mdl
     return mdl
 
 # Tools for retinotopy registration:
 def _retinotopy_vectors_to_float(ang, ecc, wgt, weight_cutoff=0):
     (ang, ecc, wgt) = np.asarray(
-        [(a,e,w) if all(isinstance(x,Number) or np.issubdtype(type(x),np.float) for x in [a,e,w]) \
-                    and w > weight_cutoff else (0,0,0)
-         for (a,e,w) in zip(ang, ecc, wgt)]).T
+        [aew if pimms.is_vector(aew, 'float') and aew[2] > weight_cutoff else (0,0,0)
+         for aew in zip(ang, ecc, wgt)]).T
     #wgt = np.clip((wgt - weight_cutoff) / (1.0 - weight_cutoff), 0, 1)
     wgt[wgt <= weight_cutoff] = 0
     return (ang, ecc, wgt)
@@ -625,8 +578,8 @@ def retinotopy_mesh_field(mesh, mdl,
                           angle_type='both',
                           exclusion_threshold=None):
     '''
-    mesh_field_spec(mesh, model) yields a list that can be used with mesh_register as a potential
-    term. This should generally be used in a similar fashion to retinotopy_anchors.
+    retinotopy_mesh_field(mesh, model) yields a list that can be used with mesh_register as a
+      potentialterm. This should generally be used in a similar fashion to retinotopy_anchors.
 
     Options:
       * polar_angle (default None) specifies that the given data should be used in place of the
@@ -686,7 +639,9 @@ def retinotopy_mesh_field(mesh, mdl,
         max_step_size=0.05,
         max_steps=2000)
     '''
-    if isinstance(mdl, basestring):
+    #TODO: given a 3D mesh and a registered model, we should be able to return a 3D version of the
+    # anchors by unprojecting them
+    if pimms.is_str(mdl):
         mdl = retinotopy_model(mdl)
     if not isinstance(mdl, RetinotopyMeshModel):
         if isinstance(mdl, RegisteredRetinotopyModel):
@@ -812,6 +767,8 @@ def retinotopy_anchors(mesh, mdl,
       * scale (default 1) specifies a constant by which to multiply all weights for all anchors; the
         value None is interpreted as 1.
       * shape (default 'Gaussian') specifies the shape of the potential function (see mesh_register)
+      * model_hemi (default: None) specifies the hemisphere of the model to load; if None, then
+        looks for a non-specific model.
       * suffix (default None) specifies any additional arguments that should be appended to the 
         potential function description list that is produced by this function; i.e., the 
         retinotopy_anchors function produces a list, and the contents of suffix, if given and not
@@ -849,19 +806,9 @@ def retinotopy_anchors(mesh, mdl,
         max_step_size=0.05,
         max_steps=2000)
     '''
-    if isinstance(mdl, basestring):
+    if pimms.is_str(mdl):
         hemi = None
-        if model_hemi is Ellipsis:
-            md = mesh.meta_data
-            sub = md.get('subject', None)
-            hemi_obj = md.get('hemisphere', None)
-            hemi = None               if sub      and sub.name == 'fsaverage_sym'  else \
-                   hemi_obj.chirality if hemi_obj and isinstance(hemi, Hemisphere) else \
-                   hemi_obj           if isinstance(hemi_obj, basestring)          else \
-                   None
-        elif model_hemi is None:
-            hemi = None
-        elif isinstance(model_hemi, basestring):
+        if pimms.is_str(model_hemi):
             model_hemi = model_hemi.upper()
             hemnames = {k:h
                         for (h,als) in [('LH', ['LH','L','LEFT','RHX','RX']),
@@ -869,13 +816,13 @@ def retinotopy_anchors(mesh, mdl,
                         for k in als}
             if model_hemi in hemnames: hemi = hemnames[model_hemi]
             else: raise ValueError('Unrecognized hemisphere name: %s' % model_hemi)
-        else:
+        elif model_hemi is not None:
             raise ValueError('model_hemi must be a string, Ellipsis, or None')
         mdl = retinotopy_model(mdl, hemi=hemi)
     if not isinstance(mdl, RetinotopyModel):
         raise RuntimeError('given model is not a RetinotopyModel instance!')
-    if not isinstance(mesh, CorticalMesh):
-        raise RuntimeError('given mesh is not a CorticalMesh object!')
+    if not isinstance(mesh, geo.Mesh):
+        raise RuntimeError('given mesh is not a Mesh object!')
     n = mesh.vertex_count
     X = mesh.coordinates.T
     if weight_cutoff is None: weight_cutoff = 0
@@ -886,23 +833,24 @@ def retinotopy_anchors(mesh, mdl,
         for (name, arg) in [
                 ('polar_angle', polar_angle),
                 ('eccentricity', eccentricity),
-                ('weight', [weight for i in range(n)] \
-                           if isinstance(weight, Number) or np.issubdtype(type(weight), np.float) \
-                           else weight)]]
+                ('weight', np.full(n, weight) if pimms.is_number(weight) else weight)]]
     # Make sure they contain no None/invalid values
     (polar_angle, eccentricity, weight) = _retinotopy_vectors_to_float(
         polar_angle, eccentricity, weight,
         weight_cutoff=weight_cutoff)
-    idcs = [i for (i,w) in enumerate(weight) if w > 0]
+    idcs = np.where(weight > 0)[0]
     # Interpret the select arg if necessary (but don't apply it yet)
     select = ['close', [40]] if select == 'close'   else \
              ['close', [40]] if select == ['close'] else \
              select
+    lttyp = (types.ListType, types.TupleType)
     if select is None:
         select = lambda a,b: b
-    elif isinstance(select, list) and len(select) == 2 and select[0] == 'close':
-        d = np.mean(mesh.edge_lengths)*select[1][0] if isinstance(select[1], list) else select[1]
-        select = lambda idx,ancs: [a for a in ancs if a[0] is not None if norm(X[idx] - a) < d]
+    elif isinstance(select, lttyp) and len(select) == 2 and select[0] == 'close':
+        if isinstance(select[1], lttyp):
+            d = np.mean(mesh.edge_lengths)*select[1][0]
+        else: d = select[1]
+        select = lambda idx,ancs: [a for a in ancs if a[0] is not None if npla.norm(X[idx] - a) < d]
     # Okay, apply the model:
     res = mdl.angle_to_cortex(polar_angle[idcs], eccentricity[idcs])
     # Organize the data; trim out those not selected
@@ -930,11 +878,11 @@ def retinotopy_anchors(mesh, mdl,
         wgts *= fswgts * field_sign_weight + (1 - field_sign_weight)
     # Figure out the sigma parameter:
     if sigma is None: sigs = None
-    elif isinstance(sigma, Number) or np.issubdtype(type(sigma), np.float): sigs = sigma
-    elif hasattr(sigma, '__iter__') and len(sigma) == 3:
+    elif pimms.is_number(sigma): sigs = sigma
+    elif pimms.is_vector(sigma) and len(sigma) == 3:
         [minsig, mult, maxsig] = sigma
         sigs = np.clip(
-            [mult*min([norm(a0 - a) for a in anchs if a is not a0]) if len(iii) > 1 else maxsig
+            [mult*min([npla.norm(a0 - a) for a in anchs if a is not a0]) if len(iii) > 1 else maxsig
              for (iii,anchs,_) in data
              for a0 in anchs],
             minsig, maxsig)
@@ -950,203 +898,249 @@ def retinotopy_anchors(mesh, mdl,
             + ([] if suffix is None else suffix))
     return tmp
 
-def register_retinotopy_initialize(hemi,
-                                   model='benson17', model_hemi=Ellipsis,
-                                   polar_angle=None, eccentricity=None, weight=None,
-                                   weight_cutoff=0.1,
-                                   max_predicted_eccen=85,
-                                   partial_voluming_correction=True,
-                                   prior='retinotopy',
-                                   resample=Ellipsis,
-                                   max_area=None,
-                                   max_eccentricity=None):
+####################################################################################################
+# Registration Calculations
+# The registration system is a set of pimms calculation functions all wrapped into a pimms plan;
+# this way it is modular and easy to modify.
+
+@pimms.calc('empirical_retinotopy')
+def calc_empirical_retinotopy(cortex, polar_angle=None, eccentricity=None, weight=None,
+                              eccentricity_range=None, weight_min=0,
+                              partial_voluming_correction=False):
     '''
-    register_retinotopy_initialize(hemi, model) yields an fsaverage or fsaverage_sym hemisphere that
-    has been prepared for retinotopic registration with the data on the given hemisphere, hemi. The
-    options polar_angle, eccentricity, weight, and weight_cutoff are accepted, as are the
-    prior and resample options; all are documented in help(register_retinotopy).
-    The return value of this function is actually a dictionary with the element 'map' giving the
-    resulting map projection, and additional entries giving other meta-data calculated along the
-    way. Note that the hemisphere will only be fsaverage_sym if the option model_hemi is set to
-    None.
+    calc_empirical_retinotopy computes the value empirical_retinotopy, which is an itable object
+      storing the retinotopy data for the registration.
+
+    Required afferent parameters:
+      @ cortex Must be the cortex object that is to be registered to the model of retinotopy.
+ 
+    Optional afferent parameters:
+      @ polar_angle May be an array of polar angle values or a polar angle property name; if None
+        (the default), attempts to auto-detect an empirical polar angle property.
+      @ eccentricity May be an array of eccentricity values or an eccentricity property name; if
+        None (the default), attempts to auto-detect an empirical eccentricity property.
+      @ weight May be an array of weight values or a weight property name; if None (the default),
+        attempts to auto-detect an empirical weight property, such as variance_explained.
+      @ eccentricity_range May be a maximum eccentricity value or a (min, max) eccentricity range
+        to be used in the registration; if None, then no clipping is done.
+      @ weight_min May be given to indicate that weight values below this value should not be
+        included in the registration; the default is 0.
+      @ partial_voluming_correction May be set to True (default is False) to indicate that partial
+        voluming correction should be used to adjust the weights.
+
+    Efferent values:
+      @ empirical_retinotopy Will be a pimms itable of the empirical retinotopy data to be used in
+        the registration; the table's keys will be 'polar_angle', 'eccentricity', and 'weight';
+        values that should be excluded for any reason will have 0 weight and undefined angles.
     '''
-    # Step 0: Initialization of variables ##########################################################
-    prop_names = ['polar_angle', 'eccentricity', 'weight']
     data = {}  # the map we build up in this function
-    n = hemi.vertex_count
+    n = cortex.vertex_count
+    (emin,emax) = (-np.inf,np.inf)       if eccentricity_range is None          else \
+                  (0,eccentricity_range) if pimms.is_number(eccentricity_range) else \
+                  eccentricity_range
     # Step 1: get our properties straight ##########################################################
     (ang, ecc, wgt) = [
         extract_retinotopy_argument(hemi, name, arg, default='empirical')
         for (name, arg) in [
                 ('polar_angle', polar_angle),
                 ('eccentricity', eccentricity),
-                ('weight', [weight for i in range(n)] \
-                           if isinstance(weight, Number) or np.issubdtype(type(weight), np.float) \
-                           else weight)]]
-    # we also want to make sure weight is 0 where there are none values
-    (ang, ecc, wgt) = _retinotopy_vectors_to_float(ang, ecc, wgt, weight_cutoff=weight_cutoff)
-    # if there's a max eccentricity, apply that to the weights
-    if max_eccentricity is not None:
-        wgt = np.array(wgt)
-        wgt[ecc > max_eccentricity] = 0
-    # correct for partial voluming if necessary:
-    if partial_voluming_correction is True: wgt *= (1.0 - np.asarray(hemi.partial_volume_factor()))
-    # note these in the result dictionary:
-    data['sub_polar_angle'] = ang
-    data['sub_eccentricity'] = ecc
-    data['sub_weight'] = wgt
-    if hemi.has_property('curvature'):
-        data['sub_curvature'] = hemi.prop('curvature')
-    else:
-        data['sub_curvature'] = np.zeros((len(ang),))
-    # Step 2: do alignment, if required ############################################################
-    if isinstance(model, basestring):
-        h = hemi.name.lower() if model_hemi is Ellipsis else \
-            None              if model_hemi is None     else \
+                ('weight', np.full(n, weight) if pimms.is_number(weight) else weight)]]
+    bad = ~np.isfinite(np.prod([ang, ecc, wgt], axis=0))
+    ecc[bad] = 0
+    wgt[bad] = 0
+    # do partial voluming correction if requested
+    if partial_voluming_correction: wgt = wgt * (1 - cortex.partial_voluming_factor)
+    # now trim and finalize
+    bad = bad | (wgt <= weight_min) | (ecc < emin) | (ecc > emax)
+    wgt[bad] = 0
+    ang[bad] = 0
+    ecc[bad] = 0
+    # that's it!
+    return (pimms.itable(polar_angle=ang, eccentricity=ecc, weight=wgt),)
+@pimms.calc('model')
+def calc_model(cortex, model_argument, model_hemi=Ellipsis, radius=np.pi/3):
+    '''
+    calc_model loads the appropriate model object given the model argument, which may given the name
+    of the model or a model object itself.
+
+    Required afferent parameters:
+      @ model_argument Must be either a RegisteredRetinotopyModel object or the name of a model that
+        can be loaded.
+
+    Optional afferent parameters:
+      @ model_hemi May be used to specify the hemisphere of the model; this is usually only used
+        when the fsaverage_sym hemisphere is desired, in which case this should be set to None; if
+        left at the default value (Ellipsis), then it will use the hemisphere of the cortex param.
+
+    Provided efferent values:
+      @ model Will be the RegisteredRetinotopyModel object to which the mesh should be registered.
+    '''
+    if pimms.is_str(model_argument):
+        h = cortex.chirality if model_hemi is Ellipsis else \
+            None             if model_hemi is None     else \
             model_hemi
-        model = retinotopy_model(model, hemi=h)
+        model = retinotopy_model(model, hemi=h, radius=radius)
     if not isinstance(model, RegisteredRetinotopyModel):
         raise ValueError('model must be a RegisteredRetinotopyModel')
-    data['model'] = model
-    model_reg = model.projection_data['registration']
-    model_reg = 'fsaverage_sym' if model_reg is None else model_reg
-    model_chirality = model.projection_data['chirality']
-    if model_reg == 'fsaverage_sym':
-        proj_from_hemi = hemi if hemi.chirality == 'LH' else hemi.subject.RHX
-    else:
-        if model_chirality is not None and hemi.chirality != model_chirality:
-            raise ValueError('Inverse-chirality hemisphere cannot be registered to model')
-        proj_from_hemi = hemi
+    return hemi
+@pimms.calc('native_mesh', 'preregistration_mesh', 'preregistration_map')
+def calc_initial_state(cortex, model, empirical_retinotopy, resample=Ellipsis):
+    '''
+    calc_initial_state is a calculator that prepares the initial state of the registration process.
+    The initial state consists of a flattened 2D mesh ('native_map') that has been made from the
+    initial cortex, and a 'registration_map', on which registration is to be performed. The former
+    of these two meshes will always share vertex labels with the cortex argument, and the latter
+    mesh this mesh may be identical to the native mesh or may be a resampled version of it.
+
+    Optional afferent parameters:
+      @ resample May specify that the registration_map should be resampled to the 'fsaverage' or the
+        'fsaverage_sym' map; the advantage of this is that the resampling prevents angles already
+        distorted by inflation, registration, and flattening from being sufficiently small to
+        dominate the registration initially. The default value is Ellipsis, which specifies that the
+        'fsaverage' or 'fsaverage_sym' resampling should be applied if the model is registered to
+        either of those, and otherwise no resampling should be applied.
+
+    Provided efferent values:
+      @ native_mesh Will be the 3D mesh registered to the model's required registration space.
+      @ preregistration_mesh Will be the 3D mesh that is ready to be used in registration; this may
+        be identical to native_mesh if there is no resampling.
+      @ preregistration_map Will be the 2D flattened mesh for use in registration; this mesh is
+        a flattened version of preregistration_mesh.
+    '''
+    model_reg = model.registration
+    model_reg = 'native' if model_reg is None else model_reg
+    model_chirality = None if model_reg == 'fsaverage_sym' else model.chirality
+    if model_chirality is not None and cortex.chirality != model_chirality:
+        raise ValueError('Inverse-chirality hemisphere cannot be registered to model')
     # make sure we are registered to the model space
-    if model_reg not in proj_from_hemi.topology.registrations:
-        raise ValueError('Hemisphere is not registered to the model registration: %s' % model_reg)
-    # give this hemisphere the correct data
-    proj_from_hemi = proj_from_hemi.using(
-        properties=proj_from_hemi.properties.using(
-            polar_angle=ang,
-            eccentricity=ecc,
-            weight=wgt))
-    data['project_from_hemi'] = proj_from_hemi
-    # note the subject's registration to the model's registration:
-    subreg = proj_from_hemi.topology.registrations[model_reg]
-    ## if there's a prior, we should enforce it now:
-    if prior is None:
-        prior_hemi = None
-        coords = subreg.coordinates
-    else:
-        if hemi.subject.id == model_reg or model_reg == 'native':
-            prior_subject = proj_from_hemi.subject
-            prior_hemi = proj_from_hemi
-        else:
-            prior_subject = freesurfer_subject(model_reg)
-            prior_hemi = getattr(prior_subject, proj_from_hemi.chirality)
-        if prior != 'native' and prior not in prior_hemi.topology.registrations:
-            raise ValueError('Prior registration %s not found in prior subject %s' \
-                             % (prior, model_reg))
-        elif model_reg != 'native' and model_reg not in prior_hemi.topology.registrations:
-            raise ValueError('Model registratio not found in prior subject: %s' % prior_subject)
-        prior_reg0 = prior_hemi.topology.registrations[model_reg]
-        prior_reg1 = prior_hemi.topology.registrations[prior]
-        addr = prior_reg0.address(subreg.coordinates)
-        data['address_in_prior'] = addr
-        coords = prior_reg1.unaddress(addr)
-    prior_reg = Registration(proj_from_hemi.topology, coords)
-    data['prior_registration'] = prior_reg
-    data['prior_hemisphere'] = prior_hemi
-    # Step 3: resample, if need be
+    if model_reg not in cortex.registrations:
+        raise ValueError('given Cortex is not registered to the model registration: %s' % model_reg)
+    # give this registration the correct data
+    native_mesh = cortex.registrations[model_reg].with_prop(empirical_retinotopy)
+    # and now, resampling...
     if resample is Ellipsis:
-        resample = 'fsaverage_sym' if model_hemi is None else 'fsaverage'
-    data['resample'] = resample
+        resample = model_reg if model_reg == 'fsaverage' or model_reg == 'fsaverage_sym' else None
     if resample is None:
-        tohem = proj_from_hemi
-        toreg = prior_reg
-        data['initial_registration'] = prior_reg
-        for p in prop_names:
-            data['initial_' + p] = data['sub_' + p]
-        data['initial_curvature'] = data['sub_curvature']
-        data['unresample_function'] = lambda rr: rr
+        preregmesh = native_mesh
     else:
-        if resample == 'fsaverage_sym':
-            tohem = freesurfer_subject('fsaverage_sym').LH
-            toreg = tohem.topology.registrations['fsaverage_sym']
-        elif resample == 'fsaverage':
-            tohem = getattr(freesurfer_subject('fsaverage'), model_chirality)
-            toreg = tohem.topology.registrations['fsaverage']
-        else:
-            raise ValueError('resample argument must be fsaverage, fsaverage_sym, or None')
-        data['resample_hemisphere'] = tohem
-        resamp_addr = toreg.address(prior_reg.coordinates)
-        data['resample_address'] = resamp_addr
-        data['initial_registration'] = toreg
-        for (p,v) in zip(prop_names,
-                         _retinotopy_vectors_to_float(
-                             *[toreg.interpolate_from(prior_reg, data['sub_' + p])
-                               for p in prop_names])):
-            data['initial_' + p] = v
-        data['initial_curvature'] = toreg.interpolate_from(prior_reg, data['sub_curvature'])
-        data['unresample_function'] = lambda rr: Registration(proj_from_hemi.topology,
-                                                              rr.unaddress(resamp_addr))
-    data['initial_mesh'] = tohem.registration_mesh(toreg)
-    # Step 4: make the projection
-    proj_data = model.projection_data
-    if resample is None:
-        proj_data = proj_from_hemi.projection_data(center=proj_data['center'],
-                                                   center_right=proj_data['center_right'],
-                                                   method=proj_data['method'],
-                                                   registration=proj_data['registration'],
-                                                   radius=proj_data['radius'])
-    m = proj_data['forward_function'](data['initial_mesh'])
-    for p in prop_names:
-        m.prop(p, data['initial_' + p][m.vertex_labels])
-    m.prop('curvature', data['initial_curvature'][m.vertex_labels])
-    data['map'] = m
-    # Step 5: Annotate how we get back
-    def __postproc_fn(reg):
-        d = data.copy()
-        d['registered_coordinates'] = reg
-        # First, unproject the map
-        reg_map_3dx = d['map'].unproject(reg).T
-        reg_3dx = np.array(d['initial_registration'].coordinates, copy=True)
-        reg_3dx[d['map'].vertex_labels] = reg_map_3dx
-        final_reg = Registration(tohem.topology, reg_3dx)
-        d['finished_registration'] = final_reg
-        # Now, if need be, unresample the points:
-        d['registration'] = d['unresample_function'](final_reg)
-        # now convert the sub points into retinotopy points
-        rmesh = proj_from_hemi.registration_mesh(d['registration'])
-        pred = np.asarray(
-            [((p,e,l)
-              if r != 0 and (max_area is None or r <= max_area) and e <= max_predicted_eccen else
-              (0.0, 0.0, 0))
-             for (p,e,l) in zip(*model.cortex_to_angle(rmesh))
-             for r in [abs(round(l))]]).T
-        pred = (np.asarray(pred[0], dtype=np.float32),
-                np.asarray(pred[1], dtype=np.float32),
-                np.asarray(pred[2], dtype=np.int32))
-        for i in (0,1,2): pred[i].flags.writeable = False
-        pred = make_dict({p:v for (p,v) in zip(['polar_angle','eccentricity','visual_area'], pred)})
-        d['prediction'] = pred
-        rmesh.prop(pred)
-        d['registered_mesh'] = rmesh
-        return make_dict(d)
-    data['postprocess_function'] = __postproc_fn
-    return data
+        # make a map from the appropriate hemisphere...
+        ch = 'lh' if model_chirality is None else model_chirality
+        preregmesh = getattr(nyfs.freesurfer_subject(resample), ch).registrations['native']
+        # resample properties over...
+        preregmesh = preregmesh.with_prop(native_mesh.interpolate(preregmesh.coordinates, 'all'))
+    # make the map projection now...
+    preregmap = model.map_projection(preregmesh)
+    return {'native_mesh':native_mesh, 'preregistration_mesh':preregmesh,
+            'preregistration_map':preregmap}
+@pimms.calc('registered_map')
+def calc_registration(preregistration_map, model,
+                      scale=1, sigma=Ellipsis, max_steps=8000, max_step_size=0.05, method='random'):
+    '''
+    calc_registration is a calculator that creates the registration coordinates.
+    '''
+    # make the java object
+    x = mesh_register(
+        registration_map,
+        [['edge',      'harmonic',      'scale', 1.0],
+         ['angle',     'infinite-well', 'scale', 1.0],
+         ['perimeter', 'harmonic'],
+         retinotopy_anchors(preregistration_map, model,
+                            polar_angle='polar_angle',
+                            eccentricity='eccentricity',
+                            weight='weight',
+                            weight_cutoff=0, # taken care of already
+                            scale=scale,
+                            **({} if sigma is Ellipsis else {'sigma':sigma}))],
+        method=method,
+        max_steps=max_steps,
+        max_step_size=max_step_size)
+    return preregistration_map.copy(coordinates=x)
+@pimms.calc('registered_mesh', 'registration_prediction', 'prediction', 'predicted_mesh')
+def calc_prediction(registered_map, preregistration_mesh, native_mesh, model):
+    '''
+    calc_registration_prediction is a pimms calculator that creates the both the prediction and the
+    registration_prediction, both of which are pimms itables including the fields 'polar_angle',
+    'eccentricity', and 'visual_area'. The registration_prediction data describe the vertices for
+    the registered_map, not necessarily of the native_mesh, while the prediction describes the
+    native mesh.
+
+    Provided efferent values:
+      @ registered_mesh Will be a mesh object that is equivalent to the preregistration_mesh but
+        with the coordinates and predicted fields (from the registration) filled in. Note that this
+        mesh is still in the resampled configuration is resampling was performed.
+      @ registration_prediction Will be a pimms ITable object with columns 'polar_angle', 
+        'eccentricity', and 'visual_area'. For values outside of the model region, visual_area will
+        be 0 and other values will be undefined (but are typically 0). The registration_prediction
+        describes the values on the registrered_mesh.
+      @ prediction will be a pimms ITable object with columns 'polar_angle', 'eccentricity', and
+        'visual_area'. For values outside of the model region, visual_area will be 0 and other
+        values will be undefined (but are typically 0). The prediction describes the values on the
+        native_mesh and the predicted_mesh.
+    '''
+    # invert the map projection to make the registration map into a mesh
+    coords3d = registered_map.meta('projection').inverse(registered_map.coordinates)
+    rmesh = preregistration_mesh.copy(coordinates=coords3d)
+    # go ahead and get the model predictions...
+    d = model.cortex_to_angle(registered_map.coordinates)
+    d = {'polar_angle':d[0], 'eccentricity':d[1], 'visual_area':np.asarray(d[2], dtype=np.int)}
+    # okay, put these on the mesh
+    rpred = {}
+    for (k,v) in six.iteritems(d):
+        v.setflags(write=False)
+        tmp = np.zeros(rmesh.vertex_count, dtype=v.dtype)
+        tmp[registered_map.vertex_labels] = v
+        tmp.setflags(write=False)
+        rpred[k] = tmp
+    d = pyr.pmap(d)
+    rpred = pyr.pmap(d3d)
+    rmesh = rmesh.with_prop(rpred)
+    # next, do all of this for the native mesh..
+    if native_mesh is preregistration_mesh:
+        pred = d3d
+        pmesh = rmesh
+    else:
+        # we need to address the native coordinates in the prereg coordinates then unaddress them
+        # in the registered coordinates; this will let us make a native-registered-map and repeat
+        # the exercise above
+        addr = preregistration_mesh.address(native_mesh.coordinates)
+        natreg_mesh = native_mesh.copy(rmesh.unaddress(addr))
+        d = model.cortex_to_angle(natreg_mesh)
+        d = {'polar_angle':d[0], 'eccentricity':d[1], 'visual_area':np.asarray(d[2], dtype=np.int)}
+        # okay, put these on the mesh
+        pred = {}
+        for (k,v) in six.iteritems(d):
+            v.setflags(write=False)
+            tmp = np.zeros(rmesh.vertex_count, dtype=v.dtype)
+            tmp[registered_map.vertex_labels] = v
+            tmp.setflags(write=False)
+            pred[k] = tmp
+        pred = pyr.pmap(pred)
+        pmesh = natreg_mesh.with_prop(pred)
+    return {'registered_mesh'        : rmesh,
+            'registration_prediction': rpred,
+            'prediction'             : pred,
+            'predicted_mesh'         : pmesh}
+
+#: retinotopy_registration is the pimms calculation plan executed by register_retinotopy()
+retinotopy_registration = pimms.plan(
+    retinotopy = calc_empirical_retinotopy,
+    model      = calc_model,
+    initialize = calc_initial_state,
+    register   = calc_registration,
+    predict    = calc_prediction)
 
 def register_retinotopy(hemi,
                         model='benson17', model_hemi=Ellipsis,
                         polar_angle=None, eccentricity=None, weight=None, weight_cutoff=0.1,
-                        max_eccentricity=None,
+                        eccentricity_range=None,
                         partial_voluming_correction=True,
-                        edge_scale=1.0, angle_scale=1.0, functional_scale=1.0,
-                        edge_max_compression=0.25, edge_max_stretch=3.0,
+                        scale=1.0,
                         sigma=Ellipsis,
                         select='close',
                         prior='retinotopy',
                         resample=Ellipsis,
                         max_steps=2000, max_step_size=0.05, method='random',
-                        max_predicted_eccen=90,
-                        return_meta_data=False,
-                        mutate_hemi=Ellipsis):
+                        yield_imap=False):
     '''
     register_retinotopy(hemi) registers the given hemisphere object, hemi, to a model of V1, V2,
       and V3 retinotopy, and yields a copy of hemi that is identical but additionally contains
@@ -1158,8 +1152,7 @@ def register_retinotopy(hemi,
     most cases, the default options should work relatively well.
 
     Method:
-      (1) Prepare for registration by running neuropythy.vision.register_retinotopy_initialize. This
-          function runs through a number of substeps:
+      (1) Prepare for registration by several intitialization substeps:
             a. Extract the polar angle, eccentricity and weight data from the hemisphere. These
                data are usually properties on the mesh and can be modifies by the options
                polar_angle, eccentricity, and weight, which can be either property names or list
@@ -1168,7 +1161,7 @@ def register_retinotopy(hemi,
                'empirical'.
             b. If partial voluming correction is enabled (via the option
                partial_voluming_correction), multiply the weight by (1 - p) where p is 
-               hemi.partial_volume_factor().
+               hemi.partial_volume_factor.
             c. If there is a prior that is specified as a belief about the retinotopy, then a
                Registration is created for the hemisphere such that its vertices are arranged
                according to that prior (see also the prior option). Note that because hemi's
@@ -1239,38 +1232,37 @@ def register_retinotopy(hemi,
         or found, then unity weight for all vertices is assumed. By default, each will check the
         hemisphere's properties for properties with compatible names; it will prefer the properties
         PRF_polar_angle, PRF_ecentricity, and PRF_variance_explained if possible.
-      * weight_cutoff specifies the minimum value a vertex must have in the weight property in order
-        to be considered as retinotopically relevant.
-      * max_eccentricity (default: None) specifies that any vertex whose eccentricity is too high
-        should be given a weight of 0 in the registration.
+      * weight_min (default: 0.1) specifies the minimum value a vertex must have in the weight
+        property in order to be considered as retinotopically relevant.
+      * eccentricity_range (default: None) specifies that any vertex whose eccentricity is too low
+        or too high should be given a weight of 0 in the registration.
       * partial_voluming_correction (default: True), if True, specifies that the value
-        (1 - hemi.partial_volume_factor()) should be applied to all weight values (i.e., weights
+        (1 - hemi.partial_volume_factor) should be applied to all weight values (i.e., weights
         should be down-weighted when likely to be affected by a partial voluming error).
       * sigma specifies the standard deviation of the Gaussian shape for the Schira model anchors;
         see retinotopy_anchors for more information.
-      * edge_scale, angle_scale, and functional_scale all specify the relative strengths of the
-        various components of the potential field (functional_scale refers to the strength of the
-        retinotopy model).
+      * scale (default: 1.0) specifies the strength of the functional constraints (i.e. the anchors:
+        the part of the minimization responsible for ensuring that retinotopic coordinates are
+        aligned); the anatomical constraints (i.e. the edges and angles: the part of the
+        minimization responsible for ensuring that the mesh is not overly deformed) are always held
+        at a strength of 1.0.
       * select specifies the select option that should be passed to retinotopy_anchors.
-      * max_steps (default 30,000) specifies the maximum number of registration steps to run.
+      * max_steps (default 8,000) specifies the maximum number of registration steps to run.
       * max_step_size (default 0.05) specifies the maxmim distance a single vertex is allowed to
         move in a single step of the minimization.
-      * edge_max_compression (default 0.25) specifies the minimum fraction of its length that an
-        edge should be allowed to be compressed to.
-      * edge_max_stretch (default 3.0) specifies the maximum fraction of its length that an edge
-        should be allowed to be stretched to.
       * method (default 'random') is the method argument passed to mesh_register. This should be
         'random', 'pure', or 'nimble'. Generally, 'random' is recommended.
-      * return_meta_data (default: False) specifies whether the return value should be the new
-        Registration object or a dictionary of meta-data that was used during the registration
-        calculations, in which the key 'registation' gives the registration object.
+      * yield_imap (default: False) specifies whether the return value should be the new
+        Mesh object or a pimms imap (i.e., a persistent mapping of the result of a pimms
+        calculation) containing the meta-data that was used during the registration
+        calculations. If this is True, then register_retinotopy will return immediately, and
+        calculations will only be performed as the relevant data are requested from the returned
+        imap. The item 'predicted_mesh' gives the return value when yield_imap is set to False.
       * radius (default: pi/3) specifies the radius, in radians, of the included portion of the map
         projection (projected about the occipital pole).
       * sigma (default Ellipsis) specifies the sigma argument to be passed onto the 
         retinotopy_anchors function (see help(retinotopy_anchors)); the default value, Ellipsis,
         is interpreted as the default value of the retinotopy_anchors function's sigma option.
-      * max_predicted_eccen (default: 85) specifies the maximum eccentricity that should appear in
-        the predicted retinotopy values.
       * prior (default: 'retinotopy') specifies the prior that should be used, if found, in the 
         topology registrations for the subject associated with the retinotopy_model's registration.
       * resample (default: Ellipsis) specifies that the data should be resampled to one of
@@ -1278,58 +1270,19 @@ def register_retinotopy(hemi,
         resampling is performed; if Ellipsis, then auto-detect either fsaverage or fsaverage_sym
         based on the model_hemi option (if it is None, fsaverage_sym, else fsaverage).
     '''
-    # Step 1: prep the map for registration--figure out what properties we're using...
-    model = retinotopy_model()      if model is None                 else \
-            retinotopy_model(model) if isinstance(model, basestring) else \
-            model
-    data = register_retinotopy_initialize(hemi,
-                                          model=model,
-                                          model_hemi=model_hemi,
-                                          polar_angle=polar_angle,
-                                          eccentricity=eccentricity,
-                                          weight=weight,
-                                          weight_cutoff=weight_cutoff,
-                                          max_eccentricity=max_eccentricity,
-                                          partial_voluming_correction=partial_voluming_correction,
-                                          max_predicted_eccen=max_predicted_eccen,
-                                          prior=prior, resample=resample)
-    # Step 2: run the mesh registration
-    if max_steps == 0:
-        r = data['map'].coordinates
-    else:
-        elens = data['map'].edge_lengths
-        if edge_max_compression is None and edge_max_stretch is None:
-            edge_well_potential = []
-        else: 
-            emin = 0 if edge_max_compression is None else edge_max_compression * elens
-            emax = (10**6) * elens if edge_max_stretch is None else edge_max_stretch * elens
-            edge_well_potential = [['edge', 'infinite-well', 'min', emin, 'max', emax]]
-        r = mesh_register(
-            data['map'],
-            #edge_well_potential + [
-            [#['angle',     'infinite-well'],
-             ['edge',      'harmonic-log', 'scale', edge_scale],
-             ['angle',     'harmonic-log', 'scale', angle_scale],
-             ['perimeter', 'harmonic'],
-             retinotopy_anchors(data['map'], model,
-                                polar_angle='polar_angle',
-                                eccentricity='eccentricity',
-                                weight='weight',
-                                weight_cutoff=0, # taken care of above
-                                scale=functional_scale,
-                                select=select,
-                                **({} if sigma is Ellipsis else {'sigma':sigma}))],
-            method=method,
-            max_steps=max_steps,
-            max_step_size=max_step_size)
-    # Step 3: run the post-processing function
-    postproc = data['postprocess_function']
-    ppr = postproc(r)
-    return ppr if return_meta_data else ppr['registered_mesh']
+    # create the imap
+    imap = retinotopy_registration(
+        cortex=hemi, model=model, model_hemi=model_hemi,
+        polar_angle=polar_angle, eccentricity=eccentricity, weight=weight, weight_min=weight_min,,
+        eccentricity_range=eccentricity_range,
+        partial_voluming_correction=partial_voluming_correction,
+        scale=scale, sigma=sigma, select=select, prior=prior, resample=resample,
+        max_steps=max_steps, max_step_size=max_step_size, method-method)
+    return imap if yield_imap else imap['predicted_mesh']
 
 # Tools for registration-free retinotopy prediction:
-_retinotopy_templates = {}
-def predict_retinotopy(sub, template='benson17'):
+_retinotopy_templates = pyr.m(fsaverage={}, fsaverage_sym={})
+def predict_retinotopy(sub, template='benson17', registration='fsaverage'):
     '''
     predict_retinotopy(subject) yields a pair of dictionaries each with three keys: polar_angle,
     eccentricity, and v123roi; each of these keys maps to a numpy array with one entry per vertex.
@@ -1342,39 +1295,42 @@ def predict_retinotopy(sub, template='benson17'):
     directory; these files are sym.template_angle.mgz, sym.template_eccen.mgz, and 
     sym.template_areas.mgz.
     '''
-    global __retinotopy_templates
+    global _retinotopy_templates
     template = template.lower()
-    if template not in _retinotopy_templates:
-        # Find a sym template that has the right data:
-        sym_path = next((os.path.join(path0, 'fsaverage_sym')
-                         for path0 in (subject_paths() +
-                                       [os.path.join(os.path.dirname(os.path.dirname(__file__)),
-                                                     'lib', 'data')])
-                         for path in [os.path.join(path0, 'fsaverage_sym', 'surf')]
-                         if os.path.isfile(os.path.join(path, 'sym.%s_angle.mgz' % template)) 
-                         if os.path.isfile(os.path.join(path, 'sym.%s_eccen.mgz' % template))
-                         if os.path.isfile(os.path.join(path, 'sym.%s_varea.mgz' % template))),
-                        None)
-        if sym_path is None:
-            raise ValueError('No fsaverage_sym subj found with surf/sym.%s_*.mgz files!' % template)
-        sym = freesurfer_subject('fsaverage_sym').LH
-        tmpl_path = os.path.join(sym_path, 'surf', 'sym.%s_' % template)
-        # We need to load in the template data
-        _retinotopy_templates[template] = {
-            'angle': fsmgh.load(tmpl_path + 'angle.mgz').get_data().flatten(),
-            'eccen': fsmgh.load(tmpl_path + 'eccen.mgz').get_data().flatten(),
-            'varea': fsmgh.load(tmpl_path + 'varea.mgz').get_data().flatten()}
+    retino_tmpls = _retinotopy_templates[registration]
+    hemis = ['lh','rh'] if registration == 'fsaverage' else ['sym']
+    if template not in retino_tmpls:
+        libdir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'lib', 'data')
+        search_paths = subject_paths() + [libdir]
+        filenames = ['%s.%s_%s.mgz' % (hname,template,fnm)
+                     for fnm in ['angle','eccen','varea']
+                     for hname in hemis]
+        # find an appropriate directory
+        tmpl_path = next((os.path.join(path0, registration)
+                          for path0 in search_paths
+                          if all(os.path.isfile(os.path.join(path, registration, 'surf', s))
+                                 for s in filenames)),
+                         None)
+        if tmpl_path is None:
+            raise ValueError('No subject found with appropriate surf/*.%s_*.mgz files!' % template)
+        tmpl_sub = freesurfer_subject(registration)
+        for h in hemis:
+            retino_tmpls[template] = {
+                k: pimms.imm_array(fsmgh.load('%s.%s_%s.mgz'%(h,template,k)).get_data().flatten())
+                for k in ['angle', 'eccen', 'varea']}
     # Okay, we just need to interpolate over to this subject
     tmpl = _retinotopy_templates[template]
-    sym = freesurfer_subject('fsaverage_sym').LH
-    return (
-        {'polar_angle':  sub.LH.interpolate(sym,  tmpl['angle'], apply=False),
-         'eccentricity': sub.LH.interpolate(sym,  tmpl['eccen'], apply=False),
-         'visual_area':  sub.LH.interpolate(sym,  tmpl['varea'], apply=False, method='nearest')},
-        {'polar_angle':  sub.RHX.interpolate(sym, tmpl['angle'], apply=False),
-         'eccentricity': sub.RHX.interpolate(sym, tmpl['eccen'], apply=False),
-         'visual_area':  sub.RHX.interpolate(sym, tmpl['varea'], apply=False, method='nearest')})
-        
+    if not all(s in tmpl for s in hemis):
+        raise ValueError('could not find matching template')
+    if registration == 'fsaverage_sym':
+        sym = freesurfer_subject('fsaverage_sym')
+        subj_hems = (sub.lh, sub.hemis['rhx'])
+        tmpl_hems = (sym.lh, sym.lh)
+    else:
+        fsa = freesurfer_subject('fsaverage')
+        subj_hems = (sub.lh, sub.rh)
+        tmpl_hems = (sym.lh, sym.lh)
+    return tuple([th.interpolate(sh, tmpl), for (sh,th) in zip(subj_hems, tmpl_hems)])
 
 def clean_retinotopy(obj, retinotopy='empirical', output_style='visual', weight=Ellipsis,
                      equality_sigma=0.15, equality_scale=10.0,
@@ -1398,9 +1354,9 @@ def clean_retinotopy(obj, retinotopy='empirical', output_style='visual', weight=
     '''
     from scipy.optimize import minimize
     from scipy.sparse import (lil_matrix, csr_matrix)
-    if isinstance(obj, Hemisphere): obj = obj.white_surface
+    if isinstance(obj, mri.Cortex): obj = obj.white_surface
     # get the retinotopy first:
-    if isinstance(retinotopy, basestring):
+    if pimms.is_str(retinotopy):
         retinotopy = mesh_retinotopy(obj, retinotopy.lower())
     (theta0, eccen0) = as_retinotopy(retinotopy, 'visual')
     # we want to scale eccen by a log-transform; this is the inverse of the cortical magnification
