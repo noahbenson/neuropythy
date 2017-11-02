@@ -5,6 +5,7 @@
 
 import numpy               as     np
 import neuropythy.geometry as     geo
+from   numpy               import pi
 from   neuropythy.java     import (to_java_doubles, to_java_ints, to_java_array,
                                    java_link, serialize_numpy)
 import pimms
@@ -58,7 +59,7 @@ def _parse_field_function_argument(argdat, args, faces, edges, coords):
     # see if we can find such an arg...
     for i in range(len(args)):
         if isinstance(args[i], basestring) and args[i].lower() == argname.lower():
-            return (args[i+1] if pimms.is_number(args[i+1] else to_java_array(args[i+1]))
+            return (args[i+1] if pimms.is_number(args[i+1]) else to_java_array(args[i+1]))
     # did not find the arg; use the default:
     return argdflt
 

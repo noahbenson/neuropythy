@@ -2,22 +2,6 @@
 
 '''Tools for analyzing and registering cortical meshes.'''
 
-from mri        import (Cortex)
-#from vision     import (retinotopy_data, empirical_retinotopy_data, predicted_retinotopy_data,
-#                        register_retinotopy, retinotopy_anchors, retinotopy_model,
-#                        neighborhood_cortical_magnification,
-#                        as_retinotopy, mesh_retinotopy)
-
-import freesurfer
-from   freesurfer import freesurfer_subject
-
-
-# Version information...
-__version__ = '0.4.0'
-
-description = 'Integrate Python environment with FreeSurfer and perform mesh registration'
-
-
 def reload_neuropythy():
     '''
     reload_neuropythy() reloads all of the modules of neuropythy and returns the reloaded
@@ -46,5 +30,23 @@ def reload_neuropythy():
             'neuropythy.commands')
     for mdl in mdls:
         if mdl in sys.modules:
-            reload(sys.modules[mdl])
+            sys.modules[mdl] = reload(sys.modules[mdl])
     return reload(sys.modules['neuropythy'])
+
+from mri        import (Cortex)
+from vision     import (retinotopy_data, empirical_retinotopy_data, predicted_retinotopy_data,
+                        register_retinotopy, retinotopy_anchors, retinotopy_model,
+                        neighborhood_cortical_magnification,
+                        as_retinotopy, mesh_retinotopy)
+
+
+import freesurfer
+from   freesurfer import subject as freesurfer_subject
+
+
+# Version information...
+__version__ = '0.4.0'
+
+description = 'Integrate Python environment with FreeSurfer and perform mesh registration'
+
+

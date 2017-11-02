@@ -456,7 +456,10 @@ class Cortex(geo.Topology):
     particular cortex object.
     '''
     def __init__(self, chirality, tess, surfaces, registrations, meta_data=None):
-        Topology.__init__(self, tess, registrations)
+        self.chirality = chirality
+        self.surfaces = surfaces
+        self.meta_data = meta_data
+        geo.Topology.__init__(self, tess, registrations)
         self.chirality = chirality
         self.surfaces = surfaces
         self.meta_data = meta_data
@@ -466,6 +469,7 @@ class Cortex(geo.Topology):
         '''
         cortex.chirality gives the chirality ('lh' or 'rh') for the given cortex.
         '''
+        if ch is None: return None
         ch = ch.lower()
         if ch != 'lh' and ch != 'rh':
             raise ValueError('chirality must be \'lh\' or \'rh\'')
@@ -526,7 +530,7 @@ class Cortex(geo.Topology):
         '''
         cortex.repr is equivalent to repr(cortex).
         '''
-        arg = (chirality.upper(), tess.face_count, vertex_count)
+        arg = ('XH' if chirality is None else chirality.upper(), tess.face_count, vertex_count)
         return 'Cortex(<%s>, <%d faces>, <%d vertices>)' % arg
 
     def __repr__(self):

@@ -63,7 +63,7 @@ class VertexSet(ObjectWithMetaData):
         '''
         vset.indices is the list of vertex indices for the given vertex-set vset.
         '''
-        return pimms.imm_array(range(vertex_count), dtype=np.int)
+        return pimms.imm_array(np.asarray(range(vertex_count), dtype=np.int))
     @pimms.require
     def validate_vertex_properties_size(_properties, vertex_count):
         '''
@@ -583,7 +583,7 @@ class Tesselation(VertexSet):
         '''
         md = self.meta_data
         if meta_data is not None: md = pimms.merge(md, meta_data)
-        return geo.Mesh(self.tess, coords, meta_data=md, properties=properties)
+        return Mesh(self, coords, meta_data=md, properties=properties)
     def subtess(self, vertices, tag=None):
         '''
         tess.subtess(vertices) yields a sub-tesselation of the given tesselation object that only
@@ -680,11 +680,13 @@ class Mesh(VertexSet):
         '''
         mesh.properties is the pimms Itable object of properties known to the given mesh.
         '''
+        pp = {} if _properties is None else _properties
+        tp = {} if tess.properties is None else tess.properties
         # note that tess.properties always already has labels and indices included
         if _properties is tess.properties:
-            return pimms.merge(_properties, {'coordinates': coordinates.T})
+            return pimms.merge(pp, {'coordinates': coordinates.T})
         else:
-            return pimms.merge(tess.properties, _properties, {'coordinates': coordinates.T})
+            return pimms.merge(tp, pp, {'coordinates': coordinates.T})
     @pimms.value
     def edge_coordinates(tess, coordinates):
         '''
@@ -731,13 +733,13 @@ class Mesh(VertexSet):
         wz = np.isclose(norms, 0)
         return pimms.imm_array(xp * ((~wz) / (norms + wz)))
     @pimms.value
-    def vertex_normals(face_normals, vertex_faces):
+    def vertex_normals(face_normals, tess):
         '''
         mesh.vertex_normals is the (3 x n) array of the outward-facing normal vectors of each
           vertex in the given mesh. If mesh is a 2D mesh, these are all either [0,0,1] or
           [0,0,-1].
         '''
-        tmp = np.array([np.sum(face_normals[:,fs], axis=1) for fs in vertex_faces]).T
+        tmp = np.array([np.sum(face_normals[:,fs], axis=1) for fs in tess.vertex_faces]).T
         norms = np.sqrt(np.sum(tmp ** 2, axis=0))
         wz = np.isclose(norms, 0)
         return pimms.imm_array(tmp * ((~wz) / (norms + wz)))
@@ -869,7 +871,7 @@ class Mesh(VertexSet):
         if len(tri_no) == 0:
             tri = self.coordinates[:, self.tess.faces[:, tri_no]]
         else:
-            tri = np.transpose([self.coordinates[:,t] for t in self.tess.faces[:,tri_no]], (1,2,0))
+            tri = np.transpose([self.coordinates[:,t] for t in self.tess.faces[:,tri_no]], (2,0,1))
         return point_in_triangle(tri, pt)
 
     def _find_triangle_search(self, x, k=24, searched=set([])):
@@ -989,6 +991,7 @@ class Mesh(VertexSet):
             return (tri_no if tri_no is not None
                     else self._find_triangle_search(pt, k=(2*k), searched=set(near)))
         else:
+            if pt.shape[0] == self.coordinates.shape[0]: pt = pt.T
             tcount = self.tess.faces.shape[1]
             max_k = 256 if tcount > 256 else tcount
             if k > tcount: k = tcount
@@ -1015,14 +1018,20 @@ class Mesh(VertexSet):
             (dmins, dmaxs) = [[f(x[np.isfinite(x)]) for x in self.coordinates.T]
                               for f in [np.min, np.max]]
             finpts = np.isfinite(np.sum(pt, axis=1))
-            if finpts.sum() == 0:
-                inside_q = reduce(np.logical_and,
-                                  [(x >= mn)&(x <= mx) for (x,mn,mx) in zip(pt.T,dmins,dmaxs)])
+            if finpts.all():
+                if pt.shape[1] == 2:
+                    inside_q = reduce(np.logical_and,
+                                      [(x >= mn)&(x <= mx) for (x,mn,mx) in zip(pt.T,dmins,dmaxs)])
+                else:
+                    inside_q = np.full(len(pt), True, dtype=np.bool)
             else:
                 inside_q = np.full(len(pt), False, dtype=np.bool)
-                inside_q[finpts] = reduce(
-                    np.logical_and,
-                    [(x >= mn)&(x <= mx) for (x,mn,mx) in zip(pt[finpts].T,dmins,dmaxs)])
+                if pt.shape[1] == 2:
+                    inside_q[finpts] = reduce(
+                        np.logical_and,
+                        [(x >= mn)&(x <= mx) for (x,mn,mx) in zip(pt[finpts].T,dmins,dmaxs)])
+                else:
+                    insize_q[finpts] = True
             if not inside_q.any(): return res
             res[inside_q] = try_nearest(pt[inside_q])
             return res
@@ -1107,7 +1116,7 @@ class Mesh(VertexSet):
         n = self.coordinates.shape[1]
         m = coords.shape[0]
         mtx = sps.lil_matrix((m, n), dtype=np.float)
-        nv = self.nearest_vertex(x, n_jobs=n_jobs)
+        nv = self.nearest_vertex(coords, n_jobs=n_jobs)
         for (ii,u) in enumerate(nv):
             mtx[ii,u] = 1
         return mtx.tocsr()
@@ -1862,7 +1871,6 @@ class Topology(VertexSet):
     '''
 
     def __init__(self, tess, registrations, properties=None, meta_data=None, chirality=None):
-        VertexSet.__init__(self, tess.labels, tess.properties)
         self.tess = tess
         self.chirality = chirality
         self._registrations = registrations

@@ -104,13 +104,13 @@ def _load_imm_mgh(flnm):
     img.get_data().setflags(write=False)
     return img
 
-# A FreeSurferSubject is much like a Subject, but its dependency structure all comes from the path
-# rather than data provided to the constructor:
+# A freesurfer.Subject is much like an mri.Subject, but its dependency structure all comes from the
+# path rather than data provided to the constructor:
 @pimms.immutable
-class FreeSurferSubject(mri.Subject):
+class Subject(mri.Subject):
     '''
-    A FreeSurferSubject is an instance of neuropythy.mri.Subject that depends only on the path of
-    the subject represented; all other data are automatically derived from this.
+    A neuropythy.freesurfer.Subject is an instance of neuropythy.mri.Subject that depends only on
+    the path of the subject represented; all other data are automatically derived from this.
     '''
     def __init__(self, path, meta_data=None):
         if not is_freesurfer_subject_path(path):
@@ -173,7 +173,7 @@ class FreeSurferSubject(mri.Subject):
     @staticmethod
     def _cortex_from_path(chirality, name, surf_path, data_path):
         '''
-        FreeSurferSubject._cortex_from_path(chirality, name, spath, dpath) yields a Cortex object
+        Subject._cortex_from_path(chirality, name, spath, dpath) yields a Cortex object
           that has been loaded from the given path. The given spath should be the path from which
           to load the structural information (like lh.sphere and rh.white) while the dpath is the
           path from which to load the non-structural information (like lh.thickness or rh.curv).
@@ -192,12 +192,12 @@ class FreeSurferSubject(mri.Subject):
                 return p
             return _load_fn
         props = {}
-        for (k,(a,_)) in six.iteritems(FreeSurferSubject._auto_properties):
+        for (k,(a,_)) in six.iteritems(Subject._auto_properties):
             f = os.path.join(data_path, chirality + '.' + k)
             if os.path.isfile(f):
-                props[a] = _make_prop_loader()
+                props[a] = _make_prop_loader(f)
         # That takes care of the defauly properties; now look for auto-retino properties
-        for flnm in os.path.listdir(data_path):
+        for flnm in os.listdir(data_path):
             if flnm[0] == '.' or not flnm.startswith(chirality + '.'): continue
             if flnm.endswith('.mgz') or flnm.endswith('.mgh'):
                 mid = flnm[3:-4]
@@ -205,18 +205,18 @@ class FreeSurferSubject(mri.Subject):
             else:
                 mid = flnm[3:]
                 loader = _make_prop_loader
-            if mid in FreeSurferSubject._auto_retino_names:
-                tr = FreeSurferSubject._auto_retino_names[mid]
+            if mid in Subject._auto_retino_names:
+                tr = Subject._auto_retino_names[mid]
                 props[tr] = loader(flnm)
         props = pimms.lazy_map(props)
         # we need a tesselation in order to make the surfaces or the cortex object
         white_surf_name = os.path.join(surf_path, chirality + '.white')
         # We need the tesselation at instantiation-time, so we can load it now
-        tess = geo.Tesselation(fsio.load_geometry(white_surf_name)[1], properties=props)
+        tess = geo.Tesselation(fsio.read_geometry(white_surf_name)[1], properties=props)
         # start by creating the surface file names
         def _make_surf_loader(flnm):
             def _load_fn():
-                x = fsio.load_geometry(flnm)[0].T
+                x = fsio.read_geometry(flnm)[0].T
                 x.setflags(write=False)
                 return tess.make_mesh(x).with_meta(filename=flnm)
             return _load_fn
@@ -227,11 +227,11 @@ class FreeSurferSubject(mri.Subject):
         # okay, now we can do the same for the relevant registrations; since the sphere registration
         # is the same as the sphere surface, we can just copy that one over:
         regs = {'native': lambda:surfs['sphere']}
-        for flnm in os.path.listdirs(surf_path):
+        for flnm in os.listdir(surf_path):
             if flnm.startswith(chirality + '.') and flnm.endswith('.sphere.reg'):
                 mid = flnm[(len(chirality)+1):-11]
                 if mid == '': mid = 'fsaverage'
-                regs[mid] = _make_surf_loader(flnm)
+                regs[mid] = _make_surf_loader(os.path.join(surf_path, flnm))
         regs = pimms.lazy_map(regs)
         # great; now we can actually create the cortex object itself
         return mri.Cortex(chirality, tess, surfs, regs).persist()
@@ -248,12 +248,12 @@ class FreeSurferSubject(mri.Subject):
         # properties based on the above auto-property data
         ctcs = {}
         for h in ['lh', 'rh']:
-            ctcs[h] = FreeSurferSubject._cortex_from_path(h, h, surf_path, surf_path)
+            ctcs[h] = Subject._cortex_from_path(h, h, surf_path, surf_path)
         # we also want to check for the xhemi subject
         xpath = os.path.join(path, 'xhemi', 'surf')
         if os.path.isdir(xpath):
             for (h,xh) in zip(['lh', 'rh'], ['rhx', 'lhx']):
-                ctcs[xh] = FreeSurferSubject._cortex_from_path(h, xh, xpath, surf_path)
+                ctcs[xh] = Subject._cortex_from_path(h, xh, xpath, surf_path)
         # that's all!
         return pimms.lazy_map(ctcs)
     @pimms.value
@@ -298,14 +298,20 @@ class FreeSurferSubject(mri.Subject):
             ims[tname] = _make_accessor(nm)
         # last, check for auto-retino-properties:
         for k in six.iterkeys(mgh_images):
-            if k in FreeSurferSubject._auto_retino_names:
-                tr = FreeSurferSubject._auto_retino_names[k]
+            if k in Subject._auto_retino_names:
+                tr = Subject._auto_retino_names[k]
                 ims[tr] = _make_accessor(k)
         return pimms.lazy_map(ims)
+    @pimms.value
+    def voxel_to_vertex_matrix(mgh_images):
+        '''
+        See neuropythy.mri.Subject.voxel_to_vertex_matrix.
+        '''
+        return pimms.imm_array(mgh_images['ribbon'].get_vox2ras_tkr())
 
-def freesurfer_subject(name):
+def subject(name):
     '''
-    freesurfer_subject(name) yields a freesurfer Subject object for the subject with the given name.
+    subject(name) yields a freesurfer Subject object for the subject with the given name.
     Subjects are cached and not reloaded.
     Note that subects returned by freesurfer_subject() are always persistent Immutable objects; this
     means that you must create a transient version of the subject to modify it via the member
@@ -315,10 +321,10 @@ def freesurfer_subject(name):
     subpath = find_subject_path(name)
     if subpath is None: return None
     fpath = '/' + os.path.relpath(subpath, '/')
-    if fpath in freesurfer_subject._cache:
-        return freesurfer_subject._cache[fpath]
+    if fpath in subject._cache:
+        return subject._cache[fpath]
     else:
-        sub = FreeSurferSubject(subpath).persist()
-        if isinstance(sub, FreeSurferSubject): freesurfer_subject._cache[fpath] = sub
+        sub = Subject(subpath).persist()
+        if isinstance(sub, Subject): subject._cache[fpath] = sub
         return sub
-freesurfer_subject._cache = {}
+subject._cache = {}

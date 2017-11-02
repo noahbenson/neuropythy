@@ -6,6 +6,7 @@
 import numpy                        as np
 import numpy.linalg                 as npla
 import nibabel.freesurfer.mghformat as fsmgh
+import pyrsistent                   as pyr
 import os, sys, gzip, six, pimms
 
 import neuropythy.geometry           as geo
@@ -379,19 +380,19 @@ def mesh_retinotopy(m, source='any'):
     # That's it
     return res
 
-pRF_data_Wandell2015 = make_dict(
+pRF_data_Wandell2015 = pyr.pmap(
     {k.lower():v
-     for (k,v) in {
-             "V1":  {'m':0.16883, 'b':0.02179}, "V2":  {'m':0.16912, 'b':0.14739},
-             "V3":  {'m':0.26397, 'b':0.34221}, "hV4": {'m':0.52963, 'b':0.44501},
-             "V3a": {'m':0.35722, 'b':1.00189}, "V3b": {'m':0.35722, 'b':1.00189},
-             "VO1": {'m':0.68505, 'b':0.47988}, "VO2": {'m':0.93893, 'b':0.26177},
-             "LO1": {'m':0.85645, 'b':0.36149}, "LO2": {'m':0.74762, 'b':0.45887},
-             "TO1": {'m':1.37441, 'b':0.17240}, "TO2": {'m':1.65694, 'b':0.00000}}.iteritems()})
-pRF_data_Kay2013 = make_dict(
+     for (k,v) in six.iteritems(
+             {"V1":  {'m':0.16883, 'b':0.02179}, "V2":  {'m':0.16912, 'b':0.14739},
+              "V3":  {'m':0.26397, 'b':0.34221}, "hV4": {'m':0.52963, 'b':0.44501},
+              "V3a": {'m':0.35722, 'b':1.00189}, "V3b": {'m':0.35722, 'b':1.00189},
+              "VO1": {'m':0.68505, 'b':0.47988}, "VO2": {'m':0.93893, 'b':0.26177},
+              "LO1": {'m':0.85645, 'b':0.36149}, "LO2": {'m':0.74762, 'b':0.45887},
+              "TO1": {'m':1.37441, 'b':0.17240}, "TO2": {'m':1.65694, 'b':0.00000}})})
+pRF_data_Kay2013 = pyr.pmap(
     {k.lower():{'m':v, 'b':0.5}
      for (k,v) in {'V1':0.16, 'V2':0.18, 'V3':0.25, 'hV4':0.36}.iteritems()})
-pRF_data = make_dict({'wandell2015':pRF_data_Wandell2015, 'kay2013':pRF_data_Kay2013})
+pRF_data = pyr.pmap({'wandell2015':pRF_data_Wandell2015, 'kay2013':pRF_data_Kay2013})
 def predict_pRF_radius(eccentricity, visual_area='V1', source='Wandell2015'):
     '''
     predict_pRF_radius(eccentricity) yields an estimate of the pRF size for a patch of cortex at the
@@ -494,7 +495,7 @@ _retinotopy_model_paths = [
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         'lib', 'models')]
 def retinotopy_model(name='benson17', hemi=None,
-                     radius=pi/2.5, sphere_radius=100.0,
+                     radius=np.pi/2.5, sphere_radius=100.0,
                      search_paths=None, update=False):
     '''
     retinotopy_model() yields a standard retinotopy model of V1, V2, and V3 as well as other areas
@@ -1273,11 +1274,11 @@ def register_retinotopy(hemi,
     # create the imap
     imap = retinotopy_registration(
         cortex=hemi, model=model, model_hemi=model_hemi,
-        polar_angle=polar_angle, eccentricity=eccentricity, weight=weight, weight_min=weight_min,,
+        polar_angle=polar_angle, eccentricity=eccentricity, weight=weight, weight_min=weight_min,
         eccentricity_range=eccentricity_range,
         partial_voluming_correction=partial_voluming_correction,
         scale=scale, sigma=sigma, select=select, prior=prior, resample=resample,
-        max_steps=max_steps, max_step_size=max_step_size, method-method)
+        max_steps=max_steps, max_step_size=max_step_size, method=method)
     return imap if yield_imap else imap['predicted_mesh']
 
 # Tools for registration-free retinotopy prediction:
@@ -1330,7 +1331,7 @@ def predict_retinotopy(sub, template='benson17', registration='fsaverage'):
         fsa = freesurfer_subject('fsaverage')
         subj_hems = (sub.lh, sub.rh)
         tmpl_hems = (sym.lh, sym.lh)
-    return tuple([th.interpolate(sh, tmpl), for (sh,th) in zip(subj_hems, tmpl_hems)])
+    return tuple([th.interpolate(sh, tmpl) for (sh,th) in zip(subj_hems, tmpl_hems)])
 
 def clean_retinotopy(obj, retinotopy='empirical', output_style='visual', weight=Ellipsis,
                      equality_sigma=0.15, equality_scale=10.0,

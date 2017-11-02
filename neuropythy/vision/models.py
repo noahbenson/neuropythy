@@ -61,7 +61,7 @@ class SchiraModel(RetinotopyModel):
     # These are the accepted arguments to the model:
     default_parameters = pyr.pmap({'A': 1.05,
                                    'B': 90.0,
-                                   'lambda': 0.4,
+                                   'lam': 0.4,
                                    'psi': 0.15,
                                    'scale': (21.0, 21.0),
                                    'shear': ((1.0, 0.0), (0.0, 1.0)),
@@ -72,10 +72,10 @@ class SchiraModel(RetinotopyModel):
                                    'hv4size': 0.9,
                                    'v3asize': 0.9})
 
-    def __init__(self, A=1.05, B=90.0, lambda=0.4, psi=0.15, scale=(21.0, 21.0),
+    def __init__(self, A=1.05, B=90.0, lam=0.4, psi=0.15, scale=(21.0, 21.0),
                  shear=((1.0,0.0),(0.0,1.0)), center=(-6.0, 0.0),
                  v1size=1.2, v2size=0.6, v3size=0.4, hv4size=0.9, v3asize=0.9):
-        self.parameters = pyr.m(A=A, V=V, lambda=lambda, psi=psi, scale=scale, shear=shear,
+        self.parameters = pyr.m(A=A, V=V, lam=lam, psi=psi, scale=scale, shear=shear,
                                 center=center, v1size=v1size, v2size=v2size, v3size=v3size,
                                 hv4size=hv4size, v3asize=v3asize)
 
@@ -113,7 +113,7 @@ class SchiraModel(RetinotopyModel):
         return java_link().jvm.nben.neuroscience.SchiraModel(
             parameters['A'],
             parameters['B'],
-            parameters['lambda'],
+            parameters['lam'],
             parameters['psi'],
             parameters['v1size'],
             parameters['v2size'],
@@ -200,15 +200,15 @@ class RetinotopyMeshModel(RetinotopyModel):
         if coords.shape[0] != 2: coords = coords.T
         if coords.shape[0] != 2: raise ValueError('coordinate matrix must have 2 rows or columns')
         return pimms.imm_array(coords)
-    @pimms.params
+    @pimms.param
     def polar_angles(angs):
         'mdl.polar_angles is the vector of polar angle values for the given retinotopy mesh model.'
         return pimms.imm_array(angs)
-    @pimms.params
+    @pimms.param
     def eccentricities(eccs):
         'mdl.eccentrities is the vector of eccentricity values for the given retinotopy mesh model.'
         return pimms.imm_array(eccs)
-    @pimms.params
+    @pimms.param
     def visual_areas(labs):
         'mdl.visual_areas is the vector of visual area labels for the given retinotopy mesh model.'
         return pimms.imm_array(labs)
@@ -263,7 +263,7 @@ class RetinotopyMeshModel(RetinotopyModel):
                               'eccentricity': eccentricities,
                               'visual_area':  visual_areas,
                               'cortical_coordinates': cortical_coordinates.T,
-                              'visual_coordinates':   visual_coordinates.T)})
+                              'visual_coordinates':   visual_coordinates.T})
         if isinstance(tris, geo.Tesselation): return tris.copy(properties=props)
         return geo.Tesselation(tris, properties=props).persist()
     @pimms.value
