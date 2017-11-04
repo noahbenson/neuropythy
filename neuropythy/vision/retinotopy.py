@@ -563,17 +563,17 @@ def retinotopy_model(name='benson17', hemi=None,
     return mdl
 
 # Tools for retinotopy registration:
-def _retinotopy_vectors_to_float(ang, ecc, wgt, weight_cutoff=0):
+def _retinotopy_vectors_to_float(ang, ecc, wgt, weight_min=0):
     (ang, ecc, wgt) = np.asarray(
-        [aew if pimms.is_vector(aew, 'float') and aew[2] > weight_cutoff else (0,0,0)
+        [aew if pimms.is_vector(aew, 'float') and aew[2] > weight_min else (0,0,0)
          for aew in zip(ang, ecc, wgt)]).T
-    #wgt = np.clip((wgt - weight_cutoff) / (1.0 - weight_cutoff), 0, 1)
-    wgt[wgt <= weight_cutoff] = 0
+    #wgt = np.clip((wgt - weight_min) / (1.0 - weight_min), 0, 1)
+    wgt[wgt <= weight_min] = 0
     return (ang, ecc, wgt)
 
 def retinotopy_mesh_field(mesh, mdl,
                           polar_angle=None, eccentricity=None, weight=None,
-                          weight_cutoff=0, scale=1, sigma=None, shape=2, suffix=None,
+                          weight_min=0, scale=1, sigma=None, shape=2, suffix=None,
                           max_eccentricity=Ellipsis,
                           max_polar_angle=180,
                           angle_type='both',
@@ -598,7 +598,7 @@ def retinotopy_mesh_field(mesh, mdl,
         If weight is left as None, then the function will check for 'weight',
         'variance_explained', 'PRF_variance_explained', and 'retinotopy_weight' values and will use
         the first found (in that order). If none of these is found, then a value of 1 is assumed.
-      * weight_cutoff (default 0) specifies that the weight must be higher than the given value inn
+      * weight_min (default 0) specifies that the weight must be higher than the given value inn
         order to be included in the fit; vertices with weights below this value have their weights
         truncated to 0.
       * scale (default 1) specifies a constant by which to multiply all weights for all anchors; the
@@ -655,7 +655,7 @@ def retinotopy_mesh_field(mesh, mdl,
         raise RuntimeError('given mesh is not a CorticalMesh object!')
     n = mesh.vertex_count
     X = mesh.coordinates.T
-    if weight_cutoff is None: weight_cutoff = 0
+    if weight_min is None: weight_min = 0
     # make sure we have our polar angle/eccen/weight values:
     # (weight is odd because it might be a single number, so handle that first)
     (polar_angle, eccentricity, weight) = [
@@ -669,7 +669,7 @@ def retinotopy_mesh_field(mesh, mdl,
     # Make sure they contain no None/invalid values
     (polar_angle, eccentricity, weight) = _retinotopy_vectors_to_float(
         polar_angle, eccentricity, weight,
-        weight_cutoff=weight_cutoff)
+        weight_min=weight_min)
     idcs = [i for (i,w) in enumerate(weight) if w > 0]
     # Okay, let's get the model data ready
     mdl_1s = np.ones(mdl.forward.coordinates.shape[0])
@@ -728,7 +728,7 @@ def retinotopy_mesh_field(mesh, mdl,
         
 def retinotopy_anchors(mesh, mdl,
                        polar_angle=None, eccentricity=None,
-                       weight=None, weight_cutoff=0.1,
+                       weight=None, weight_min=0.1,
                        field_sign=None,
                        field_sign_weight=0,
                        model_field_sign=None,
@@ -762,7 +762,7 @@ def retinotopy_anchors(mesh, mdl,
         If weight is left as None, then the function will check for 'weight',
         'variance_explained', 'PRF_variance_explained', and 'retinotopy_weight' values and will use
         the first found (in that order). If none of these is found, then a value of 1 is assumed.
-      * weight_cutoff (default 0) specifies that the weight must be higher than the given value inn
+      * weight_min (default 0) specifies that the weight must be higher than the given value inn
         order to be included in the fit; vertices with weights below this value have their weights
         truncated to 0.
       * scale (default 1) specifies a constant by which to multiply all weights for all anchors; the
@@ -826,7 +826,7 @@ def retinotopy_anchors(mesh, mdl,
         raise RuntimeError('given mesh is not a Mesh object!')
     n = mesh.vertex_count
     X = mesh.coordinates.T
-    if weight_cutoff is None: weight_cutoff = 0
+    if weight_min is None: weight_min = 0
     # make sure we have our polar angle/eccen/weight values:
     # (weight is odd because it might be a single number, so handle that first)
     (polar_angle, eccentricity, weight) = [
@@ -838,7 +838,7 @@ def retinotopy_anchors(mesh, mdl,
     # Make sure they contain no None/invalid values
     (polar_angle, eccentricity, weight) = _retinotopy_vectors_to_float(
         polar_angle, eccentricity, weight,
-        weight_cutoff=weight_cutoff)
+        weight_min=weight_min)
     idcs = np.where(weight > 0)[0]
     # Interpret the select arg if necessary (but don't apply it yet)
     select = ['close', [40]] if select == 'close'   else \
@@ -1031,8 +1031,9 @@ def calc_initial_state(cortex, model, empirical_retinotopy, resample=Ellipsis):
         preregmesh = preregmesh.with_prop(native_mesh.interpolate(preregmesh.coordinates, 'all'))
     # make the map projection now...
     preregmap = model.map_projection(preregmesh)
-    return {'native_mesh':native_mesh, 'preregistration_mesh':preregmesh,
-            'preregistration_map':preregmap}
+    return {'native_mesh':          native_mesh,
+            'preregistration_mesh': preregmesh,
+            'preregistration_map':  preregmap}
 @pimms.calc('registered_map')
 def calc_registration(preregistration_map, model,
                       scale=1, sigma=Ellipsis, max_steps=8000, max_step_size=0.05, method='random'):
@@ -1049,7 +1050,7 @@ def calc_registration(preregistration_map, model,
                             polar_angle='polar_angle',
                             eccentricity='eccentricity',
                             weight='weight',
-                            weight_cutoff=0, # taken care of already
+                            weight_min=0, # taken care of already
                             scale=scale,
                             **({} if sigma is Ellipsis else {'sigma':sigma}))],
         method=method,
@@ -1132,7 +1133,7 @@ retinotopy_registration = pimms.plan(
 
 def register_retinotopy(hemi,
                         model='benson17', model_hemi=Ellipsis,
-                        polar_angle=None, eccentricity=None, weight=None, weight_cutoff=0.1,
+                        polar_angle=None, eccentricity=None, weight=None, weight_min=0.1,
                         eccentricity_range=None,
                         partial_voluming_correction=True,
                         scale=1.0,
@@ -1272,14 +1273,14 @@ def register_retinotopy(hemi,
         based on the model_hemi option (if it is None, fsaverage_sym, else fsaverage).
     '''
     # create the imap
-    imap = retinotopy_registration(
+    m = retinotopy_registration(
         cortex=hemi, model=model, model_hemi=model_hemi,
         polar_angle=polar_angle, eccentricity=eccentricity, weight=weight, weight_min=weight_min,
         eccentricity_range=eccentricity_range,
         partial_voluming_correction=partial_voluming_correction,
         scale=scale, sigma=sigma, select=select, prior=prior, resample=resample,
         max_steps=max_steps, max_step_size=max_step_size, method=method)
-    return imap if yield_imap else imap['predicted_mesh']
+    return m if yield_imap else m['predicted_mesh']
 
 # Tools for registration-free retinotopy prediction:
 _retinotopy_templates = pyr.m(fsaverage={}, fsaverage_sym={})
