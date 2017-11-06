@@ -8,7 +8,7 @@ import numpy.linalg          as     npla
 import scipy                 as     sp
 import scipy.spatial         as     space
 import pyrsistent            as     pyr
-import os, gzip, types, pimms
+import os, gzip, types, six, pimms
 
 import neuropythy.geometry   as     geo
 import neuropythy.mri        as     mri
@@ -23,6 +23,31 @@ class RetinotopyModel(object):
     that inherits from RetinotopyModel must implement the following methods to work properly with
     the registration system of the neuropythy library.
     '''
+
+    def __init__(self, area_name_to_id):
+        self.area_name_to_id = area_name_to_id
+    @pimms.param
+    def area_name_to_id(vai):
+        '''
+        mdl.area_name_to_id is a persistent map whose keys are area names (such as 'V1' or 'hV4')
+        and whose values are the area id (a number greater than 0) for that area.
+        mdl.area_name_to_id is a parameter which may be provided as a lsit of area names, in which
+        case the first is assumed to be area 1, the next area 2, etc.
+        '''
+        if vai is None: return None
+        if not pimms.is_map(vai): return pyr.pmap({nm:(ii+1) for (ii,nm) in enumerate(vai)})
+        if pimms.is_lazy_map(vai): return vai
+        elif pimms.is_pmap(vai): return vai
+        else: return pyr.pmap(vai)
+    @pimms.value
+    def area_id_to_name(area_name_to_id):
+        '''
+        mdl.area_id_to_name is a persistent map whose keys are area id's and whose values are the
+        associated area's name.
+        '''
+        if area_name_to_id is None: return None
+        return pyr.pmap({v:k for (k,v) in six.iteritems(area_name_to_id)})
+    # Methods that must be overloaded!
     def angle_to_cortex(self, theta, rho):
         '''
         model.angle_to_cortex(theta, rho) yields a (k x 2) matrix in which each row corresponds to
@@ -71,14 +96,15 @@ class SchiraModel(RetinotopyModel):
                                    'v3size': 0.4,
                                    'hv4size': 0.9,
                                    'v3asize': 0.9})
+    visual_area_names = ('V1', 'V2', 'V3')
 
     def __init__(self, A=1.05, B=90.0, lam=0.4, psi=0.15, scale=(21.0, 21.0),
                  shear=((1.0,0.0),(0.0,1.0)), center=(-6.0, 0.0),
                  v1size=1.2, v2size=0.6, v3size=0.4, hv4size=0.9, v3asize=0.9):
+        self.area_name_to_id = visual_area_names
         self.parameters = pyr.m(A=A, V=V, lam=lam, psi=psi, scale=scale, shear=shear,
                                 center=center, v1size=v1size, v2size=v2size, v3size=v3size,
                                 hv4size=hv4size, v3asize=v3asize)
-
     @pimms.param
     def parameters(params):
         '''
@@ -160,8 +186,12 @@ class SchiraModel(RetinotopyModel):
                                                    to_java_doubles(y))
         else:
             return self._java_object.cortexToAngle(x, y)
-        return np.asarray([[c for c in r] for r in jarr])
-        
+        dat = np.asarray([[c for c in r] for r in jarr])
+        a = dat[:,2]
+        a = np.round(np.abs(a))
+        a[a > 3] = 0
+        dat[:,2] = a
+        return dat
 
 @pimms.immutable
 class RetinotopyMeshModel(RetinotopyModel):
@@ -175,13 +205,16 @@ class RetinotopyMeshModel(RetinotopyModel):
     vertex.
     '''
 
-    def __init__(self, triangles, coordinates, angles, eccens, area_ids, transform=None):
+    def __init__(self, triangles, coordinates, angles, eccens, area_ids, transform=None,
+                 area_name_to_id=None):
         self.faces = triangles
         self.cortical_coordinates = coordinates
         self.polar_angles = angles
         self.eccentricities = eccens
         self.visual_areas = area_ids
         self.transform = transform
+        self.area_name_to_id = area_name_to_id
+            
 
     @pimms.param
     def faces(tris):
@@ -360,6 +393,7 @@ class RegisteredRetinotopyModel(RetinotopyModel):
         '''
         self.model = model
         self.map_projection = mapproj
+        self.area_name_to_id = model.area_name_to_id
     @pimms.param
     def model(mdl):
         '''
@@ -406,6 +440,9 @@ class RegisteredRetinotopyModel(RetinotopyModel):
                    'Method: %s' % self.map_projection.method.capitalize(),
                    'Transform: [%f,%f,%f;%f,%f,%f;%f,%f,%f]' % tuple(tuple(x) for x in tx)]:
             f.write(ln + '\n')
+        if self.area_name_to_id:
+            lbls = [x for (_,x) in sorted(six.iteritems(self.area_name_to_id), key=lambda x:x[0])]
+            f.write('AreaNames: [%s]\n' % ' '.join(lbls))
         (xs,ys) = m.coordinates
         for (x,y,t,r,a) in zip(xs, ys, m.polar_angles, m.eccentricities, m.visual_areas):
             f.write('%f,%f :: %f,%f,%f\n' % (x,y,t,r,a))
@@ -511,8 +548,16 @@ def load_fmm_model(filename, radius=np.pi/3.0, sphere_radius=100.0):
     tx = np.asarray(
         [map(float, row.split(','))
          for row in lines[8].split(':')[1].strip(' \t[]').split(';')])
+    if lines[9].startswith('AreaNames: ['):
+        # we load the area names
+        s = lines[9][12:-1]
+        area_names = tuple(s.split(' '))
+        start_line = 10        
+    else:
+        area_names = None
+        start_line = 9
     crds = []
-    for row in lines[9:(n+9)]:
+    for row in lines[start_line:(n+start_line)]:
         try:
             (left,right) = row.split(' :: ')
             crds.append(map(float, left.split(',')))
@@ -527,11 +572,12 @@ def load_fmm_model(filename, radius=np.pi/3.0, sphere_radius=100.0):
                        for (left,right) in [row.split(' :: ')]])
     tris = -1 + np.asarray(
         [map(int, row.split(','))
-         for row in lines[(n+9):(n+m+9)]])
+         for row in lines[(n+start_lines):(n+m+start_lines)]])
     return RegisteredRetinotopyModel(
         RetinotopyMeshModel(tris, crds,
                             90-180/np.pi*vals[:,0], vals[:,1], vals[:,2],
-                            transform=tx),
+                            transform=tx,
+                            area_name_to_id=area_names),
         geo.MapProjection(registration=reg,
                           center=center,
                           center_right=onxaxis,

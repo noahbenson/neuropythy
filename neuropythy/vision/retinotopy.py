@@ -24,6 +24,9 @@ _empirical_retinotopy_names = {
                      'training_polar_angle',  'polar_angle'],
     'eccentricity': ['prf_eccentricity',      'empirical_eccentricity', 'measured_eccentricity',
                      'training_eccentricity', 'eccentricity'],
+    'radius':       ['pRF_size', 'pRF_radius', 'empirical_size', 'empirical_radius',
+                     'measured_size', 'measured_radius', 'size', 'radius',
+                     'pRF_sigma', 'empirical_sigma', 'measured_sigma', 'sigma'],
     'weight':       ['prf_weight',       'prf_variance_explained',       'prf_vexpl',
                      'empirical_weight', 'empirical_variance_explained', 'empirical_vexpl',
                      'measured_weight',  'measured_variance_explained',  'measured_vexpl',
@@ -305,7 +308,7 @@ def as_retinotopy(data, output_style='visual', units=Ellipsis, prefix=None, suff
 
 def mesh_retinotopy(m, source='any'):
     '''
-    mesh_retinotopy(m) yields a dict containing a retinotopy dataset the keys 'polar_angle',
+    mesh_retinotopy(m) yields a dict containing a retinotopy dataset with the keys 'polar_angle',
       'eccentricity', and any other related fields for the given retinotopy type; for example,
       'pRF_size' and 'variance_explained' may be included for measured retinotopy datasets and
       'visual_area' may be included for atlas or model datasets. The coordinates are always in the
@@ -370,7 +373,7 @@ def mesh_retinotopy(m, source='any'):
     # okay, we found it; make it into a dict
     res = {'polar_angle': z[0], 'eccentricity': z[1]}
     # check for extra fields if relevant
-    pnames = {k.lower():k for k in m.property_names} if check_fields else {}
+    pnames = {k.lower():k for k in m.properties} if check_fields else {}
     for (fname, aliases) in check_fields:
         for f in [fname] + aliases:
             if prefix: f = prefix + f
@@ -470,6 +473,13 @@ def retinotopic_field_sign(m, element='vertices', retinotopy=Ellipsis, invert_fi
     fidx = t.vertex_face_index
     vfs = np.asarray([np.mean(tsign[ii]) if len(ii) > 0 else 0 for ii in fidx])
     return vfs
+
+visual_area_field_signs = pyr.pmap({'V1' :-1, 'V2' :1, 'V3' :-1, 'hV4':1,
+                                    'VO1':-1, 'LO1':1, 'V3b':-1, 'V3a':1})
+'''
+visual_area_field_signs is a persistent map of field signs as observed empirically for visual areas
+V1, V2, V3, hV4, VO1, LO1, V3a, and V3b.
+'''
 
 # Tools for retinotopy model loading:
 _default_schira_model = None
@@ -729,8 +739,8 @@ def retinotopy_mesh_field(mesh, mdl,
 def retinotopy_anchors(mesh, mdl,
                        polar_angle=None, eccentricity=None,
                        weight=None, weight_min=0.1,
-                       field_sign=None,
                        field_sign_weight=0,
+                       radius_weight=0, radius_weight_source='Wandell2015', radius=None,
                        model_field_sign=None,
                        model_hemi=Ellipsis,
                        scale=1,
@@ -791,6 +801,24 @@ def retinotopy_anchors(mesh, mdl,
         to which a single vertex is attracted; for any anchor a to which a vertex u is attracted,
         the sigma of a is the middle sigma-argument value times the minimum distance from a to all
         other anchors to which u is attracted (clipped by the min and max sigma).
+      * field_sign_weight (default: 0) specifies the amount of weight that should be put on the
+        retinotopic field of the model as a method of attenuating the weights on those anchors whose
+        empirical retinotopic values and predicted model locations do not match. The weight that
+        results is calculated from the difference in empirical field-sign for each vertex and the
+        visual area field sign based on the labels in the model. The higher the field-sign weight,
+        (approaching 1) the more the resulting value is a geometric mean of the field-sign-based
+        weight and the original weights. As this value approaches 0, the resulting weights are more
+        like the original weights.
+      * radius_weight (default: 0) specifies the amount of weight that should be put on the
+        receptive field radius of the model as a method of attenuating the weights on those anchors
+        whose empirical retinotopic values and predicted model locations do not match. The weight
+        that results is calculated from the difference in empirical RF radius for each vertex and
+        the predicted RF radius based on the labels in the model. The higher the radius weight,
+        (approaching 1) the more the resulting value is a geometric mean of the field-sign-based
+        weight and the original weights. As this value approaches 0, the resulting weights are more
+        like the original weights.
+      * radius_weight_source (default: 'Wandell2015') specifies the source for predicting RF radius;
+        based on eccentricity and visual area label.
 
     Example:
      # The retinotopy_anchors function is intended for use with mesh_register, as follows:
@@ -858,7 +886,7 @@ def retinotopy_anchors(mesh, mdl,
     data = [[[i for _ in r], r, [ksidx[tuple(a)] for a in r]]
             for (i,r0) in zip(idcs, res)
             if r0[0] is not None
-            for ksidx in [{tuple(a):k for (k,a) in enumerate(r0)}]
+            for ksidx in [{tuple(a):(k+1) for (k,a) in enumerate(r0)}]
             for r in [select(i, r0)]
             if len(r) > 0]
     # Flatten out the data into arguments for Java
@@ -867,16 +895,39 @@ def retinotopy_anchors(mesh, mdl,
     labs = np.asarray([ii for d in data for ii in d[2]]).T
     # Get just the relevant weights and the scale
     wgts = np.asarray(weight[idcs] * (1 if scale is None else scale))
-    # add in the field-sign weights if requested here
-    if not np.isclose(field_sign_weight, 0) and model_field_sign is not None:
+    # add in the field-sign weights and radius weights if requested here;
+    if not np.isclose(field_sign_weight, 0) and mdl.area_name_to_id is not None:
+        id2n = mdl.area_id_to_name
         if field_sign is True or field_sign is Ellipsis or field_sign is None:
-            field_sign = retinotopic_field_sign(mesh, retinotopy={'polar_angle':  polar_angle,
-                                                                  'eccentricity': eccentricity})
-        elif isinstance(field_sign, basestring): field_sign = mesh.prop(field_sign)
+            r = {'polar_angle': polar_angle,  'eccentricity': eccentricity}
+            field_sign = retinotopic_field_sign(mesh, retinotopy=r)
+        elif pimms.is_str(field_sign): field_sign = mesh.prop(field_sign)
         field_sign = np.asarray(field_sign)
-        fswgts = 1.0 - 0.25 * np.asarray([(fs - model_field_sign[l+1])
-                                          for (l,fs) in zip(labs, field_sign[idcs])])**2
-        wgts *= fswgts * field_sign_weight + (1 - field_sign_weight)
+        fswgts = 1.0 - 0.25 * np.asarray(
+            [(fs - visual_area_field_signs[id2n[l]]) if l in id2n else 0
+             for (l,fs) in zip(labs,field_sign[idcs])])**2
+        # average the weights at some fraction with the original weights
+        fswgts = field_sign_weight*fswfts + (1 - field_sign_weight)*wgts
+    else: fswgts = None
+    # add in radius weights if requested as well
+    if not np.isclose(radius_weight, 0) and mdl.area_name_to_id is not None:
+        id2n = mdl.area_id_to_name
+        emprad = extract_retinotopy_argument(mesh, 'radius', radius, default='empirical')
+        emprad = emprad[idcs]
+        emprad = np.argsort(np.argsort(emprad)) * (1.0 / len(emprad)) - 0.5
+        eccs = eccentricity[idcs]
+        prerad = np.asarray([predict_pRF_radius(ecc, id2n[lbl], source=radius_weight_source)
+                             for (ecc,lbl) in zip(eccs,labs)])
+        prerad = np.argsort(np.argsort(prerad)) * (1.0 / len(prerad)) - 0.5
+        rdwgts = 1.0 - (emprad - prerad)**2
+        # average the weights at some fraction with the original weights
+        rdwgts = radius_weight*rdwgts + (1-radius_weight)*wgts
+    else: rdwgts = None
+    # apply the weights
+    if fswgts is not None:
+        if rdwgts is not None: wgts = np.power(fswgts*rdwgts*wgts, 1.0/3.0)
+        else:                  wgts = np.sqrt(fswgts*wgts)
+    elif rdwgts is not None:   wgts = np.sqrt(rdwgts*wgts)
     # Figure out the sigma parameter:
     if sigma is None: sigs = None
     elif pimms.is_number(sigma): sigs = sigma
@@ -905,7 +956,8 @@ def retinotopy_anchors(mesh, mdl,
 # this way it is modular and easy to modify.
 
 @pimms.calc('empirical_retinotopy')
-def calc_empirical_retinotopy(cortex, polar_angle=None, eccentricity=None, weight=None,
+def calc_empirical_retinotopy(cortex,
+                              polar_angle=None, eccentricity=None, pRF_radius=None, weight=None,
                               eccentricity_range=None, weight_min=0,
                               partial_voluming_correction=False):
     '''
@@ -920,6 +972,8 @@ def calc_empirical_retinotopy(cortex, polar_angle=None, eccentricity=None, weigh
         (the default), attempts to auto-detect an empirical polar angle property.
       @ eccentricity May be an array of eccentricity values or an eccentricity property name; if
         None (the default), attempts to auto-detect an empirical eccentricity property.
+      @ pRF_radius May be an array of receptive field radius values or the property name for such an
+        array; if None (the default), attempts to auto-detect an empirical radius property.
       @ weight May be an array of weight values or a weight property name; if None (the default),
         attempts to auto-detect an empirical weight property, such as variance_explained.
       @ eccentricity_range May be a maximum eccentricity value or a (min, max) eccentricity range
@@ -940,15 +994,18 @@ def calc_empirical_retinotopy(cortex, polar_angle=None, eccentricity=None, weigh
                   (0,eccentricity_range) if pimms.is_number(eccentricity_range) else \
                   eccentricity_range
     # Step 1: get our properties straight ##########################################################
-    (ang, ecc, wgt) = [
-        extract_retinotopy_argument(hemi, name, arg, default='empirical')
+    (ang, ecc, rad, wgt) = [
+        np.array(extract_retinotopy_argument(cortex, name, arg, default='empirical'))
         for (name, arg) in [
                 ('polar_angle', polar_angle),
                 ('eccentricity', eccentricity),
+                ('radius', pRF_radius),
                 ('weight', np.full(n, weight) if pimms.is_number(weight) else weight)]]
+    if weight is None: wgt = np.ones(len(ecc))
     bad = ~np.isfinite(np.prod([ang, ecc, wgt], axis=0))
     ecc[bad] = 0
     wgt[bad] = 0
+    if rad is not None: rad[bad] = 0
     # do partial voluming correction if requested
     if partial_voluming_correction: wgt = wgt * (1 - cortex.partial_voluming_factor)
     # now trim and finalize
@@ -956,8 +1013,13 @@ def calc_empirical_retinotopy(cortex, polar_angle=None, eccentricity=None, weigh
     wgt[bad] = 0
     ang[bad] = 0
     ecc[bad] = 0
+    for x in [ang, ecc, wgt, rad]:
+        if x is not None:
+            x.setflags(write=False)
     # that's it!
-    return (pimms.itable(polar_angle=ang, eccentricity=ecc, weight=wgt),)
+    dat = dict(polar_angle=ang, eccentricity=ecc, weight=wgt)
+    if rad is not None: dat['radius'] = rad
+    return (pimms.itable(dat),)
 @pimms.calc('model')
 def calc_model(cortex, model_argument, model_hemi=Ellipsis, radius=np.pi/3):
     '''
@@ -981,9 +1043,11 @@ def calc_model(cortex, model_argument, model_hemi=Ellipsis, radius=np.pi/3):
             None             if model_hemi is None     else \
             model_hemi
         model = retinotopy_model(model, hemi=h, radius=radius)
+    else:
+        model = model_argument
     if not isinstance(model, RegisteredRetinotopyModel):
         raise ValueError('model must be a RegisteredRetinotopyModel')
-    return hemi
+    return model
 @pimms.calc('native_mesh', 'preregistration_mesh', 'preregistration_map')
 def calc_initial_state(cortex, model, empirical_retinotopy, resample=Ellipsis):
     '''
@@ -1034,9 +1098,28 @@ def calc_initial_state(cortex, model, empirical_retinotopy, resample=Ellipsis):
     return {'native_mesh':          native_mesh,
             'preregistration_mesh': preregmesh,
             'preregistration_map':  preregmap}
+@pimms.calc('anchors')
+def calc_anchors(preregistration_map, model,
+                 scale=1, sigma=Ellipsis, radius_weight=0, field_sign_weight=0):
+    '''
+    calc_anchors is a calculator that creates a set of anchor instructions for a registration.
+    '''
+    wgts = preregistration_map.prop('weight')
+    rads = preregistratin_map.prop('radius')
+    if np.isclose(radius_weight, 0): radius_weight = 0
+    ancs = retinotopy_anchors(preregistration_map, model,
+                              polar_angle='polar_angle',
+                              eccentricity='eccentricity',
+                              radius='radius',
+                              weight=wgts, weight_min=0, # taken care of already
+                              radius_weight=radius_weight, field_sign_weight=field_sign_weight,
+                              scale=scale,
+                              **({} if sigma is Ellipsis else {'sigma':sigma}))
+    return ancs
+
 @pimms.calc('registered_map')
-def calc_registration(preregistration_map, model,
-                      scale=1, sigma=Ellipsis, max_steps=8000, max_step_size=0.05, method='random'):
+def calc_registration(preregistration_map, model, anchors,
+                      max_steps=8000, max_step_size=0.05, method='random'):
     '''
     calc_registration is a calculator that creates the registration coordinates.
     '''
@@ -1046,13 +1129,7 @@ def calc_registration(preregistration_map, model,
         [['edge',      'harmonic',      'scale', 1.0],
          ['angle',     'infinite-well', 'scale', 1.0],
          ['perimeter', 'harmonic'],
-         retinotopy_anchors(preregistration_map, model,
-                            polar_angle='polar_angle',
-                            eccentricity='eccentricity',
-                            weight='weight',
-                            weight_min=0, # taken care of already
-                            scale=scale,
-                            **({} if sigma is Ellipsis else {'sigma':sigma}))],
+         anchors],
         method=method,
         max_steps=max_steps,
         max_step_size=max_step_size)
@@ -1128,19 +1205,23 @@ retinotopy_registration = pimms.plan(
     retinotopy = calc_empirical_retinotopy,
     model      = calc_model,
     initialize = calc_initial_state,
+    anchors    = calc_anchors,
     register   = calc_registration,
     predict    = calc_prediction)
 
 def register_retinotopy(hemi,
                         model='benson17', model_hemi=Ellipsis,
-                        polar_angle=None, eccentricity=None, weight=None, weight_min=0.1,
+                        polar_angle=None, eccentricity=None, weight=None, pRF_radius=None,
+                        weight_min=0.1,
                         eccentricity_range=None,
-                        partial_voluming_correction=True,
+                        partial_voluming_correction=False,
+                        radius_weight=1, field_sign_weight=1,
                         scale=1.0,
                         sigma=Ellipsis,
                         select='close',
                         prior='retinotopy',
                         resample=Ellipsis,
+                        radius=np.pi/3,
                         max_steps=2000, max_step_size=0.05, method='random',
                         yield_imap=False):
     '''
@@ -1229,11 +1310,11 @@ def register_retinotopy(hemi,
         unless you are using an fsaverage_sym model, in which case it should be set to None; in all
         other cases, the default value (Ellipsis) instructs the function to auto-detect the
         hemisphere.
-      * polar_angle, eccentricity, and weight specify the property names for the respective
-        quantities; these may alternately be lists or numpy arrays of values. If weight is not given
-        or found, then unity weight for all vertices is assumed. By default, each will check the
-        hemisphere's properties for properties with compatible names; it will prefer the properties
-        PRF_polar_angle, PRF_ecentricity, and PRF_variance_explained if possible.
+      * polar_angle, eccentricity, pRF_radius, and weight specify the property names for the
+        respective quantities; these may alternately be lists or numpy arrays of values. If weight
+        is not given or found, then unity weight for all vertices is assumed. By default, each will
+        check the  hemisphere's properties for properties with compatible names; it will prefer the
+        properties PRF_polar_angle, PRF_ecentricity, and PRF_variance_explained if possible.
       * weight_min (default: 0.1) specifies the minimum value a vertex must have in the weight
         property in order to be considered as retinotopically relevant.
       * eccentricity_range (default: None) specifies that any vertex whose eccentricity is too low
@@ -1241,6 +1322,16 @@ def register_retinotopy(hemi,
       * partial_voluming_correction (default: True), if True, specifies that the value
         (1 - hemi.partial_volume_factor) should be applied to all weight values (i.e., weights
         should be down-weighted when likely to be affected by a partial voluming error).
+      * field_sign_weight (default: 1) indicates the relative weight (between 0 and 1) that should
+        be given to the field-sign as a method of determining which anchors have the strongest
+        springs. A value of 1 indicates that the effective weights of anchors should be the 
+        geometric mean of the empirical retinotopic weight and field-sign-based weight; a value of 0
+        indicates that no attention should be paid to the field sign weight.
+      * radius_weight (default: 1) indicates the relative weight (between 0 and 1) that should
+        be given to the pRF radius as a method of determining which anchors have the strongest
+        springs. A value of 1 indicates that the effective weights of anchors should be the 
+        geometric mean of the empirical retinotopic weight and pRF-radius-based weight; a value of 0
+        indicates that no attention should be paid to the radius-based weight.
       * sigma specifies the standard deviation of the Gaussian shape for the Schira model anchors;
         see retinotopy_anchors for more information.
       * scale (default: 1.0) specifies the strength of the functional constraints (i.e. the anchors:
@@ -1274,11 +1365,12 @@ def register_retinotopy(hemi,
     '''
     # create the imap
     m = retinotopy_registration(
-        cortex=hemi, model=model, model_hemi=model_hemi,
-        polar_angle=polar_angle, eccentricity=eccentricity, weight=weight, weight_min=weight_min,
-        eccentricity_range=eccentricity_range,
+        cortex=hemi, model_argument=model, model_hemi=model_hemi,
+        polar_angle=polar_angle, eccentricity=eccentricity, weight=weight, pRF_radius=pRF_radius,
+        weight_min=weight_min,  eccentricity_range=eccentricity_range,
         partial_voluming_correction=partial_voluming_correction,
-        scale=scale, sigma=sigma, select=select, prior=prior, resample=resample,
+        radius_weight=radius_weight, field_sign_weight=field_sign_weight,
+        scale=scale, sigma=sigma, select=select, prior=prior, resample=resample, radius=radius,
         max_steps=max_steps, max_step_size=max_step_size, method=method)
     return m if yield_imap else m['predicted_mesh']
 

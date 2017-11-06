@@ -58,28 +58,28 @@ def _parse_field_function_argument(argdat, args, faces, edges, coords):
     argdflt = argdat[1]
     # see if we can find such an arg...
     for i in range(len(args)):
-        if isinstance(args[i], basestring) and args[i].lower() == argname.lower():
+        if pimms.is_str(args[i]) and args[i].lower() == argname.lower():
             return (args[i+1] if pimms.is_number(args[i+1]) else to_java_array(args[i+1]))
     # did not find the arg; use the default:
     return argdflt
 
 def _parse_field_argument(instruct, faces, edges, coords):
     _java = java_link()
-    if isinstance(instruct, basestring):
+    if pimms.is_str(instruct):
         insttype = instruct
         instargs = []
-    elif type(instruct) in [list, tuple]:
+    elif hasattr(instruct, '__iter__'):
         insttype = instruct[0]
         instargs = instruct[1:]
     else:
-        raise RuntimeError('potential field instruction must be list/tuple or string')
+        raise RuntimeError('potential field instruction must be list/tuple-like or a string')
     # look this type up in the types data:
     insttype = insttype.lower()
     if insttype not in _parse_field_data_types:
         raise RuntimeError('Unrecognized field data type: ' + insttype)
     instdata = _parse_field_data_types[insttype]
     # if the data is a dictionary, we must parse on the next arg
-    if isinstance(instdata, dict):
+    if pimms.is_map(instdata):
         shape_name = instargs[0].lower()
         instargs = instargs[1:]
         if shape_name not in instdata:
@@ -96,8 +96,8 @@ def _parse_field_argument(instruct, faces, edges, coords):
 # parse a field potential argument and return a java object that represents it
 def _parse_field_arguments(arg, faces, edges, coords):
     '''See mesh_register.'''
-    if not isinstance(arg, list):
-        raise RuntimeError('field argument must be a list of instructions')
+    if not hasattr(arg, '__iter__'):
+        raise RuntimeError('field argument must be a list-like collection of instructions')
     pot = [_parse_field_argument(instruct, faces, edges, coords) for instruct in arg]
     # make a new Potential sum unless the length is 1
     if len(pot) <= 1:

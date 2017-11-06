@@ -570,7 +570,8 @@ class Tesselation(VertexSet):
         if len(_properties.column_names) == 0:
             return True
         if vertex_count != _properties.row_count:
-            raise ValueError('_properties does not have the correct number of entries')
+            ns = (_properties.row_count, vertex_count)
+            raise ValueError('_properties has incorrect number of entries %d; (should be %d' % ns)
         return True
 
     # Normal Methods
@@ -1945,9 +1946,10 @@ class Topology(VertexSet):
         '''
         topo.properties is the pimms Itable object of properties known to the given topology topo.
         '''
+        pp = {} if _properties is None else _properties
+        tp = {} if tess.properties is None else tess.properties
         # note that tess.properties always already has labels and indices included
-        return (_properties  if _properties is tess.properties else 
-                pimms.merge(tess.properties, _properties))
+        return pimms.itable(pimms.merge(pp, tp) if _properties is not tess.properties else pp)
     @pimms.value
     def repr(chirality, tess):
         '''

@@ -171,14 +171,20 @@ class Subject(mri.Subject):
                                            _auto_retino_names]
                                  for (k,a) in d.iteritems()})
     @staticmethod
-    def _cortex_from_path(chirality, name, surf_path, data_path):
+    def _cortex_from_path(chirality, name, surf_path, data_path, data_prefix=Ellipsis):
         '''
         Subject._cortex_from_path(chirality, name, spath, dpath) yields a Cortex object
           that has been loaded from the given path. The given spath should be the path from which
           to load the structural information (like lh.sphere and rh.white) while the dpath is the
           path from which to load the non-structural information (like lh.thickness or rh.curv).
         '''
-        # we can start by making a lazy-map of the auto-properties
+        # data prefix is ellipsis when we use the same as the chirality; unless the name ends with
+        # X, in which case, it's considered a reversed-hemisphere
+        chirality = chirality.lower()
+        if data_prefix is Ellipsis:
+            if name.lower().endswith('x'): data_prefix = 'rh' if chirality == 'lh' else 'lh'
+            else:                          data_prefix = chirality
+            # we can start by making a lazy-map of the auto-properties
         def _make_prop_loader(flnm):
             def _load_fn():
                 p = fsio.read_morph_data(flnm)
@@ -193,12 +199,12 @@ class Subject(mri.Subject):
             return _load_fn
         props = {}
         for (k,(a,_)) in six.iteritems(Subject._auto_properties):
-            f = os.path.join(data_path, chirality + '.' + k)
+            f = os.path.join(data_path, data_prefix + '.' + k)
             if os.path.isfile(f):
                 props[a] = _make_prop_loader(f)
         # That takes care of the defauly properties; now look for auto-retino properties
         for flnm in os.listdir(data_path):
-            if flnm[0] == '.' or not flnm.startswith(chirality + '.'): continue
+            if flnm[0] == '.' or not flnm.startswith(data_prefix + '.'): continue
             if flnm.endswith('.mgz') or flnm.endswith('.mgh'):
                 mid = flnm[3:-4]
                 loader = _make_mghprop_loader
@@ -207,7 +213,7 @@ class Subject(mri.Subject):
                 loader = _make_prop_loader
             if mid in Subject._auto_retino_names:
                 tr = Subject._auto_retino_names[mid]
-                props[tr] = loader(flnm)
+                props[tr] = loader(os.path.join(data_path, flnm))
         props = pimms.lazy_map(props)
         # we need a tesselation in order to make the surfaces or the cortex object
         white_surf_name = os.path.join(surf_path, chirality + '.white')
