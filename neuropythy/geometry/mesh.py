@@ -120,7 +120,7 @@ class VertexSet(ObjectWithMetaData):
           number of keyword arguments, all of which are merged into a single dict left-to-right
           before application.
         '''
-        pp = self._properties.merge(*(args + (kwargs,)))
+        pp = pimms.merge(self._properties if self._properties else {}, *(args + (kwargs,)))
         return self if pp is self._properties else self.copy(_properties=pp)
     def wout_prop(self, *args):
         '''
@@ -1534,10 +1534,11 @@ class MapProjection(ObjectWithMetaData):
     projection_forward_methods = {}
     projection_inverse_methods = {}
 
-    def __init__(self,
+    def __init__(self, mesh=None,
                  center=None, center_right=None, radius=None, method='equirectangular',
                  registration='native', chirality=None, sphere_radius=None,
                  pre_affine=None, post_affine=None, meta_data=None):
+        self.mesh = mesh
         self.center = center
         self.center_right = center_right
         self.radius = radius
@@ -1625,7 +1626,7 @@ class MapProjection(ObjectWithMetaData):
         if not pimms.is_str(ch):
             raise ValueError('projection chirality must be either None or \'lh\' or \rh\'')
         ch = ch.lower()
-        if ch in ['lh', 'rh']:
+        if ch not in ['lh', 'rh']:
             raise ValueError('projection chirality must be either None or \'lh\' or \rh\'')
         return ch
     @pimms.param

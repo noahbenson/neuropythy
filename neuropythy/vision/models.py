@@ -552,12 +552,12 @@ def load_fmm_model(filename, radius=np.pi/3.0, sphere_radius=100.0):
         # we load the area names
         s = lines[9][12:-1]
         area_names = tuple(s.split(' '))
-        start_line = 10        
+        l0 = 10        
     else:
         area_names = None
-        start_line = 9
+        l0 = 9
     crds = []
-    for row in lines[start_line:(n+start_line)]:
+    for row in lines[l0:(n+l0)]:
         try:
             (left,right) = row.split(' :: ')
             crds.append(map(float, left.split(',')))
@@ -565,14 +565,14 @@ def load_fmm_model(filename, radius=np.pi/3.0, sphere_radius=100.0):
             print row
             raise
     crds = np.asarray([map(float, left.split(','))
-                       for row in lines[9:(n+9)]
+                       for row in lines[l0:(n+l0)]
                        for (left,right) in [row.split(' :: ')]])
     vals = np.asarray([map(float, right.split(','))
-                       for row in lines[9:(n+9)]
+                       for row in lines[l0:(n+l0)]
                        for (left,right) in [row.split(' :: ')]])
     tris = -1 + np.asarray(
         [map(int, row.split(','))
-         for row in lines[(n+start_lines):(n+m+start_lines)]])
+         for row in lines[(n+l0):(n+m+l0)]])
     return RegisteredRetinotopyModel(
         RetinotopyMeshModel(tris, crds,
                             90-180/np.pi*vals[:,0], vals[:,1], vals[:,2],

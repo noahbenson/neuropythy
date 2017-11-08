@@ -14,6 +14,15 @@ import os, six, pimms
 ####################################################################################################
 # Subject Directory and where to find Subjects
 _subjects_dirs = pyr.v()
+if 'SUBJECTS_DIR' in os.environ:
+    sd = os.environ['SUBJECTS_DIR']
+    if os.path.isdir(sd):
+        _subjects_dirs = _subjects_dirs.append(sd)
+if 'FREESURFER_HOME' in os.environ:
+    fsh = os.path.join(os.environ['FREESURFER_HOME'], 'subjects')
+    if os.path.isdir(fsh):
+        _subjects_dirs = _subjects_dirs.append(fsh)
+
 def subject_paths():
     '''
     subject_paths() yields a list of paths to Freesurfer subject directories in which subjects are

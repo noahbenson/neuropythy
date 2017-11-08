@@ -2,9 +2,9 @@
 # neuropythy/util/command.py
 # This file implements the command-line tools that are available as part of neuropythy.
 
-from   types      import (ListType, TupleType)
-import pyrsistent as     pyr
-import pimms
+import numpy      as np
+import pyrsistent as pyr
+import types, pimms
 
 @pimms.immutable
 class CommandLineParser(object):
@@ -108,7 +108,7 @@ class CommandLineParser(object):
         
     def __call__(self, *args):
         if len(args) > 0 and not isinstance(args[0], basestring) and \
-           isinstance(args[0], (ListType, TupleType)):
+           isinstance(args[0], (types.ListType, types.TupleType)):
             args = list(args)
             return self.__call__(*(list(args[0]) + args[1:]))
         parse_state = None

@@ -568,7 +568,7 @@ def retinotopy_model(name='benson17', hemi=None,
             if fname is not None: break
         if fname is None: raise ValueError('Cannot find an FFM file with the name %s' % origname)
     # Okay, load the model...
-    mdl = load_fmm_model(fname)
+    mdl = load_fmm_model(fname).persist()
     __loaded_retinotopy_models[name] = mdl
     return mdl
 
@@ -1001,7 +1001,7 @@ def calc_empirical_retinotopy(cortex,
                 ('eccentricity', eccentricity),
                 ('radius', pRF_radius),
                 ('weight', np.full(n, weight) if pimms.is_number(weight) else weight)]]
-    if weight is None: wgt = np.ones(len(ecc))
+    if wgt is None: wgt = np.ones(len(ecc))
     bad = ~np.isfinite(np.prod([ang, ecc, wgt], axis=0))
     ecc[bad] = 0
     wgt[bad] = 0
@@ -1042,7 +1042,7 @@ def calc_model(cortex, model_argument, model_hemi=Ellipsis, radius=np.pi/3):
         h = cortex.chirality if model_hemi is Ellipsis else \
             None             if model_hemi is None     else \
             model_hemi
-        model = retinotopy_model(model, hemi=h, radius=radius)
+        model = retinotopy_model(model_argument, hemi=h, radius=radius)
     else:
         model = model_argument
     if not isinstance(model, RegisteredRetinotopyModel):
@@ -1072,9 +1072,9 @@ def calc_initial_state(cortex, model, empirical_retinotopy, resample=Ellipsis):
       @ preregistration_map Will be the 2D flattened mesh for use in registration; this mesh is
         a flattened version of preregistration_mesh.
     '''
-    model_reg = model.registration
+    model_reg = model.map_projection.registration
     model_reg = 'native' if model_reg is None else model_reg
-    model_chirality = None if model_reg == 'fsaverage_sym' else model.chirality
+    model_chirality = None if model_reg == 'fsaverage_sym' else model.map_projection.chirality
     if model_chirality is not None and cortex.chirality != model_chirality:
         raise ValueError('Inverse-chirality hemisphere cannot be registered to model')
     # make sure we are registered to the model space
@@ -1090,7 +1090,7 @@ def calc_initial_state(cortex, model, empirical_retinotopy, resample=Ellipsis):
     else:
         # make a map from the appropriate hemisphere...
         ch = 'lh' if model_chirality is None else model_chirality
-        preregmesh = getattr(nyfs.freesurfer_subject(resample), ch).registrations['native']
+        preregmesh = getattr(nyfs.subject(resample), ch).registrations['native']
         # resample properties over...
         preregmesh = preregmesh.with_prop(native_mesh.interpolate(preregmesh.coordinates, 'all'))
     # make the map projection now...
