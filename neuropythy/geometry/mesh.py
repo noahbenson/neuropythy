@@ -73,7 +73,10 @@ class VertexSet(ObjectWithMetaData):
         if   _properties is None: return True
         elif _properties.row_count == 0: return True
         elif _properties.row_count == vertex_count: return True
-        else: raise ValueError('_properties.row_count and vertex_count must be equal')
+        else:
+            s = (_properties.row_count, vertex_count)
+            s = '_properties.row_count (%d) and vertex_count (%d) must be equal' % s
+            raise ValueError(s)
     # The idea here is that _properties may be provided by the overloading class, then properties
     # can be overloaded by that class to add unmodifiable properties to the object; e.g., meshes
     # want coordinates to be a property that cannot be updated.
@@ -606,6 +609,7 @@ class Tesselation(VertexSet):
         fsum = np.sum([vertices[f] for f in self.indexed_faces], axis=0)
         fids = np.where(fsum == 3)[0]
         faces = self.faces[:,fids]
+        vidcs = self.index(np.unique(faces))
         props = self._properties
         if props is not None and len(props) > 1: props = props[vidcs]
         md = self.meta_data.set(tag, self) if pimms.is_str(tag)   else \
@@ -846,6 +850,7 @@ class Mesh(VertexSet):
              self.meta_data.set('supermesh', self) if tag is True else \
              self.meta_data
         dat = {'coordinates': coords, 'tess': subt}
+        print (len(vidcs), props.row_count, coords.shape, tess.vertex_count)
         if props is not self._properties: dat['_properties'] = props
         if md is not self.meta_data: dat['meta_data'] = md
         return self.copy(**dat)

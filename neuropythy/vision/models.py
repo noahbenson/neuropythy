@@ -273,7 +273,7 @@ class RetinotopyMeshModel(RetinotopyModel):
     def cleaned_visual_areas(visual_areas, faces):
         '''
         mdl.cleaned_visual_areas is the same as mdl.visual_areas except that vertices with visual
-        area values of 0 (boundary values) are given the mean of their neighbors.
+        area values of 0 (boundary values) are given the mode of their neighbors.
         '''
         area_ids = np.array(visual_areas)
         boundaryNeis = {}
@@ -283,11 +283,11 @@ class RetinotopyMeshModel(RetinotopyModel):
                                                     [i for i in t if area_ids[i] != 0])]
                            if len(bound) > 0 and len(inside) > 0
                            for b in bound]:
-            if b not in boundaryNeis: boundaryNeis[b] = inside
-            else: boundaryNeis[b] |= inside
-        for (b,neis) in boundaryNeis.iteritems():
-            area_ids[b] = np.mean(area_ids[list(neis)])
-        return pimms.imm_array(area_ids)
+            if b in boundaryNeis: boundaryNeis[b] |= inside
+            else:                 boundaryNeis[b] =  inside
+        for (b,neis) in six.iteritems(boundaryNeis):
+            area_ids[b] = np.argmax(np.bincount(area_ids[list(neis)]))
+        return pimms.imm_array(np.asarray(area_ids, dtype=np.int))
     @pimms.value
     def tess(faces, cortical_coordinates, visual_coordinates,
              polar_angles, eccentricities, cleaned_visual_areas):
@@ -316,7 +316,7 @@ class RetinotopyMeshModel(RetinotopyModel):
             def _fn():
                 idx = np.where(visual_areas == area_label)[0]
                 st = tess.subtess(idx)
-                return st.make_mesh(visual_coordinates[:, idx]).persist()
+                return st.make_mesh(visual_coordinates[:, st.labels]).persist()
             return _fn
         return pimms.lazy_map({k:_make_submesh(k) for k in np.unique(visual_areas) if k != 0})
 
