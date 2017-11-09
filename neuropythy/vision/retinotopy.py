@@ -1049,7 +1049,7 @@ def calc_model(cortex, model_argument, model_hemi=Ellipsis, radius=np.pi/3):
         raise ValueError('model must be a RegisteredRetinotopyModel')
     return model
 @pimms.calc('native_mesh', 'preregistration_mesh', 'preregistration_map')
-def calc_initial_state(cortex, model, empirical_retinotopy, resample=Ellipsis):
+def calc_initial_state(cortex, model, empirical_retinotopy, resample=Ellipsis, prior=None):
     '''
     calc_initial_state is a calculator that prepares the initial state of the registration process.
     The initial state consists of a flattened 2D mesh ('native_map') that has been made from the
@@ -1064,6 +1064,13 @@ def calc_initial_state(cortex, model, empirical_retinotopy, resample=Ellipsis):
         dominate the registration initially. The default value is Ellipsis, which specifies that the
         'fsaverage' or 'fsaverage_sym' resampling should be applied if the model is registered to
         either of those, and otherwise no resampling should be applied.
+      @ prior May specify an alternate registration to which the native mesh should be projected
+        prior to flattening and registration. The default value, None, indicates that the model's
+        default registration should just be used. Generally models will be registered to either the 
+        fsaverage or fsaverage_sym atlases; if your fsaverage subject has a geometry file matching
+        the pattern ?h.*.sphere.reg, such as lh.retinotopy.sphere.reg, you can use that file as a
+        registration (with registration/prior name 'retinotopy') in place of the fsaverage's native
+        lh.sphere from which to start the overall retinotopy registration.
 
     Provided efferent values:
       @ native_mesh Will be the 3D mesh registered to the model's required registration space.
@@ -1074,6 +1081,7 @@ def calc_initial_state(cortex, model, empirical_retinotopy, resample=Ellipsis):
     '''
     model_reg = model.map_projection.registration
     model_reg = 'native' if model_reg is None else model_reg
+    ch = 'lh' if model_chirality is None else model_chirality
     model_chirality = None if model_reg == 'fsaverage_sym' else model.map_projection.chirality
     if model_chirality is not None and cortex.chirality != model_chirality:
         raise ValueError('Inverse-chirality hemisphere cannot be registered to model')
@@ -1082,14 +1090,21 @@ def calc_initial_state(cortex, model, empirical_retinotopy, resample=Ellipsis):
         raise ValueError('given Cortex is not registered to the model registration: %s' % model_reg)
     # give this registration the correct data
     native_mesh = cortex.registrations[model_reg].with_prop(empirical_retinotopy)
-    # and now, resampling...
+    preregmesh = native_mesh # will become the preregistration mesh below
+    # see about the prior
+    if prior is not None:
+        try:
+            mdl_ctx = getattr(nyfs.subject(model_reg), ch)
+            nativ = mdl_ctx.registrations['native']
+            prior = mdl_ctx.registrations[prior]
+        except: raise ValueError('Could not find given prior %s' % prior)
+        addr = nativ.address(native_mesh)
+        preregmesh = native_mesh.copy(coordinates=prior.unaddress(addr))
+        # and now, resampling...
     if resample is Ellipsis:
         resample = model_reg if model_reg == 'fsaverage' or model_reg == 'fsaverage_sym' else None
-    if resample is None:
-        preregmesh = native_mesh
-    else:
+    if resample is not None:
         # make a map from the appropriate hemisphere...
-        ch = 'lh' if model_chirality is None else model_chirality
         preregmesh = getattr(nyfs.subject(resample), ch).registrations['native']
         # resample properties over...
         preregmesh = preregmesh.with_prop(native_mesh.interpolate(preregmesh.coordinates, 'all'))
