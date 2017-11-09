@@ -7,7 +7,7 @@ import numpy                        as np
 import numpy.linalg                 as npla
 import nibabel.freesurfer.mghformat as fsmgh
 import pyrsistent                   as pyr
-import os, sys, gzip, six, pimms
+import os, sys, gzip, six, types, pimms
 
 import neuropythy.geometry           as geo
 import neuropythy.freesurfer         as nyfs
@@ -106,7 +106,7 @@ def extract_retinotopy_argument(obj, retino_type, arg, default='any'):
     that the empirical_retinotopy_data and predicted_retinotopy_data functions should be used,
     respectively.
     '''
-    if   pimms.is_str(obj):        values = obj.prop(arg)
+    if   pimms.is_str(arg):        values = obj.prop(arg)
     elif hasattr(arg, '__iter__'): values = arg
     elif arg is not None:          raise ValueError('cannot interpret retinotopy arg: %s' % arg)
     elif default == 'predicted':   values = predicted_retinotopy_data(obj, retino_type)
@@ -1105,7 +1105,7 @@ def calc_anchors(preregistration_map, model,
     calc_anchors is a calculator that creates a set of anchor instructions for a registration.
     '''
     wgts = preregistration_map.prop('weight')
-    rads = preregistratin_map.prop('radius')
+    rads = preregistration_map.prop('radius')
     if np.isclose(radius_weight, 0): radius_weight = 0
     ancs = retinotopy_anchors(preregistration_map, model,
                               polar_angle='polar_angle',

@@ -290,15 +290,15 @@ class RetinotopyMeshModel(RetinotopyModel):
         return pimms.imm_array(area_ids)
     @pimms.value
     def tess(faces, cortical_coordinates, visual_coordinates,
-             polar_angles, eccentricities, visual_areas):
+             polar_angles, eccentricities, cleaned_visual_areas):
         'mdl.tess is the tesselation object for mesh model.'
         props = pimms.itable({'polar_angle':  polar_angles,
                               'eccentricity': eccentricities,
-                              'visual_area':  visual_areas,
+                              'visual_area':  cleaned_visual_areas,
                               'cortical_coordinates': cortical_coordinates.T,
                               'visual_coordinates':   visual_coordinates.T})
-        if isinstance(tris, geo.Tesselation): return tris.copy(properties=props)
-        return geo.Tesselation(tris, properties=props).persist()
+        if isinstance(faces, geo.Tesselation): return faces.copy(properties=props)
+        return geo.Tesselation(faces, properties=props).persist()
     @pimms.value
     def cortical_mesh(tess, cortical_coordinates):
         '''
@@ -306,14 +306,15 @@ class RetinotopyMeshModel(RetinotopyModel):
         '''
         return tess.make_mesh(cortical_coordinates).persist()
     @pimms.value
-    def visual_meshes(tess, visual_coordinates, visual_areas):
+    def visual_meshes(tess, visual_coordinates, cleaned_visual_areas):
         '''
         mdl.visual_meshes is a map of meshes; the keys of the map are the unique visual area id's
         in the given retinotopy mesh model (mdl) and the values are the meshes that represent them.
         '''
+        visual_areas = cleaned_visual_areas
         def _make_submesh(area_label):
             def _fn():
-                idx = np.where(visual_areas == area_label)
+                idx = np.where(visual_areas == area_label)[0]
                 st = tess.subtess(idx)
                 return st.make_mesh(visual_coordinates[:, idx]).persist()
             return _fn
@@ -575,7 +576,7 @@ def load_fmm_model(filename, radius=np.pi/3.0, sphere_radius=100.0):
          for row in lines[(n+l0):(n+m+l0)]])
     return RegisteredRetinotopyModel(
         RetinotopyMeshModel(tris, crds,
-                            90-180/np.pi*vals[:,0], vals[:,1], vals[:,2],
+                            90-180/np.pi*vals[:,0], vals[:,1], np.asarray(vals[:,2], dtype=np.int),
                             transform=tx,
                             area_name_to_id=area_names),
         geo.MapProjection(registration=reg,

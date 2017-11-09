@@ -818,6 +818,7 @@ def eccen_colors(*args, **kwargs):
         return vertex_eccen_color(m, **kwargs)
 def colors_to_cmap(colors):
     colors = np.asarray(colors)
+    if len(colors.shape) == 1: return colors_to_cmap([colors])[0]
     if colors.shape[1] == 3:
         colors = np.hstack((colors, np.ones((len(colors),1))))
     steps = (0.5 + np.asarray(range(len(colors)-1), dtype=np.float))/(len(colors) - 1)
@@ -850,7 +851,7 @@ def cortex_plot(the_map, color=None, plotter=matplotlib.pyplot, weights=Ellipsis
     '''
     tri = matplotlib.tri.Triangulation(the_map.coordinates[0],
                                        the_map.coordinates[1],
-                                       triangles=the_map.indexed_faces.T)
+                                       triangles=the_map.tess.indexed_faces.T)
     if weights is not Ellipsis:
         if weights is None or not hasattr(weights, '__iter__'):
             weights = np.ones(the_map.vertex_count)

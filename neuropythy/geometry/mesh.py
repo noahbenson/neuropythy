@@ -16,7 +16,7 @@ import sys, six, pimms
 if sys.version_info[0] == 3: from   collections import abc as colls
 else:                        import collections            as colls
 
-from .util import (triangle_area, triangle_address, alignment_matrix_3D,
+from .util import (triangle_area, triangle_address, alignment_matrix_3D, rotation_matrix_3D,
                    cartesian_to_barycentric_3D, cartesian_to_barycentric_2D,
                    barycentric_to_cartesian, point_in_triangle)
 from neuropythy.util import (ObjectWithMetaData, to_affine)
@@ -323,11 +323,11 @@ class TesselationIndex(object):
         elif isinstance(index, colls.Set):
             return set([vi[k] for k in index])
         elif pimms.is_vector(index):
-            return np.asarray([vi[k] for k in index])
+            return np.asarray([vi[k] for k in index], dtype=np.int)
         elif pimms.is_matrix(index):
-            return np.asarray([[idx[k] for k in u] for u in index])
+            return np.asarray([[vi[k] for k in u] for u in index], dtype=np.int)
         else:
-            return self.vertex_index[index]
+            return vi[index]
 
 @pimms.immutable
 class Tesselation(VertexSet):
@@ -411,7 +411,7 @@ class Tesselation(VertexSet):
                 edge2face[e] = [i]
                 k += 1
         edge2face = {k:tuple(v) for (k,v) in six.iteritems(edge2face)}
-        for ((a,b),v) in six.iteritems(edge2face):
+        for ((a,b),v) in six.iteritems(pyr.pmap(edge2face)):
             edge2face[(b,a)] = v
         return pyr.m(edges=pimms.imm_array(np.transpose(edge_list[0:k])),
                      edge_index=pyr.pmap(idx),
@@ -571,7 +571,7 @@ class Tesselation(VertexSet):
             return True
         if vertex_count != _properties.row_count:
             ns = (_properties.row_count, vertex_count)
-            raise ValueError('_properties has incorrect number of entries %d; (should be %d' % ns)
+            raise ValueError('_properties has incorrect number of entries %d; (should be %d)' % ns)
         return True
 
     # Normal Methods
@@ -599,7 +599,7 @@ class Tesselation(VertexSet):
         if len(vertices) != self.vertex_count or \
            not np.array_equal(vertices, np.asarray(vertices, np.bool)):
             tmp = self.index(vertices)
-            vertices = np.zeros(self.vertex_count)
+            vertices = np.zeros(self.vertex_count, dtype=np.bool)
             vertices[tmp] = 1
         vidcs = self.indices[vertices]
         if len(vidcs) == self.vertex_count: return self
@@ -685,9 +685,9 @@ class Mesh(VertexSet):
         tp = {} if tess.properties is None else tess.properties
         # note that tess.properties always already has labels and indices included
         if _properties is tess.properties:
-            return pimms.merge(pp, {'coordinates': coordinates.T})
+            return pimms.itable(pp, {'coordinates': coordinates.T})
         else:
-            return pimms.merge(tp, pp, {'coordinates': coordinates.T})
+            return pimms.itable(tp, pp, {'coordinates': coordinates.T})
     @pimms.value
     def edge_coordinates(tess, coordinates):
         '''
@@ -695,7 +695,7 @@ class Mesh(VertexSet):
           the given mesh; d is the number of dimensions that define the vertex positions in the mesh
           and p is the number of edges in the mesh.
         '''
-        return pimms.imm_array([coordinates[:,e] for e in tess.edges])
+        return pimms.imm_array([coordinates[:,e] for e in tess.indexed_edges])
     @pimms.value
     def face_coordinates(tess, coordinates):
         '''
@@ -703,7 +703,7 @@ class Mesh(VertexSet):
           the given mesh; d is the number of dimensions that define the vertex positions in the mesh
           and m is the number of triange faces in the mesh.
         '''
-        return pimms.imm_array([coordinates[:,f] for f in tess.faces])
+        return pimms.imm_array([coordinates[:,f] for f in tess.indexed_faces])
     @pimms.value
     def edge_centers(edge_coordinates):
         '''
@@ -835,9 +835,9 @@ class Mesh(VertexSet):
         it is passed along to the mesh's tesselation object; the value Ellipsis (default) can be
         given in order to specify that tag_tess should take the same value as tag.
         '''
-        subt = tess.subtess(vertices, tag=tag_tess)
+        subt = self.tess.subtess(vertices, tag=tag_tess)
         if subt is self.tess: return self
-        vidcs = self.index(subt.labels)
+        vidcs = self.tess.index(subt.labels)
         props = self._properties
         if props is not None and props.row_count > 0:
             props = props[vidcs]
@@ -870,9 +870,10 @@ class Mesh(VertexSet):
         pt = np.asarray(pt)
         tri_no = np.asarray(tri_no)
         if len(tri_no) == 0:
-            tri = self.coordinates[:, self.tess.faces[:, tri_no]]
+            tri = self.coordinates[:, self.tess.indexed_faces[:, tri_no]]
         else:
-            tri = np.transpose([self.coordinates[:,t] for t in self.tess.faces[:,tri_no]], (2,0,1))
+            tri = np.transpose([self.coordinates[:,t] for t in self.tess.indexed_faces[:,tri_no]],
+                               (2,0,1))
         return point_in_triangle(tri, pt)
 
     def _find_triangle_search(self, x, k=24, searched=set([])):
@@ -1079,11 +1080,11 @@ class Mesh(VertexSet):
         # we make a mask with 1 extra element, always out of the mask, as a way to flag vertices
         # that shouldn't appear in the mask for some other reason
         if mask is None or (pimms.is_str(mask) and mask.lower() == 'all'):
-            mask = np.ones(n + 1)
+            mask = np.ones(n + 1, dtype=np.bool)
             mask[n] = 0
         else:
             mask_mtx = sps.lil_matrix((n,n))
-            diag = np.zeros(n + 1)
+            diag = np.zeros(n + 1, dtype=np.bool)
             diag[mask] = 1
             mask = diag
             mask_mtx.setdiag(diag[:-1])
@@ -1094,6 +1095,7 @@ class Mesh(VertexSet):
             [(r.indices[np.argsort(r.data)[-1]], 1/ss) if np.isfinite(ss) and ss > 0 else (n,0)
              for r in interp
              for ss in [r.data.sum()]])
+        closest = np.asarray(closest, dtype=np.int)
         rescale_mtx = sps.lil_matrix((n,n))
         rescale_mtx.setdiag(rowdivs)
         interp = interp.dot(rescale_mtx.tocsc())
@@ -1133,7 +1135,7 @@ class Mesh(VertexSet):
         n = self.coordinates.shape[1]
         m = coords.shape[0]
         mtx = sps.lil_matrix((m, n), dtype=np.float)
-        tris = self.tess.faces
+        tris = self.tess.indexed_faces
         # first, find the triangle containing each point...
         containers = self.container(coords, n_jobs=n_jobs)
         # which points are in a triangle at all...
@@ -1271,7 +1273,7 @@ class Mesh(VertexSet):
                 data = self.properties
             if pimms.is_lazy_map(data):
                 def _make_lambda(kk): return lambda:_apply_interp(data[kk])
-                return pyr.lazy_map({k:_make_lambda(k) for k in six.iterkeys(data)})
+                return pimms.lazy_map({k:_make_lambda(k) for k in six.iterkeys(data)})
             elif pimms.is_map(data):
                 return pyr.pmap({k:_apply_interp(data[k]) for k in six.iterkeys(data)})
             elif pimms.is_matrix(data):
@@ -1303,11 +1305,11 @@ class Mesh(VertexSet):
         if len(data.shape) == 1:
             face_id = self.container(data)
             if face_id is None: return None
-            tx = self.coordinates[:,self.tess.faces[:,face_id]].T
+            tx = self.coordinates[:,self.tess.indexed_faces[:,face_id]].T
         else:
             data = data if data.shape[1] == 3 or data.shape[1] == 2 else data.T
             face_id = np.asarray(self.container(data))
-            faces = self.tess.faces
+            faces = self.tess.indexed_faces
             null = np.full((faces.shape[0], self.coordinates.shape[0]), np.nan)
             tx = np.asarray([self.coordinates[:,faces[:,f]].T if f else null
                              for f in face_id])
@@ -1326,14 +1328,14 @@ class Mesh(VertexSet):
         if 'coordinates' not in data: raise ValueError('address must contain coordinates')
         face_id = data['face_id']
         coords = data['coordinates']
-        faces = self.tess.faces
+        faces = self.tess.indexed_faces
         if all(hasattr(x, '__iter__') for x in (face_id, coords)):
             null = np.full((faces.shape[0], self.coordinates.shape[0]), np.nan)
             tx = np.asarray([self.coordinates[:,faces[:,f]].T if f else null for f in face_id])
         elif face_id is None:
             return np.full(self.coordinates.shape[0], np.nan)
         else:
-            tx = np.asarray(self.coordinates[:,self.tess.faces[:,face_id]].T)
+            tx = np.asarray(self.coordinates[:,faces[:,face_id]].T)
         return barycentric_to_cartesian(tx, coords)
 
     # smooth a field on the cortical surface
@@ -1558,7 +1560,7 @@ class MapProjection(ObjectWithMetaData):
         mesh object.
         '''
         if m is None: return None
-        if not isinstance(m, geo.Mesh):
+        if not isinstance(m, Mesh):
             raise ValueError('projection mesh must be a Mesh object')
         return m
     @pimms.param
@@ -1668,7 +1670,7 @@ class MapProjection(ObjectWithMetaData):
         mtx = np.eye(4) if pre_affine is None else pre_affine
         cmtx = np.eye(4)
         if center is not None:
-            tmp = geo.alignment_matrix_3D(center, [1,0,0])
+            tmp = alignment_matrix_3D(center, [1,0,0])
             cmtx[0:3,0:3] = tmp
             mtx = cmtx.dot(mtx)
         crmtx = np.eye(4)
@@ -1678,7 +1680,7 @@ class MapProjection(ObjectWithMetaData):
             cr = cmtx[0:3,0:3].dot(center_right)
             # what angle do we need to rotate this?
             ang = np.arctan2(cr[2], cr[1])
-            crmtx[0:3,0:3] = geo.rotation_matrix_3D([1,0,0], -ang)
+            crmtx[0:3,0:3] = rotation_matrix_3D([1,0,0], -ang)
             mtx = crmtx.dot(mtx)
         # That's all that actually needs to be done in preprocessing
         return pimms.imm_array(mtx)
@@ -1734,15 +1736,12 @@ class MapProjection(ObjectWithMetaData):
         if self.radius is None: return np.ones(x.shape[1], dtype=np.bool)
         # put the coordinates through the initial transformation:
         x = self.alignment_matrix.dot(np.concatenate((x, np.ones((1,x.shape[1])))))
+        x = np.clip(x[0] / self._sphere_radius, -1, 1)
         # okay, we want the angle of the vertex [1,0,0] to these points...
-        th = np.arccos(x[0])
+        th = np.arccos(x)
         # and we want to know what points are within the angle given by the radius; if the radius
         # is a radian-like quantity, we use th itself; otherwise, we convert it to a distance
-        if pimms.is_quantity(self.radius):
-            rad = pimms.mag(radius, 'radians')
-        else:
-            th *= self._sphere_radius
-            rad = radius
+        rad = pimms.mag(self.radius, 'radians') if pimms.is_quantity(self.radius) else self.radius
         return (th < rad)
     def select_domain(self, x):
         '''
@@ -1843,7 +1842,7 @@ class MapProjection(ObjectWithMetaData):
             proj = self if self.mesh is obj else self.copy(mesh=obj)
             submesh = self.select_domain(obj)
             res = self.forward(submesh)
-            return res if tag is None else res.with_meta(tag, proj)
+            return res if tag is None else res.with_meta({tag:proj})
         elif pimms.is_vector(obj):
             return self.forward(obj) if self.in_domain(obj) else None
         else:
@@ -1972,7 +1971,7 @@ class Topology(VertexSet):
         ps = self.properties
         if properties is not None:
             ps = pimms.merge(ps, properties)
-        return geo.Mesh(self.tess, coords, meta_data=md, properties=ps)
+        return Mesh(self.tess, coords, meta_data=md, properties=ps)
     def register(self, name, coords):
         '''
         topology.register(name, coordinates) returns a new topology identical to topo that 
