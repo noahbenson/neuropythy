@@ -518,9 +518,9 @@ class Tesselation(VertexSet):
     def vertex_face_index(labels, faces):
         '''
         tess.vertex_face_index is a map whose keys are vertices and whose values are tuples of the
-        edge indices of the faces that contain the relevant vertex.
+        indices of the faces that contain the relevant vertex.
         '''
-        d = {k:[] for _ in labels}
+        d = {k:[] for k in labels}
         for (i,(u,v,w)) in enumerate(faces.T):
             d[u].append(i)
             d[v].append(i)
@@ -850,7 +850,6 @@ class Mesh(VertexSet):
              self.meta_data.set('supermesh', self) if tag is True else \
              self.meta_data
         dat = {'coordinates': coords, 'tess': subt}
-        print (len(vidcs), props.row_count, coords.shape, tess.vertex_count)
         if props is not self._properties: dat['_properties'] = props
         if md is not self.meta_data: dat['meta_data'] = md
         return self.copy(**dat)
@@ -993,10 +992,7 @@ class Mesh(VertexSet):
         '''
         pt = np.asarray(pt, dtype=np.float32)
         if len(pt.shape) == 1:
-            (d, near) = self.face_hash.query(pt, k=k) #n_jobs fails?
-            tri_no = next((kk for kk in near if self.is_point_in_face(kk, pt)), None)
-            return (tri_no if tri_no is not None
-                    else self._find_triangle_search(pt, k=(2*k), searched=set(near)))
+            return self.container([pt], k=k, n_jobs=n_jobs)[0]
         else:
             if pt.shape[0] == self.coordinates.shape[0]: pt = pt.T
             tcount = self.tess.faces.shape[1]
@@ -1022,7 +1018,7 @@ class Mesh(VertexSet):
                 return res
             res = np.full(len(pt), None, dtype=np.object)
             # filter out points that aren't close enough to be in a triangle:
-            (dmins, dmaxs) = [[f(x[np.isfinite(x)]) for x in self.coordinates.T]
+            (dmins, dmaxs) = [[f(x[np.isfinite(x)]) for x in self.coordinates]
                               for f in [np.min, np.max]]
             finpts = np.isfinite(np.sum(pt, axis=1))
             if finpts.all():
@@ -1101,9 +1097,11 @@ class Mesh(VertexSet):
              for r in interp
              for ss in [r.data.sum()]])
         closest = np.asarray(closest, dtype=np.int)
-        rescale_mtx = sps.lil_matrix((n,n))
-        rescale_mtx.setdiag(rowdivs)
-        interp = interp.dot(rescale_mtx.tocsc())
+        if not np.array_equal(rowdivs, np.ones(len(rowdivs))):
+            # rescale the rows
+            rescale_mtx = sps.lil_matrix((m,m))
+            rescale_mtx.setdiag(rowdivs)
+            interp = rescale_mtx.tocsc().dot(interp)
         # any row with no interpolation weights or that is nearest to a vertex not in the mesh
         # needs to be given a nan value upon interpolation
         bad_pts = ~mask[closest]
@@ -1185,8 +1183,7 @@ class Mesh(VertexSet):
             mesh during interpolation.
         '''
         # we can start by applying the mask to the interpolation
-        if mask is not None or weights is not None:
-            interp = Mesh.scale_interpolation(interp, mask=mask, weights=weights)
+        interp = Mesh.scale_interpolation(interp, mask=mask, weights=weights)
         (m,n) = interp.shape
         # if data is a map, we iterate over its columns:
         if pimms.is_str(data):
@@ -1253,7 +1250,7 @@ class Mesh(VertexSet):
         if method is None: method = 'auto'
         method = method.lower()
         if method == 'linear':
-            interp = self.linear_interpolation(x, n_jobs=n_jobs),
+            interp = self.linear_interpolation(x, n_jobs=n_jobs)
         elif method == 'nearest':
             return self.apply_interpolation(self.nearest_interpolation(x, n_jobs=n_jobs),
                                             data, mask=mask, weights=weights)
@@ -1316,7 +1313,7 @@ class Mesh(VertexSet):
             face_id = np.asarray(self.container(data))
             faces = self.tess.indexed_faces
             null = np.full((faces.shape[0], self.coordinates.shape[0]), np.nan)
-            tx = np.asarray([self.coordinates[:,faces[:,f]].T if f else null
+            tx = np.asarray([self.coordinates[:,faces[:,f]].T if f is not None else null
                              for f in face_id])
         bc = cartesian_to_barycentric_3D(tx, data) if self.coordinates.shape[0] == 3 else \
              cartesian_to_barycentric_2D(tx, data)
@@ -1333,10 +1330,13 @@ class Mesh(VertexSet):
         if 'coordinates' not in data: raise ValueError('address must contain coordinates')
         face_id = data['face_id']
         coords = data['coordinates']
+        if np.sum(~np.isfinite(coords)) > 0:
+            raise ValueError('---')
         faces = self.tess.indexed_faces
         if all(hasattr(x, '__iter__') for x in (face_id, coords)):
             null = np.full((faces.shape[0], self.coordinates.shape[0]), np.nan)
-            tx = np.asarray([self.coordinates[:,faces[:,f]].T if f else null for f in face_id])
+            tx = np.asarray([self.coordinates[:,faces[:,f]].T if f is not None else null
+                             for f in face_id])
         elif face_id is None:
             return np.full(self.coordinates.shape[0], np.nan)
         else:
@@ -1694,7 +1694,7 @@ class MapProjection(ObjectWithMetaData):
         '''
         proj.inverse_alignment_matrix is a 4x4 matrix that is the inverse of proj.alignment_matrix.
         '''
-        return None if alingment_matrix is None else pimms.imm_array(npla.inv(alignment_matrix))
+        return None if alignment_matrix is None else pimms.imm_array(npla.inv(alignment_matrix))
     @pimms.value
     def inverse_post_affine(post_affine):
         '''

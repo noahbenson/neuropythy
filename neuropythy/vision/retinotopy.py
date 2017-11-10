@@ -121,7 +121,7 @@ def extract_retinotopy_argument(obj, retino_type, arg, default='any'):
         found = False
         # could be that we were given a mesh data-field for a map
         try:
-            values = values[obj.vertex_labels]
+            values = values[obj.labels]
         except:
             raise RuntimeError('%s data: length %s should be %s' % (retino_type, len(values), n))
     return values
@@ -384,7 +384,7 @@ def mesh_retinotopy(m, source='any'):
     return res
 
 pRF_data_Wandell2015 = pyr.pmap(
-    {k.lower():v
+    {k.lower():pyr.pmap(v)
      for (k,v) in six.iteritems(
              {"V1":  {'m':0.16883, 'b':0.02179}, "V2":  {'m':0.16912, 'b':0.14739},
               "V3":  {'m':0.26397, 'b':0.34221}, "hV4": {'m':0.52963, 'b':0.44501},
@@ -393,7 +393,7 @@ pRF_data_Wandell2015 = pyr.pmap(
               "LO1": {'m':0.85645, 'b':0.36149}, "LO2": {'m':0.74762, 'b':0.45887},
               "TO1": {'m':1.37441, 'b':0.17240}, "TO2": {'m':1.65694, 'b':0.00000}})})
 pRF_data_Kay2013 = pyr.pmap(
-    {k.lower():{'m':v, 'b':0.5}
+    {k.lower():pyr.pmap({'m':v, 'b':0.5})
      for (k,v) in {'V1':0.16, 'V2':0.18, 'V3':0.25, 'hV4':0.36}.iteritems()})
 pRF_data = pyr.pmap({'wandell2015':pRF_data_Wandell2015, 'kay2013':pRF_data_Kay2013})
 def predict_pRF_radius(eccentricity, visual_area='V1', source='Wandell2015'):
@@ -426,7 +426,7 @@ def predict_pRF_radius(eccentricity, visual_area='V1', source='Wandell2015'):
     if source not in pRF_data:
         raise ValueError('Given source (%s) not found in pRF-size database' % source)
     dat = pRF_data[source]
-    adat = dat[visual_area]
+    dat = dat[visual_area]
     return dat['m']*eccentricity + dat['b']
 
 def _retinotopic_field_sign_triangles(m, retinotopy):
@@ -442,7 +442,7 @@ def _retinotopic_field_sign_triangles(m, retinotopy):
     coords = np.asarray([x, y])
     us = coords[:, t.indexed_faces[1]] - coords[:, t.indexed_faces[0]]
     vs = coords[:, t.indexed_faces[2]] - coords[:, t.indexed_faces[0]]
-    (us,vs) = [np.concatenate((xs, np.full((1, m.face_count), 0.0))) for xs in [us,vs]]
+    (us,vs) = [np.concatenate((xs, np.full((1, t.face_count), 0.0))) for xs in [us,vs]]
     xs = np.cross(us, vs, axis=0)[2]
     xs[np.isclose(xs, 0)] = 0
     return np.sign(xs)
@@ -470,8 +470,8 @@ def retinotopic_field_sign(m, element='vertices', retinotopy=Ellipsis, invert_fi
     if invert_field: tsign = -tsign
     element = element.lower()
     if element == 'triangles' or element == 'faces': return tsign
-    fidx = t.vertex_face_index
-    vfs = np.asarray([np.mean(tsign[ii]) if len(ii) > 0 else 0 for ii in fidx])
+    vfs = t.vertex_faces
+    vfs = np.asarray([np.mean(tsign[list(ii)]) if len(ii) > 0 else 0 for ii in vfs])
     return vfs
 
 visual_area_field_signs = pyr.pmap({'V1' :-1, 'V2' :1, 'V3' :-1, 'hV4':1,
@@ -739,13 +739,13 @@ def retinotopy_mesh_field(mesh, mdl,
 def retinotopy_anchors(mesh, mdl,
                        polar_angle=None, eccentricity=None,
                        weight=None, weight_min=0.1,
-                       field_sign_weight=0,
+                       field_sign_weight=0, field_sign=None,
                        radius_weight=0, radius_weight_source='Wandell2015', radius=None,
                        model_field_sign=None,
                        model_hemi=Ellipsis,
                        scale=1,
                        shape='Gaussian', suffix=None,
-                       sigma=[0.05, 1.0, 2.0],
+                       sigma=[0.1, 2.0, 4.0],
                        select='close'):
     '''
     retinotopy_anchors(mesh, model) is intended for use with the mesh_register function and the
@@ -792,7 +792,7 @@ def retinotopy_anchors(mesh, mdl,
         the mesh should be excluded; a value of just ['close', k] on the other hand indicates that
         any anchor more than k distance from the vertex should be exlcuded. The default value,
         'close', is equivalent to ['close', [40]].
-      * sigma (default [0.05, 1.0, 2.0]) specifies how the sigma parameter should be handled; if
+      * sigma (default [0.1, 2.0, 4.0]) specifies how the sigma parameter should be handled; if
         None, then no sigma value is specified; if a single number, then all sigma values are
         assigned that value; if a list of three numbers, then the first is the minimum sigma value,
         the second is the fraction of the minimum distance between paired anchor points, and the 
@@ -907,7 +907,7 @@ def retinotopy_anchors(mesh, mdl,
             [(fs - visual_area_field_signs[id2n[l]]) if l in id2n else 0
              for (l,fs) in zip(labs,field_sign[idcs])])**2
         # average the weights at some fraction with the original weights
-        fswgts = field_sign_weight*fswfts + (1 - field_sign_weight)*wgts
+        fswgts = field_sign_weight*fswgts + (1 - field_sign_weight)*wgts
     else: fswgts = None
     # add in radius weights if requested as well
     if not np.isclose(radius_weight, 0) and mdl.area_name_to_id is not None:
@@ -1081,8 +1081,8 @@ def calc_initial_state(cortex, model, empirical_retinotopy, resample=Ellipsis, p
     '''
     model_reg = model.map_projection.registration
     model_reg = 'native' if model_reg is None else model_reg
-    ch = 'lh' if model_chirality is None else model_chirality
     model_chirality = None if model_reg == 'fsaverage_sym' else model.map_projection.chirality
+    ch = 'lh' if model_chirality is None else model_chirality
     if model_chirality is not None and cortex.chirality != model_chirality:
         raise ValueError('Inverse-chirality hemisphere cannot be registered to model')
     # make sure we are registered to the model space
@@ -1140,7 +1140,7 @@ def calc_registration(preregistration_map, model, anchors,
     '''
     # make the java object
     x = mesh_register(
-        registration_map,
+        preregistration_map,
         [['edge',      'harmonic',      'scale', 1.0],
          ['angle',     'infinite-well', 'scale', 1.0],
          ['perimeter', 'harmonic'],
@@ -1172,7 +1172,9 @@ def calc_prediction(registered_map, preregistration_mesh, native_mesh, model):
         native_mesh and the predicted_mesh.
     '''
     # invert the map projection to make the registration map into a mesh
-    coords3d = registered_map.meta('projection').inverse(registered_map.coordinates)
+    coords3d = np.array(preregistration_mesh.coordinates)
+    idcs = registered_map.labels
+    coords3d[:,idcs] = registered_map.meta('projection').inverse(registered_map.coordinates)
     rmesh = preregistration_mesh.copy(coordinates=coords3d)
     # go ahead and get the model predictions...
     d = model.cortex_to_angle(registered_map.coordinates)
@@ -1182,33 +1184,24 @@ def calc_prediction(registered_map, preregistration_mesh, native_mesh, model):
     for (k,v) in six.iteritems(d):
         v.setflags(write=False)
         tmp = np.zeros(rmesh.vertex_count, dtype=v.dtype)
-        tmp[registered_map.vertex_labels] = v
+        tmp[registered_map.labels] = v
         tmp.setflags(write=False)
         rpred[k] = tmp
-    d = pyr.pmap(d)
-    rpred = pyr.pmap(d3d)
+    rpred = pyr.pmap(rpred)
     rmesh = rmesh.with_prop(rpred)
     # next, do all of this for the native mesh..
     if native_mesh is preregistration_mesh:
-        pred = d3d
+        pred = rpred
         pmesh = rmesh
     else:
         # we need to address the native coordinates in the prereg coordinates then unaddress them
         # in the registered coordinates; this will let us make a native-registered-map and repeat
         # the exercise above
         addr = preregistration_mesh.address(native_mesh.coordinates)
-        natreg_mesh = native_mesh.copy(rmesh.unaddress(addr))
+        natreg_mesh = native_mesh.copy(coordinates=rmesh.unaddress(addr))
         d = model.cortex_to_angle(natreg_mesh)
-        d = {'polar_angle':d[0], 'eccentricity':d[1], 'visual_area':np.asarray(d[2], dtype=np.int)}
-        # okay, put these on the mesh
-        pred = {}
-        for (k,v) in six.iteritems(d):
-            v.setflags(write=False)
-            tmp = np.zeros(rmesh.vertex_count, dtype=v.dtype)
-            tmp[registered_map.vertex_labels] = v
-            tmp.setflags(write=False)
-            pred[k] = tmp
-        pred = pyr.pmap(pred)
+        pred = pyr.m(polar_angle=d[0], eccentricity=d[1],
+                     visual_area=np.asarray(d[2], dtype=np.int))
         pmesh = natreg_mesh.with_prop(pred)
     return {'registered_mesh'        : rmesh,
             'registration_prediction': rpred,
@@ -1234,7 +1227,7 @@ def register_retinotopy(hemi,
                         scale=1.0,
                         sigma=Ellipsis,
                         select='close',
-                        prior='retinotopy',
+                        prior=None,
                         resample=Ellipsis,
                         radius=np.pi/3,
                         max_steps=2000, max_step_size=0.05, method='random',
@@ -1371,7 +1364,7 @@ def register_retinotopy(hemi,
       * sigma (default Ellipsis) specifies the sigma argument to be passed onto the 
         retinotopy_anchors function (see help(retinotopy_anchors)); the default value, Ellipsis,
         is interpreted as the default value of the retinotopy_anchors function's sigma option.
-      * prior (default: 'retinotopy') specifies the prior that should be used, if found, in the 
+      * prior (default: None) specifies the prior that should be used, if found, in the 
         topology registrations for the subject associated with the retinotopy_model's registration.
       * resample (default: Ellipsis) specifies that the data should be resampled to one of
         the uniform meshes, 'fsaverage' or 'fsaverage_sym', prior to registration; if None then no

@@ -252,7 +252,10 @@ class RetinotopyMeshModel(RetinotopyModel):
         cortical surface representation
         '''
         if tx is None: return None
-        return pimms.imm_array(to_affine(tx))
+        tx = to_affine(tx)
+        if np.array_equal(tx, np.eye(3)): return None
+        tx.setflags(write=False)
+        return tx
 
     @pimms.value
     def inverse_transform(transform):
@@ -323,7 +326,7 @@ class RetinotopyMeshModel(RetinotopyModel):
     
     def cortex_to_angle(self, x, y):
         'See RetinotopyModel.cortex_to_angle.'
-        if pimms.is_vector(x): return self.cortex_to_angle([x], [y])[0]
+        if not pimms.is_vector(x): return self.cortex_to_angle([x], [y])[0]
         # start by applying the transform to the points
         tx = self.inverse_transform
         xy = np.asarray([x,y]).T if tx is None else np.dot(tx, [x,y,np.ones(len(x))])[0:2].T
@@ -332,7 +335,7 @@ class RetinotopyMeshModel(RetinotopyModel):
             xy,
             [self.polar_angles, self.eccentricities],
             method='linear')
-        interp_id = self.forward.interpolate(
+        interp_id = self.cortical_mesh.interpolate(
             xy,
             self.visual_areas,
             method='nearest')
@@ -358,7 +361,7 @@ class RetinotopyMeshModel(RetinotopyModel):
             [msh.interpolate(coords, msh.prop('cortical_coordinates'), method='linear')
              for area in sorted(self.visual_meshes.keys())
              for msh in [self.visual_meshes[area]]],
-            (2,0,1))
+            (1,0,2))
         if tx is not None:
             res = np.asarray(
                 [np.dot(tx, np.vstack((area_xy.T, np.ones(len(area_xy)))))[0:2].T
@@ -466,13 +469,13 @@ class RegisteredRetinotopyModel(RetinotopyModel):
                     m = self.map_projection(args[0])
                     res = np.zeros((3, args[0].vertex_count))
                     c2a = np.asarray(self.cortex_to_angle(m.coordinates))
-                    res[:, m.vertex_labels] = c2a if len(c2a) == len(res) else c2a.T
+                    res[:, m.labels] = c2a if len(c2a) == len(res) else c2a.T
                     return res
             elif isinstance(args[0], mri.Cortex):
                 m = self.map_projection(args[0])
                 res = np.zeros((3, args[0].vertex_count))
                 c2a = np.asarray(self.cortex_to_angle(m.coordinates))
-                res[:, m.vertex_labels] = c2a if len(c2a) == len(res) else c2a.T
+                res[:, m.labels] = c2a if len(c2a) == len(res) else c2a.T
                 return res
             else:
                 X = np.asarray(args[0])

@@ -32,12 +32,13 @@ def neighborhood_cortical_magnification(mesh, coordinates):
     based cortical magnification values for the vertices in the given mesh if their visual field
     coordinates are given by the visual_coordinates matrix (must be like [x_values, y_values]). If
     either x-value or y-value of a coordinate is either None or numpy.nan, then that cortical
-    magnification value is None.
+    magnification value is numpy.nan.
     '''
     idcs = _cmag_coord_idcs(coordinates)
     neis = mesh.tess.indexed_neighborhoods
     coords_vis = np.asarray(coordinates if len(coordinates) == 2 else coordinates.T)
     coords_srf = mesh.coordinates
+    res = np.full((mesh.vertex_count, 3), np.nan, dtype=np.float)
     res = np.array([row for row in [(np.nan,np.nan,np.nan)] for _ in range(mesh.vertex_count)],
                    dtype=np.float)
     for idx in idcs:
