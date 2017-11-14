@@ -3,23 +3,20 @@
 # The code for the function that handles the registration of retinotopy
 # By Noah C. Benson
 
-import numpy as np
-import scipy as sp
-import os, sys
-from math import pi
-from numbers import Number
+from __future__ import print_function
 
-import nibabel.freesurfer.io as fsio
-import nibabel.freesurfer.mghformat as fsmgh
-from pysistence import make_dict
+import numpy                        as     np
+import scipy                        as     sp
+import nibabel                      as     nib
+import nibabel.freesurfer.io        as     fsio
+import nibabel.freesurfer.mghformat as     fsmgh
+import os, sys, pimms
 
-from neuropythy.freesurfer import (freesurfer_subject, add_subject_path,
-                                   cortex_to_ribbon, cortex_to_ribbon_map,
-                                   Hemisphere)
-from neuropythy.util import CommandLineParser
-from neuropythy.vision import (predict_retinotopy)
+from neuropythy.freesurfer          import (subject, add_subject_path)
+from neuropythy.util                import (CommandLineParser, export_image)
+from neuropythy.vision              import (predict_retinotopy, retinotopy_model, clean_retinotopy)
 
-benson14_retinotopy_help = \
+info = \
    '''
    The benson14_retinotopy command can be used to project the anatomically defined
    template of retinotopy to a subject's left and right hemisphere(s).  At least
@@ -88,24 +85,23 @@ _benson14_parser_instructions = [
     ('a', 'angle-tag',              'angle_tag',         'benson14_angle'),
     ('l', 'label-tag',              'label_tag',         'benson14_varea'),
     ('d', 'subjects-dir',           'subjects_dir',      None),
-    ('t', 'template',               'template',          'benson17')
-    ]
+    ('t', 'template',               'template',          'benson17')]
 _benson14_parser = CommandLineParser(_benson14_parser_instructions)
-def benson14_retinotopy_command(*args):
+def main(*args):
     '''
-    benson14_retinotopy_command(args...) runs the benson14_retinotopy command; see 
-    benson14_retinotopy_help for mor information.
+    benson14_retinotopy.main(args...) runs the benson14_retinotopy command; see 
+    benson14_retinotopy.info for mor information.
     '''
     # Parse the arguments...
     (args, opts) = _benson14_parser(args)
     # help?
     if opts['help']:
-        print benson14_retinotopy_help
+        print(info, file=sys.stdout)
         return 1
     # verbose?
     verbose = opts['verbose']
     def note(s):
-        if verbose: print s
+        if verbose: print(s, file=sys.stdout)
         return verbose
     # Add the subjects directory, if there is one
     if 'subjects_dir' in opts and opts['subjects_dir'] is not None:
@@ -119,7 +115,7 @@ def benson14_retinotopy_command(*args):
     # okay, now go through the subjects...
     for subnm in args:
         note('Processing subject %s:' % subnm)
-        sub = freesurfer_subject(subnm)
+        sub = subject(subnm)
         note('   - Interpolating template...')
         (lhdat, rhdat) = predict_retinotopy(sub, template=opts['template'])
         # Export surfaces
@@ -151,19 +147,18 @@ def benson14_retinotopy_command(*args):
         if nve:
             note('   - Skipping volume export.')
         else:
-            surf2rib = cortex_to_ribbon_map(sub, hemi=None)
             note('   - Exporting Volumes:')
             for t in lhdat.keys():
                 flnm = os.path.join(sub.directory, 'mri', tr[t] + '.mgz')
                 if ow or not os.path.exist(flnm):
                     note('    - Preparing volume file: %s' % flnm)
-                    vol = cortex_to_ribbon(sub,
-                                           (lhdat[t], rhdat[t]),
-                                           map=surf2rib,
-                                           method=('max' if t == 'visual_area' else 'weighted'),
-                                           dtype=(np.int32 if t == 'visual_area' else np.float32))
+                    dtyp = (np.int32 if t == 'visual_area' else np.float32)
+                    vol = sub.cortex_to_image(
+                        (lhdat[t], rhdat[t]),
+                        method=('nearest' if t == 'visual_area' else 'lines'),
+                        dtype=dtyp)
                     note('    - Exporting volume file: %s' % flnm)
-                    vol.to_filename(flnm)
+                    export_image(flnm, vol, dtype=dtyp)
                 else:
                     note('    - Not overwriting existing file: %s' % flnm)
         note('   Subject %s finished!' % sub.id)

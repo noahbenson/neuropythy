@@ -2,8 +2,10 @@
 # neuropythy/util/command.py
 # This file implements the command-line tools that are available as part of neuropythy.
 
-import numpy      as np
-import pyrsistent as pyr
+import numpy                        as np
+import pyrsistent                   as pyr
+import nibabel                      as nib
+import nibabel.freesurfer.mghformat as fsmgh
 import types, pimms
 
 @pimms.immutable
@@ -65,6 +67,7 @@ class CommandLineParser(object):
         self.flag_characters = pyr.pmap(cflags)
         self.option_words = pyr.pmap(wargs)
         self.option_characters = pyr.pmap(cargs)
+    @pimms.param
     def default_values(dv):
         '''
         clp.default_values yields the persistent map of default values for the given command-line
@@ -73,6 +76,7 @@ class CommandLineParser(object):
         if pimms.is_pmap(dv): return dv
         elif pimms.is_map(dv): return pyr.pmap(dv)
         else: raise ValueError('default_value must be a mapping')
+    @pimms.param
     def flag_words(u):
         '''
         clp.flag_words yields the persistent map of optional flag words recognized by the given
@@ -81,6 +85,7 @@ class CommandLineParser(object):
         if pimms.is_pmap(u): return u
         elif pimms.is_map(u): return pyr.pmap(u)
         else: raise ValueError('flag_words must be a mapping')
+    @pimms.param
     def flag_characters(u):
         '''
         clp.flag_characters yields the persistent map of the flag characters recognized by the given
@@ -89,6 +94,7 @@ class CommandLineParser(object):
         if pimms.is_pmap(u): return u
         elif pimms.is_map(u): return pyr.pmap(u)
         else: raise ValueError('flag_characters must be a mapping')
+    @pimms.param
     def option_words(u):
         '''
         clp.option_words yields the persistent map of optional words recognized by the given
@@ -97,6 +103,7 @@ class CommandLineParser(object):
         if pimms.is_pmap(u): return u
         elif pimms.is_map(u): return pyr.pmap(u)
         else: raise ValueError('option_words must be a mapping')
+    @pimms.param
     def option_characters(u):
         '''
         clp.option_characters yields the persistent map of optional characters recognized by the
@@ -254,3 +261,40 @@ def to_affine(aff, dims=None):
         arg = (dims, dims,dims+1, dims+1,dims+1)
         raise ValueError('%dD affine matrix must be %dx%d or %dx%d' % args)
     return aff
+
+def export_image(filename, data, affine, format=None, dtype=None):
+    '''
+    export_image(filename, array, affine) exports the given array to the given filename and yields
+       the filename. The options format and dtype may specify the array features; valid formats
+       are 'nifti' or 'mgh'/'mgz'. If no format is given, then auto-detects format from filename
+       extension.
+    '''
+    if format is None:
+        fnl = filename.lower()
+        if fnl.endswith('.mgz') or fnl.endswith('.mgh'): format = fnl[-3:]
+        elif fnl.endswith('.nii'): format = 'nii'
+        elif fnl.endswith('.nii.gz'): format = 'nii.gz'
+        else: raise ValueError('Could not deduce format of file %s' % filename)
+    else:
+        format = format.lower()
+        if format in ['nifti', 'niigz', 'nii-gz', 'nifti-gzip']:
+            format = 'nii.gz'
+        elif format in ['freesurfer', 'mgh.gz', 'mgh-gz', 'mgh-gzip']:
+            format = 'mgz'
+        elif format not in ['nii', 'mgz', 'mgh', 'nii.gz']:
+            raise ValueError('Could not understand format argument %s' % format)
+    if pimms.is_str(dtype):
+        dtype = dtype.lower()
+        if dtype in ['int', 'integer', 'int32']:
+            dtype = np.int32
+        elif dtype in ['float', 'real', 'float32', 'real32']:
+            dtype = np.float32
+        else:
+            raise ValueError('Only float and int dtypes supported')
+    data = np.asarray(data) if dtype is None else np.asarray(data, dtype=dtype)
+    if format in ['nii', 'nii.gz']:
+        img = nib.Nifti1Image(data, affine)
+    else:
+        img = fsmgh.MGHImage(data, affine)
+    img.to_filename(filename)
+    return filename

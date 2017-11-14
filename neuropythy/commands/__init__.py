@@ -7,11 +7,11 @@ import os, sys, math
 import pysistence
 
 import register_retinotopy
-from .benson14_retinotopy import (benson14_retinotopy_command, benson14_retinotopy_help)
-from .surface_to_ribbon   import (surface_to_ribbon_command,   surface_to_ribbon_help)
+import benson14_retinotopy
+import surface_to_ribbon
 
 # The commands that can be run by main:
 commands = pysistence.make_dict(
     register_retinotopy=register_retinotopy.main,
-    benson14_retinotopy=benson14_retinotopy_command,
-    surface_to_ribbon=surface_to_ribbon_command)
+    benson14_retinotopy=benson14_retinotopy.main,
+    surface_to_ribbon=surface_to_ribbon.main)

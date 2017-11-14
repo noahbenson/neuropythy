@@ -3,21 +3,19 @@
 # The code for the function that handles the registration of retinotopy
 # By Noah C. Benson
 
+from __future__ import print_function
+
 import numpy                        as     np
 import scipy                        as     sp
+import nibabel                      as     nib
 import nibabel.freesurfer.io        as     fsio
 import nibabel.freesurfer.mghformat as     fsmgh
-from   math                         import pi
-from   numbers                      import Number
-from   pysistence                   import make_dict
-from   numbers                      import Integral
-import os, sys
+import os, sys, pimms
 
-from neuropythy.freesurfer import (freesurfer_subject, add_subject_path, find_subject_path,
-                                   cortex_to_ribbon, cortex_to_ribbon_map, Hemisphere)
-from neuropythy.util       import (CommandLineParser)
+from neuropythy.freesurfer          import (subject, add_subject_path)
+from neuropythy.util                import (CommandLineParser, export_image)
 
-surface_to_ribbon_help = \
+info = \
    '''
    Syntax: surface_to_ribbon <subject> <out>
    <subject> must be a valid FreeSurfer subject id (in the $SUBJECTS_DIR directory
@@ -70,7 +68,7 @@ _surface_to_ribbon_parser_instructions = [
     ['l', 'lh',           'lh_file',      None],
     ['r', 'rh',           'rh_file',      None],
     ['f', 'fill',         'fill',         0],
-    ['m', 'method',       'method',       'weighted'],
+    ['m', 'method',       'method',       'auto'],
     ['t', 'type',         'dtype',        None],
     ['d', 'subjects-dir', 'subjects_dir', None]]
 _surface_to_ribbon_parser = CommandLineParser(_surface_to_ribbon_parser_instructions)
@@ -82,24 +80,24 @@ def read_surf_file(flnm):
     data = fsio.read_morph_data(flnm)
   return data
 
-def surface_to_ribbon_command(args):
+def main(args):
     '''
-    surface_to_rubbon_command(args) can be given a list of arguments, such as sys.argv[1:]; these
+    surface_to_rubbon.main(args) can be given a list of arguments, such as sys.argv[1:]; these
     arguments may include any options and must include exactly one subject id and one output
     filename. Additionally one or two surface input filenames must be given. The surface files are
     projected into the ribbon and written to the output filename. For more information see the
-    string stored in surface_to_ribbon_help.
+    string stored in surface_to_ribbon.info.
     '''
     # Parse the arguments
     (args, opts) = _surface_to_ribbon_parser(args)
     # First, help?
     if opts['help']:
-        print surface_to_ribbon_help
+        print(info, file=sys.stdout)
         return 1
     # and if we are verbose, lets setup a note function
     verbose = opts['verbose']
     def note(s):
-        if verbose: print s
+        if verbose: print(s, file=sys.stdout)
         return verbose
     # Add the subjects directory, if there is one
     if 'subjects_dir' in opts and opts['subjects_dir'] is not None:
@@ -155,13 +153,17 @@ def surface_to_ribbon_command(args):
     if lhfl is None and rhfl is None: raise ValueError('No surfaces provided')
     # check the method
     method = opts['method'].lower()
-    if method != 'weighted' and method != 'max':
+    if method not in ['lines', 'nearest', 'auto']:
         raise ValueError('Unsupported method: %s' % method)
     # and the datatype
     if opts['dtype'] is None: dtyp = None
     elif opts['dtype'].lower() == 'float': dtyp = np.float32
     elif opts['dtype'].lower() == 'int': dtyp = np.int32
     else: raise ValueError('Type argument must be float or int')
+    if method == 'auto':
+      if dtyp is np.float32: method = 'lines'
+      elif dtyp is np.int32: method = 'nearest'
+      else: method = 'lines'
     # Now, load the data:
     note('Reading surfaces...')
     (lhdat, rhdat) = (None, None)
@@ -174,16 +176,13 @@ def surface_to_ribbon_command(args):
     (dat, hemi) = (rhdat, 'rh') if lhdat is None else \
                   (lhdat, 'lh') if rhdat is None else \
                   ((lhdat, rhdat), None)
-    note('Generating vertex-to-voxel mapping...')
-    sub = freesurfer_subject(sub)
-    s2r = cortex_to_ribbon_map(sub, hemi=hemi)
+    sub = subject(sub)
     # okay, make the volume...
     note('Generating volume...')
-    vol = cortex_to_ribbon(sub, dat,
-                           map=s2r, hemi=hemi, method=method, fill=opts['fill'], dtype=dtyp)
+    vol = sub.cortex_to_image(dat, hemi=hemi, method=method, fill=opts['fill'], dtype=dtyp)
     # and write out the file
     note('Exporting volume file: %s' % outfl)
-    vol.to_filename(outfl)
+    export_image(outfl, vol, dtype=dtyp)
     note('surface_to_ribbon complete!')
     return 0    
 

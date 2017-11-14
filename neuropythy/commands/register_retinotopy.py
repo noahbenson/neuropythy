@@ -3,21 +3,20 @@
 # The code for the function that handles the registration of retinotopy
 # By Noah C. Benson
 
-import numpy                        as np
-import scipy                        as sp
-import nibabel                      as nib
-import nibabel.freesurfer.io        as fsio
-import nibabel.freesurfer.mghformat as fsmgh
-import os, sys
+from __future__ import print_function
 
-from __future__            import print_function
+import numpy                        as     np
+import scipy                        as     sp
+import nibabel                      as     nib
+import nibabel.freesurfer.io        as     fsio
+import nibabel.freesurfer.mghformat as     fsmgh
+import pyrsistent                   as     pyr
+import os, sys, pimms
 
-from neuropythy.freesurfer import (subject, add_subject_path,
-                                   cortex_to_ribbon, cortex_to_ribbon_map,
-                                   Hemisphere)
-from neuropythy.util       import CommandLineParser
-from neuropythy.vision     import (register_retinotopy, retinotopy_model, clean_retinotopy)
-
+from neuropythy.freesurfer          import (subject, add_subject_path)
+from neuropythy.util                import CommandLineParser
+from neuropythy.vision              import (register_retinotopy, retinotopy_model, clean_retinotopy,
+                                            empirical_retinotopy_data)
 
 info = \
    '''
@@ -150,7 +149,7 @@ _retinotopy_parser_instructions = [
     ('K', 'no-rh',                  'run_rh',            True),
     ('c', 'clean',                  'clean',             False),
     ('b', 'no-resample',            'resample',          True),
-    #('N', 'no-partial-correction',  'part_vol_correct',  True),
+    ('N', 'partial-correction',     'part_vol_correct',  False),
     # Options
     ['a', 'lh-angle',               'angle_lh_file',     None],
     ['t', 'lh-theta',               'theta_lh_file',     None],
@@ -168,8 +167,8 @@ _retinotopy_parser_instructions = [
 
     ['m', 'weight-min',             'weight_min',        '0.1'],
     ['s', 'scale',                  'scale',             '1.0'],
-    ['g', 'field-sign-weight'       'field_sign_weight', '1.0'],
-    ['G', 'radius-weight'           'radius_weight',     '1.0'],
+    ['g', 'field-sign-weight',      'field_sign_weight', '1.0'],
+    ['G', 'radius-weight',          'radius_weight',     '1.0'],
     ['i', 'max-steps',              'max_steps',         '8000'],
     ['D', 'max-step-size',          'max_step_size',     '0.05'],
     ['p', 'prior',                  'prior',             None],
@@ -187,6 +186,7 @@ _retinotopy_parser_instructions = [
     ['I', 'max-input-eccen',        'max_in_eccen',      '90'],
     ['d', 'subjects-dir',           'subjects_dir',      None]]
 _retinotopy_parser = CommandLineParser(_retinotopy_parser_instructions)
+
 def _guess_surf_file(fl):
     # MGH/MGZ files
     try:    return np.squeeze(fsmgh.load(fl).get_fdata())
@@ -199,7 +199,7 @@ def _guess_surf_file(fl):
     except: raise ValueError('Could not determine filetype for: %s' % fl)
 def _guess_vol_file(fl):
     # MGH/MGZ files
-    try return fsmgh.load(fl)
+    try: return fsmgh.load(fl)
     except: pass
     # Nifti Files
     try: return nib.load(fl)
@@ -251,12 +251,12 @@ def calc_arguments(args):
     (args, opts) = _retinotopy_parser(args)
     # We do some of the options right here...
     if opts['help']:
-        print info
+        print(info, file=sys.stdout)
         sys.exit(1)
     # and if we are verbose, lets setup a note function
     verbose = opts['verbose']
     def note(s):
-        if verbose: print(s)
+        if verbose: print(s, file=sys.stdout)
         return verbose
     def error(s):
         print(s, file=sys.stderr)
@@ -269,7 +269,7 @@ def calc_arguments(args):
     try: sub = subject(args[0])
     except: error('Failed to load subject %s' % args[0])
     # and the model
-    mdl_name = args[1] if len(args) < 2 else 'benson17'
+    mdl_name = args[1] if len(args) == 2 else 'benson17'
     try: model = retinotopy_model(mdl_name)
     except: error('Could not load retinotopy model %s' % mdl_name)
 
@@ -281,6 +281,9 @@ def calc_arguments(args):
     opts['max_steps'] = int(opts['max_steps'])
     # Make a note:
     note('Processing subject: %s' % sub.name)
+    del opts['help']
+    del opts['verbose']
+    del opts['subjects_dir']
     # That's all we need!
     return pimms.merge(opts,
                        {'subject': sub.persist(),
@@ -301,7 +304,7 @@ def calc_retinotopy(note, error, subject, clean, run_lh, run_rh,
             ('lh', angle_lh_file,theta_lh_file, eccen_lh_file,rho_lh_file, weight_lh_file, run_lh),
             ('rh', angle_rh_file,theta_rh_file, eccen_rh_file,rho_rh_file, weight_rh_file, run_rh)]:
         if not run: continue
-        hemi = getattr(sub, h)
+        hemi = getattr(subject, h)
         props = {}
         # load the properties or find them in the auto-properties
         if ang:
@@ -332,6 +335,7 @@ def calc_retinotopy(note, error, subject, clean, run_lh, run_rh,
         # Do smoothing, if requested
         if clean:
             note('Cleaning %s retinotopy...' % h.upper())
+            print(props.keys())
             props = clean_retinotopy(hemi, props)
         ctcs[h] = hemi.with_prop(props)
     return {'cortices': pyr.pmap(ctcs)}
@@ -432,7 +436,7 @@ def save_volume_files(note, error, registrations, subject,
         def export(flnm, d):
             flnm = flnm + '.' + volume_format
             dt = np.int32 if np.issubdtype(d.dtype, np.int) else np.float32
-            img = fsmgh.MGHImage(np.asarray(d, dtype=dt), subject.voxel_to_vertex_matrix))
+            img = fsmgh.MGHImage(np.asarray(d, dtype=dt), subject.voxel_to_vertex_matrix)
             img.to_filename(flnm)
             return flnm
     elif volume_format in ['nifti', 'nii', 'niigz', 'nii.gz']:
@@ -440,7 +444,7 @@ def save_volume_files(note, error, registrations, subject,
         def export(flnm, p):
             flnm = flnm + '.' + volume_format
             dt = np.int32 if np.issubdtype(p.dtype, np.int) else np.float32
-            img = nib.Nifti1Image(np.asarray(p, dtype=dt), subject.voxel_to_vertex_matrix))
+            img = nib.Nifti1Image(np.asarray(p, dtype=dt), subject.voxel_to_vertex_matrix)
             img.to_filename(flnm)
             return flnm
     else:
