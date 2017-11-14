@@ -1178,7 +1178,11 @@ def calc_prediction(registered_map, preregistration_mesh, native_mesh, model):
     rmesh = preregistration_mesh.copy(coordinates=coords3d)
     # go ahead and get the model predictions...
     d = model.cortex_to_angle(registered_map.coordinates)
-    d = {'polar_angle':d[0], 'eccentricity':d[1], 'visual_area':np.asarray(d[2], dtype=np.int)}
+    id2n = model.area_id_to_name
+    (ang, ecc) = d[0:2]
+    lbl = np.asarray(d[2], dtype=np.int)
+    rad = np.asarray([predict_pRF_radius(e, id2n[l]) for (e,l) in zip(ecc,lbl)])
+    d = {'polar_angle':ang, 'eccentricity':ecc, 'visual_area':lbl, 'radius':rad}
     # okay, put these on the mesh
     rpred = {}
     for (k,v) in six.iteritems(d):
