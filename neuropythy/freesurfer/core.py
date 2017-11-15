@@ -310,7 +310,7 @@ class Subject(mri.Subject):
         def _make_accessor(nm): return lambda:mgh_images[nm].get_data()
         for (tname, name) in zip(['original', 'normalized', 'segmentation', 'brain'],
                                  ['orig',     'norm',       'aseg',         'brain']):
-            ims[tname] = _make_accessor(nm)
+            ims[tname] = _make_accessor(name)
         # last, check for auto-retino-properties:
         for k in six.iterkeys(mgh_images):
             if k in Subject._auto_retino_names:
@@ -322,7 +322,7 @@ class Subject(mri.Subject):
         '''
         See neuropythy.mri.Subject.voxel_to_vertex_matrix.
         '''
-        return pimms.imm_array(mgh_images['ribbon'].get_vox2ras_tkr())
+        return pimms.imm_array(mgh_images['ribbon'].header.get_vox2ras_tkr())
 
 def subject(name):
     '''

@@ -11,7 +11,7 @@ import nibabel                      as     nib
 import nibabel.freesurfer.io        as     fsio
 import nibabel.freesurfer.mghformat as     fsmgh
 import pyrsistent                   as     pyr
-import os, sys, pimms
+import os, sys, six, pimms
 
 from neuropythy.freesurfer          import (subject, add_subject_path)
 from neuropythy.util                import CommandLineParser
@@ -150,20 +150,22 @@ _retinotopy_parser_instructions = [
     ('c', 'clean',                  'clean',             False),
     ('b', 'no-resample',            'resample',          True),
     ('N', 'partial-correction',     'part_vol_correct',  False),
+    ('S', 'model-sym',              'model_sym',         False),
     # Options
     ['a', 'lh-angle',               'angle_lh_file',     None],
     ['t', 'lh-theta',               'theta_lh_file',     None],
     ['e', 'lh-eccen',               'eccen_lh_file',     None],
     ['r', 'lh-rho',                 'rho_lh_file',       None],
-    ['w', 'weight-lh',              'weight_lh_file',    None],
+    ['w', 'lh-weight',              'weight_lh_file',    None],
+    ['q', 'lh-radius',              'radius_lh_file',    None],
     ['k', 'run-lh',                 'run_lh',            'true'],
     ['A', 'rh-angle',               'angle_rh_file',     None],
     ['T', 'rh-theta',               'theta_rh_file',     None],
     ['E', 'rh-eccen',               'eccen_rh_file',     None],
     ['R', 'rh-rho',                 'rho_rh_file',       None],
-    ['W', 'weight-rh',              'weight_rh_file',    None],
+    ['W', 'rh-weight',              'weight_rh_file',    None],
+    ['Q', 'rh-radius',              'radius_rh_file',    None],
     ['K', 'run-rh',                 'run_rh',            'true'],
-    ['c', 'clean',                  'clean',             'false'],
 
     ['m', 'weight-min',             'weight_min',        '0.1'],
     ['s', 'scale',                  'scale',             '1.0'],
@@ -189,13 +191,13 @@ _retinotopy_parser = CommandLineParser(_retinotopy_parser_instructions)
 
 def _guess_surf_file(fl):
     # MGH/MGZ files
-    try:    return np.squeeze(fsmgh.load(fl).get_fdata())
+    try:    return fsmgh.load(fl).get_data().flatten()
     except: pass
     # FreeSurfer Curv files
     try:    return fsio.read_morph_data(fl)
     except: pass
     # Nifti files
-    try:    return np.squeeze(nib.load(fl).get_fdata())
+    try:    return np.squeeze(nib.load(fl).get_data())
     except: raise ValueError('Could not determine filetype for: %s' % fl)
 def _guess_vol_file(fl):
     # MGH/MGZ files
@@ -209,21 +211,24 @@ def _guess_vol_file(fl):
             'no_vol_export',     
             'no_surf_export',    
             'no_reg_export',     
-            'no_overwrite',      
+            'no_overwrite',
+            'model_sym',
             'part_vol_correct',  
             'angle_lh_file',     
             'theta_lh_file',     
             'eccen_lh_file',     
             'rho_lh_file',
             'run_lh',
-            'weight_lh_file',    
+            'weight_lh_file',
+            'radius_lh_file',
             'angle_rh_file',     
             'theta_rh_file',     
             'eccen_rh_file',     
             'rho_rh_file',
             'run_rh',
             'clean',
-            'weight_rh_file',    
+            'weight_rh_file',
+            'radius_rh_file',
             'weight_min',        
             'scale',             
             'max_steps',         
@@ -270,7 +275,11 @@ def calc_arguments(args):
     except: error('Failed to load subject %s' % args[0])
     # and the model
     mdl_name = args[1] if len(args) == 2 else 'benson17'
-    try: model = retinotopy_model(mdl_name)
+    try:
+        if opts['model_sym']:
+            model = {h:retinotopy_model(mdl_name).persist() for h in ['lh', 'rh']}
+        else:
+            model = {h:retinotopy_model(mdl_name, hemi=h).persist() for h in ['lh', 'rh']}
     except: error('Could not load retinotopy model %s' % mdl_name)
 
     # Now, we want to run a few filters on the options
@@ -287,34 +296,40 @@ def calc_arguments(args):
     # That's all we need!
     return pimms.merge(opts,
                        {'subject': sub.persist(),
-                        'model':   model.persist(),
+                        'model':   pyr.pmap(model),
                         'options': pyr.pmap(opts),
                         'note':    note,
                         'error':   error})
 @pimms.calc('cortices')
 def calc_retinotopy(note, error, subject, clean, run_lh, run_rh,
-                    angle_lh_file, theta_lh_file, eccen_lh_file, rho_lh_file, weight_lh_file,
-                    angle_rh_file, theta_rh_file, eccen_rh_file, rho_rh_file, weight_rh_file):
+                    angle_lh_file, theta_lh_file,
+                    eccen_lh_file, rho_lh_file,
+                    weight_lh_file, radius_lh_file,
+                    angle_rh_file, theta_rh_file,
+                    eccen_rh_file, rho_rh_file,
+                    weight_rh_file, radius_rh_file):
     '''
     calc_retinotopy extracts the retinotopy options from the command line, loads the relevant files,
     and stores them as properties on the subject's lh and rh cortices.
     '''
     ctcs = {}
-    for (h,ang,tht,ecc,rho,wgt,run) in [
-            ('lh', angle_lh_file,theta_lh_file, eccen_lh_file,rho_lh_file, weight_lh_file, run_lh),
-            ('rh', angle_rh_file,theta_rh_file, eccen_rh_file,rho_rh_file, weight_rh_file, run_rh)]:
+    for (h,ang,tht,ecc,rho,wgt,rad,run) in [
+            ('lh', angle_lh_file,theta_lh_file, eccen_lh_file,rho_lh_file,
+             weight_lh_file, radius_lh_file, run_lh),
+            ('rh', angle_rh_file,theta_rh_file, eccen_rh_file,rho_rh_file,
+             weight_rh_file, radius_rh_file, run_rh)]:
         if not run: continue
         hemi = getattr(subject, h)
         props = {}
         # load the properties or find them in the auto-properties
         if ang:
-            try: props['polar_ange'] = _guess_surf_file(ang)
+            try: props['polar_angle'] = _guess_surf_file(ang)
             except: error('could not load surface file %s' % ang)
         elif tht:
             try:
-                tmp = _guess_surf_file(ang)
+                tmp = _guess_surf_file(tht)
                 props['polar_angle'] = 90.0 - 180.0 / np.pi * tmp
-            except: error('could not load surface file %s' % ang)
+            except: error('could not load surface file %s' % tht)
         else:
             props['polar_angle'] = empirical_retinotopy_data(hemi, 'polar_angle')
         if ecc:
@@ -326,24 +341,30 @@ def calc_retinotopy(note, error, subject, clean, run_lh, run_rh,
                 props['eccentricity'] = 180.0 / np.pi * tmp
             except: error('could not load surface file %s' % rho)
         else:
-            props['polar_angle'] = empirical_retinotopy_data(hemi, 'polar_angle')
+            props['eccentricity'] = empirical_retinotopy_data(hemi, 'eccentricity')
         if wgt:
             try: props['weight'] = _guess_surf_file(wgt)
             except: error('could not load surface file %s' % wgt)
         else:
             props['weight'] = empirical_retinotopy_data(hemi, 'weight')
+        if rad:
+            try: props['radius'] = _guess_surf_file(rad)
+            except: error('could not load surface file %s' % rad)
+        else:
+            props['radius'] = empirical_retinotopy_data(hemi, 'radius')
         # Do smoothing, if requested
         if clean:
             note('Cleaning %s retinotopy...' % h.upper())
-            print(props.keys())
-            props = clean_retinotopy(hemi, props)
+            (ang,ecc) = clean_retinotopy(hemi, props)
+            props['polar_angle']  = ang
+            props['eccentricity'] = ecc
         ctcs[h] = hemi.with_prop(props)
     return {'cortices': pyr.pmap(ctcs)}
 @pimms.calc('registrations')
 def calc_registrations(note, error, cortices, model,
                        weight_min, scale, prior, max_out_eccen, max_steps, max_step_size,
                        radius_weight, field_sign_weight, resample,
-                       part_vol_correct=False):
+                       part_vol_correct):
     '''
     calc_registrations is the calculator that performs the registrations for the left and right
     hemisphere; these are returned as the immutable maps yielded from the register_retinotopy
@@ -352,9 +373,9 @@ def calc_registrations(note, error, cortices, model,
     # Do the registration
     res = {}
     for (h,ctx) in six.iteritems(cortices):
-        note('    - Running Registration...')
+        note('Preparing %s Registration...' % h.upper())
         try:
-            res[h] = register_retinotopy(ctx, model,
+            res[h] = register_retinotopy(ctx, model[h],
                                          polar_angle='polar_angle',
                                          eccentricity='eccentricity',
                                          weight='weight',
@@ -365,11 +386,11 @@ def calc_registrations(note, error, cortices, model,
                                          scale=scale,
                                          prior=prior,
                                          resample=resample,
-                                         max_predicted_eccen=max_out_eccen,
                                          max_steps=max_steps,
                                          max_step_size=max_step_size,
                                          yield_imap=True)
-        except: error('Exception caught while setting-up register_retinotopy (%s)' % h)
+        except: #error('Exception caught while setting-up register_retinotopy (%s)' % h)
+            raise
     return {'registrations': pyr.pmap(res)}
 @pimms.calc('surface_files')
 def save_surface_files(note, error, registrations, subject,
@@ -384,7 +405,7 @@ def save_surface_files(note, error, registrations, subject,
     # make an exporter for properties:
     if surface_format in ['curv', 'morph', 'auto', 'automatic']:
         def export(flnm, p):
-            with open(flnm, 'w') as fl: fsio.write_morph_data(fl, p, hemi.face_count)
+            with open(flnm, 'w') as fl: fsio.write_morph_data(fl, p)
             return flnm
     elif surface_format in ['mgh', 'mgz']:
         def export(flnm, p):
@@ -405,12 +426,12 @@ def save_surface_files(note, error, registrations, subject,
         error('Could not understand surface file-format %s' % surface_format)
     path = surface_path if surface_path else os.path.join(subject.path, 'surf')
     files = []
+    note('Exporting files...')
     for h in six.iterkeys(registrations):
         hemi = getattr(subject, h)
         reg = registrations[h]
-        note('Extracting %s predicted mesh...', h.upper())
+        note('Extracting %s predicted mesh...' % h.upper())
         pmesh = reg['predicted_mesh']
-        note('Exporting files...')
         for (pname,tag) in zip(['polar_angle', 'eccentricity', 'visual_area', 'radius'],
                                [angle_tag, eccen_tag, label_tag, radius_tag]):
             flnm = export(os.path.join(path, h + '.' + tag), pmesh.prop(pname))

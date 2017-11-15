@@ -475,7 +475,8 @@ def retinotopic_field_sign(m, element='vertices', retinotopy=Ellipsis, invert_fi
     return vfs
 
 visual_area_field_signs = pyr.pmap({'V1' :-1, 'V2' :1, 'V3' :-1, 'hV4':1,
-                                    'VO1':-1, 'LO1':1, 'V3b':-1, 'V3a':1})
+                                    'VO1':-1, 'VO2':1, 'LO1':1,  'LO2':-1,
+                                    'V3b':-1, 'V3a':1, 'TO1':-1, 'TO2':1})
 '''
 visual_area_field_signs is a persistent map of field signs as observed empirically for visual areas
 V1, V2, V3, hV4, VO1, LO1, V3a, and V3b.
@@ -1103,7 +1104,7 @@ def calc_initial_state(cortex, model, empirical_retinotopy, resample=Ellipsis, p
         # and now, resampling...
     if resample is Ellipsis:
         resample = model_reg if model_reg == 'fsaverage' or model_reg == 'fsaverage_sym' else None
-    if resample is not None:
+    if resample is not None and resample is not False:
         # make a map from the appropriate hemisphere...
         preregmesh = getattr(nyfs.subject(resample), ch).registrations['native']
         # resample properties over...
@@ -1181,7 +1182,7 @@ def calc_prediction(registered_map, preregistration_mesh, native_mesh, model):
     id2n = model.area_id_to_name
     (ang, ecc) = d[0:2]
     lbl = np.asarray(d[2], dtype=np.int)
-    rad = np.asarray([predict_pRF_radius(e, id2n[l]) for (e,l) in zip(ecc,lbl)])
+    rad = np.asarray([predict_pRF_radius(e, id2n[l]) if l > 0 else 0 for (e,l) in zip(ecc,lbl)])
     d = {'polar_angle':ang, 'eccentricity':ecc, 'visual_area':lbl, 'radius':rad}
     # okay, put these on the mesh
     rpred = {}
@@ -1479,8 +1480,8 @@ def clean_retinotopy(obj, retinotopy='empirical', output_style='visual', weight=
     # our x0 value is just a joining of theta with rho:
     x0 = np.concatenate((theta0, rho0))
     n = len(theta0)
-    es = obj.indexed_edges
-    fcs = obj.indexed_faces
+    es  = obj.indexed_edges if isinstance(obj, geo.Tesselation) else obj.tess.indexed_edges
+    fcs = obj.indexed_faces if isinstance(obj, geo.Tesselation) else obj.tess.indexed_faces
     m = es.shape[1]
     p = fcs.shape[1]
     ninv = 1.0 / n

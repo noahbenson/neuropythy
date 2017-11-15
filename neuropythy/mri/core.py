@@ -9,7 +9,7 @@ import scipy               as sp
 import scipy.sparse        as sps
 import neuropythy.geometry as geo
 import pyrsistent          as pyr
-import os, sys, types, pimms
+import os, sys, types, six, itertools, pimms
 
 from neuropythy.util import (ObjectWithMetaData, to_affine)
 
@@ -32,7 +32,7 @@ def _line_voxel_overlap(vx, xs, xe):
     if None in isect or any(a == b for (a,b) in isect): return 0.0
     return npla.norm([e - s for (s,e) in isect]) / npla.norm([e - s for (s,e) in zip(xs,xe)])
 
-def _vertex_to_voxel_line_interpolation(hemi, gray_indices, vertex_to_voxel_matrix):
+def _vertex_to_voxel_lines_interpolation(hemi, gray_indices, vertex_to_voxel_matrix):
     # 1-based indexing is assumed:
     idcs = np.transpose(gray_indices) + 1
     # we also need the transformation from surface to voxel
@@ -62,14 +62,15 @@ def _vertex_to_voxel_line_interpolation(hemi, gray_indices, vertex_to_voxel_matr
                  for (vox,xdat) in itertools.groupby(sorted(vtx_voxels,key=first_fn), key=first_fn)
                  for dat in [[q[1] for q in xdat]]}
     v2v_map = {tuple([i-1 for i in idx]): (ids, np.array(olaps) / np.sum(olaps))
-               for idx in idcs
+               for idx0 in idcs
+               for idx in [tuple(idx0)]
                if idx in vox_byidx
                for (ids, olaps) in [vox_byidx[idx]]}
     # we just need to put these into a matrix; we need a voxel-ijk-to-index translation
     ijk2idx = {tuple(ijk):idx for (idx,ijk) in enumerate(zip(*gray_indices))}
     # we now just need to put things in order:
-    interp = sps.lil_matrix((len(gray_index[0]), hemi.vertex_count), dtype=np.float)
-    for (ijk,dat) in six.iteritems(ijk2idx):
+    interp = sps.lil_matrix((len(gray_indices[0]), hemi.vertex_count), dtype=np.float)
+    for (ijk,dat) in six.iteritems(vox_byidx):
         ijk = ijk2idx[ijk]
         for (idx,olap) in zip(*dat):
             interp[idx, ijk] = olap
@@ -285,9 +286,9 @@ class Subject(ObjectWithMetaData):
         return np.asarray(img).shape
 
     @pimms.value
-    def lh_vertex_to_voxel_line_interpolation(lh_gray_indices, lh, vertex_to_voxel_matrix):
+    def lh_vertex_to_voxel_lines_interpolation(lh_gray_indices, lh, vertex_to_voxel_matrix):
         '''
-        sub.lh_gray_vertex_to_voxel_line_interpolation is a scipy sparse matrix representing the
+        sub.lh_gray_vertex_to_voxel_lines_interpolation is a scipy sparse matrix representing the
           interpolation from the vertices into the voxels; the ordering of the voxels that is
           produced by the dot-product of this matrix with the vector of vertex-values is the same
           as the ordering used in sub.lh_gray_indices.
@@ -295,11 +296,11 @@ class Subject(ObjectWithMetaData):
         surface vertices into the the ribbon and weighting them by the fraction of the vector that
         lies in the voxel.
         '''
-        return _vertex_to_voxel_line_interpolation(lh, lh_gray_indices, vertex_to_voxel_matrix)
+        return _vertex_to_voxel_lines_interpolation(lh, lh_gray_indices, vertex_to_voxel_matrix)
     @pimms.value
-    def rh_vertex_to_voxel_line_interpolation(rh_gray_indices, rh, vertex_to_voxel_matrix):
+    def rh_vertex_to_voxel_lines_interpolation(rh_gray_indices, rh, vertex_to_voxel_matrix):
         '''
-        sub.rh_gray_vertex_to_voxel_line_interpolation is a scipy sparse matrix representing the
+        sub.rh_gray_vertex_to_voxel_lines_interpolation is a scipy sparse matrix representing the
           interpolation from the vertices into the voxels; the ordering of the voxels that is
           produced by the dot-product of this matrix with the vector of vertex-values is the same
           as the ordering used in sub.rh_gray_indices.
@@ -307,7 +308,7 @@ class Subject(ObjectWithMetaData):
         surface vertices into the the ribbon and weighting them by the fraction of the vector that
         lies in the voxel.
         '''
-        return _vertex_to_voxel_line_interpolation(rh, rh_gray_indices, vertex_to_voxel_matrix)
+        return _vertex_to_voxel_lines_interpolation(rh, rh_gray_indices, vertex_to_voxel_matrix)
     @pimms.value
     def lh_vertex_to_voxel_nearest_interpolation(lh_gray_indices, lh, voxel_to_vertex_matrix):
         '''
@@ -350,17 +351,17 @@ class Subject(ObjectWithMetaData):
         sub.path_join(args...) is equivalent to os.path.join(sub.path, args...).
         '''
         return os.path.join(sub.path, *args)
-    def cortex_to_image(data, hemi=None, method='lines', fill=0, dtype=None):
+    def cortex_to_image(self, data, hemi=None, method='lines', fill=0, dtype=None):
         '''
-        sub.cortex_to_ribbon(data, hemi) projects the given cortical-surface data to the given
+        sub.cortex_to_image(data, hemi) projects the given cortical-surface data to the given
           subject's gray-matter voxels of the given hemisphere and returns the resulting numpy
           array.
-        sub.cortex_to_ribbon((lh_data, rh_data)) projects into both hemispheres.
+        sub.cortex_to_image((lh_data, rh_data)) projects into both hemispheres.
     
         The following options may be given:
           * method (default: 'lines') specifies that a particular method should be used; valid
             options are 'lines' and 'nearest'. The 'lines' method uses the
-            sub.lh_vertex_to_voxel_line_interpolation and sub.rh_vertex_to_voxel_line_interpolation
+            lh_vertex_to_voxel_lines_interpolation and rh_vertex_to_voxel_lines_interpolation 
             matrices while 'nearest' uses the nearest-neighbor interpolation. The 'lines' method is
             generally preferred.
           * fill (default: 0) specifies the value to be assigned to all voxels not in the gray mask.
@@ -391,7 +392,7 @@ class Subject(ObjectWithMetaData):
             if h is None: continue
             if dat is None: raise ValueError('hemisphere %s requested but data not provided' % h)
             dat = np.asarray(dat)
-            hem = getattr(sub, h)
+            hem = getattr(self, h)
             if not pimms.is_matrix(dat) and not pimms.is_vector(dat):
                 raise ValueError('data given for %s is neither a vector nor a matrix' % h)
             if pimms.is_matrix(dat) and dat.shape[0] != hem.vertex_count: dat = dat.T
