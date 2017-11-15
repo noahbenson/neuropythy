@@ -562,12 +562,8 @@ def load_fmm_model(filename, radius=np.pi/3.0, sphere_radius=100.0):
         l0 = 9
     crds = []
     for row in lines[l0:(n+l0)]:
-        try:
-            (left,right) = row.split(' :: ')
-            crds.append(map(float, left.split(',')))
-        except:
-            print row
-            raise
+        (left,right) = row.split(' :: ')
+        crds.append(map(float, left.split(',')))
     crds = np.asarray([map(float, left.split(','))
                        for row in lines[l0:(n+l0)]
                        for (left,right) in [row.split(' :: ')]])
