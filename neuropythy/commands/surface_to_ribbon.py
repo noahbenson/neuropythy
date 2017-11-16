@@ -182,7 +182,7 @@ def main(args):
     vol = sub.cortex_to_image(dat, hemi=hemi, method=method, fill=opts['fill'], dtype=dtyp)
     # and write out the file
     note('Exporting volume file: %s' % outfl)
-    export_image(outfl, vol, dtype=dtyp)
+    export_image(outfl, vol, sub.voxel_to_vertex_matrix, dtype=dtyp)
     note('surface_to_ribbon complete!')
     return 0    
 

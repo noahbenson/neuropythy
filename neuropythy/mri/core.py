@@ -33,8 +33,7 @@ def _line_voxel_overlap(vx, xs, xe):
     return npla.norm([e - s for (s,e) in isect]) / npla.norm([e - s for (s,e) in zip(xs,xe)])
 
 def _vertex_to_voxel_lines_interpolation(hemi, gray_indices, vertex_to_voxel_matrix):
-    # 1-based indexing is assumed:
-    idcs = np.transpose(gray_indices) + 1
+    idcs = np.transpose(gray_indices)
     # we also need the transformation from surface to voxel
     tmtx = vertex_to_voxel_matrix
     # given that the voxels assume 1-based indexing, this means that the center of each voxel
@@ -47,13 +46,17 @@ def _vertex_to_voxel_lines_interpolation(hemi, gray_indices, vertex_to_voxel_mat
     pialX = txcoord(hemi.pial_surface.coordinates)
     whiteX = txcoord(hemi.white_surface.coordinates)
     # make a list of voxels through which each vector passes:
+    mins = np.asarray([np.floor(np.min([xw, xp], axis=0)) for (xw,xp) in zip(whiteX, pialX)],
+                      dtype=np.int)
+    maxs = np.asarray([np.ceil( np.max([xw, xp], axis=0)) for (xw,xp) in zip(whiteX, pialX)],
+                      dtype=np.int)
     min_idx = np.min(idcs, axis=1)
     max_idx = np.max(idcs, axis=1)
-    vtx_voxels = [((i,j,k), (id, olap))
-                  for (id, (xs, xe)) in enumerate(zip(whiteX.T, pialX.T))
-                  for i in range(int(np.floor(min(xs[0], xe[0]))), int(np.ceil(max(xs[0], xe[0]))))
-                  for j in range(int(np.floor(min(xs[1], xe[1]))), int(np.ceil(max(xs[1], xe[1]))))
-                  for k in range(int(np.floor(min(xs[2], xe[2]))), int(np.ceil(max(xs[2], xe[2]))))
+    vtx_voxels = [((i,j,k), (ii, olap))
+                  for (ii, (mns, mxs, xs, xe)) in enumerate(zip(mins.T, maxs.T, whiteX.T, pialX.T))
+                  for i in range(mns[0], mxs[0]+1)
+                  for j in range(mns[1], mxs[1]+1)
+                  for k in range(mns[2], mxs[2]+1)
                   for olap in [_line_voxel_overlap((i,j,k), xs, xe)]
                   if olap > 0]
     # and accumulate these lists... first group by voxel index then sum across these
@@ -70,10 +73,12 @@ def _vertex_to_voxel_lines_interpolation(hemi, gray_indices, vertex_to_voxel_mat
     ijk2idx = {tuple(ijk):idx for (idx,ijk) in enumerate(zip(*gray_indices))}
     # we now just need to put things in order:
     interp = sps.lil_matrix((len(gray_indices[0]), hemi.vertex_count), dtype=np.float)
+    tmp = np.asarray([x for x in six.iterkeys(vox_byidx) if x not in ijk2idx])
     for (ijk,dat) in six.iteritems(vox_byidx):
-        ijk = ijk2idx[ijk]
-        for (idx,olap) in zip(*dat):
-            interp[idx, ijk] = olap
+        if ijk in ijk2idx:
+            ijk = ijk2idx[ijk]
+            for (idx,olap) in zip(*dat):
+                interp[ijk, idx] = olap
     return interp.tocsr()
 
 def _vertex_to_voxel_nearest_interpolation(hemi, gray_indices, voxel_to_vertex_matrix):
@@ -235,7 +240,7 @@ class Subject(ObjectWithMetaData):
         sub.gray_indices is a frozenset of the indices of the gray voxels in the given subject
         represented as 3-tuples.
         '''
-        if   lh_gray_indices is None and rh_gray_indices is None: return None
+        if lh_gray_indices is None and rh_gray_indices is None: return None
         if lh_gray_indices is None: lh_gray_indices = frozenset([])
         else: lh_gray_indices = frozenset([tuple(idx) for idx in np.transpose(lh_gray_indices)])
         if rh_gray_indices is None: rh_gray_indices = frozenset([])
@@ -380,9 +385,8 @@ class Subject(ObjectWithMetaData):
             if   hemi[0] is None: data = (None, data['rh'])
             elif hemi[1] is None: data = (data['lh'], None)
             else: data = (data['lh'], data['rh'])
-        elif pimms.is_matrix(data):
+        elif hasattr(data, '__iter__') and len(data) == 2:
             data = np.asarray(data)
-            if data.shape[0] != 2: data = data.T
         else:
             if   hemi[0] is None: data = (data, None)
             elif hemi[1] is None: data = (None, data)
@@ -425,7 +429,7 @@ class Subject(ObjectWithMetaData):
         # Figure out the dtype
         if dtype is None:
             # check the input...
-            if all(d is None or not np.is_vector(d, 'inexact') for d in data):
+            if all(d is None or not pimms.is_vector(d, 'inexact') for d in data):
                 dtype = np.int32
             else: dtype = np.float32
         # make our output array

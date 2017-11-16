@@ -1409,8 +1409,8 @@ def predict_retinotopy(sub, template='benson17', registration='fsaverage'):
     if template not in retino_tmpls:
         libdir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'lib', 'data')
         search_paths = subject_paths() + [libdir]
-        filenames = ['%s.%s_%s.mgz' % (hname,template,fnm)
-                     for fnm in ['angle','eccen','varea']
+        filenames = ['%s.%s_%s' % (hname,template,fnm)
+                     for fnm in ['angle','eccen','varea','radius']
                      for hname in hemis]
         # find an appropriate directory
         tmpl_path = next((os.path.join(path0, registration)
@@ -1419,12 +1419,12 @@ def predict_retinotopy(sub, template='benson17', registration='fsaverage'):
                                  for s in filenames)),
                          None)
         if tmpl_path is None:
-            raise ValueError('No subject found with appropriate surf/*.%s_*.mgz files!' % template)
+            raise ValueError('No subject found with appropriate surf/*.%s_* files!' % template)
         tmpl_sub = freesurfer_subject(registration)
         for h in hemis:
             retino_tmpls[template] = {
-                k: pimms.imm_array(fsmgh.load('%s.%s_%s.mgz'%(h,template,k)).get_data().flatten())
-                for k in ['angle', 'eccen', 'varea']}
+                k: pimms.imm_array(fsio.read_morph_data('%s.%s_%s' % (h,template,k)))
+                for k in ['angle', 'eccen', 'varea', 'radius']}
     # Okay, we just need to interpolate over to this subject
     tmpl = _retinotopy_templates[template]
     if not all(s in tmpl for s in hemis):
@@ -1436,7 +1436,7 @@ def predict_retinotopy(sub, template='benson17', registration='fsaverage'):
     else:
         fsa = freesurfer_subject('fsaverage')
         subj_hems = (sub.lh, sub.rh)
-        tmpl_hems = (sym.lh, sym.lh)
+        tmpl_hems = (fsa.lh, fsa.rh)
     return tuple([th.interpolate(sh, tmpl) for (sh,th) in zip(subj_hems, tmpl_hems)])
 
 def clean_retinotopy(obj, retinotopy='empirical', output_style='visual', weight=Ellipsis,
