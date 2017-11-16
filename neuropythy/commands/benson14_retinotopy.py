@@ -10,7 +10,7 @@ import scipy                        as     sp
 import nibabel                      as     nib
 import nibabel.freesurfer.io        as     fsio
 import nibabel.freesurfer.mghformat as     fsmgh
-import os, sys, pimms
+import os, sys, six, pimms
 
 from neuropythy.freesurfer          import (subject, add_subject_path)
 from neuropythy.util                import (CommandLineParser, export_image)
@@ -80,17 +80,21 @@ _benson14_parser_instructions = [
     ('x', 'no-volume-export',       'no_vol_export',     False),
     ('z', 'no-surface-export',      'no_surf_export',    False),
     ('n', 'no-overwrite',           'no_overwrite',      False),
-    # Options                       
+    # Options
     ('e', 'eccen-tag',              'eccen_tag',         'benson14_eccen'),
     ('a', 'angle-tag',              'angle_tag',         'benson14_angle'),
     ('l', 'label-tag',              'label_tag',         'benson14_varea'),
+    ('r', 'radius-tag',             'radius_tag',        'benson14_sigma'),
     ('d', 'subjects-dir',           'subjects_dir',      None),
-    ('t', 'template',               'template',          'benson17')]
+    ('t', 'template',               'template',          'benson17'),
+    ('s', 'surf-format',            'surf_format',       'curv'),
+    ('v', 'vol-format',             'vol_format',        'mgz'),
+    ('R', 'reg',                    'registration',      'fsaverage')]
 _benson14_parser = CommandLineParser(_benson14_parser_instructions)
 def main(*args):
     '''
     benson14_retinotopy.main(args...) runs the benson14_retinotopy command; see 
-    benson14_retinotopy.info for mor information.
+    benson14_retinotopy.info for more information.
     '''
     # Parse the arguments...
     (args, opts) = _benson14_parser(args)
@@ -99,10 +103,43 @@ def main(*args):
         print(info, file=sys.stdout)
         return 1
     # verbose?
-    verbose = opts['verbose']
-    def note(s):
-        if verbose: print(s, file=sys.stdout)
-        return verbose
+    if opts['verbose']:
+        def note(s):
+            print(s, file=sys.stdout)
+            return True
+    else:
+        def note(s): return False
+    # based on format, how do we export?
+    sfmt = opts['surf_format'].lower()
+    if sfmt in ['curv', 'auto', 'automatic', 'morph']:
+        export_surf = fsio.write_morph_data
+    elif sfmt in ['mgh', 'mgz']:
+        def export_surf(flnm,data):
+            data = np.asarray([[data]])
+            img = fsmgh.MGHImage(data, np.eye(4))
+            img.to_filename(flnm + '.' + sfmt)
+    elif sfmt in ['nii', 'nii.gz', 'nifti']:
+        sfmt = 'nii.gz' if sfmt == 'nifti' else sfmt
+        def export_surf(flnm,data):
+            data = np.asarray([[data]])
+            img = nib.Nifti1Image(data, np.eye(4))
+            img.to_filename(flnm + '.' + fmst)
+    else:
+        raise ValueError('Unknown surface format: %s' % opts['surf_format'])
+    vfmt = opts['vol_format'].lower()
+    if vfmt in ['mgh', 'mgz']:
+        def export_vol(flnm, data, sub):
+            data = np.asarray(data)
+            img = fsmgh.MGHImage(data, sub.voxel_to_vertex_matrix)
+            img.to_filename(flnm + '.' + fmt)
+    elif fmt in ['nii', 'nii.gz', 'nifti']:
+        fmt = 'nii.gz' if fmt == 'nifti' else fmt
+        def export_vol(flnm, data, sub):
+            data = np.asarray(data)
+            img = nib.Nifti1Image(data, sub.voxel_to_vertex_matrix)
+            img.to_filename(flnm + '.' + fmt)
+    else:
+        raise ValueError('Unknown volume format: %s' % opts['vol_format'])
     # Add the subjects directory, if there is one
     if 'subjects_dir' in opts and opts['subjects_dir'] is not None:
         add_subject_path(opts['subjects_dir'])
@@ -111,36 +148,33 @@ def main(*args):
     nve = opts['no_vol_export']
     tr = {'polar_angle':  opts['angle_tag'],
           'eccentricity': opts['eccen_tag'],
-          'visual_area':      opts['label_tag']}
+          'visual_area':  opts['label_tag'],
+          'radius':       opts['radius_tag']}
     # okay, now go through the subjects...
     for subnm in args:
         note('Processing subject %s:' % subnm)
         sub = subject(subnm)
         note('   - Interpolating template...')
-        (lhdat, rhdat) = predict_retinotopy(sub, template=opts['template'])
+        (lhdat, rhdat) = predict_retinotopy(sub,
+                                            template=opts['template'],
+                                            registration=opts['registration'])
         # Export surfaces
         if nse:
             note('   - Skipping surface export.')
         else:
             note('   - Exporting surfaces:')
-            for (t,dat) in lhdat.iteritems():
-                flnm = os.path.join(sub.directory, 'surf', 'lh.' + tr[t] + '.mgz')
+            for (t,dat) in six.iteritems(lhdat):
+                flnm = os.path.join(sub.directory, 'surf', 'lh.' + tr[t])
                 if ow or not os.path.exist(flnm):
                     note('    - Exporting LH prediction file: %s' % flnm)
-                    img = fsmgh.MGHImage(
-                        np.asarray([[dat]], dtype=(np.int32 if t == 'visual_area' else np.float32)),
-                        np.eye(4))
-                    img.to_filename(flnm)
+                    export_surf(flnm, dat)
                 else:
                     note('    - Not overwriting existing file: %s' % flnm)
-            for (t,dat) in rhdat.iteritems():
-                flnm = os.path.join(sub.directory, 'surf', 'rh.' + tr[t] + '.mgz')
+            for (t,dat) in six.iteritems(rhdat):
+                flnm = os.path.join(sub.directory, 'surf', 'rh.' + tr[t])
                 if ow or not os.path.exist(flnm):
                     note('    - Exporting RH prediction file: %s' % flnm)
-                    img = fsmgh.MGHImage(
-                        np.asarray([[dat]], dtype=(np.int32 if t == 'visual_area' else np.float32)),
-                        np.eye(4))
-                    img.to_filename(flnm)
+                    export_surf(flnm, dat)
                 else:
                     note('    - Not overwriting existing file: %s' % flnm)
         # Export volumes
@@ -158,7 +192,7 @@ def main(*args):
                         method=('nearest' if t == 'visual_area' else 'lines'),
                         dtype=dtyp)
                     note('    - Exporting volume file: %s' % flnm)
-                    export_image(flnm, vol, dtype=dtyp)
+                    export_vol(flnm, vol, sub)
                 else:
                     note('    - Not overwriting existing file: %s' % flnm)
         note('   Subject %s finished!' % sub.id)
