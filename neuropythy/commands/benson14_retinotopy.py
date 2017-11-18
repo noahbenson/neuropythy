@@ -189,7 +189,7 @@ def main(*args):
                     dtyp = (np.int32 if t == 'visual_area' else np.float32)
                     vol = sub.cortex_to_image(
                         (lhdat[t], rhdat[t]),
-                        method=('nearest' if t == 'visual_area' else 'lines'),
+                        method=('nearest' if t == 'visual_area' else 'linear'),
                         dtype=dtyp)
                     note('    - Exporting volume file: %s' % flnm)
                     export_vol(flnm, vol, sub)

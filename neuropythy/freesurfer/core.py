@@ -178,7 +178,7 @@ class Subject(mri.Subject):
                                             'area.pial': 'pial_surface_area',
                                             'curv':      'curvature'},
                                            _auto_retino_names]
-                                 for (k,a) in d.iteritems()})
+                                 for (k,a) in six.iteritems(d)})
     @staticmethod
     def _cortex_from_path(chirality, name, surf_path, data_path, data_prefix=Ellipsis):
         '''
@@ -285,8 +285,11 @@ class Subject(mri.Subject):
                if f[0] != '.'
                if len(f) > 4 and f[-4:].lower() in ['.mgz', '.mgh']
                if os.path.isfile(f)]
-        return pimms.lazy_map({os.path.split(flnm)[-1][:-4]: lambda:_load_imm_mgh(flnm)
-                               for flnm in fls})
+        def _make_loader(fname):
+            def _loader():
+                return _load_imm_mgh(fname)
+            return _loader
+        return pimms.lazy_map({os.path.split(flnm)[-1][:-4]: _make_loader(flnm) for flnm in fls})
     @pimms.value
     def images(mgh_images):
         '''
@@ -323,6 +326,12 @@ class Subject(mri.Subject):
         See neuropythy.mri.Subject.voxel_to_vertex_matrix.
         '''
         return pimms.imm_array(mgh_images['ribbon'].header.get_vox2ras_tkr())
+    @pimms.value
+    def voxel_to_native_matrix(mgh_images):
+        '''
+        See neuropythy.mri.Subject.voxel_to_native_matrix.
+        '''
+        return pimms.imm_array(mgh_images['ribbon'].header.get_affine())
 
 def subject(name):
     '''

@@ -3,14 +3,16 @@
 # Tools for interpolating from meshes.
 # By Noah C. Benson
 
-import numpy          as np
-import numpy.matlib   as npml
-import numpy.linalg   as npla
-import scipy          as sp
-import scipy.spatial  as space
-import scipy.sparse   as sps
-import scipy.optimize as spopt
-import pyrsistent     as pyr
+import numpy                        as np
+import numpy.matlib                 as npml
+import numpy.linalg                 as npla
+import scipy                        as sp
+import scipy.spatial                as space
+import scipy.sparse                 as sps
+import scipy.optimize               as spopt
+import nibabel                      as nib
+import nibabel.freesurfer.mghformat as fsmgh
+import pyrsistent                   as pyr
 import sys, six, pimms
 
 if sys.version_info[0] == 3: from   collections import abc as colls
@@ -1343,6 +1345,69 @@ class Mesh(VertexSet):
             tx = np.asarray(self.coordinates[:,faces[:,face_id]].T)
         return barycentric_to_cartesian(tx, coords)
 
+    def from_image(self, image, affine=None, method=None, fill=0, dtype=None):
+        '''
+        mesh.from_image(image) interpolates the given 3D image array at the values in the given 
+          mesh's coordinates and yields the property that results. If image is given as a string, then
+          this function will attempt to load it as an mgh/mgz file or a nifti file.
+
+        The following options may be used:
+          * affine (default: None) may specify the affine transform that aligns the vertex coordinates
+            with the image (vertex-to-voxel transform). If None, then uses a FreeSurfer-like transform
+            by default. Note that if image is an MGHImage or a Nifti1Image, then the tkr-affine or the
+            affine transform included in the header will be used by default if None is given.
+          * method (default: None) may specify either 'linear' or 'nearest'; if None, then the
+            interpolation is linear when the image data is real and nearest otherwise.
+          * fill (default: 0) values filled in when a vertex falls outside of the image.
+        '''
+        if isinstance(image, fsmgh.MGHImage):
+            # we want to apply the tkr transform by default
+            if affine is None: affine = npla.inv(image.header.get_vox2ras_tkr())
+            image = image.get_data()
+        elif isinstance(image, nib.Nifti1Image):
+            if affine is None: affine = npla.inv(image.affine)
+            image = image.get_data()
+        elif pimms.is_str(image):
+            try:    return self.from_image(fsmgh.load(image), affine=affine, method=method, fill=fill)
+            except: return self.from_image(nib.load(image),   affine=affine, method=method, fill=fill)
+        image = np.asarray(image)
+        if affine is None:
+            ijk0 = np.asarray(image.shape) * 0.5
+            affine = to_affine(([[-1,0,0],[0,0,-1],[0,1,0]], ijk0), 3)
+        else: affine = to_affine(affine, 3)
+        if method is not None: method = method.lower()
+        if method is None or method in ['auto', 'automatic']:
+            method = 'linear' if np.issubdtype(image.dtype, np.inexact) else 'nearest'
+        if dtype is None: dtype = image.dtype
+        # okay, these are actually pretty simple; first transform the coordinates
+        xyz = affine.dot(np.vstack((self.coordinates, np.ones(self.vertex_count))))[0:3]
+        res = np.full(self.vertex_count, fill, dtype=dtype)
+        # now find the nearest voxel centers...
+        # if we are doing nearest neighbor; we're basically done already:
+        if method == 'nearest':
+            ijk = np.asarray(np.round(xyz), dtype=np.int)
+            ok = np.all((ijk >= 0) & [ii < sh for (ii,sh) in zip(ijk, image.shape)], axis=0)
+            res[ok] = image[tuple(ijk[:,ok])]
+            return res
+        # otherwise, we do linear interpolation; find the 8 neighboring voxels
+        mins = np.floor(xyz)
+        maxs = np.ceil(xyz)
+        ok = np.all((mins >= 0) & [ii < sh for (ii,sh) in zip(maxs, image.shape)], axis=0)
+        (mins,maxs,xyz) = [x[:,ok] for x in (mins,maxs,xyz)]
+        voxs = np.asarray([mins,
+                           [mins[0], mins[1], maxs[2]],
+                           [mins[0], maxs[1], mins[2]],
+                           [mins[0], maxs[1], maxs[2]],
+                           [maxs[0], mins[1], mins[2]],
+                           [maxs[0], mins[1], maxs[2]],                           
+                           [maxs[0], maxs[1], mins[2]],
+                           maxs],
+                          dtype=np.int)
+        wgts = np.asarray([np.prod(1 - np.abs(xyz - row), axis=0) for row in voxs])
+        vals = np.asarray([image[tuple(row)] for row in voxs])
+        res[ok] = np.sum(wgts * vals, axis=0)
+        return res
+    
     # smooth a field on the cortical surface
     def smooth(self, prop, smoothness=0.5, weights=None, weight_min=None, weight_transform=None,
                outliers=None, data_range=None, mask=None, valid_range=None, null=np.nan,

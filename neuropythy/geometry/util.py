@@ -436,3 +436,121 @@ def point_in_triangle(tri, pt):
     else:
         raise ValueError('triangles and pts do not have parallel shapes')
 
+def det4D(m):
+    '''
+    det4D(array) yields the determinate of the given matrix array, which may have more than 2
+      dimensions, in which case the later dimensions are multiplied and added point-wise.
+    '''
+    # I just solved this in Mathematica, copy-pasted, and replaced the string '] m' with ']*m':
+    # Mathematica code: Det@Table[m[i][j], {i, 0, 3}, {j, 0, 3}]
+    return (m[0][3]*m[1][2]*m[2][1]*m[3][0] - m[0][2]*m[1][3]*m[2][1]*m[3][0] -
+            m[0][3]*m[1][1]*m[2][2]*m[3][0] + m[0][1]*m[1][3]*m[2][2]*m[3][0] +
+            m[0][2]*m[1][1]*m[2][3]*m[3][0] - m[0][1]*m[1][2]*m[2][3]*m[3][0] -
+            m[0][3]*m[1][2]*m[2][0]*m[3][1] + m[0][2]*m[1][3]*m[2][0]*m[3][1] +
+            m[0][3]*m[1][0]*m[2][2]*m[3][1] - m[0][0]*m[1][3]*m[2][2]*m[3][1] -
+            m[0][2]*m[1][0]*m[2][3]*m[3][1] + m[0][0]*m[1][2]*m[2][3]*m[3][1] +
+            m[0][3]*m[1][1]*m[2][0]*m[3][2] - m[0][1]*m[1][3]*m[2][0]*m[3][2] -
+            m[0][3]*m[1][0]*m[2][1]*m[3][2] + m[0][0]*m[1][3]*m[2][1]*m[3][2] +
+            m[0][1]*m[1][0]*m[2][3]*m[3][2] - m[0][0]*m[1][1]*m[2][3]*m[3][2] -
+            m[0][2]*m[1][1]*m[2][0]*m[3][3] + m[0][1]*m[1][2]*m[2][0]*m[3][3] +
+            m[0][2]*m[1][0]*m[2][1]*m[3][3] - m[0][0]*m[1][2]*m[2][1]*m[3][3] -
+            m[0][1]*m[1][0]*m[2][2]*m[3][3] + m[0][0]*m[1][1]*m[2][2]*m[3][3])
+def det_4x3(a,b,c,d):
+    '''
+    det_4x3(a,b,c,d) yields the determinate of the matrix formed the given rows, which may have
+      more than 1 dimension, in which case the later dimensions are multiplied and added point-wise.
+      The point's must be 3D points; the matrix is given a fourth column of 1s and the resulting
+      determinant is of this matrix. 
+    '''
+    # I just solved this in Mathematica, copy-pasted, and replaced the string '] m' with ']*m':
+    # Mathematica code: Det@Table[If[j == 3, 1, i[j]], {i, {a, b, c, d}}, {j, 0, 3}]
+    return (a[1]*b[2]*c[0] + a[2]*b[0]*c[1] - a[2]*b[1]*c[0] - a[0]*b[2]*c[1] -
+            a[1]*b[0]*c[2] + a[0]*b[1]*c[2] + a[2]*b[1]*d[0] - a[1]*b[2]*d[0] -
+            a[2]*c[1]*d[0] + b[2]*c[1]*d[0] + a[1]*c[2]*d[0] - b[1]*c[2]*d[0] -
+            a[2]*b[0]*d[1] + a[0]*b[2]*d[1] + a[2]*c[0]*d[1] - b[2]*c[0]*d[1] -
+            a[0]*c[2]*d[1] + b[0]*c[2]*d[1] + a[1]*b[0]*d[2] - a[0]*b[1]*d[2] -
+            a[1]*c[0]*d[2] + b[1]*c[0]*d[2] + a[0]*c[1]*d[2] - b[0]*c[1]*d[2])
+    
+def tetrahedral_barycentric_coordinates(tetra, pt):
+    '''
+    tetrahedral_barycentric_coordinates(tetrahedron, point) yields a list of weights for each vertex
+      in the given tetrahedron in the same order as the vertices given. If all weights are 0, then
+      the point is not inside the tetrahedron.
+    '''
+    # I found a description of this algorithm here (Nov. 2017):
+    # http://steve.hollasch.net/cgindex/geometry/ptintet.html
+    tetra = np.asarray(tetra)
+    if tetra.shape[0] != 4:
+        if tetra.shape[1] == 4:
+            if tetra.shape[0] == 3:
+                tetra = np.transpose(tetra, (1,0) if len(tetra.shape) == 2 else (1,0,2))
+            else:
+                tetra = np.transpose(tetra, (1,2,0))
+        elif tetra.shape[1] == 3:
+            tetra = np.transpose(tetra, (2,1,0))
+        else:
+            tetra = np.transpose(tetra, (2,0,1))
+    elif tetra.shape[1] != 3:
+        tetra = np.transpose(tetra, (0,2,1))
+    if pt.shape[0] != 3: pt = pt.T
+    # Okay, calculate the determinants...
+    d_ = det_4x3(tetra[0], tetra[1], tetra[2], tetra[3])
+    d0 = det_4x3(pt,       tetra[1], tetra[2], tetra[3])
+    d1 = det_4x3(tetra[0], pt,       tetra[2], tetra[3])
+    d2 = det_4x3(tetra[0], tetra[1], pt,       tetra[3])
+    d3 = det_4x3(tetra[0], tetra[1], tetra[2], pt)
+    s_ = np.sign(d_)
+    z_ = (np.isclose(d_, 0) | np.any([s_ != si for si in np.sign([d0,d1,d2,d3])], axis=0))
+    d_inv = (~z_) / (d_ + z_)
+    return np.asarray([d_inv * dq for dq in (d0,d1,d2,d3)])
+
+def point_in_tetrahedron(tetra, pt):
+    '''
+    point_in_tetrahedron(tetrahedron, point) yields True if the given point is in the given 
+      tetrahedron. If either tetrahedron or point (or both) are lists of shapes/points, then this
+      calculation is automatically threaded over all the given arguments.
+    '''
+    bcs = tetrahedral_barycentric_coordinates(tetra, pt)
+    return ~np.all(np.isclose(bcs, 0), axis=0)
+
+def prism_barycentric_coordinates(tri1, tri2, pt):
+    '''
+    prism_barycentric_coordinates(tri1, tri2, point) yields a list of weights for each vertex
+      in the given tetrahedron in the same order as the vertices given. If all weights are 0, then
+      the point is not inside the tetrahedron. The returned weights are in a 2 x 3 matrix where the
+      first row gives weights for tri1 and the second for tri2.
+    '''
+    pt = np.asarray(pt)
+    tri1 = np.asarray(tri1)
+    tri2 = np.asarray(tri2)
+    (tri1,tri2) = [
+        (np.transpose(tri, (1,0) if len(tri.shape) == 2 else (2,0,1)) if tri.shape[0] != 3 else
+         np.transpose(tri, (0,2,1))                                   if tri.shape[1] != 3 else
+         tri)
+        for tri in (tri1,tri2)]
+    pt = pt.T if pt.shape[0] != 3 else pt
+    # get the individual tetrahedron bc coordinates
+    bcs1 = tetrahedral_barycentric_coordinates([tri1[0], tri1[1], tri1[2], tri2[0]], pt)
+    bcs2 = tetrahedral_barycentric_coordinates([tri1[1], tri1[2], tri2[0], tri2[1]], pt)
+    bcs3 = tetrahedral_barycentric_coordinates([tri1[2], tri2[0], tri2[1], tri2[2]], pt)
+    bcs4 = tetrahedral_barycentric_coordinates([tri1[0], tri1[1], tri2[0], tri2[1]], pt)
+    bcs5 = tetrahedral_barycentric_coordinates([tri1[0], tri1[2], tri2[0], tri2[2]], pt)
+    bcs6 = tetrahedral_barycentric_coordinates([tri1[1], tri1[2], tri2[1], tri2[2]], pt)
+    bcs = ((bcs1[0] + bcs4[0] + bcs5[0],
+            bcs1[1] + bcs2[0] + bcs4[1] + bcs6[0],
+            bcs1[2] + bcs2[1] + bcs3[0] + bcs5[1] + bcs6[1]),
+           (bcs1[3] + bcs2[2] + bcs3[1] + bcs4[2] + bcs5[2],
+            bcs2[3] + bcs3[2] + bcs4[3] + bcs6[2],
+            bcs3[3] + bcs5[3] + bcs6[3]))
+    return np.asarray(bcs)
+
+def point_in_prism(tri1, tri2, pt):
+    '''
+    point_in_prism(tri1, tri2, pt) yields True if the given point is inside the prism that stretches
+      between triangle 1 and triangle 2. Will automatically thread over extended dimensions. If
+      multiple triangles are given, then the vertices must be an earlier dimension than the
+      coordinates; e.g., a 3 x 3 x n array will be assumed to organized such that element [0,1,k] is
+      the y coordinate of the first vertex of the k'th triangle.
+    '''
+    bcs = prism_barycentric_coordinates(tri1, tri2, pt)
+    return ~np.isclose(np.sum(bcs[0] + bcs[1], axis=0), 0)

@@ -182,7 +182,7 @@ _retinotopy_parser_instructions = [
     ['y', 'eccen-tag',              'eccen_tag',         'inferred_eccen'],
     ['w', 'angle-tag',              'angle_tag',         'inferred_angle'],
     ['l', 'label-tag',              'label_tag',         'inferred_varea'],
-    ['j', 'radius-tag',             'radius_tag',        'inferred_prfsz'],
+    ['j', 'radius-tag',             'radius_tag',        'inferred_sigma'],
     ['u', 'registration-name',      'registration_name', 'retinotopy'],
     ['M', 'max-output-eccen',       'max_out_eccen',     '90'],
     ['I', 'max-input-eccen',        'max_in_eccen',      '90'],
@@ -479,12 +479,12 @@ def save_volume_files(note, error, registrations, subject,
                            [angle_tag, eccen_tag, label_tag, radius_tag]):
         # we have to make the volume first...
         dat = tuple([None if h is None else h.prop(pname) for h in hemis])
-        (mtd,dt) = ('nearest',np.int32) if pname == 'visual_area' else ('lines',np.float32)
+        (mtd,dt) = ('nearest',np.int32) if pname == 'visual_area' else ('linear',np.float32)
         note('Constructing %s image...' % pname)
         img = subject.cortex_to_image(dat, method=mtd, dtype=dt)
         flnm = export(os.path.join(path, tag), img)
         files.append(flnm)
-    return {'surface_files': tuple(files)}
+    return {'volume_files': tuple(files)}
 @pimms.calc('files')
 def accumulate_files(surface_files, volume_files):
     '''

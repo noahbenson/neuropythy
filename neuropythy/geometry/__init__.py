@@ -31,6 +31,10 @@ from .util import (
     barycentric_to_cartesian,
     triangle_address,
     triangle_unaddress,
-    point_in_triangle)
+    point_in_triangle,
+    point_in_tetrahedron,
+    point_in_prism,
+    tetrahedral_barycentric_coordinates,
+    prism_barycentric_coordinates)
 from .mesh import (VertexSet, Tesselation, Mesh, Topology, MapProjection)
 
