@@ -1194,7 +1194,7 @@ class Mesh(VertexSet):
                 self.properties if data.lower() == 'all' else self.properties[data])
         elif pimms.is_lazy_map(data):
             def _make_lambda(kk): return lambda:self.apply_interpolation(interp, data[kk])
-            return pimms.lazy_map({k:_make_lambda(k) for k in data.iterkeys()})
+            return pimms.lazy_map({k:_make_lambda(k) for k in six.iterkeys(data)})
         elif pimms.is_map(data):
             return pyr.pmap({k:self.apply_interpolation(interp, data[k])
                              for k in six.iterkeys(data)})
@@ -1345,36 +1345,41 @@ class Mesh(VertexSet):
             tx = np.asarray(self.coordinates[:,faces[:,face_id]].T)
         return barycentric_to_cartesian(tx, coords)
 
-    def from_image(self, image, affine=None, method=None, fill=0, dtype=None):
+    def from_image(self, image, affine=None, method=None, fill=0, dtype=None,
+                   native_to_vertex_matrix=None):
         '''
         mesh.from_image(image) interpolates the given 3D image array at the values in the given 
-          mesh's coordinates and yields the property that results. If image is given as a string, then
+          mesh's coordinates and yields the property that results. If image is given as a string,
           this function will attempt to load it as an mgh/mgz file or a nifti file.
 
         The following options may be used:
-          * affine (default: None) may specify the affine transform that aligns the vertex coordinates
-            with the image (vertex-to-voxel transform). If None, then uses a FreeSurfer-like transform
-            by default. Note that if image is an MGHImage or a Nifti1Image, then the tkr-affine or the
-            affine transform included in the header will be used by default if None is given.
+          * affine (default: None) may specify the affine transform that aligns the vertex
+            coordinates with the image (vertex-to-voxel transform). If None, then uses a
+            FreeSurfer-like transformby default. Note that if image is an MGHImage or a Nifti1Image,
+            then the included affine transform included in the header will be used by default if
+            None is given.
           * method (default: None) may specify either 'linear' or 'nearest'; if None, then the
             interpolation is linear when the image data is real and nearest otherwise.
           * fill (default: 0) values filled in when a vertex falls outside of the image.
+          * native_to_vertex_matrix (default: None) may optionally give a final transformation that
+            converts from native subject orientation encoded in images to vertex positions.
         '''
-        if isinstance(image, fsmgh.MGHImage):
+        if isinstance(image, nib.analyse.SpatialImage):
             # we want to apply the tkr transform by default
-            if affine is None: affine = npla.inv(image.header.get_vox2ras_tkr())
-            image = image.get_data()
-        elif isinstance(image, nib.Nifti1Image):
             if affine is None: affine = npla.inv(image.affine)
             image = image.get_data()
         elif pimms.is_str(image):
-            try:    return self.from_image(fsmgh.load(image), affine=affine, method=method, fill=fill)
-            except: return self.from_image(nib.load(image),   affine=affine, method=method, fill=fill)
+            try:    return self.from_image(fsmgh.load(image), affine=affine, method=method,
+                                           fill=fill)
+            except: return self.from_image(nib.load(image),   affine=affine, method=method,
+                                           fill=fill)
         image = np.asarray(image)
         if affine is None:
             ijk0 = np.asarray(image.shape) * 0.5
             affine = to_affine(([[-1,0,0],[0,0,-1],[0,1,0]], ijk0), 3)
         else: affine = to_affine(affine, 3)
+        if native_to_vertex_matrix is not None:
+            affine = np.dot(to_affine(native_to_vertex_matrix), affine)
         if method is not None: method = method.lower()
         if method is None or method in ['auto', 'automatic']:
             method = 'linear' if np.issubdtype(image.dtype, np.inexact) else 'nearest'

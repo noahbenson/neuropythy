@@ -1,3 +1,4 @@
+####################################################################################################
 # __init__.py
 
 '''Tools for analyzing and registering cortical meshes.'''
@@ -5,6 +6,8 @@
 submodules = ('neuropythy.util.core'
               'neuropythy.util',
               'neuropythy.java',
+              'neuropythy.io.core',
+              'neuropythy.io',
               'neuropythy.geometry.util',
               'neuropythy.geometry.mesh',
               'neuropythy.geometry',
@@ -35,15 +38,13 @@ def reload_neuropythy():
             sys.modules[mdl] = reload(sys.modules[mdl])
     return reload(sys.modules['neuropythy'])
 
-from mri        import (Cortex)
-from vision     import (retinotopy_data, empirical_retinotopy_data, predicted_retinotopy_data,
-                        register_retinotopy, retinotopy_anchors, retinotopy_model,
-                        neighborhood_cortical_magnification,
-                        as_retinotopy, mesh_retinotopy)
-
-
+from io           import (load, save, to_nifti)
+from mri          import (Cortex, Subject)
+from vision       import (retinotopy_data, empirical_retinotopy_data, predicted_retinotopy_data,
+                          register_retinotopy, retinotopy_anchors, retinotopy_model,
+                          neighborhood_cortical_magnification, as_retinotopy, mesh_retinotopy)
+from   freesurfer import (subject as freesurfer_subject, to_mgh)
 import freesurfer
-from   freesurfer import subject as freesurfer_subject
 
 
 # Version information...

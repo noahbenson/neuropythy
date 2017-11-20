@@ -532,9 +532,11 @@ class Subject(ObjectWithMetaData):
                                                method=method, fill=fill, dtype=dtype)
                           for h in ['lh', 'rh']])
         else:
-            return getattr(self, hemi).from_image(image, surface=surface, affine=affine,
-                                                  method=method, fill=fill, dtype=dtype)
-    
+            hemi = getattr(self, hemi)
+            hemi.from_image(image, surface=surface, affine=affine,
+                            method=method, fill=fill, dtype=dtype,
+                            native_to_vertex_matrix=sub.native_to_vertex_matrix)
+
 @pimms.immutable
 class Cortex(geo.Topology):
     '''
@@ -658,13 +660,15 @@ class Cortex(geo.Topology):
             return self.make_mesh((1 - name)*x0 + name*x1)
         else:
             raise ValueError('could not understand surface layer: %s' % name)
-    def from_image(self, image, surface='midgray', affine=None, method=None, fill=0, dtype=None):
+    def from_image(self, image, surface='midgray', affine=None, method=None, fill=0, dtype=None,
+                   native_to_vertex_matrix=None):
         '''
         cortex.from_image(image) is equivalent to cortex.midgray_surface.from_image(image).
         cortex.from_image(image, surface) uses the given surface (see also cortex.surface).
         '''
         mesh = self.surface(surface)
-        return mesh.from_image(image, affine=affine, method=method, fill=fill, dtype=dtype)
+        return mesh.from_image(image, affine=affine, method=method, fill=fill, dtype=dtype,
+                               native_to_vertex_matrix=native_to_vertex_matrix)
 
 ####################################################################################################
 # These functions deal with cortex_to_image and image_to_cortex interpolation:

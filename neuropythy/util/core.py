@@ -1,6 +1,7 @@
 ####################################################################################################
-# neuropythy/util/command.py
-# This file implements the command-line tools that are available as part of neuropythy.
+# neuropythy/util/core.py
+# This file implements the command-line tools that are available as part of neuropythy as well as
+# a number of other random utilities.
 
 import numpy                        as np
 import pyrsistent                   as pyr

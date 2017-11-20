@@ -4,11 +4,13 @@
 # By Noah C. Benson
 
 import numpy                        as np
+import nibabel                      as nib
 import nibabel.freesurfer.io        as fsio
 import nibabel.freesurfer.mghformat as fsmgh
 import pyrsistent                   as pyr
 import neuropythy.geometry          as geo
 import neuropythy.mri               as mri
+import neuropythy.io                as nyio
 import os, six, pimms
 
 ####################################################################################################
@@ -333,6 +335,7 @@ class Subject(mri.Subject):
         '''
         return pimms.imm_array(mgh_images['ribbon'].header.get_affine())
 
+@nyio.importer('freesurfer_subject', sniff=is_freesurfer_subject_path)
 def subject(name):
     '''
     subject(name) yields a freesurfer Subject object for the subject with the given name.
@@ -341,7 +344,6 @@ def subject(name):
     means that you must create a transient version of the subject to modify it via the member
     function sub.transient().
     '''
-    import os
     subpath = find_subject_path(name)
     if subpath is None: return None
     fpath = '/' + os.path.relpath(subpath, '/')
@@ -352,3 +354,117 @@ def subject(name):
         if isinstance(sub, Subject): subject._cache[fpath] = sub
         return sub
 subject._cache = {}
+
+####################################################################################################
+# import/export code that works with neuropythy.io
+
+# MGH Images!
+@nyio.importer('mgh', ('mgh', 'mgh.gz', 'mgz'))
+def load_mgh(filename, to='auto'):
+    '''
+    load_mgh(filename) yields the MGHImage referened by the given filename by using the
+      nibabel.freesurfer.mghformat.load function.
+    
+    The optional argument 'to' may be used to coerce the resulting data to a particular format; the
+    following arguments are understood:
+      * 'header' will yield just the image header
+      * 'data' will yield the image's data-array
+      * 'field' will yield a squeezed version of the image's data-array and will raise an error if
+        the data object has more than 2 non-unitary dimensions (appropriate for loading surface
+        properties stored in image files)
+      * 'affine' will yield the image's affine transformation
+      * 'image' will yield the raw image object
+      * 'auto' is equivalent to 'image' unless the image has no more than 2 non-unitary dimensions,
+        in which case it is assumed to be a surface-field and the return value is equivalent to
+        the 'field' value.
+    '''
+    img = fsmgh.load(filename)
+    to = to.lower()
+    if to == 'image':    return img
+    elif to == 'data':   return img.get_data()
+    elif to == 'affine': return img.affine
+    elif to == 'header': return img.header
+    elif to == 'field':
+        dat = np.squeeze(img.get_data())
+        if len(data.shape) > 2:
+            raise ValueError('image requested as field has more than 2 non-unitary dimensions')
+        return dat
+    elif to in ['auto', 'automatic']:
+        dims = set(img.dataobj.shape)
+        if 1 < len(dims) < 4 and 1 in dims:
+            return img.squeeze(img.get_data())
+        else:
+            return img
+    else:
+        raise ValueError('unrecognized \'to\' argument \'%s\'' % to)
+def to_mgh(obj, like=None, header=None, affine=None, extra=Ellipsis):
+    '''
+    to_mgh(obj) yields an MGHmage object that is as equivalent as possible to the given object obj.
+      If obj is an MGHImage already and no changes are requested, then it is returned unmolested;
+      otherwise, the optional arguments can be used to edit the header, affine, and exta.
+
+    The following options are accepted:
+      * like (default: None) may be provided to give a guide for the various header- and meta-data
+        that is included in the image. If this is a nifti image object, its meta-data are used; if
+        this is a subject, then the meta-data are deduced from the subject's voxel and native
+        orientation matrices. All other specific options below override anything deduced from the
+        like argument.
+      * header (default: None) may be a Nifti1 or Niti2 image header to be used as the nifti header
+        or to replace the header in a new image.
+      * affine (default: None) may specify the affine transform to be given to the image object.
+      * extra (default: Ellipsis) may specify an extra mapping for storage with the image data; the
+        default value Ellipsis indicates that such a mapping should be left as is if it already
+        exists in the obj or in the like option and should otherwise be empty.
+    '''
+    obj0 = obj
+    # First go from like to explicit versions of affine and header:
+    if like is not None:
+        if isinstance(like, nib.analyze.AnalyzeHeader) or isinstance(obj, fsmgh.MGHHeader):
+            if header is None: header = like
+        elif isinstance(like, nib.analyze.SpatialImage):
+            if header is None: header = like.header
+            if affine is None: affine = like.affine
+            if extra is Ellipsis: extra = like.extra
+        elif isinstance(like, mri.Subject):
+            if affine is None: affine = like.voxel_to_native_matrix
+        else:
+            raise ValueError('Could not interpret like argument with type %s' % type(like))
+    # check to make sure that we have to change something:
+    elif (isinstance(obj, fsmgh.MGHImage)):
+        if ((header is None or obj.header is header) and
+            (extra is Ellipsis or extra == obj.extra or (extra is None and len(obj.extra) == 0))):
+            return obj
+    # okay, now look at the header and affine etc.
+    if header is None:
+        if isinstance(obj, nib.analyze.SpatialImage):
+            header = obj.header
+        else:
+            header = fsmgh.MGHHeader()
+    if affine is None:
+        if isinstance(obj, nib.analyze.SpatialImage):
+            affine = obj.affine
+        else:
+            affine = np.eye(4)
+    if extra is None: extra = {}
+    # Figure out what the data is
+    if isinstance(obj, nib.analyze.SpatialImage):
+        obj = obj.dataobj
+    else:
+        obj = np.asarray(obj)
+    if len(obj.shape) < 3: obj = np.asarray([[obj]])
+    # Okay, make a new object now...
+    obj = fsmgh.MGHImage(obj, affine, header=header, extra=extra)
+    # Okay, that's it!
+    return obj
+@nyio.exporter('mgh', ('mgh', 'mgh.gz', 'mgz'))
+def save_mgh(filename, obj, like=None, header=None, affine=None, extra=Ellipsis):
+    '''
+    save_mgh(filename, obj) saves the given object to the given filename in the mgh format and
+      returns the filename.
+
+    All options that can be given to the to_mgh function can also be passed to this function; they
+    are used to modify the object prior to exporting it.
+    '''
+    obj = to_mgh(obj, like=like, header=header, affine=affine, extra=extra)
+    obj.to_filename(filename)
+    return filename
