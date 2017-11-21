@@ -6,12 +6,14 @@
 import numpy                        as np
 import numpy.linalg                 as npla
 import nibabel.freesurfer.mghformat as fsmgh
+import nibabel.freesurfer.io        as fsio
 import pyrsistent                   as pyr
 import os, sys, gzip, six, types, pimms
 
 import neuropythy.geometry           as geo
 import neuropythy.freesurfer         as nyfs
 import neuropythy.mri                as mri
+import neuropythy.freesurfer         as nyfs
 from   neuropythy.registration   import (mesh_register, java_potential_term)
 from   neuropythy.java           import (to_java_doubles, to_java_ints)
 
@@ -1408,36 +1410,41 @@ def predict_retinotopy(sub, template='benson17', registration='fsaverage'):
     hemis = ['lh','rh'] if registration == 'fsaverage' else ['sym']
     if template not in retino_tmpls:
         libdir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'lib', 'data')
-        search_paths = subject_paths() + [libdir]
+        search_paths = nyfs.subject_paths() + [libdir]
         filenames = ['%s.%s_%s' % (hname,template,fnm)
-                     for fnm in ['angle','eccen','varea','radius']
+                     for fnm in ['angle','eccen','varea','sigma']
                      for hname in hemis]
         # find an appropriate directory
         tmpl_path = next((os.path.join(path0, registration)
                           for path0 in search_paths
-                          if all(os.path.isfile(os.path.join(path, registration, 'surf', s))
+                          if all(os.path.isfile(os.path.join(path0, registration, 'surf', s))
                                  for s in filenames)),
                          None)
         if tmpl_path is None:
             raise ValueError('No subject found with appropriate surf/*.%s_* files!' % template)
-        tmpl_sub = freesurfer_subject(registration)
-        for h in hemis:
-            retino_tmpls[template] = {
-                k: pimms.imm_array(fsio.read_morph_data('%s.%s_%s' % (h,template,k)))
-                for k in ['angle', 'eccen', 'varea', 'radius']}
+        tmpl_sub = nyfs.subject(registration)
+        spath = os.path.join(tmpl_path, 'surf')
+        retino_tmpls[template] = {
+            h:{k: pimms.imm_array(np.asarray(dat, dtype=np.int) if k == 'varea' else dat)
+               for k in ['angle', 'eccen', 'varea', 'sigma']
+               for fnm in [os.path.join(spath, '%s.%s_%s' % (h, template, k))]
+               for dat in [fsio.read_morph_data(fnm)]}
+            for h in ['lh', 'rh']}
+        
     # Okay, we just need to interpolate over to this subject
-    tmpl = _retinotopy_templates[template]
+    tmpl = retino_tmpls[template]
     if not all(s in tmpl for s in hemis):
         raise ValueError('could not find matching template')
     if registration == 'fsaverage_sym':
-        sym = freesurfer_subject('fsaverage_sym')
+        sym = nyfs.subject('fsaverage_sym')
         subj_hems = (sub.lh, sub.hemis['rhx'])
         tmpl_hems = (sym.lh, sym.lh)
     else:
-        fsa = freesurfer_subject('fsaverage')
+        fsa = nyfs.subject('fsaverage')
         subj_hems = (sub.lh, sub.rh)
         tmpl_hems = (fsa.lh, fsa.rh)
-    return tuple([th.interpolate(sh, tmpl) for (sh,th) in zip(subj_hems, tmpl_hems)])
+    return tuple([th.interpolate(sh, tmpl[h])
+                  for (sh,th,h) in zip(subj_hems, tmpl_hems, ['lh','rh'])])
 
 def clean_retinotopy(obj, retinotopy='empirical', output_style='visual', weight=Ellipsis,
                      equality_sigma=0.15, equality_scale=10.0,

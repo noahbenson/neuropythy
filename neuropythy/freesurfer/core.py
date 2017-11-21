@@ -342,10 +342,11 @@ def subject(name):
     Subjects are cached and not reloaded.
     Note that subects returned by freesurfer_subject() are always persistent Immutable objects; this
     means that you must create a transient version of the subject to modify it via the member
-    function sub.transient().
+    function sub.transient(). Better, you can make copies of the objects with desired modifications
+    using the copy method.
     '''
     subpath = find_subject_path(name)
-    if subpath is None: return None
+    if subpath is None: raise ValueError('Could not locate subject with name \'%s\'' % name)
     fpath = '/' + os.path.relpath(subpath, '/')
     if fpath in subject._cache:
         return subject._cache[fpath]
@@ -468,3 +469,72 @@ def save_mgh(filename, obj, like=None, header=None, affine=None, extra=Ellipsis)
     obj = to_mgh(obj, like=like, header=header, affine=affine, extra=extra)
     obj.to_filename(filename)
     return filename
+
+# For other freesurfer formats
+@nyio.importer('freesurfer_geometry', ('white', 'pial', 'sphere', 'sphere.reg', 'inflated'))
+def load_freesurfer_geometry(filename, to='mesh'):
+    '''
+    load_freesurfer_geometry(filename) yields the data stored at the freesurfer geometry file given
+      by filename. The optional argument 'to' may be used to change the kind of data that is
+      returned.
+
+    The following are valid settings for the 'to' keyword argument:
+      * 'mesh' (the default) yields a mesh object
+      * 'tess' yields a tess object (discarding coordinates)
+      * 'raw' yields a tuple of numpy arrays, identical to the read_geometry return value.
+    '''
+    (xs, fs, info) = fsio.read_geometry(filename, read_metadata=True)
+    to = to.lower()
+    if to in ['mesh', 'auto', 'automatic']:
+        return geo.Mesh(fs, xs, meta_data=info)
+    elif to in ['tess', 'tesselation']:
+        return geo.Tesselation(fs, meta_data=info)
+    elif to in ['coords', 'coordinates']:
+        return xs
+    elif to in ['triangles', 'faces']:
+        return fs
+    elif to in ['meta', 'meta_data']:
+        return info
+    elif to =='raw':
+        return (xs, fs)
+    else:
+        raise ValueError('Could not understand \'to\' argument: %s' % to)
+@nyio.exporter('freesurfer_geometry', ('sphere.reg',))
+def save_freesurfer_geometry(filename, obj, volume_info=None, create_stamp=None):
+    '''
+    save_mgh(filename, obj) saves the given object to the given filename in the mgh format and
+      returns the filename.
+
+    All options that can be given to the to_mgh function can also be passed to this function; they
+    are used to modify the object prior to exporting it.
+    '''
+    obj = to_mesh(obj)
+    fsio.write_geometry(filename, obj.coordinates.T, obj.faces.T,
+                        volume_info=volume_info, create_stamp=create_stamp)
+    return filename
+@nyio.importer('freesurfer_morph', ('curv',))
+def load_freesurfer_morph(filename):
+    '''
+    load_freesurfer_morph(filename) yields the result of loading the given filename as FreeSurfer
+      morph-data (e.g., lh.curv).
+    '''
+    return fsio.read_morph_data(filename)
+@nyio.exporter('freesurfer_morph', ('curv',))
+def save_freesurfer_morph(filename, obj, face_count=0):
+    '''
+    save_freesurfer_morph(filename, obj) saves the given object using nibabel.freesurfer.io's
+      write_morph_data function, and returns the given filename.
+    '''
+    fsio.write_morph_data(filename, obj, fnum=face_count)
+    return filename
+@nyio.importer('freesurfer_label', ('label',))
+def load_freesurfer_label(filename, read_scalars=False):
+    '''
+    load_freesurfer_label(filename) is equivalent to nibabel.freesurfer.io.read_label(filename).
+    '''
+    return fsio.read_label(filename, read_scalars=read_scalars)
+    
+
+    
+    
+    

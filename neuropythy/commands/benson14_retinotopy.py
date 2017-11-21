@@ -12,9 +12,10 @@ import nibabel.freesurfer.io        as     fsio
 import nibabel.freesurfer.mghformat as     fsmgh
 import os, sys, six, pimms
 
-from neuropythy.freesurfer          import (subject, add_subject_path)
-from neuropythy.util                import (CommandLineParser, export_image)
-from neuropythy.vision              import (predict_retinotopy, retinotopy_model, clean_retinotopy)
+from   neuropythy.freesurfer        import (subject, add_subject_path)
+from   neuropythy.util              import (CommandLineParser, export_image)
+from   neuropythy.vision            import (predict_retinotopy, retinotopy_model, clean_retinotopy)
+import neuropythy.io                as     nyio
 
 info = \
    '''
@@ -22,19 +23,20 @@ info = \
    template of retinotopy to a subject's left and right hemisphere(s).  At least
    one subject id (either a freesurfer subject name, if SUBJECTS_DIR is set
    appropriately in the environment, or a path to a subject directory) must be
-   given. Each subject must have been registered to the fsaverage_sym subject using
-   the FreeSurfer surfreg command (after xhemireg for right hemispheres).  In each
-   subject's freesurfer directory, a variety of output data is deposited:
-    * surf/lh.angle_benson14.mgz   surf/rh.angle_benson14.mgz
-      surf/lh.eccen_benson14.mgz   surf/rh.eccen_benson14.mgz
-      surf/lh.v123roi_benson14.mgz surf/rh.v123roi_benson14.mgz
-      These files contain predictions of polar angle, eccentricity, and visual-area
-      label for each hemisphere. The files are mgz format, so contain volumes;
-      however, the volumes in each of these files is (1 x 1 x n) where n is the
-      number of vertices in the hemisphere's Freesurfer meshes.
+   given. In each subject's freesurfer directory, a variety of output data is
+   deposited:
+    * surf/lh.angle_benson14  surf/rh.angle_benson14
+      surf/lh.eccen_benson14  surf/rh.eccen_benson14
+      surf/lh.varea_benson14  surf/rh.varea_benson14
+      surf/lh.sigma_benson14  surf/rh.sigma_benson14
+      These files contain predictions of polar angle, eccentricity, visual-area
+      label, and pRF radius for each surface vertex in each hemisphere of the
+      subject's hemispheres. The files are, by default, in FreeSurfer's curv
+      format, but their format can be modified with the --surf-format flag.
     * mri/angle_benson14.mgz
       mri/eccen_benson14.mgz
-      mri/v123roi_benson14.mgz
+      mri/varea_benson14.mgz
+      mri/sigma_benson14.mgz
       These contain the data from the above surface data projected into the
       subject's 3D volume. Note that the volumes are oriented like Freesurfer's
       mri/brain.mgz file; if you want to convert this to the orientation of your
@@ -45,10 +47,15 @@ info = \
     * --eccen-tag=|-y<tag>
       --angle-tag=|-t<tag>
       --label-tag=|-l<tag>
+      --sigma-tag=|-s<tag>
       These options specify the output tag to use for the predicted measurement
       that results from the registration. By default, these are
-      'eccen_benson14', 'angle_benson14', and 'v123roi_benson14'.
+      'eccen_benson14', 'angle_benson14', 'varea_benson14', and 'sigma_benson14'.
       The output files have the name <hemi>.<tag>.mgz
+    * --surf-format=|-o<nifti|nii.gz|nii|mgh|mgz|curv>
+      --vol-format=|-v<nifti|nii.gz|nii|mgh|mgz>
+      These flags specify what format the output should be in; note that nii.gz
+      and nifti are identical; curv is a FreeSurfer curv (AKA morph data) file.
     * --no-volume-export|-x
       --no-surface-export|-z
       These flags indicate that the various data produced and written to the
@@ -68,7 +75,11 @@ info = \
     * --template=|-t
       Specifies the specific template that should be applied. By default this is
       'Benson17', the 2017 version of the template originally described in the paper
-      by Benson et al. (2014). The option 'benson14' is also accepted.
+      by Benson et al. (2014). The option 'benson14' is also accepted. If the 
+    * --reg=|-R<fsaverage|fsaverage_sym>
+      Specifies the registration to look for the template in. This is, by default,
+      fsaverage, but for the templates aligned to the fsaverage_sym hemisphere,
+      this should specify fsaverage_sym.
     * --
       This token, by itself, indicates that the arguments that remain should not be
       processed as flags or options, even if they begin with a -.
@@ -84,10 +95,10 @@ _benson14_parser_instructions = [
     ('e', 'eccen-tag',              'eccen_tag',         'benson14_eccen'),
     ('a', 'angle-tag',              'angle_tag',         'benson14_angle'),
     ('l', 'label-tag',              'label_tag',         'benson14_varea'),
-    ('r', 'radius-tag',             'radius_tag',        'benson14_sigma'),
+    ('s', 'sigma-tag',              'sigma_tag',         'benson14_sigma'),
     ('d', 'subjects-dir',           'subjects_dir',      None),
     ('t', 'template',               'template',          'benson17'),
-    ('s', 'surf-format',            'surf_format',       'curv'),
+    ('o', 'surf-format',            'surf_format',       'curv'),
     ('v', 'vol-format',             'vol_format',        'mgz'),
     ('R', 'reg',                    'registration',      'fsaverage')]
 _benson14_parser = CommandLineParser(_benson14_parser_instructions)
@@ -112,32 +123,19 @@ def main(*args):
     # based on format, how do we export?
     sfmt = opts['surf_format'].lower()
     if sfmt in ['curv', 'auto', 'automatic', 'morph']:
-        export_surf = fsio.write_morph_data
-    elif sfmt in ['mgh', 'mgz']:
-        def export_surf(flnm,data):
-            data = np.asarray([[data]])
-            img = fsmgh.MGHImage(data, np.eye(4))
-            img.to_filename(flnm + '.' + sfmt)
-    elif sfmt in ['nii', 'nii.gz', 'nifti']:
-        sfmt = 'nii.gz' if sfmt == 'nifti' else sfmt
-        def export_surf(flnm,data):
-            data = np.asarray([[data]])
-            img = nib.Nifti1Image(data, np.eye(4))
-            img.to_filename(flnm + '.' + fmst)
+        sfmt = 'freesurfer_morph'
+        sext = ''
+    elif sfmt == 'nifti':
+        sext = '.nii.gz'
+    elif sfmt in ['mgh', 'mgz', 'nii', 'nii.gz']:
+        sext = '.' + sfmt
     else:
         raise ValueError('Unknown surface format: %s' % opts['surf_format'])
     vfmt = opts['vol_format'].lower()
-    if vfmt in ['mgh', 'mgz']:
-        def export_vol(flnm, data, sub):
-            data = np.asarray(data)
-            img = fsmgh.MGHImage(data, sub.voxel_to_vertex_matrix)
-            img.to_filename(flnm + '.' + fmt)
-    elif fmt in ['nii', 'nii.gz', 'nifti']:
-        fmt = 'nii.gz' if fmt == 'nifti' else fmt
-        def export_vol(flnm, data, sub):
-            data = np.asarray(data)
-            img = nib.Nifti1Image(data, sub.voxel_to_vertex_matrix)
-            img.to_filename(flnm + '.' + fmt)
+    if vfmt == 'nifti':
+        vext = '.nii.gz'
+    elif vfmt in ['mgh', 'mgz', 'nii', 'nii.gz']:
+        vext = '.' + vfmt
     else:
         raise ValueError('Unknown volume format: %s' % opts['vol_format'])
     # Add the subjects directory, if there is one
@@ -146,10 +144,10 @@ def main(*args):
     ow = not opts['no_overwrite']
     nse = opts['no_surf_export']
     nve = opts['no_vol_export']
-    tr = {'polar_angle':  opts['angle_tag'],
-          'eccentricity': opts['eccen_tag'],
-          'visual_area':  opts['label_tag'],
-          'radius':       opts['radius_tag']}
+    tr = {'angle': opts['angle_tag'],
+          'eccen': opts['eccen_tag'],
+          'varea': opts['label_tag'],
+          'sigma': opts['sigma_tag']}
     # okay, now go through the subjects...
     for subnm in args:
         note('Processing subject %s:' % subnm)
@@ -164,17 +162,17 @@ def main(*args):
         else:
             note('   - Exporting surfaces:')
             for (t,dat) in six.iteritems(lhdat):
-                flnm = os.path.join(sub.directory, 'surf', 'lh.' + tr[t])
+                flnm = os.path.join(sub.path, 'surf', 'lh.' + tr[t] + sext)
                 if ow or not os.path.exist(flnm):
                     note('    - Exporting LH prediction file: %s' % flnm)
-                    export_surf(flnm, dat)
+                    nyio.save(flnm, dat, format=sfmt)
                 else:
                     note('    - Not overwriting existing file: %s' % flnm)
             for (t,dat) in six.iteritems(rhdat):
-                flnm = os.path.join(sub.directory, 'surf', 'rh.' + tr[t])
+                flnm = os.path.join(sub.path, 'surf', 'rh.' + tr[t] + sext)
                 if ow or not os.path.exist(flnm):
                     note('    - Exporting RH prediction file: %s' % flnm)
-                    export_surf(flnm, dat)
+                    nyio.save(flnm, dat, format=sfmt)
                 else:
                     note('    - Not overwriting existing file: %s' % flnm)
         # Export volumes
@@ -183,7 +181,7 @@ def main(*args):
         else:
             note('   - Exporting Volumes:')
             for t in lhdat.keys():
-                flnm = os.path.join(sub.directory, 'mri', tr[t] + '.mgz')
+                flnm = os.path.join(sub.path, 'mri', tr[t] + vext)
                 if ow or not os.path.exist(flnm):
                     note('    - Preparing volume file: %s' % flnm)
                     dtyp = (np.int32 if t == 'visual_area' else np.float32)
@@ -192,9 +190,9 @@ def main(*args):
                         method=('nearest' if t == 'visual_area' else 'linear'),
                         dtype=dtyp)
                     note('    - Exporting volume file: %s' % flnm)
-                    export_vol(flnm, vol, sub)
+                    nyio.save(flnm, vol, like=sub)
                 else:
                     note('    - Not overwriting existing file: %s' % flnm)
-        note('   Subject %s finished!' % sub.id)
+        note('   Subject %s finished!' % sub.name)
     return 0
             

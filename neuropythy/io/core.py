@@ -183,10 +183,11 @@ def save(filename, data, format=None, **kwargs):
         format = format.lower()
         if format not in exporters:
             # it might be an extension
-            format = next((k for (k,(_,es,_)) in six.iteritems(exporters) if format in es), None)
-            if format is None:
+            fmt = next((k for (k,(_,es,_)) in six.iteritems(exporters) if format in es), None)
+            if fmt is None:
                 # okay, no idea what it is
                 raise ValueError('Format \'%s\' not recognized by neuropythy' % format)
+            format = fmt
     (f,_,_) = exporters[format]
     return f(filename, data, **kwargs)
 def exporter(name, extensions=None, sniff=None):

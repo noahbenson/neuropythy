@@ -572,7 +572,7 @@ class Tesselation(VertexSet):
         tess.validate_properties requres that all non-builtin properties have the same number of
           entries as the there are vertices in the tesselation.
         '''
-        if len(_properties.column_names) == 0:
+        if _properties is None or len(_properties.column_names) == 0:
             return True
         if vertex_count != _properties.row_count:
             ns = (_properties.row_count, vertex_count)
@@ -1123,7 +1123,7 @@ class Mesh(VertexSet):
         if coords.shape[0] == self.coordinates.shape[0]: coords = coords.T
         n = self.coordinates.shape[1]
         m = coords.shape[0]
-        mtx = sps.lil_matrix((m, n), dtype=np.float)
+        mtx = sps.lil_matrix((m, n), dtype=np.int)
         nv = self.nearest_vertex(coords, n_jobs=n_jobs)
         for (ii,u) in enumerate(nv):
             mtx[ii,u] = 1
@@ -2060,7 +2060,7 @@ class Topology(VertexSet):
             if self.registrations[name] is coords:
                 return self
         return self.copy(_registrations=self.registrations.set(name, coords))
-    def interpolate(self, x, data, mask=None, weights=None, method='automatic', n_jobs=1):
+    def interpolate(self, topo, data, mask=None, weights=None, method='automatic', n_jobs=1):
         '''
         topology.interpolate(topo, data) yields a numpy array of the data interpolated from the
           given array, data, which must contain the same number of elements as there are vertices
@@ -2085,6 +2085,8 @@ class Topology(VertexSet):
           * n_jobs (default: 1) is passed along to the cKDTree.query method, so may be set to an
             integer to specify how many processors to use, or may be -1 to specify all processors.
         '''
+        if not isinstance(topo, Topology):
+            raise ValueError('Topologies can only be interpolated with other topologies')
         reg_names = [k for k in topo.registrations.iterkeys() if k in self.registrations]
         if not reg_names:
             raise RuntimeError('Topologies do not share a matching registration!')
@@ -2116,4 +2118,56 @@ class Topology(VertexSet):
                              sphere_radius=sphere_radius,
                              pre_affine=pre_affine, post_affine=post_affine)
         return proj(self, tag=tag)
+
+
+####################################################################################################
+# Some Functions that deal with converting to/from the above classes
+
+def to_tess(obj, properties=None, meta_data=None):
+    '''
+    to_tess(obj) yields a Tesselation object that is equivalent to obj; if obj is a tesselation
+      object already and no changes are requested (see options) then obj is returned unmolested.
+
+    The following objects can be converted into tesselations:
+      * a tesselation object
+      * a mesh or topology object (yields their tess objects)
+      * a 3 x n or n x 3 matrix of integers (the faces)
+      * a tuple (coords, faces), as returned when, for example, loading a freesurfer geometry file;
+        in this cases, the result is equivalent to to_tess(faces)
+
+    The following options are accepted:
+      * properties (default: None) specifies properties that should be given to the tesselation
+        object (see Tesselation and VertexSet).
+      * meta_data (default: None) specifies meta-data that should be attached to the tesselation
+        object (see Tesselation).
+    '''
+    if isinstance(obj, Tesselation): res = obj
+    elif isinstance(obj, Mesh): res = obj.tess
+    elif isinstance(obj, Topology): res = obj.tess
+    elif pimms.is_matrix(obj, 'number'): res = Tesselation(obj)
+    elif isinstance(obj, types.TupleType) and len(obj) == 2 and pimms.is_matrix(obj[1], 'int'):
+        res = Tesselation(obj[1])
+    else: raise ValueError('Cannot deduce how object is a tesselation')
+    if properties is not None: res = res.with_prop(properties)
+    if meta_data is not None:  res = res.with_meta(meta_data)
+    return res
+def to_mesh(obj, properties=None, meta_data=None):
+    '''
+    to_mesh(obj) yields a Mesh object that is equivalent to obj; if obj is a mesh object and no
+      changes are requested (see options) then obj is returned unmolested.
+
+    The following objects can be converted into meshes:
+      * a mesh object
+      * a tuple (coords, faces) where coords is a coordinate matrix and faces is a matrix of
+        coordinate indices that make-up the triangles
+    '''
+    if isinstance(obj, Mesh):
+        res = mesh
+        if properties is not None: res = res.with_prop(properties)
+        if meta_data is not None: res = res.with_meta(meta_data)
+        return res
+    elif isinstance(obj, types.TupleType) and len(obj) == 2:
+        return Mesh(obj[1], obj[0], properties=properties, meta_data=meta_data)
+    else:
+        raise ValueError('Could not deduce how object can be convertex into a mesh')
 
