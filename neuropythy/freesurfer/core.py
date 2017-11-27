@@ -393,7 +393,7 @@ def load_mgh(filename, to='auto'):
     elif to in ['auto', 'automatic']:
         dims = set(img.dataobj.shape)
         if 1 < len(dims) < 4 and 1 in dims:
-            return img.squeeze(img.get_data())
+            return np.squeeze(img.get_data())
         else:
             return img
     else:

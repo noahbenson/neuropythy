@@ -151,6 +151,7 @@ _retinotopy_parser_instructions = [
     ('b', 'no-resample',            'resample',          True),
     ('N', 'partial-correction',     'part_vol_correct',  False),
     ('S', 'model-sym',              'model_sym',         False),
+    ('V', 'invert-rh-angle',        'invert_rh_angle',   False),
     # Options
     ['a', 'lh-angle',               'angle_lh_file',     None],
     ['t', 'lh-theta',               'theta_lh_file',     None],
@@ -213,6 +214,7 @@ def _guess_vol_file(fl):
             'no_reg_export',     
             'no_overwrite',
             'model_sym',
+            'invert_rh_angle',
             'part_vol_correct',  
             'angle_lh_file',     
             'theta_lh_file',     
@@ -301,7 +303,7 @@ def calc_arguments(args):
                         'note':    note,
                         'error':   error})
 @pimms.calc('cortices')
-def calc_retinotopy(note, error, subject, clean, run_lh, run_rh,
+def calc_retinotopy(note, error, subject, clean, run_lh, run_rh, invert_rh_angle,
                     angle_lh_file, theta_lh_file,
                     eccen_lh_file, rho_lh_file,
                     weight_lh_file, radius_lh_file,
@@ -352,6 +354,9 @@ def calc_retinotopy(note, error, subject, clean, run_lh, run_rh,
             except: error('could not load surface file %s' % rad)
         else:
             props['radius'] = empirical_retinotopy_data(hemi, 'radius')
+        # Check for inverted rh
+        if h == 'rh' and invert_rh_angle:
+            props['polar_angle'] = -props['polar_angle']
         # Do smoothing, if requested
         if clean:
             note('Cleaning %s retinotopy...' % h.upper())

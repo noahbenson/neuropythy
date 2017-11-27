@@ -1909,7 +1909,7 @@ class MapProjection(ObjectWithMetaData):
             # We need to figure out if there is a matching registration
             reg = self.registration
             if self.registration is None: reg = 'native'
-            if reg in topo.registrations:
+            if reg in obj.registrations:
                 return self(obj.registrations[reg], tag=tag)
             else:
                 raise ValueError('given topology does not include the registration %s' % reg)
@@ -1999,7 +1999,8 @@ class Topology(VertexSet):
                     else:
                         return Mesh(tess, val).persist()
                 return _lambda_reg_check
-            elif isinstance(val, Mesh):
+            val = _registrations[key]
+            if isinstance(val, Mesh):
                 return val if val.tess is tess else val.copy(tess=tess)
             else:
                 return Mesh(tess, val)
