@@ -26,6 +26,7 @@ from .util import (
     segment_intersection_2D,
     line_segment_intersection_2D,
     triangle_area,
+    triangle_normal,
     cartesian_to_barycentric_2D,
     cartesian_to_barycentric_3D,
     barycentric_to_cartesian,

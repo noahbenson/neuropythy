@@ -12,10 +12,10 @@ def normalize(u):
     normalize(u) yields a vetor with the same direction as u but unit length, or, if u has zero
     length, yields u.
     '''
-    unorm = np.linalg.norm(u)
-    if unorm == 0:
-        return u
-    return np.asarray(u) / unorm
+    unorm = np.sqrt(np.sum(u**2, axis=0))
+    z = np.isclose(unorm, 0)
+    c = (~z) / (unorm + z)
+    return np.asarray(u) * c
 
 def vector_angle_cos(u, v):
     '''
@@ -214,6 +214,37 @@ def triangle_area(a,b,c):
     s = 0.5 * np.sum(sides, axis=0)
     sides = np.clip(s - sides, 0.0, None)
     return np.sqrt(s * np.prod(sides, axis=0))
+
+def triangle_normal(a,b,c):
+    '''
+    triangle_normal(a, b, c) yields the normal vector of the triangle whose vertices are given by
+      the points a, b, and c. If the points are 2D points, then 3D normal vectors are still yielded,
+      that are always (0,0,1) or (0,0,-1). This function auto-threads over matrices, in which case
+      they must be in equivalent orientations, and the result is returned in whatever orientation
+      they are given in. In some cases, the intended orientation of the matrices is ambiguous (e.g.,
+      if a, b, and c are 2 x 3 matrices), in which case the matrix is always assumed to be given in
+      (dims x vertices) orientation.
+    '''
+    (a,b,c) = [np.asarray(x) for x in (a,b,c)]
+    if len(a.shape) == 1 and len(b.shape) == 1 and len(c.shape) == 1:
+        return triangle_normal(*[np.transpose([x]) for x in (a,b,c)])[:,0]
+    (a,b,c) = [np.transpose([x]) if len(x.shape) == 1 else x for x in (a,b,c)]
+    # find a required number of dimensions, if possible
+    if a.shape[0] in (2,3):
+        dims = a.shape[0]
+        tx = True
+    else:
+        dims = a.shape[1]
+        (a,b,c) = [x.T for x in (a,b,c)]
+        tx = False
+    n = (a.shape[1] if a.shape[1] != 1 else b.shape[1] if b.shape[1] != 1 else
+         c.shape[1] if c.shape[1] != 1 else 1)
+    if dims == 2:
+        (a,b,c) = [np.vstack((x, np.zeros((1,n)))) for x in (a,b,c)]
+    ab = normalize(b - a)
+    ac = normalize(c - a)
+    res = np.cross(ab, ac, axisa=0, axisb=0)
+    return res.T if tx else res
 
 def cartesian_to_barycentric_3D(tri, xy):
     '''

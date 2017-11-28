@@ -7,7 +7,7 @@ import numpy                        as np
 import pyrsistent                   as pyr
 import nibabel                      as nib
 import nibabel.freesurfer.mghformat as fsmgh
-import types, pimms
+import types, inspect, pimms
 
 @pimms.immutable
 class CommandLineParser(object):
@@ -262,40 +262,54 @@ def to_affine(aff, dims=None):
         arg = (dims, dims,dims+1, dims+1,dims+1)
         raise ValueError('%dD affine matrix must be %dx%d or %dx%d' % args)
     return aff
+        
+def simplex_summation_matrix(simplices, weight=None):
+    '''
+    simplex_summation_matrix(mtx) yields a scipy sparse array matrix that, when dotted with a
+      column vector of length m (where m is the number of simplices described in the simplex matrix,
+      mtx), yields a vector of length n (where n is the number of vertices in the simplex mesh); the
+      returned vetor is the sum over each vertex, of the faces to which it belongs.
 
-def export_image(filename, data, affine, format=None, dtype=None):
+    The matrix mtx must be oriented such that the first dimension (rows) corresponds to the vertices
+    of the simplices and the second dimension (columns) corresponds to simplices themselves.
+
+    The optional argument weight may specify a weight for each face, in which case the summation is
+    a weighted sum instead of a flat sum.
     '''
-    export_image(filename, array, affine) exports the given array to the given filename and yields
-       the filename. The options format and dtype may specify the array features; valid formats
-       are 'nifti' or 'mgh'/'mgz'. If no format is given, then auto-detects format from filename
-       extension.
+    simplices = np.asarray(simplices)
+    n = np.max(simplices) + 1
+    (d,m) = simplices.shape
+    rng = range(m)
+    s = sps.csr_matrix(
+        (np.ones(d*m, dtype=np.int),
+         (np.concatenate(simplices), np.concatenate([rng for _ in range(d)]))),
+        shape=(n,m),
+        dtype=np.int)
+    if weight is not None:
+        s = s.dot(sps.csc_matrix((weight, (rng, rng)), shape=(m,m)))
+    return s
+def simplex_averaging_matrix(simplices, weight=None):
     '''
-    if format is None:
-        fnl = filename.lower()
-        if fnl.endswith('.mgz') or fnl.endswith('.mgh'): format = fnl[-3:]
-        elif fnl.endswith('.nii'): format = 'nii'
-        elif fnl.endswith('.nii.gz'): format = 'nii.gz'
-        else: raise ValueError('Could not deduce format of file %s' % filename)
-    else:
-        format = format.lower()
-        if format in ['nifti', 'niigz', 'nii-gz', 'nifti-gzip']:
-            format = 'nii.gz'
-        elif format in ['freesurfer', 'mgh.gz', 'mgh-gz', 'mgh-gzip']:
-            format = 'mgz'
-        elif format not in ['nii', 'mgz', 'mgh', 'nii.gz']:
-            raise ValueError('Could not understand format argument %s' % format)
-    if pimms.is_str(dtype):
-        dtype = dtype.lower()
-        if dtype in ['int', 'integer', 'int32']:
-            dtype = np.int32
-        elif dtype in ['float', 'real', 'float32', 'real32']:
-            dtype = np.float32
-        else:
-            raise ValueError('Only float and int dtypes supported')
-    data = np.asarray(data) if dtype is None else np.asarray(data, dtype=dtype)
-    if format in ['nii', 'nii.gz']:
-        img = nib.Nifti1Image(data, affine)
-    else:
-        img = fsmgh.MGHImage(data, affine)
-    img.to_filename(filename)
-    return filename
+    Simplex_averaging_matrix(mtx) is equivalent to simplex_simmation_matrix, except that each row of
+      the matrix is subsequently normalized such that all rows sum to 1.
+    '''
+    m = simplex_summation_matrix(simplices, weight=weight)
+    rs = np.asarray(m.sum(axis=1))[:,0]
+    z = np.isclose(rs, 0)
+    invrs = (~zs) / (rs + zs)
+    rng = range(len(simplices[0]))
+    return sps.csr_matrix((invrs, (rng, rng))).dot(m.tocsc())
+
+def zinv(x):
+    '''
+    zinv(x) yields 1/x if x is not close to 0 and 0 otherwise. Automatically threads over arrays.
+    '''
+    x = np.asarray(x)
+    z = np.isclose(x, 0)
+    return (~z) / (x + z)
+def zdiv(a, b):
+    '''
+    zdiv(a,b) yields a/b if b is not close to 0 and 0 if b is close to 0; automatically threads over
+      lists.
+    '''
+    return a * zinv(b)
