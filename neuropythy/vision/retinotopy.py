@@ -1005,7 +1005,7 @@ def calc_empirical_retinotopy(cortex,
                 ('radius', pRF_radius),
                 ('weight', np.full(n, weight) if pimms.is_number(weight) else weight)]]
     if wgt is None: wgt = np.ones(len(ecc))
-    bad = ~np.isfinite(np.prod([ang, ecc, wgt], axis=0))
+    bad = np.logical_not(np.isfinite(np.prod([ang, ecc, wgt], axis=0)))
     ecc[bad] = 0
     wgt[bad] = 0
     if rad is not None: rad[bad] = 0
@@ -1595,7 +1595,7 @@ def clean_retinotopy(obj, retinotopy='empirical', output_style='visual', weight=
     ## We need to know the initial gradient lengths
     (fs_tht0, fs_rho0) = [[z0[ii] for ii in fcs] for z0 in [theta0, rho0]]
     (_,_,ntht0,ntht0_2, _,_,nrho0,nrho0_2) = _face_retino_grads(fs_tht0, fs_rho0)
-    fidcs = np.where(~np.isclose(ntht0_2 * nrho0_2, 0))[0]
+    fidcs = np.where(np.logical_not(np.isclose(ntht0_2 * nrho0_2, 0)))[0]
     ## we are only interested in faces whose initial gradients are not near 0; this prevents
     ## discontinuities in the potential. Go ahead and filter these:
     (fcs, fs_tht0, fs_rho0)             = [np.asarray(z)[:,fidcs] for z in (fcs, fs_tht0, fs_rho0)]
@@ -1676,10 +1676,6 @@ def clean_retinotopy(obj, retinotopy='empirical', output_style='visual', weight=
         (fe, dfe) = _f_equal(x)  if equality_scale != 0      else (0,0)
         (fs, dfs) = _f_smooth(x) if smoothness_scale != 0    else (0,0)
         (fo, dfo) = _f_ortho(x)  if orthogonality_scale != 0 else (0,0)
-        #print np.asarray([[equality_scale*fe, smoothness_scale*fs, orthogonality_scale*fo],
-        #                  [equality_scale*np.sqrt(np.sum(dfe**2)),
-        #                   smoothness_scale*np.sqrt(np.sum(dfs**2)),
-        #                   orthogonality_scale*np.sqrt(np.sum(dfo**2))]])
         scales = [equality_scale, smoothness_scale, orthogonality_scale]
         if not np.isfinite([fe,fs,fo]).all():
             return (np.inf, np.full(len(x), np.inf))

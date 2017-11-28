@@ -296,7 +296,7 @@ def simplex_averaging_matrix(simplices, weight=None):
     m = simplex_summation_matrix(simplices, weight=weight)
     rs = np.asarray(m.sum(axis=1))[:,0]
     z = np.isclose(rs, 0)
-    invrs = (~zs) / (rs + zs)
+    invrs = np.logical_not(zs) / (rs + zs)
     rng = range(len(simplices[0]))
     return sps.csr_matrix((invrs, (rng, rng))).dot(m.tocsc())
 
@@ -306,7 +306,7 @@ def zinv(x):
     '''
     x = np.asarray(x)
     z = np.isclose(x, 0)
-    return (~z) / (x + z)
+    return np.logical_not(z) / (x + z)
 def zdiv(a, b):
     '''
     zdiv(a,b) yields a/b if b is not close to 0 and 0 if b is close to 0; automatically threads over

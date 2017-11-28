@@ -77,7 +77,7 @@ def neighborhood_cortical_magnification(mesh, coordinates):
                 try:
                     isects_vis = np.asarray(line_segment_intersection_2D(line, segs_vis))
                     # okay, these will all be nan but two of them; they are the points we care about
-                    isect_idcs = np.unique(np.where(~np.isnan(isects_vis))[1])
+                    isect_idcs = np.unique(np.where(np.logical_not(np.isnan(isects_vis)))[1])
                 except:
                     isect_idcs = []
                 if len(isect_idcs) != 2:
@@ -216,7 +216,7 @@ def path_cortical_magnification(mesh, path, mask=None, return_all=False,
                 ss = []
                 isect = np.asarray(segment_intersection_2D((pt0, next_pt), all_segs)).T
                 # we want to ignore intersections in the current triangle tid0
-                isect_idcs = [idc for idc in np.where(~np.isnan(isect[:,0]))[0]
+                isect_idcs = [idc for idc in np.where(np.logical_not(np.isnan(isect[:,0])))[0]
                               if edge_idx[all_edges[idc]] != tid0_set]
                 if len(isect_idcs) == 0:
                     # nothing left but the last point

@@ -270,6 +270,46 @@ class Subject(ObjectWithMetaData):
         return _vertex_to_voxel_linear_interpolation(rh, rh_gray_indices, image_dimensions,
                                                      voxel_to_vertex_matrix)
     @pimms.value
+    def lh_vertex_to_voxel_heaviest_interpolation(lh_vertex_to_voxel_linear_interpolation):
+        '''
+        sub.lh_gray_vertex_to_voxel_heaviest_interpolation is a scipy sparse matrix representing the
+          interpolation from the vertices into the voxels; the ordering of the voxels that is
+          produced by the dot-product of this matrix with the vector of vertex-values is the same
+          as the ordering used in sub.lh_gray_indices.
+        The method works by projecting the vectors from the white surface vertices to the pial
+        surface vertices into the the ribbon and weighting them by the fraction of the vector that
+        lies in the voxel; the column in each row of the interpolation matrix with the highest
+        weight is then given a value of 1 while all other rows are given values of 0. This is
+        equivalent to performing nearest-neighbor interpolation while controlling for the depth of
+        the voxel in the cortex.
+        '''
+        interp = lh_vertex_to_voxel_linear_interpolation
+        (rs,cs) = interp.shape
+        argmaxs = np.asarray(interp.argmax(axis=1))[:,0]
+        return sps.csr_matrix((np.ones(rs, dtype=np.int), (range(rs), argmaxs)),
+                              shape=interp.shape,
+                              dtype=np.int)
+    @pimms.value
+    def rh_vertex_to_voxel_heaviest_interpolation(rh_vertex_to_voxel_linear_interpolation):
+        '''
+        sub.rh_gray_vertex_to_voxel_heaviest_interpolation is a scipy sparse matrix representing the
+          interpolation from the vertices into the voxels; the ordering of the voxels that is
+          produced by the dot-product of this matrix with the vector of vertex-values is the same
+          as the ordering used in sub.rh_gray_indices.
+        The method works by projecting the vectors from the white surface vertices to the pial
+        surface vertices into the the ribbon and weighting them by the fraction of the vector that
+        lies in the voxel; the column in each row of the interpolation matrix with the highest
+        weight is then given a value of 1 while all other rows are given values of 0. This is
+        equivalent to performing nearest-neighbor interpolation while controlling for the depth of
+        the voxel in the cortex.
+        '''
+        interp = rh_vertex_to_voxel_linear_interpolation
+        (rs,cs) = interp.shape
+        argmaxs = np.asarray(interp.argmax(axis=1))[:,0]
+        return sps.csr_matrix((np.ones(rs, dtype=np.int), (range(rs), argmaxs)),
+                              shape=interp.shape,
+                              dtype=np.int)
+    @pimms.value
     def vertex_to_voxel_linear_interpolation(lh_vertex_to_voxel_linear_interpolation,
                                              rh_vertex_to_voxel_linear_interpolation):
         '''
@@ -406,10 +446,13 @@ class Subject(ObjectWithMetaData):
     
         The following options may be given:
           * method (default: 'lines') specifies that a particular method should be used; valid
-            options are 'linear' and 'nearest'. The 'linear' method uses the
+            options are 'linear', 'heaviest', and 'nearest'. The 'linear' method uses the
             lh_vertex_to_voxel_linear_interpolation and rh_vertex_to_voxel_linear_interpolation 
-            matrices while 'nearest' uses the nearest-neighbor interpolation. The 'linears' method
-            is generally preferred unless your data is discreet.
+            matrices while 'nearest' uses the nearest-neighbor interpolation. The 'heaviest' method
+            uses the highest-valued weight in the 'linear' interpolation matrix, which is
+            equivalent to using nearest-neighbor interpolation after controlling for the depth of
+            the voxel with respect to the vertices. The 'linear' method is generally preferred
+            unless your data is discreet, in which the 'heaviest' method is generally best.
           * fill (default: 0) specifies the value to be assigned to all voxels not in the gray mask
             or voxels in the gray-mask that are missed by the interpolation method.
           * dtype (default: None) specifies the data type that should be exported. If None, this
@@ -488,7 +531,7 @@ class Subject(ObjectWithMetaData):
         if pimms.is_str(method):
             method = 'auto' if method is None else method.lower()
             if method in ['auto', 'automatic']:
-                method = 'linears' if np.issubdtype(dtype, np.inexact) else 'nearest'
+                method = 'linear' if np.issubdtype(dtype, np.inexact) else 'heaviest'
             # if there is no affine specified, we can use one of the pre-built
             # matrices for this subject
             if affine is None and np.array_equal(shape, self.image_dimensions):
@@ -522,8 +565,9 @@ class Subject(ObjectWithMetaData):
     def image_to_cortex(self, image,
                         surface='midgray', hemi=None, affine=None, method=None, fill=0, dtype=None):
         '''
-        sub.from_image(image) is equivalent to (sub.lh.from_image(image), sub.rh.from_image(image));
-        sub.from_image(image, surface) uses the given surface (see also cortex.surface).
+        sub.image_to_cortex(image) is equivalent to the tuple
+          (sub.lh.from_image(image), sub.rh.from_image(image)).
+        sub.image_to_cortex(image, surface) uses the given surface (see also cortex.surface).
         '''
         if hemi is None: hemi = 'both'
         hemi = hemi.lower()
@@ -533,9 +577,9 @@ class Subject(ObjectWithMetaData):
                           for h in ['lh', 'rh']])
         else:
             hemi = getattr(self, hemi)
-            hemi.from_image(image, surface=surface, affine=affine,
-                            method=method, fill=fill, dtype=dtype,
-                            native_to_vertex_matrix=sub.native_to_vertex_matrix)
+            return hemi.from_image(image, surface=surface, affine=affine,
+                                   method=method, fill=fill, dtype=dtype,
+                                   native_to_vertex_matrix=self.native_to_vertex_matrix)
 
 @pimms.immutable
 class Cortex(geo.Topology):
@@ -555,13 +599,13 @@ class Cortex(geo.Topology):
     registrations includes the key 'native' this is taken to be the default registration for the
     particular cortex object.
     '''
-    def __init__(self, chirality, tess, surfaces, registrations, meta_data=None):
+    def __init__(self, chirality, tess, surfaces, registrations, properties=None, meta_data=None):
         self.chirality = chirality
-        self.surfaces = surfaces
+        self.surface_coordinates = surfaces
         self.meta_data = meta_data
-        geo.Topology.__init__(self, tess, registrations)
+        geo.Topology.__init__(self, tess, registrations, properties=properties)
         self.chirality = chirality
-        self.surfaces = surfaces
+        self.surface_coordinates = surfaces
         self.meta_data = meta_data
 
     @pimms.param
@@ -575,17 +619,30 @@ class Cortex(geo.Topology):
             raise ValueError('chirality must be \'lh\' or \'rh\'')
         return ch
     @pimms.param
-    def surfaces(surfs):
+    def surface_coordinates(surfs):
         '''
-        cortex.surfaces is a mapping of the surfaces of the given cortex; this must include the
-        surfaces 'white' and 'pial'.
+        cortex.surface_coordinates is a mapping of the surface coordinates of the given cortex; this
+        must include the surfaces 'white' and 'pial'.
         '''
         if pimms.is_lazy_map(surfs) or pimms.is_pmap(surfs):
             return surfs
         elif pimms.is_map(surfs):
             return pyr.pmap(surfs)
         else:
-            raise ValueError('surfaces must be a mapping object')
+            raise ValueError('surface_coordinates must be a mapping object')
+    @pimms.value
+    def surfaces(surface_coordinates, properties, tess):
+        '''
+        cortex.surfaces is a mapping of the surfaces of the given cortex; this must include the
+        surfaces 'white' and 'pial'.
+        '''
+        def _make_mesh(name):
+            val = surface_coordinates[name]
+            if isinstance(val, geo.Mesh): val = val.coordinates
+            def _lambda():
+                return geo.Mesh(tess, val, properties=properties).persist()
+            return _lambda
+        return pimms.lazy_map({k:_make_mesh(k) for k in six.iterkeys(surface_coordinates)})
     @pimms.require
     def validate_surfaces(surfaces):
         '''
@@ -624,7 +681,7 @@ class Cortex(geo.Topology):
         u = pial_surface.coordinates - white_surface.coordinates
         d = np.sqrt(np.sum(u**2, axis=0))
         z = np.isclose(d, 0)
-        return pimms.imm_array((~z) / (d + z))
+        return pimms.imm_array(np.logical_not(z) / (d + z))
     @pimms.value
     def repr(chirality, tess, vertex_count):
         '''
@@ -705,7 +762,7 @@ def _vertex_to_voxel_linear_interpolation(hemi, gray_indices, image_shape, voxel
         bcs = geo.prism_barycentric_coordinates(fwcoords[:,:,col], fpcoords[:,:,col], xyz[ii].T)
         bcs = bcs[0] + bcs[1] # since the layers are the same in this case...
         outp = np.isclose(np.sum(bcs, axis=0), 0)
-        inp = ~outp
+        inp = np.logical_not(outp)
         # for those in their prisms, we linearly interpolate using the bc coordinates
         bcs = bcs[:,inp]
         ii_inp = ii[inp]
@@ -718,7 +775,7 @@ def _vertex_to_voxel_linear_interpolation(hemi, gray_indices, image_shape, voxel
     # last, we normalize the rows
     rowsums = np.asarray(interp.sum(axis=1))[:,0]
     z = np.isclose(rowsums, 0)
-    invrows = (~z) / (rowsums + z)
+    invrows = np.logical_not(z) / (rowsums + z)
     ii = np.asarray(range(n))
     return sps.csc_matrix((invrows, (ii,ii))).dot(interp)
     
@@ -740,11 +797,11 @@ def _vertex_to_voxel_lines_interpolation(hemi, gray_indices, image_shape, vertex
     # normalize these...
     lens = np.sqrt(np.sum(u**2, axis=0))
     z = np.isclose(lens, 0)
-    inv_lens = (~z) / (lens + z)
+    inv_lens = np.logical_not(z) / (lens + z)
     u = inv_lens * u
     usign = np.sign(u)
     z = usign == 0
-    u_inv = (~z) / (u + z)
+    u_inv = np.logical_not(z) / (u + z)
     # find smallest and largest voxel indices through which a particular line passes
     (mins, maxs) = [np.array(x) for x in [whiteX, pialX]]
     # extend these a little so that we don't miss any voxels
@@ -791,21 +848,21 @@ def _vertex_to_voxel_lines_interpolation(hemi, gray_indices, image_shape, vertex
         oob = np.any(start < 0, axis=0) | (tmp >= index.shape[1])
         tmp[oob] = 0
         found_idcs = index[0, tmp].toarray()[0]
-        gray_fis = (found_idcs > 0) & (~oob)
+        gray_fis = (found_idcs > 0) & np.logical_not(oob)
         found_idcs = found_idcs[gray_fis] - 1
         interp[(found_idcs, ii[gray_fis])] = frac[gray_fis]
         # update the min values
         mins = mins + d*u
         # if the min is now equal to the max, then we are done with that line!
-        keep = np.where((~np.isclose(np.sum((mins - maxs)**2, axis=0), 0)) 
+        keep = np.where(np.logical_not(np.isclose(np.sum((mins - maxs)**2, axis=0), 0))
                         & np.all((maxs - mins) * u_inv > 0, axis=0))[0]
         if len(keep) < len(ii):
             (inv_lens,ii) = [x[keep] for x in (inv_lens,ii)]
             (ends,mins,maxs,usign,u,u_inv) = [x[:,keep] for x in (ends,mins,maxs,usign,u,u_inv)]
     # now we want to scale the rows by their totals
     totals = np.asarray(interp.sum(axis=1))[:,0]
-    zs = ~np.isclose(totals, 0)
-    inv_totals = zs / (totals + (~zs))
+    zs = np.isclose(totals, 0)
+    inv_totals = np.logical_not(zs) / (totals + zs)
     rng = range(len(inv_totals))
     interp = sps.csr_matrix((inv_totals, (rng, rng))).dot(interp.tocsc())
     # That's all we have to do!
@@ -871,7 +928,8 @@ def cortex_to_image_interpolation(obj, mask=None, affine=None, method='linear', 
         then the function attempts to deduce the correct shape; if obj is a subject, then its
         image_dimensions tuple is used. Otherwise, the size is deduced from the mask, if possible;
         if it cannot be deduced from the mask, then (256, 256, 256) is used.
-      * method (default: 'linear') specifies the method to use. May be 'linear' or 'nearest'.
+      * method (default: 'linear') specifies the method to use. May be 'linear', 'heaviest', or
+        'nearest'.
     '''
     # get the min/max values of the coordinates (for deducing sizes, if necessary)
     if mask is None:
@@ -923,6 +981,16 @@ def cortex_to_image_interpolation(obj, mask=None, affine=None, method='linear', 
         interp = [_vertex_to_voxel_lines_interpolation(h, mask, shape, affine) for h in hems]
         if len(interp) == 1: interp = interp[0]
         else: interp = sps.hstack(interp)
+    elif method in ['heaviest', 'heavy', 'weight', 'weightiest']:
+        interp = [_vertex_to_voxel_linear_interpolation(h, mask, shape, affine) for h in hems]
+        if len(interp) == 1: interp = interp[0]
+        else: interp = sps.hstack(interp)
+        # convert to binary matrix:
+        (rs,cs) = interp.shape
+        argmaxs = np.asarray(interp.argmax(axis=1))[:,0]
+        return sps.csr_matrix((np.ones(rs, dtype=np.int), (range(rs), argmaxs)),
+                              shape=interp.shape,
+                              dtype=np.int)
     elif method in ['nearest', 'near', 'nearest-neighbor', 'nn']:
         aff = npla.inv(affine)
         interp = [_vertex_to_voxel_nearest_interpolation(h, mask, aff) for h in hems]

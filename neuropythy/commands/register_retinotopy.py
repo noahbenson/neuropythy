@@ -303,7 +303,8 @@ def calc_arguments(args):
                         'note':    note,
                         'error':   error})
 @pimms.calc('cortices')
-def calc_retinotopy(note, error, subject, clean, run_lh, run_rh, invert_rh_angle,
+def calc_retinotopy(note, error, subject, clean, run_lh, run_rh,
+                    invert_rh_angle, max_in_eccen,
                     angle_lh_file, theta_lh_file,
                     eccen_lh_file, rho_lh_file,
                     weight_lh_file, radius_lh_file,
@@ -357,6 +358,9 @@ def calc_retinotopy(note, error, subject, clean, run_lh, run_rh, invert_rh_angle
         # Check for inverted rh
         if h == 'rh' and invert_rh_angle:
             props['polar_angle'] = -props['polar_angle']
+        # and zero-out weights for high eccentricities
+        if max_in_eccen is not None:
+            props['weight'][props['eccentricity'] > max_in_eccen] = 0
         # Do smoothing, if requested
         if clean:
             note('Cleaning %s retinotopy...' % h.upper())

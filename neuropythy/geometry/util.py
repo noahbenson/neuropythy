@@ -12,10 +12,11 @@ def normalize(u):
     normalize(u) yields a vetor with the same direction as u but unit length, or, if u has zero
     length, yields u.
     '''
+    u = np.asarray(u)
     unorm = np.sqrt(np.sum(u**2, axis=0))
     z = np.isclose(unorm, 0)
-    c = (~z) / (unorm + z)
-    return np.asarray(u) * c
+    c = np.logical_not(z) / (unorm + z)
+    return u * c
 
 def vector_angle_cos(u, v):
     '''
@@ -532,7 +533,7 @@ def tetrahedral_barycentric_coordinates(tetra, pt):
     d3 = det_4x3(tetra[0], tetra[1], tetra[2], pt)
     s_ = np.sign(d_)
     z_ = (np.isclose(d_, 0) | np.any([s_ != si for si in np.sign([d0,d1,d2,d3])], axis=0))
-    d_inv = (~z_) / (d_ + z_)
+    d_inv = np.logical_not(z_) / (d_ + z_)
     return np.asarray([d_inv * dq for dq in (d0,d1,d2,d3)])
 
 def point_in_tetrahedron(tetra, pt):
@@ -542,7 +543,7 @@ def point_in_tetrahedron(tetra, pt):
       calculation is automatically threaded over all the given arguments.
     '''
     bcs = tetrahedral_barycentric_coordinates(tetra, pt)
-    return ~np.all(np.isclose(bcs, 0), axis=0)
+    return np.logical_not(np.all(np.isclose(bcs, 0), axis=0))
 
 def prism_barycentric_coordinates(tri1, tri2, pt):
     '''
@@ -584,4 +585,4 @@ def point_in_prism(tri1, tri2, pt):
       the y coordinate of the first vertex of the k'th triangle.
     '''
     bcs = prism_barycentric_coordinates(tri1, tri2, pt)
-    return ~np.isclose(np.sum(bcs[0] + bcs[1], axis=0), 0)
+    return np.logical_not(np.isclose(np.sum(bcs[0] + bcs[1], axis=0), 0))

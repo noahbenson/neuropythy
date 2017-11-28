@@ -22,6 +22,7 @@ from .util import (triangle_area, triangle_address, alignment_matrix_3D, rotatio
                    cartesian_to_barycentric_3D, cartesian_to_barycentric_2D,
                    barycentric_to_cartesian, point_in_triangle)
 from neuropythy.util import (ObjectWithMetaData, to_affine)
+from neuropythy.io   import load
 from functools import reduce
 
 @pimms.immutable
@@ -738,7 +739,7 @@ class Mesh(VertexSet):
         xp = np.cross(u01, u02, axisa=0, axisb=0).T
         norms = np.sqrt(np.sum(xp**2, axis=0))
         wz = np.isclose(norms, 0)
-        return pimms.imm_array(xp * ((~wz) / (norms + wz)))
+        return pimms.imm_array(xp * (np.logical_not(wz) / (norms + wz)))
     @pimms.value
     def vertex_normals(face_normals, tess):
         '''
@@ -749,7 +750,7 @@ class Mesh(VertexSet):
         tmp = np.array([np.sum(face_normals[:,fs], axis=1) for fs in tess.vertex_faces]).T
         norms = np.sqrt(np.sum(tmp ** 2, axis=0))
         wz = np.isclose(norms, 0)
-        return pimms.imm_array(tmp * ((~wz) / (norms + wz)))
+        return pimms.imm_array(tmp * (np.logical_not(wz) / (norms + wz)))
     @pimms.value
     def face_angle_cosines(face_coordinates):
         '''
@@ -758,7 +759,7 @@ class Mesh(VertexSet):
         number of faces in the mesh.
         '''
         X = face_coordinates
-        X = np.asarray([x * (zs / (xl + (~zs)))
+        X = np.asarray([x * (zs / (xl + np.logical_not(zs)))
                         for x  in [X[1] - X[0], X[2] - X[1], X[0] - X[2]]
                         for xl in [np.sqrt(np.sum(x**2, axis=0))]
                         for zs in [np.isclose(xl, 0)]])
@@ -1011,7 +1012,7 @@ class Mesh(VertexSet):
                 res[in_tri_q] = guesses[in_tri_q]
                 if in_tri_q.all(): return res
                 # recurse, trying the next nearest points
-                out_tri_q = ~in_tri_q
+                out_tri_q = np.logical_not(in_tri_q)
                 sub_pts = sub_pts[out_tri_q]
                 top_i += 1
                 res[out_tri_q] = (try_nearest(sub_pts, cur_k*2, top_i, None)
@@ -1076,7 +1077,7 @@ class Mesh(VertexSet):
         if weights is not None:
             wmtx = sps.li_matrix((n,n))
             weights = np.array(weights)
-            weights[~np.isfinite(weights)] = 0
+            weights[np.logical_not(np.isfinite(weights))] = 0
             weights[weights < 0] = 0
             wmtx.setdiag(weights)
             interp = interp.dot(wmtx.tocsc())
@@ -1106,7 +1107,7 @@ class Mesh(VertexSet):
             interp = rescale_mtx.tocsc().dot(interp)
         # any row with no interpolation weights or that is nearest to a vertex not in the mesh
         # needs to be given a nan value upon interpolation
-        bad_pts = ~mask[closest]
+        bad_pts = np.logical_not(mask[closest])
         if bad_pts.sum() > 0:
             interp = interp.tolil()
             interp[bad_pts, 0] = np.nan
@@ -1215,7 +1216,7 @@ class Mesh(VertexSet):
             if np.sum(numer) < n:
                 # just remove these elements from the mask
                 data = np.array(data)
-                data[~numer] = 0
+                data[np.logical_not(numer)] = 0
                 interp = Mesh.scale_interpolation(interp, mask=numer)
             return interp.dot(data)
         # not a numerical array; we just do nearest interpolation
@@ -1332,7 +1333,7 @@ class Mesh(VertexSet):
         if 'coordinates' not in data: raise ValueError('address must contain coordinates')
         face_id = data['face_id']
         coords = data['coordinates']
-        if np.sum(~np.isfinite(coords)) > 0:
+        if np.sum(np.logical_not(np.isfinite(coords))) > 0:
             raise ValueError('---')
         faces = self.tess.indexed_faces
         if all(hasattr(x, '__iter__') for x in (face_id, coords)):
@@ -1364,15 +1365,12 @@ class Mesh(VertexSet):
           * native_to_vertex_matrix (default: None) may optionally give a final transformation that
             converts from native subject orientation encoded in images to vertex positions.
         '''
-        if isinstance(image, nib.analyse.SpatialImage):
+        if isinstance(image, nib.analyze.SpatialImage):
             # we want to apply the tkr transform by default
-            if affine is None: affine = npla.inv(image.affine)
+            if affine is None: affine = image.affine
             image = image.get_data()
         elif pimms.is_str(image):
-            try:    return self.from_image(fsmgh.load(image), affine=affine, method=method,
-                                           fill=fill)
-            except: return self.from_image(nib.load(image),   affine=affine, method=method,
-                                           fill=fill)
+            return self.from_image(load(image), affine=affine, method=method, fill=fill)
         image = np.asarray(image)
         if affine is None:
             ijk0 = np.asarray(image.shape) * 0.5
@@ -1380,6 +1378,7 @@ class Mesh(VertexSet):
         else: affine = to_affine(affine, 3)
         if native_to_vertex_matrix is not None:
             affine = np.dot(to_affine(native_to_vertex_matrix), affine)
+        affine = npla.inv(affine)
         if method is not None: method = method.lower()
         if method is None or method in ['auto', 'automatic']:
             method = 'linear' if np.issubdtype(image.dtype, np.inexact) else 'nearest'
@@ -1980,7 +1979,7 @@ class Topology(VertexSet):
         '''
         return regs if pimms.is_lazy_map(regs) or pimms.is_pmap(regs) else pyr.pmap(regs)
     @pimms.value
-    def registrations(_registrations, tess):
+    def registrations(_registrations, tess, properties):
         '''
         topo.registrations is a persistent map of the mesh objects for which the given topology
         object is the tracker; this is generally a lazy map whose values are instantiated as 
@@ -1991,19 +1990,14 @@ class Topology(VertexSet):
         # we can't assume that a value is correct without checking it...
         lazyq = pimms.is_lazy_map(_registrations)
         def _reg_check(key):
+            def _lambda_reg_check():
+                val = _registrations[key]
+                if isinstance(val, Mesh): val = val.coordinates
+                return Mesh(tess, val, properties=properties).persist()
             if lazyq and _registrations.is_lazy(key):
-                def _lambda_reg_check():
-                    val = _registrations[key]
-                    if isinstance(val, Mesh):
-                        return val if val.tess is tess else val.copy(tess=tess)
-                    else:
-                        return Mesh(tess, val).persist()
                 return _lambda_reg_check
-            val = _registrations[key]
-            if isinstance(val, Mesh):
-                return val if val.tess is tess else val.copy(tess=tess)
             else:
-                return Mesh(tess, val)
+                return _lambda_reg_check()
         return pimms.lazy_map({k:_reg_check(k) for k in six.iterkeys(_registrations)})
     @pimms.value
     def labels(tess):

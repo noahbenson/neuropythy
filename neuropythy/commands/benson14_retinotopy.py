@@ -13,7 +13,7 @@ import nibabel.freesurfer.mghformat as     fsmgh
 import os, sys, six, pimms
 
 from   neuropythy.freesurfer        import (subject, add_subject_path)
-from   neuropythy.util              import (CommandLineParser, export_image)
+from   neuropythy.util              import CommandLineParser
 from   neuropythy.vision            import (predict_retinotopy, retinotopy_model, clean_retinotopy)
 import neuropythy.io                as     nyio
 

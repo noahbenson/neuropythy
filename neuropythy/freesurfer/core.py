@@ -11,7 +11,7 @@ import pyrsistent                   as pyr
 import neuropythy.geometry          as geo
 import neuropythy.mri               as mri
 import neuropythy.io                as nyio
-import os, six, pimms
+import os, warnings, six, pimms
 
 ####################################################################################################
 # Subject Directory and where to find Subjects
@@ -235,7 +235,7 @@ class Subject(mri.Subject):
             def _load_fn():
                 x = fsio.read_geometry(flnm)[0].T
                 x.setflags(write=False)
-                return tess.make_mesh(x).with_meta(filename=flnm)
+                return x
             return _load_fn
         surfs = {}
         for s in ['white', 'pial', 'inflated', 'sphere']:
@@ -472,7 +472,7 @@ def save_mgh(filename, obj, like=None, header=None, affine=None, extra=Ellipsis)
 
 # For other freesurfer formats
 @nyio.importer('freesurfer_geometry', ('white', 'pial', 'sphere', 'sphere.reg', 'inflated'))
-def load_freesurfer_geometry(filename, to='mesh'):
+def load_freesurfer_geometry(filename, to='mesh', warn=False):
     '''
     load_freesurfer_geometry(filename) yields the data stored at the freesurfer geometry file given
       by filename. The optional argument 'to' may be used to change the kind of data that is
@@ -483,7 +483,14 @@ def load_freesurfer_geometry(filename, to='mesh'):
       * 'tess' yields a tess object (discarding coordinates)
       * 'raw' yields a tuple of numpy arrays, identical to the read_geometry return value.
     '''
-    (xs, fs, info) = fsio.read_geometry(filename, read_metadata=True)
+    if not warn:
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore',
+                                    category=UserWarning,
+                                    module='nibabel')
+            (xs, fs, info) = fsio.read_geometry(filename, read_metadata=True)
+    else:
+        (xs, fs, info) = fsio.read_geometry(filename, read_metadata=True)
     to = to.lower()
     if to in ['mesh', 'auto', 'automatic']:
         return geo.Mesh(fs, xs, meta_data=info)

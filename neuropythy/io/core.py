@@ -271,7 +271,7 @@ def load_nifti(filename, to='auto'):
             raise ValueError('image requested as field has more than 2 non-unitary dimensions')
         return dat
     elif to in ['auto', 'automatic']:
-        dims = set(img.get_data_shape())
+        dims = set(np.shape(img.get_data()))
         if 1 < len(dims) < 4 and 1 in dims:
             return img.squeeze(img.get_data())
         else:

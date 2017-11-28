@@ -13,7 +13,8 @@ import nibabel.freesurfer.mghformat as     fsmgh
 import os, sys, pimms
 
 from neuropythy.freesurfer          import (subject, add_subject_path, find_subject_path)
-from neuropythy.util                import (CommandLineParser, export_image)
+from neuropythy.util                import CommandLineParser
+from neuropythy.io                  import save
 
 info = \
    '''
@@ -182,7 +183,7 @@ def main(args):
     vol = sub.cortex_to_image(dat, hemi=hemi, method=method, fill=opts['fill'], dtype=dtyp)
     # and write out the file
     note('Exporting volume file: %s' % outfl)
-    export_image(outfl, vol, sub.voxel_to_vertex_matrix, dtype=dtyp)
+    save(outfl, vol, affine=sub.voxel_to_vertex_matrix)
     note('surface_to_image complete!')
     return 0    
 
