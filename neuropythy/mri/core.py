@@ -445,7 +445,7 @@ class Subject(ObjectWithMetaData):
         sub.cortex_to_image((lh_data, rh_data)) projects into both hemispheres.
     
         The following options may be given:
-          * method (default: 'lines') specifies that a particular method should be used; valid
+          * method (default: 'linear') specifies that a particular method should be used; valid
             options are 'linear', 'heaviest', and 'nearest'. The 'linear' method uses the
             lh_vertex_to_voxel_linear_interpolation and rh_vertex_to_voxel_linear_interpolation 
             matrices while 'nearest' uses the nearest-neighbor interpolation. The 'heaviest' method

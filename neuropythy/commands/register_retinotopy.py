@@ -370,7 +370,7 @@ def calc_retinotopy(note, error, subject, clean, run_lh, run_rh,
         ctcs[h] = hemi.with_prop(props)
     return {'cortices': pyr.pmap(ctcs)}
 @pimms.calc('registrations')
-def calc_registrations(note, error, cortices, model,
+def calc_registrations(note, error, cortices, model, model_sym,
                        weight_min, scale, prior, max_out_eccen, max_steps, max_step_size,
                        radius_weight, field_sign_weight, resample,
                        part_vol_correct):
@@ -379,6 +379,7 @@ def calc_registrations(note, error, cortices, model,
     hemisphere; these are returned as the immutable maps yielded from the register_retinotopy
     command.
     '''
+    rsamp = ('fsaverage_sym' if model_sym else 'fsaverage') if resample else False
     # Do the registration
     res = {}
     for (h,ctx) in six.iteritems(cortices):
@@ -394,7 +395,7 @@ def calc_registrations(note, error, cortices, model,
                                          radius_weight=radius_weight,
                                          scale=scale,
                                          prior=prior,
-                                         resample=resample,
+                                         resample=rsamp,
                                          max_steps=max_steps,
                                          max_step_size=max_step_size,
                                          yield_imap=True)

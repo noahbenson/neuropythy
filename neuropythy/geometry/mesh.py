@@ -554,7 +554,7 @@ class Tesselation(VertexSet):
         '''
         faces = faces.T
         nedges = [[((f[0], f[1]) if f[2] == u else (f[1], f[2]) if f[0] == u else (f[2], f[0]))
-                   for f in faces[fs]]
+                   for f in faces[list(fs)]]
                   for (u, fs) in zip(labels, vertex_faces)]
         return tuple([Tesselation._order_neighborhood(nei) for nei in nedges])
     @pimms.value
