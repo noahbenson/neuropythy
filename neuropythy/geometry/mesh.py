@@ -147,7 +147,7 @@ class VertexSet(ObjectWithMetaData):
                  outliers=None,  data_range=None,    clipped=np.inf,
                  weights=None,   weight_min=0,       weight_transform=Ellipsis,
                  mask=None,      valid_range=None,   null=np.nan,
-                 transform=None, yield_weighst=False):
+                 transform=None, yield_weights=False):
         '''
         obj.property(prop) yields the given property from obj after performing a set of filters
           on the property, as specified by the options. In the property array that is returned, the
