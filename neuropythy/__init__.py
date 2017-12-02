@@ -30,7 +30,13 @@ submodules = ('neuropythy.util.core'
 def reload_neuropythy():
     '''
     reload_neuropythy() reloads all of the modules of neuropythy and returns the reloaded
-    neuropythy module.
+    neuropythy module. This is similar to reload(neuropythy) except that it reloads all the
+    neuropythy submodules prior to reloading neuropythy.
+
+    Example:
+      import neuropythy as ny
+      # ... some nonsense that breaks the library ...
+      ny = ny.reload_neuropythy()
     '''
     import sys
     for mdl in submodules:
