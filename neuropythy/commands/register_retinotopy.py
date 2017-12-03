@@ -429,7 +429,7 @@ def save_surface_files(note, error, registrations, subject,
         def export(flnm, p):
             flnm = flnm + '.' + surface_format
             dt = np.int32 if np.issubdtype(p.dtype, np.int) else np.float32
-            img = nib.Nifti1Image(np.asarray([[p]], dtype=d), np.eye(4))
+            img = nib.Nifti1Image(np.asarray([[p]], dtype=dt), np.eye(4))
             img.to_filename(flnm)
             return flnm
     else:
