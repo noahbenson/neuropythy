@@ -3,12 +3,11 @@
 # Cortical magnification caclculation code and utilities.
 # by Noah C. Benson
 
-import numpy                   as np
-import numpy.linalg            as npla
-from   neuropythy.vision   import (extract_retinotopy_argument)
-from   neuropythy.geometry import (line_segment_intersection_2D, line_intersection_2D,
-                                   segment_intersection_2D, triangle_area,
-                                   point_in_triangle)
+import numpy               as np
+import numpy.linalg        as npla
+import neuropythy.geometry as geo
+from   neuropythy.util     import (zinv, zdiv)
+from   .retinotopy         import (extract_retinotopy_argument, mesh_retinotopy, as_retinotopy)
 
 # Three methods to calculate cortical magnification:
 # (1) local projection of the triangle neighborhood then comparison of path across it in the visual
@@ -25,6 +24,87 @@ def _cmag_coord_idcs(coordinates):
 def _cmag_fill_result(mesh, idcs, vals):
     idcs = {idx:i for (i,idx) in enumerate(idcs)}
     return [vals[idcx[i]] if i in idcs else None for i in mesh.vertex_count]
+
+def nei_cmag(mesh, retinotopy='any', surface=None):
+    '''
+    nei_cmag(mesh) yields the neighborhood-based cortical magnification for the given mesh.
+    nei_cmag(mesh, retinotopy) uses the given retinotopy argument; this must be interpretable by
+      the as_retinotopy function, or should be the name of a source (such as 'empirical' or
+      'any').
+
+    The neighborhood-based cortical magnification data is yielded as a map whose keys are 'radial',
+    'tangential', 'areal', and 'field_sign'; the units of 'radial' and 'tangential' magnifications 
+    are cortical-distance/degree and the units on the 'areal' magnification is
+    (cortical-distance/degree)^2; the field sign has no unit.
+
+    Note that if the retinotopy source is not given, this function will by default search for any
+    source using the mesh_retinotopy function.
+
+    The option surface (default None) can be provided to indicate that while the retinotopy and
+    results should be formatted for the given mesh (i.e., the result should have a value for each
+    vertex in mesh), the surface coordinates used to calculate areas on the cortical surface should
+    come from the given surface. The surface option may be a super-mesh of mesh.
+    '''
+    # First, find the retino data
+    retino = mesh_retinotopy(mesh, retinotopy)
+    # If this is a topology, we want to change to white surface
+    if isinstance(mesh, geo.Topology): mesh = mesh.white_surface
+    # Convert from polar angle/eccen to longitude/latitude
+    vcoords = np.asarray(as_retinotopy(retino, 'geographical'))
+    # note the surface coordinates
+    if surface is None: scoords = mesh.coordinates
+    else:
+        scoords = surface.coordinates
+        if scoords.shape[1] > mesh.vertex_count:
+            scoords = scoords[:, surface.index(mesh.labels)]
+    faces = mesh.tess.indexed_faces
+    sx = mesh.face_coordinates
+    # to understand this calculation, see this stack exchange question:
+    # https://math.stackexchange.com/questions/2431913/gradient-of-angle-between-scalar-fields
+    # each face has a directional magnification; we need to start with the face side lengths
+    (s0,s1,s2) = np.sqrt(np.sum((np.roll(sx, -1, axis=0) - sx)**2, axis=1))
+    # we want a couple other handy values:
+    (s0_2,s1_2,s2_2) = (s0**2, s1**2, s2**2)
+    s0_inv = zinv(s0)
+    b = 0.5 * (s0_2 - s1_2 + s2_2) * s0_inv
+    h = 0.5 * np.sqrt(2*s0_2*(s1_2 + s2_2) - s0_2**2 - (s1_2 - s2_2)**2) * s0_inv
+    h_inv = zinv(h)
+    # get the visual coordinates at each face also
+    vx = np.asarray([vcoords[:,f] for f in faces])
+    # we already have enough data to calculate areal magnification
+    arl_mag = geo.triangle_area(sx[0], sx[1], sx[2]) * zinv(geo.triangle_area(*vx))
+    # calculate the gradient at each triangle; this array is dimension 2 x 2 x m where m is the
+    # number of triangles; the first dimension is (vx,vy) and the second dimension is (fx,fy); fx
+    # and fy are the coordinates in an arbitrary coordinate system built for each face.
+    # So, to reiterate, grad is ((d(vx0)/d(fx0), d(vx0)/d(fx1)) (d(vx1)/d(fx0), d(vx1)/d(fx1)))
+    dvx0_dfx = (vx[2] - vx[1]) * s0_inv
+    dvx1_dfx = (vx[0] - (vx[1] + b*dvx0_dfx)) * h_inv
+    grad = np.asarray([dvx0_dfx, dvx1_dfx])
+    # Okay, we want to know the field signs; this is just whether the cross product of the two grad
+    # vectors (dvx0/dfx and dvx1/dfx) has a positive z
+    fsgn = np.sign(grad[0,0]*grad[1,1] - grad[0,1]*grad[1,0])
+    # We can calculate the angle too, which is just the arccos of the normalized dot-product
+    grad_norms_2 = np.sum(grad**2, axis=1)
+    grad_norms = np.sqrt(grad_norms_2)
+    (dvx_norms_inv, dvy_norms_inv) = zinv(grad_norms)
+    ngrad = grad * ((dvx_norms_inv, dvx_norms_inv), (dvy_norms_inv, dvy_norms_inv))
+    dp = np.clip(np.sum(ngrad[0] * ngrad[1], axis=0), -1, 1)
+    fang = fsgn * np.arccos(dp)
+    # Great; now we can calculate the drad and dtan; we have dx and dy, so we just need to
+    # calculate the jacobian of ((drad/dvx, drad/dvy), (dtan/dvx, dtan/dvy))
+    vx_ctr = np.mean(vx, axis=0)
+    (x0, y0) = vx_ctr
+    den_inv = zinv(np.sqrt(x0**2 + y0**2))
+    drad_dvx = np.asarray([x0,  y0]) * den_inv
+    dtan_dvx = np.asarray([-y0, x0]) * den_inv
+    # get dtan and drad
+    drad_dfx = np.asarray([np.sum(drad_dvx[i]*grad[:,i], axis=0) for i in [0,1]])
+    dtan_dfx = np.asarray([np.sum(dtan_dvx[i]*grad[:,i], axis=0) for i in [0,1]])
+    # we can now turn these into the magnitudes plus the field sign
+    rad_mag = np.sqrt(np.sum(drad_dfx**2, axis=0))
+    tan_mag = np.sqrt(np.sum(dtan_dfx**2, axis=0))
+    # this is the entire result!
+    return {'radial': rad_mag, 'tangential': tan_mag, 'areal': arl_mag, 'field_sign': fsgn}
 
 def neighborhood_cortical_magnification(mesh, coordinates):
     '''
@@ -54,9 +134,9 @@ def neighborhood_cortical_magnification(mesh, coordinates):
         # areal is easy
         voronoi_vis = (pts_vis - x0col_vis) * 0.5 + x0col_vis
         voronoi_srf = (pts_srf - x0col_srf) * 0.5 + x0col_srf
-        area_vis = np.sum([triangle_area(x0_vis, a, b)
+        area_vis = np.sum([geo.triangle_area(x0_vis, a, b)
                            for (a,b) in zip(voronoi_vis.T, np.roll(voronoi_vis, 1, axis=1).T)])
-        area_srf = np.sum([triangle_area(x0_srf, a, b)
+        area_srf = np.sum([geo.triangle_area(x0_srf, a, b)
                            for (a,b) in zip(voronoi_srf.T, np.roll(voronoi_srf, 1, axis=1).T)])
         res[idx,2] = np.inf if np.isclose(area_vis, 0) else area_srf/area_vis
         # radial and tangentual we do together because they are very similar:
@@ -75,7 +155,7 @@ def neighborhood_cortical_magnification(mesh, coordinates):
                 dirvec = dirvecs[dirno]
                 line = (x0_vis, x0_vis + dirvec)
                 try:
-                    isects_vis = np.asarray(line_segment_intersection_2D(line, segs_vis))
+                    isects_vis = np.asarray(geo.line_segment_intersection_2D(line, segs_vis))
                     # okay, these will all be nan but two of them; they are the points we care about
                     isect_idcs = np.unique(np.where(np.logical_not(np.isnan(isects_vis)))[1])
                 except:
@@ -180,7 +260,7 @@ def path_cortical_magnification(mesh, path, mask=None, return_all=False,
         ss.append(pt)
         # here is the line segment we want to intersect with things
         seg = (pt, next_pt)
-        while not point_in_triangle(vis_reg.coordinates[vis_reg.tess.faces[:,tid]], next_pt):
+        while not geo.point_in_triangle(vis_reg.coordinates[vis_reg.tess.faces[:,tid]], next_pt):
             # otherwise, we need to find the next neighboring triangle:
             vtcs   = vis_reg.tess.faces[:,tid]
             tpts   = vis_reg.coordinates[vtcs].T
@@ -189,7 +269,7 @@ def path_cortical_magnification(mesh, path, mask=None, return_all=False,
             tid0 = tid
             tid0_set = set([tid0])
             projdir = next_pt - pt
-            isect = np.asarray(segment_intersection_2D((pt, next_pt), tsegs))
+            isect = np.asarray(geo.segment_intersection_2D((pt, next_pt), tsegs))
             # there should be 1 or 2 intersections; 1 if this is the first/last step,
             # 2 if there is a triangle crossed by the step
             isect_idcs = np.where(np.isfinite(isect[0]))[0]
@@ -214,7 +294,7 @@ def path_cortical_magnification(mesh, path, mask=None, return_all=False,
             if tid is None:
                 if len(ss) > 1: steps.append(ss)
                 ss = []
-                isect = np.asarray(segment_intersection_2D((pt0, next_pt), all_segs)).T
+                isect = np.asarray(geo.segment_intersection_2D((pt0, next_pt), all_segs)).T
                 # we want to ignore intersections in the current triangle tid0
                 isect_idcs = [idc for idc in np.where(np.logical_not(np.isnan(isect[:,0])))[0]
                               if edge_idx[all_edges[idc]] != tid0_set]

@@ -211,7 +211,8 @@ def triangle_area(a,b,c):
     triangle_area(a, b, c) yields the area of the triangle whose vertices are given by the points a,
     b, and c.
     '''
-    sides = np.sqrt(np.sum([(p1.T - p2.T)**2 for (p1,p2) in zip([b,c,a],[c,a,b])], axis=1))
+    (a,b,c) = [np.asarray(x) for x in (a,b,c)]
+    sides = np.sqrt(np.sum([(p1 - p2)**2 for (p1,p2) in zip([b,c,a],[c,a,b])], axis=1))
     s = 0.5 * np.sum(sides, axis=0)
     sides = np.clip(s - sides, 0.0, None)
     return np.sqrt(s * np.prod(sides, axis=0))

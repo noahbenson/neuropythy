@@ -1153,9 +1153,9 @@ class Mesh(VertexSet):
         corners = np.transpose(self.face_coordinates[:,:,containers], (0,2,1))
         coords = coords[contained_idcs]
         # get the mini-triangles' areas
-        a_area = triangle_area(coords, corners[1], corners[2])
-        b_area = triangle_area(coords, corners[2], corners[0])
-        c_area = triangle_area(coords, corners[0], corners[1])
+        a_area = triangle_area(coords.T, corners[1].T, corners[2].T)
+        b_area = triangle_area(coords.T, corners[2].T, corners[0].T)
+        c_area = triangle_area(coords.T, corners[0].T, corners[1].T)
         tot = a_area + b_area + c_area
         for (x,ii,f,aa,ba,ca,tt) in zip(coords, contained_idcs, tris.T, a_area,b_area,c_area,tot):
             if np.isclose(tt, 0):

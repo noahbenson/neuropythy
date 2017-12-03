@@ -387,7 +387,7 @@ def load_mgh(filename, to='auto'):
     elif to == 'header': return img.header
     elif to == 'field':
         dat = np.squeeze(img.get_data())
-        if len(data.shape) > 2:
+        if len(dat.shape) > 2:
             raise ValueError('image requested as field has more than 2 non-unitary dimensions')
         return dat
     elif to in ['auto', 'automatic']:
