@@ -266,14 +266,14 @@ def load_nifti(filename, to='auto'):
     elif to == 'affine': return img.affine
     elif to == 'header': return img.header
     elif to == 'field':
-        dat = np.squeeze(img.get_data())
-        if len(data.shape) > 2:
+        dat = np.squeeze(np.asarray(img.get_data()))
+        if len(dat.shape) > 2:
             raise ValueError('image requested as field has more than 2 non-unitary dimensions')
         return dat
     elif to in ['auto', 'automatic']:
         dims = set(np.shape(img.get_data()))
         if 1 < len(dims) < 4 and 1 in dims:
-            return img.squeeze(img.get_data())
+            return np.squeeze(np.asarray(img.get_data()))
         else:
             return img
     else:
@@ -365,17 +365,6 @@ def save_nifti(filename, obj, like=None, header=None, affine=None, extensions=El
                    extensions=extensions)
     obj.to_filename(filename)
     return filename
-# Gifti!
-@importer('gifti', ('gii', 'gii.gz'))
-def load_gifti(filename, to='auto'):
-    '''
-    load_gifti(filename) yields the nibabel gifti data structure loaded by nibabel from the given
-      filename. Currently, this load method is not particlarly sophisticated and simply returns this
-      data.
-    
-    The optional argument to may be used to coerce the resulting data to a particular format; the
-    following arguments are understood:
-      * 'auto' currently returns the nibabel data structure
-    '''
-    return gifio.read(filename)
+
+
 

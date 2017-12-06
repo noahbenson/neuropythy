@@ -263,10 +263,13 @@ def calc_arguments(args):
     # and if we are verbose, lets setup a note function
     verbose = opts['verbose']
     def note(s):
-        if verbose: print(s, file=sys.stdout)
+        if verbose:
+            print(s, file=sys.stdout)
+            sys.stdout.flush()
         return verbose
     def error(s):
         print(s, file=sys.stderr)
+        sys.stderr.flush()
         sys.exit(1)
     if len(args) < 1: error('subject argument is required')
     # Add the subjects directory, if there is one

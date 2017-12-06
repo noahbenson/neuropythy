@@ -52,6 +52,7 @@ setup(
               'neuropythy.cortex',
               'neuropythy.registration',
               'neuropythy.vision',
+              'neuropythy.graphics',
               'neuropythy.commands'],
     include_package_data=True,
     package_data={

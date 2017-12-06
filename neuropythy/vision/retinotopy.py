@@ -363,12 +363,17 @@ def mesh_retinotopy(m, source='any'):
     # if none of those worked, try with no prefix/suffix
     if not z:
         try:
-            z = as_retinotopy(m, 'visual', prefix=(source + '_'))
-            prefix = source + '_'
+            pref = source if source.endswith('_') else (source + '_')
+            z = as_retinotopy(m, 'visual', prefix=pref)
+            prefix = pref
+            check_fields = extra_fields['model'] + extra_fields['empirical']
         except:
+            raise
             try:
-                z = as_retinotopy(m, 'visual', suffix=('_' + source))
-                suffix = source + '_'
+                suff = source if source.startswith('_') else ('_' + source)
+                z = as_retinotopy(m, 'visual', suffix=suff)
+                suffix = suff
+                check_fields = extra_fields['model'] + extra_fields['empirical']
             except: pass
     # if still not z... we couldn't figure it out
     if not z: raise ValueError('Could not find an interpretation for source %s' % source)
@@ -381,7 +386,9 @@ def mesh_retinotopy(m, source='any'):
             if prefix: f = prefix + f
             if suffix: f = f + suffix
             f = f.lower()
-            if f in pnames: res[fname] = m.prop(pnames[f])
+            if f in pnames:
+                res[fname] = m.prop(pnames[f])
+                break
     # That's it
     return res
 
@@ -476,6 +483,13 @@ def retinotopic_field_sign(m, element='vertices', retinotopy=Ellipsis, invert_fi
     vfs = np.asarray([np.mean(tsign[list(ii)]) if len(ii) > 0 else 0 for ii in vfs])
     return vfs
 
+# These two variables are intended to provide default orderings to visual areas (but in general,
+# visual areas should be referred to by name OR as a number paired with a model).
+visual_area_names = (None,
+                     'V1', 'V2', 'V3', 'hV4', 'VO1', 'VO2', 'LO1', 'LO2',
+                     'TO1', 'TO2', 'V3b', 'V3a')
+visual_area_numbers = pyr.pmap({v:k for (k,v) in enumerate(visual_area_names)})
+
 visual_area_field_signs = pyr.pmap({'V1' :-1, 'V2' :1, 'V3' :-1, 'hV4':1,
                                     'VO1':-1, 'VO2':1, 'LO1':1,  'LO2':-1,
                                     'V3b':-1, 'V3a':1, 'TO1':-1, 'TO2':1})
@@ -502,7 +516,6 @@ def get_default_schira_model():
         except: pass
     return _default_schira_model
 
-__loaded_retinotopy_models = {}
 _retinotopy_model_paths = [
     os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -536,29 +549,28 @@ def retinotopy_model(name='benson17', hemi=None,
         matter what is included in these files, the neuropythy library's folders are searched last.
     '''
     origname = name
-    low = name.lower()
-    if name in __loaded_retinotopy_models:
-        return __loaded_retinotopy_models[name]
-    if low in __loaded_retinotopy_models:
-        return __loaded_retinotopy_models[low]
+    tup = (name,hemi,radius,sphere_radius)
+    if tup in retinotopy_model.cache:
+        return retinotopy_model.cache[tup]
     if os.path.isfile(name):
         fname = name
         name = None
-    elif low in ['schira', 'schira10', 'schira2010', 'benson14', 'benson2014']:
-        return get_default_schira_model()
+    elif name.lower() in ['schira', 'schira10', 'schira2010', 'benson14', 'benson2014']:
+        tmp = get_default_schira_model()
+        retinotopy_model.cache[tup] = tmp
+        return tmp
     else:
-        for name in [origname, low]:
-            name = name if hemi is None else ('%s.%s' % (hemi.lower(), name))
-            if len(name) > 4 and name[-4:] == '.fmm':
-                fname = name
-                name = name[:-4]
-            elif len(name) > 7 and name[-7:] == '.fmm.gz':
-                fname = name
-                name = name[:-7]
-            else:
-                fname = name + '.fmm'
-                # Find it in the search paths...
-                spaths = ([] if search_paths is None else search_paths) + _retinotopy_model_paths
+        name = name if hemi is None else ('%s.%s' % (hemi.lower(), name))
+        if len(name) > 4 and name[-4:] == '.fmm':
+            fname = name
+            name = name[:-4]
+        elif len(name) > 7 and name[-7:] == '.fmm.gz':
+            fname = name
+            name = name[:-7]
+        else:
+            fname = name + '.fmm'
+            # Find it in the search paths...
+            spaths = ([] if search_paths is None else search_paths) + _retinotopy_model_paths
             fname = next(
                 (os.path.join(path, nm0)
                  for path in spaths
@@ -568,12 +580,12 @@ def retinotopy_model(name='benson17', hemi=None,
                             None]
                  if nm is not None and nm == name),
                 None)
-            if fname is not None: break
-        if fname is None: raise ValueError('Cannot find an FFM file with the name %s' % origname)
+    if fname is None: raise ValueError('Cannot find an FFM file with the name %s' % origname)
     # Okay, load the model...
     mdl = load_fmm_model(fname).persist()
-    __loaded_retinotopy_models[name] = mdl
+    retinotopy_model.cache[tup] = mdl
     return mdl
+retinotopy_model.cache = {}
 
 # Tools for retinotopy registration:
 def _retinotopy_vectors_to_float(ang, ecc, wgt, weight_min=0):
@@ -748,7 +760,7 @@ def retinotopy_anchors(mesh, mdl,
                        model_hemi=Ellipsis,
                        scale=1,
                        shape='Gaussian', suffix=None,
-                       sigma=[0.1, 2.0, 4.0],
+                       sigma=[0.1, 2.0, 8.0],
                        select='close'):
     '''
     retinotopy_anchors(mesh, model) is intended for use with the mesh_register function and the

@@ -3,7 +3,7 @@
 
 '''Tools for analyzing and registering cortical meshes.'''
 
-submodules = ('neuropythy.util.core'
+submodules = ('neuropythy.util.core',
               'neuropythy.util',
               'neuropythy.java',
               'neuropythy.io.core',
@@ -21,6 +21,8 @@ submodules = ('neuropythy.util.core'
               'neuropythy.vision.retinotopy',
               'neuropythy.vision.cmag',
               'neuropythy.vision',
+              'neuropythy.graphics.core',
+              'neuropythy.graphics',
               'neuropythy.commands.surface_to_ribbon',
               'neuropythy.commands.benson14_retinotopy',
               'neuropythy.commands.register_retinotopy',

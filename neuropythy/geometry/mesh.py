@@ -22,7 +22,7 @@ from .util import (triangle_area, triangle_address, alignment_matrix_3D, rotatio
                    cartesian_to_barycentric_3D, cartesian_to_barycentric_2D,
                    barycentric_to_cartesian, point_in_triangle)
 from neuropythy.util import (ObjectWithMetaData, to_affine)
-from neuropythy.io   import load
+from neuropythy.io   import (load, importer)
 from functools import reduce
 
 @pimms.immutable
@@ -1334,7 +1334,11 @@ class Mesh(VertexSet):
         face_id = data['face_id']
         coords = data['coordinates']
         if np.sum(np.logical_not(np.isfinite(coords))) > 0:
-            raise ValueError('---')
+            w = np.where(np.logical_not(np.isfinite(coords)))
+            if len(w[0]) > 10:
+                raise ValueError('%d non-finite coords found when unaddressing' % len(w[0]))
+            else:
+                raise ValueError('%d non-finite coords found when unaddressing (%s)' % (len(w),w))
         faces = self.tess.indexed_faces
         if all(hasattr(x, '__iter__') for x in (face_id, coords)):
             null = np.full((faces.shape[0], self.coordinates.shape[0]), np.nan)
@@ -2166,3 +2170,62 @@ def to_mesh(obj, properties=None, meta_data=None):
     else:
         raise ValueError('Could not deduce how object can be convertex into a mesh')
 
+# The Gifti importer goes here because it relies on Mesh
+@importer('gifti', ('gii', 'gii.gz'))
+def load_gifti(filename, to='auto'):
+    '''
+    load_gifti(filename) yields the nibabel gifti data structure loaded by nibabel from the given
+      filename. Currently, this load method is not particlarly sophisticated and simply returns this
+      data.
+    
+    The optional argument to may be used to coerce the resulting data to a particular format; the
+    following arguments are understood:
+      * 'auto' currently returns the nibabel data structure.
+      * 'mesh' returns the data as a mesh, assuming that there are two darray elements stored in the,
+        gifti file, the first of which must be a coordinate matrix and a triangle topology.
+      * 'coordinates' returns the data as a coordinate matrix.
+      * 'tesselation' returns the data as a tesselation object.
+      * 'raw' returns the entire gifti image object (None will also yield this result).
+    '''
+    dat = nib.load(filename)
+    to = 'raw' if to is None else to.lower()
+    if to in ['raw', 'image', 'gifti', 'all', 'full']:
+        return dat
+    if to in ['auto', 'automatic']:
+        # is this is mesh gifti?
+        if len(dat.darrays) == 2 or len(dat.darrays) == 3:
+            if len(dat.darrays) == 2: (cor,    tri) = dat.darrays
+            else:                     (cor, _, tri) = dat.darrays
+            cor = cor.data
+            tri = tri.data
+            # possible that these were given in the wrong order:
+            if pimms.is_matrix(tri, 'inexact') and pimms.is_matrix(cor, 'int'):
+                (cor,tri) = (tri,cor)
+            # okay, try making it:
+            try: return Mesh(tri, cor)
+            except: pass
+        # is it a coord or topo?
+        if len(dat.darrays) == 1:
+            cor = dat.darrays[0].data
+            if pimms.is_matrix(cor, 'inexact'): return cor
+            if pimms.is_matrix(cor, 'int'):     return Tesselation(cor)
+        # We don't know what it is:
+        return dat
+    elif to in ['coords', 'coordinates', 'xyz']:
+        cor = dat.darrays[0].data
+        if pimms.is_matrix(cor, 'inexact'): return cor
+        else: raise ValueError('give gifti file did not contain coordinates')
+    elif to in ['tess', 'tesselation', 'triangles', 'tri', 'triangulation']:
+        cor = dat.darrays[0].data
+        if pimms.is_matrix(cor, 'int'): return Tesselation(cor)
+        else: raise ValueError('give gifti file did not contain tesselation')
+    elif to in ['mesh']:
+        if len(dat.darrays) == 2: (cor,    tri) = dat.darrays
+        else:                     (cor, _, tri) = dat.darrays
+        cor = cor.data
+        tri = tri.data
+        # possible that these were given in the wrong order:
+        if pimms.is_matrix(tri, 'inexact') and pimms.is_matrix(cor, 'int'):
+            (cor,tri) = (tri,cor)
+        # okay, try making it:
+        return Mesh(tri, cor)

@@ -12,8 +12,4 @@ for interacting with cortical data. The primary data include:
   * Subject, a class that tracks data connected to an individual subject.
 '''
 
-from .core import (Subject, Cortex,
-                   cortex_to_image_interpolation,
-                   vertex_curvature_color, vertex_weight,
-                   vertex_angle, vertex_eccen, vertex_angle_color, vertex_eccen_color,
-                   angle_colors, eccen_colors, curvature_colors, cortex_plot)
+from .core import (Subject, Cortex, cortex_to_image_interpolation)
