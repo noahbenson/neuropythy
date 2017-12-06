@@ -4,6 +4,7 @@
 # a number of other random utilities.
 
 import numpy                        as np
+import scipy.sparse                 as sps
 import pyrsistent                   as pyr
 import nibabel                      as nib
 import nibabel.freesurfer.mghformat as fsmgh
@@ -286,7 +287,7 @@ def simplex_summation_matrix(simplices, weight=None):
         shape=(n,m),
         dtype=np.int)
     if weight is not None:
-        s = s.dot(sps.csc_matrix((weight, (rng, rng)), shape=(m,m)))
+        s = s.dot(sps.csc_matrix((weight, (rng, rng)), shape=(m,m), dtype=np.float))
     return s
 def simplex_averaging_matrix(simplices, weight=None):
     '''
@@ -294,11 +295,11 @@ def simplex_averaging_matrix(simplices, weight=None):
       the matrix is subsequently normalized such that all rows sum to 1.
     '''
     m = simplex_summation_matrix(simplices, weight=weight)
-    rs = np.asarray(m.sum(axis=1))[:,0]
-    z = np.isclose(rs, 0)
-    invrs = np.logical_not(zs) / (rs + zs)
-    rng = range(len(simplices[0]))
-    return sps.csr_matrix((invrs, (rng, rng))).dot(m.tocsc())
+    rs = np.asarray(m.sum(axis=1), dtype=np.float)[:,0]
+    invrs = zinv(rs)
+    rng = range(m.shape[0])
+    diag = sps.csr_matrix((invrs, (rng, rng)), dtype=np.float)
+    return diag.dot(sps.csc_matrix(m, dtype=np.float))
 
 def zinv(x):
     '''
