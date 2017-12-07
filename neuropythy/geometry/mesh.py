@@ -504,7 +504,7 @@ class Tesselation(VertexSet):
         tess.vertex_edge_index is a map whose keys are vertices and whose values are tuples of the
         edge indices of the edges that contain the relevant vertex.
         '''
-        d = {k:[] for _ in labels}
+        d = {k:[] for k in labels}
         for (i,(u,v)) in enumerate(edges.T):
             d[u].append(i)
             d[v].append(i)

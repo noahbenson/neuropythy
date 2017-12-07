@@ -435,9 +435,12 @@ def point_in_triangle(tri, pt):
             t = (d00*d12 - d01*d02) / invDenom
             return False if (t + tol) < 0 or (s + t - tol) > 1 else True
         else:
-            return (np.dot(pt - tri[0], np.cross(tri[0], tri[1] - tri[0])) >= 0 and
-                    np.dot(pt - tri[1], np.cross(tri[1], tri[2] - tri[1])) >= 0 and
-                    np.dot(pt - tri[2], np.cross(tri[2], tri[0] - tri[2])) >= 0)
+            dp1 = np.dot(pt - tri[0], np.cross(tri[0], tri[1] - tri[0]))
+            dp2 = np.dot(pt - tri[1], np.cross(tri[1], tri[2] - tri[1]))
+            db3 = np.dot(pt - tri[2], np.cross(tri[2], tri[0] - tri[2]))
+            return ((dp1 > 0 or np.isclose(dp1, 0)) and
+                    (dp2 > 0 or np.isclose(dp2, 0)) and
+                    (dp3 > 0 or np.isclose(dp3, 0)))
     elif len(tri.shape) == 3 and len(pt.shape) == 2:
         if len(pt) != len(tri):
             raise ValueError('the number of triangles and points must be equal')
@@ -461,7 +464,9 @@ def point_in_triangle(tri, pt):
             x0 = np.sum((pt - tri[:,0]) * np.cross(tri[:,0], tri[:,1] - tri[:,0], axis=1), axis=1)
             x1 = np.sum((pt - tri[:,1]) * np.cross(tri[:,1], tri[:,2] - tri[:,1], axis=1), axis=1)
             x2 = np.sum((pt - tri[:,2]) * np.cross(tri[:,2], tri[:,0] - tri[:,2], axis=1), axis=1)
-            return ((x0 >= 0) & (x1 >= 0) & (x2 >= 0))
+            return (((x0 > 0) | np.isclose(x0, 0)) &
+                    ((x1 > 0) | np.isclose(x1, 0)) &
+                    ((x2 > 0) | np.isclose(x2, 0)))
     elif len(tri.shape) == 3 and len(pt.shape) == 1:
         return point_in_triangle(tri, np.asarray([pt for _ in tri]))
     elif len(tri.shape) == 2 and len(pt.shape) == 1:
