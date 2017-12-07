@@ -9,9 +9,9 @@ from .retinotopy import (empirical_retinotopy_data, predicted_retinotopy_data, r
                          extract_retinotopy_argument,
                          register_retinotopy, retinotopy_registration,
                          retinotopy_anchors, retinotopy_model, predict_retinotopy,
-                         mesh_retinotopy, as_retinotopy, retinotopic_field_sign,
+                         retinotopy_data, as_retinotopy, retinotopic_field_sign,
                          clean_retinotopy, predict_pRF_radius,
                          visual_area_names, visual_area_numbers)
 from .cmag       import (neighborhood_cortical_magnification, path_cortical_magnification,
-                         isoangular_path)
+                         isoangular_path, cmag)
 

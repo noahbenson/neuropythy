@@ -6,8 +6,9 @@
 import numpy               as np
 import numpy.linalg        as npla
 import neuropythy.geometry as geo
-from   neuropythy.util     import (zinv, zdiv)
-from   .retinotopy         import (extract_retinotopy_argument, mesh_retinotopy, as_retinotopy)
+from   neuropythy.util     import (zinv, zdiv, simplex_summation_matrix)
+from   .retinotopy         import (extract_retinotopy_argument, retinotopy_data, as_retinotopy)
+import pimms
 
 # Three methods to calculate cortical magnification:
 # (1) local projection of the triangle neighborhood then comparison of path across it in the visual
@@ -25,10 +26,10 @@ def _cmag_fill_result(mesh, idcs, vals):
     idcs = {idx:i for (i,idx) in enumerate(idcs)}
     return [vals[idcx[i]] if i in idcs else None for i in mesh.vertex_count]
 
-def nei_cmag(mesh, retinotopy='any', surface=None):
+def cmag(mesh, retinotopy='any', surface=None, to='vertices'):
     '''
-    nei_cmag(mesh) yields the neighborhood-based cortical magnification for the given mesh.
-    nei_cmag(mesh, retinotopy) uses the given retinotopy argument; this must be interpretable by
+    cmag(mesh) yields the neighborhood-based cortical magnification for the given mesh.
+    cmag(mesh, retinotopy) uses the given retinotopy argument; this must be interpretable by
       the as_retinotopy function, or should be the name of a source (such as 'empirical' or
       'any').
 
@@ -38,15 +39,22 @@ def nei_cmag(mesh, retinotopy='any', surface=None):
     (cortical-distance/degree)^2; the field sign has no unit.
 
     Note that if the retinotopy source is not given, this function will by default search for any
-    source using the mesh_retinotopy function.
+    source using the retinotopy_data function.
 
     The option surface (default None) can be provided to indicate that while the retinotopy and
     results should be formatted for the given mesh (i.e., the result should have a value for each
     vertex in mesh), the surface coordinates used to calculate areas on the cortical surface should
     come from the given surface. The surface option may be a super-mesh of mesh.
+
+    The option to='faces' or to='vertices' (the default) specifies whether the return-values should
+    be for the vertices or the faces of the given mesh. Vertex data are calculated from the face
+    data by summing and averaging.
     '''
     # First, find the retino data
-    retino = mesh_retinotopy(mesh, retinotopy)
+    if pimms.is_str(retinotopy):
+        retino = retinotopy_data(mesh, retinotopy)
+    else:
+        retino = retinotopy
     # If this is a topology, we want to change to white surface
     if isinstance(mesh, geo.Topology): mesh = mesh.white_surface
     # Convert from polar angle/eccen to longitude/latitude
@@ -72,7 +80,9 @@ def nei_cmag(mesh, retinotopy='any', surface=None):
     # get the visual coordinates at each face also
     vx = np.asarray([vcoords[:,f] for f in faces])
     # we already have enough data to calculate areal magnification
-    arl_mag = geo.triangle_area(sx[0], sx[1], sx[2]) * zinv(geo.triangle_area(*vx))
+    s_areas = geo.triangle_area(*sx)
+    v_areas = geo.triangle_area(*vx)
+    arl_mag = s_areas * zinv(v_areas)
     # calculate the gradient at each triangle; this array is dimension 2 x 2 x m where m is the
     # number of triangles; the first dimension is (vx,vy) and the second dimension is (fx,fy); fx
     # and fy are the coordinates in an arbitrary coordinate system built for each face.
@@ -101,9 +111,21 @@ def nei_cmag(mesh, retinotopy='any', surface=None):
     drad_dfx = np.asarray([np.sum(drad_dvx[i]*grad[:,i], axis=0) for i in [0,1]])
     dtan_dfx = np.asarray([np.sum(dtan_dvx[i]*grad[:,i], axis=0) for i in [0,1]])
     # we can now turn these into the magnitudes plus the field sign
-    rad_mag = np.sqrt(np.sum(drad_dfx**2, axis=0))
-    tan_mag = np.sqrt(np.sum(dtan_dfx**2, axis=0))
-    # this is the entire result!
+    rad_mag = zinv(np.sqrt(np.sum(drad_dfx**2, axis=0)))
+    tan_mag = zinv(np.sqrt(np.sum(dtan_dfx**2, axis=0)))
+    # this is the entire result if we are doing faces only
+    if to == 'faces':
+        return {'radial': rad_mag, 'tangential': tan_mag, 'areal': arl_mag, 'field_sign': fsgn}
+    # okay, we need to do some averaging!
+    mtx = simplex_summation_matrix(mesh.tess.indexed_faces)
+    cols = np.asarray(mtx.sum(axis=1), dtype=np.float)[:,0]
+    cols_inv = zinv(cols)
+    # for areal magnification, we want to do summation over the s and v areas then divide
+    s_areas = mtx.dot(s_areas)
+    v_areas = mtx.dot(v_areas)
+    arl_mag = s_areas * zinv(v_areas)
+    # for the others, we just average
+    (rad_mag, tan_mag, fsgn) = [cols_inv * mtx.dot(x) for x in (rad_mag, tan_mag, fsgn)]
     return {'radial': rad_mag, 'tangential': tan_mag, 'areal': arl_mag, 'field_sign': fsgn}
 
 def neighborhood_cortical_magnification(mesh, coordinates):

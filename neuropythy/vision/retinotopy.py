@@ -308,17 +308,18 @@ def as_retinotopy(data, output_style='visual', units=Ellipsis, prefix=None, suff
     f = _retinotopy_style_fns[output_style]
     return f(theta, rho)
 
-def mesh_retinotopy(m, source='any'):
+def retinotopy_data(m, source='any'):
     '''
-    mesh_retinotopy(m) yields a dict containing a retinotopy dataset with the keys 'polar_angle',
+    retinotopy_data(m) yields a dict containing a retinotopy dataset with the keys 'polar_angle',
       'eccentricity', and any other related fields for the given retinotopy type; for example,
       'pRF_size' and 'variance_explained' may be included for measured retinotopy datasets and
       'visual_area' may be included for atlas or model datasets. The coordinates are always in the
       'visual' retinotopy style, but can be reinterpreted with as_retinotopy.
-    mesh_retinotopy(m, source) may be used to specify a particular source for the data; this may be
+    retinotopy_data(m, source) may be used to specify a particular source for the data; this may be
       either 'empirical', 'model', or 'any'; or it may be a prefix/suffix beginning/ending with
       an _ character.
     '''
+    if isinstance(m, geo.VertexSet): return retinotopy_data(m.properties, source=source)
     source = source.lower()
     model_rets = ['predicted', 'model', 'template', 'atlas', 'inferred']
     empir_rets = ['empirical', 'measured', 'prf', 'data']
@@ -380,7 +381,7 @@ def mesh_retinotopy(m, source='any'):
     # okay, we found it; make it into a dict
     res = {'polar_angle': z[0], 'eccentricity': z[1]}
     # check for extra fields if relevant
-    pnames = {k.lower():k for k in m.properties} if check_fields else {}
+    pnames = {k.lower():k for k in m} if check_fields else {}
     for (fname, aliases) in check_fields:
         for f in [fname] + aliases:
             if prefix: f = prefix + f
@@ -442,9 +443,9 @@ def _retinotopic_field_sign_triangles(m, retinotopy):
     t = m.tess if isinstance(m, geo.Mesh) or isinstance(m, geo.Topology) else m
     # get the polar angle and eccen data as a complex number in degrees
     if pimms.is_str(retinotopy):
-        (x,y) = as_retinotopy(mesh_retinotopy(m, retinotopy), 'geographical')
+        (x,y) = as_retinotopy(retinotopy_data(m, retinotopy), 'geographical')
     elif retinotopy is Ellipsis:
-        (x,y) = as_retinotopy(mesh_retinotopy(m, 'any'),      'geographical')
+        (x,y) = as_retinotopy(retinotopy_data(m, 'any'),      'geographical')
     else:
         (x,y) = as_retinotopy(retinotopy,                     'geographical')
     # Okay, now we want to make some coordinates...
@@ -914,8 +915,10 @@ def retinotopy_anchors(mesh, mdl,
     if not np.isclose(field_sign_weight, 0) and mdl.area_name_to_id is not None:
         id2n = mdl.area_id_to_name
         if field_sign is True or field_sign is Ellipsis or field_sign is None:
+            from .cmag import cmag
             r = {'polar_angle': polar_angle,  'eccentricity': eccentricity}
-            field_sign = retinotopic_field_sign(mesh, retinotopy=r)
+            #field_sign = retinotopic_field_sign(mesh, retinotopy=r)
+            field_sign = cmag(mesh, r)['field_sign']
         elif pimms.is_str(field_sign): field_sign = mesh.prop(field_sign)
         field_sign = np.asarray(field_sign)
         fswgts = 1.0 - 0.25 * np.asarray(
@@ -1472,7 +1475,7 @@ def clean_retinotopy(obj, retinotopy='empirical', output_style='visual', weight=
     
     The following options are accepted:
       * retinotopy ('empirical') specifies the retinotopy data; this should be understood by the
-        mesh_retinotopy function or the as_retinotopy function.
+        retinotopy_data function or the as_retinotopy function.
       * output_style ('visual') specifies the style of the output data that should be returned;
         this should be a string understood by as_retinotopy.
       * yield_report (False) may be set to True, in which case a tuple (retino, report) is returned,
@@ -1483,7 +1486,7 @@ def clean_retinotopy(obj, retinotopy='empirical', output_style='visual', weight=
     if isinstance(obj, mri.Cortex): obj = obj.white_surface
     # get the retinotopy first:
     if pimms.is_str(retinotopy):
-        retinotopy = mesh_retinotopy(obj, retinotopy.lower())
+        retinotopy = retinotopy_data(obj, retinotopy.lower())
     (theta0, eccen0) = as_retinotopy(retinotopy, 'visual')
     # we want to scale eccen by a log-transform; this is the inverse of the cortical magnification
     # function in Horton & Hoyt 1991
