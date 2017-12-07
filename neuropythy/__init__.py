@@ -50,7 +50,7 @@ from io           import (load, save, to_nifti)
 from mri          import (Cortex, Subject)
 from vision       import (retinotopy_data, empirical_retinotopy_data, predicted_retinotopy_data,
                           register_retinotopy, retinotopy_anchors, retinotopy_model,
-                          neighborhood_cortical_magnification, as_retinotopy, mesh_retinotopy)
+                          neighborhood_cortical_magnification, as_retinotopy, retinotopy_data)
 from   freesurfer import (subject as freesurfer_subject, to_mgh)
 import freesurfer
 
