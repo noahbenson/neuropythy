@@ -761,7 +761,7 @@ def retinotopy_anchors(mesh, mdl,
                        model_hemi=Ellipsis,
                        scale=1,
                        shape='Gaussian', suffix=None,
-                       sigma=[0.1, 2.0, 16.0],
+                       sigma=[0.1, 2.0, 8.0],
                        select='close'):
     '''
     retinotopy_anchors(mesh, model) is intended for use with the mesh_register function and the
