@@ -37,5 +37,6 @@ from .util import (
     point_in_prism,
     tetrahedral_barycentric_coordinates,
     prism_barycentric_coordinates)
-from .mesh import (VertexSet, Tesselation, Mesh, Topology, MapProjection, to_tess, to_mesh)
+from .mesh import (VertexSet, Tesselation, Mesh, Topology, MapProjection,
+                   to_tess, to_mesh, to_property)
 

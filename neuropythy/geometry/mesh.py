@@ -147,115 +147,17 @@ class VertexSet(ObjectWithMetaData):
                  outliers=None,  data_range=None,    clipped=np.inf,
                  weights=None,   weight_min=0,       weight_transform=Ellipsis,
                  mask=None,      valid_range=None,   null=np.nan,
-                 transform=None, yield_weights=False):
+                 transform=None, yield_weight=False):
         '''
-        obj.property(prop) yields the given property from obj after performing a set of filters
-          on the property, as specified by the options. In the property array that is returned, the
-          values that are considered outliers (data out of some range) are indicated by numpy.inf,
-          and values that are not in the optionally-specified mask are given the value numpy.nan;
-          these may be changed with the clipped and null options, respectively.
-
-        The property argument prop may be either specified as a string (a property name in the
-        object) or as an array itself. The weights option may also be specified this way.
-
-        The following options are accepted:
-          * outliers (default:None) specifies the vertices that should be considered outliers; this
-            may be either None (no outliers explicitly specified), a list of indices, or a boolean
-            mask.
-          * data_range (default:None) specifies the acceptable data range for values in the
-            property; if None then this paramter is ignored. If specified as a pair of numbers
-            (min, max), then data that is less than the min or greater than the max is marked as an
-            outlier (in addition to other explicitly specified outliers). The values np.inf or 
-            -np.inf can be specified to indicate a one-sided range.
-          * clipped (default:np.inf) specifies the value to be used to mark an out-of-range value in
-            the returned array.
-          * mask (default:None) specifies the vertices that should be included in the property 
-            array; values are specified in the mask similarly to the outliers option, except that
-            mask values are included rather than excluded. The mask takes precedence over the 
-            outliers, in that a null (out-of-mask) value is always marked as null rather than
-            clipped.
-          * valid_range (default: None) specifies the range of values that are considered valid; 
-            i.e., values outside of the range are marked as null. Specified the same way as
-            data_range.
-          * null (default: np.nan) specifies the value marked in the array as out-of-mask.
-          * transform (default:None) may optionally provide a function to be passed the array prior
-            to being returned (after null and clipped values are marked).
-          * dtype (defaut:Ellipsis) specifies the type of the array that should be returned.
-            Ellipsis indicates that the type of the given property should be used. If None, then a
-            normal Python array is returned. Otherwise, should be a numpy type such as numpy.real64
-            or numpy.complex128.
-          * weights (default:Ellipsis) specifies the property or property array that should be
-            examined as the weights. The default, Ellipsis, simply chops values that are close to or
-            less than 0 such that they are equal to 0. None specifies that no transformation should
-            be applied.
-          * weight_min (default:0) specifies the value at-or-below which the weight is considered 
-            insignificant and the value is marked as clipped.
-          * weight_transform (default:None) specifies a function that should be applied to the
-            weight array before being used in the function.
-          * yield_weights (default:False) specifies, if True, that instead of yielding prop, yield
-            the tuple (prop, weights).
+        vset.property(prop) is equivalent to to_property(vset, prop).
         '''
-        # First, get the property array, as an array:
-        prop = self.prop(prop) if pimms.is_str(prop) else np.asarray(prop)
-        if dtype is Ellipsis:
-            dtype = prop.dtype
-        if not np.isnan(null):
-            prop = np.asarray([np.nan if x is null else x for x in prop])
-        prop = np.asarray(prop, dtype=dtype)
-        # Next, do the same for weight:
-        weight = weights
-        weight = None              if weight is None       else \
-                 self.prop(weight) if pimms.is_str(weight) else \
-                 weight
-        weight_orig = weight
-        if weight is None or weight_min is None:
-            low_weight = []
-        else:
-            if weight_transform is Ellipsis:
-                weight = np.array(weight, dtype=np.float)
-                weight[weight < 0] = 0
-                weight[np.isclose(weight, 0)] = 0
-            elif weight_transform is not None:
-                weight = weight_transform(np.asarray(weight))
-            low_weight = [] if weight_min is None else np.where(weight <= weight_min)[0]
-        # Next, find the mask; these are values that can be included theoretically;
-        all_vertices = np.asarray(range(self.properties.row_count), dtype=np.int)
-        where_nan = np.where(np.isnan(prop))[0]
-        where_inf = np.where(np.isinf(prop))[0]
-        where_ok  = reduce(np.setdiff1d, [all_vertices, where_nan, where_inf])
-        # look at the valid_range...
-        where_inv = [] if valid_range is None else \
-                    where_ok[(prop[where_ok] < valid_range[0]) | (prop[where_ok] > valid_range[1])]
-        # Whittle down the mask to what we are sure is in the spec:
-        where_nan = np.union1d(where_nan, where_inv)
-        mask = np.setdiff1d(all_vertices if mask is None else all_vertices[mask], where_nan)
-        # Find the outliers: values specified as outliers or inf values; will build this as we go
-        outliers = [] if outliers is None else all_vertices[outliers]
-        outliers = np.intersect1d(outliers, mask) # outliers not in the mask don't matter anyway
-        outliers = np.union1d(outliers, low_weight) # low-weight vertices are treated as outliers
-        # If there's a data range argument, deal with how it affects outliers
-        if data_range is not None:
-            if hasattr(data_range, '__iter__'):
-                outliers = np.union1d(outliers, mask[np.where(prop[mask] < data_range[0])[0]])
-                outliers = np.union1d(outliers, mask[np.where(prop[mask] > data_range[1])[0]])
-            else:
-                outliers = np.union1d(outliers, mask[np.where(prop[mask] < 0)[0]])
-                outliers = np.union1d(outliers, mask[np.where(prop[mask] > data_range)[0]])
-        # no matter what, trim out the infinite values (even if inf was in the data range)
-        outliers = np.union1d(outliers, mask[np.where(np.isinf(prop[mask]))[0]])
-        # Okay, mark everything in the prop:
-        where_nan = np.asarray(where_nan, dtype=np.int)
-        outliers = np.asarray(outliers, dtype=np.int)
-        prop[where_nan] = null
-        prop[outliers]  = clipped
-        if yield_weight:
-            weight = np.array(weight, dtype=np.float)
-            weight[where_nan] = 0
-            weight[outliers] = 0
-        # transform?
-        if transform: prop = transform(prop)
-        # That's it, just return
-        return (prop, weight) if yield_weight else prop
+        return to_property(self, prop,
+                           dtype=dtype,           null=null,
+                           outliers=outliers,     data_range=data_range,
+                           clipped=clipped,       weight=weight,
+                           weight_min=weight_min, weight_transform=weight_transform,
+                           mask=mask,             valid_range=valid_range,
+                           transform=transform,   yield_weight=yield_weight)
 
     def map(self, f):
         '''
@@ -273,7 +175,174 @@ class VertexSet(ObjectWithMetaData):
         '''
         idcs = np.where(self.map(f))[0]
         return idcs if indices else self.labels[idcs]
+
+def to_property(obj, prop=None,
+                dtype=Ellipsis,
+                outliers=None,  data_range=None,    clipped=np.inf,
+                weight=None,    weight_min=0,       weight_transform=Ellipsis,
+                mask=None,      valid_range=None,   null=np.nan,
+                transform=None, yield_weight=False):
+    '''
+    to_property(obj, prop) yields the given property from obj after performing a set of filters on
+      the property, as specified by the options. In the property array that is returned, the values
+      that are considered outliers (data out of some range) are indicated by numpy.inf, and values
+      that are not in the optionally-specified mask are given the value numpy.nan; these may be
+      changed with the clipped and null options, respectively.
+    to_property((obj, prop)) is equivalent to to_property(obj, prop).
+
+    The property argument prop may be either specified as a string (a property name in the object)
+    or as a property vector. The weights option may also be specified this way. Additionally, the
+    prop arg may be a list such as ['polar_angle', 'eccentricity'] where each element is either a
+    string or a vector, in which case the result is a matrix of properties. Finally, prop may be
+    a set of property names, in which case the return value is an itable whose keys are the property
+    names.
+
+    The obj argument may be either a VertexSet object (such as a Mesh or Tesselation) or a mapping
+    object such as a pimms ITable. If no strings are used to specify properties, it may additionally
+    be omitted or set to None.
+
+    The following options are accepted:
+      * outliers (default:None) specifies the vertices that should be considered outliers; this
+        may be either None (no outliers explicitly specified), a list of indices, or a boolean
+        mask.
+      * data_range (default:None) specifies the acceptable data range for values in the
+        property; if None then this paramter is ignored. If specified as a pair of numbers
+        (min, max), then data that is less than the min or greater than the max is marked as an
+        outlier (in addition to other explicitly specified outliers). The values np.inf or 
+        -np.inf can be specified to indicate a one-sided range.
+      * clipped (default:np.inf) specifies the value to be used to mark an out-of-range value in
+        the returned array.
+      * mask (default:None) specifies the vertices that should be included in the property 
+        array; values are specified in the mask similarly to the outliers option, except that
+        mask values are included rather than excluded. The mask takes precedence over the 
+        outliers, in that a null (out-of-mask) value is always marked as null rather than
+        clipped.
+      * valid_range (default: None) specifies the range of values that are considered valid; 
+        i.e., values outside of the range are marked as null. Specified the same way as
+        data_range.
+      * null (default: np.nan) specifies the value marked in the array as out-of-mask.
+      * transform (default:None) may optionally provide a function to be passed the array prior
+        to being returned (after null and clipped values are marked).
+      * dtype (defaut:Ellipsis) specifies the type of the array that should be returned.
+        Ellipsis indicates that the type of the given property should be used. If None, then a
+        normal Python array is returned. Otherwise, should be a numpy type such as numpy.real64
+        or numpy.complex128.
+      * weights (default:Ellipsis) specifies the property or property array that should be
+        examined as the weights. The default, Ellipsis, simply chops values that are close to or
+        less than 0 such that they are equal to 0. None specifies that no transformation should
+        be applied.
+      * weight_min (default:0) specifies the value at-or-below which the weight is considered 
+        insignificant and the value is marked as clipped.
+      * weight_transform (default:None) specifies a function that should be applied to the
+        weight array before being used in the function.
+      * yield_weight (default:False) specifies, if True, that instead of yielding prop, yield
+        the tuple (prop, weights).
     
+    '''
+    # was an arg given, or is obj a tuple?
+    if pimms.is_vector(obj) and len(obj) == 2:
+        return to_property(obj[0], obj[1],
+                           dtype=dtype,           null=null,
+                           outliers=outliers,     data_range=data_range,
+                           clipped=clipped,       weight=weight,
+                           weight_min=weight_min, weight_transform=weight_transform,
+                           mask=mask,             valid_range=valid_range,
+                           transform=transform,   yield_weight=yield_weight)
+    # we could have been given a property alone or a map/vertex-set and a property
+    if prop is None: (prop, obj) = (obj, None)
+    # if it's a vertex-set, we want to note that and get the map
+    if isinstance(obj, VertexSet): (vset, obj) = (obj,  obj.properties)
+    elif pimms.is_map(obj):        (vset, obj) = (None, obj)
+    elif obj is None:              (vset, obj) = (None, None)
+    else: ValueError('Data object given to to_properties() is neither a vertex-set nor a mapping')
+    # Now, get the property array, as an array
+    if pimms.is_str(prop):
+        if obj is None: raise ValueError('a property name but no data object given to to_property')
+        else: prop = obj[prop]
+    if isinstance(prop, colls.Set):
+        def _lazy_prop(kk):
+            return lambda:to_property(obj, kk,
+                                      dtype=dtype,           null=null,
+                                      outliers=outliers,     data_range=data_range,
+                                      clipped=clipped,       weight=weight,
+                                      weight_min=weight_min, weight_transform=weight_transform,
+                                      mask=mask,             valid_range=valid_range,
+                                      transform=transform,   yield_weight=yield_weight)
+        return pimms.itable({k:_lazy_prop(k) for k in prop})
+    elif (pimms.is_matrix(prop) or
+          (pimms.is_vector(prop) and all(pimms.is_str(p) or pimms.is_vector(p) for p in prop))):
+        return np.asarray([to_property(obj, k,
+                                       dtype=dtype,           null=null,
+                                       outliers=outliers,     data_range=data_range,
+                                       clipped=clipped,       weight=weight,
+                                       weight_min=weight_min, weight_transform=weight_transform,
+                                       mask=mask,             valid_range=valid_range,
+                                       transform=transform,   yield_weight=yield_weight)
+                           for k in prop])
+    elif not pimms.is_vector(prop):
+        raise ValueError('prop must be a property name or a vector or a combination of these')
+    if dtype is Ellipsis:  dtype = np.asarray(prop).dtype
+    if not np.isnan(null): prop  = np.asarray([np.nan if x == null else x for x in prop])
+    prop = np.asarray(prop, dtype=dtype)
+    # Next, do the same for weight:
+    if pimms.is_str(weight):
+        if obj is None: raise ValueError('a weight name but no data object given to to_property')
+        else: weight = obj[weight]
+    weight_orig = weight
+    if weight is None or weight_min is None:
+        low_weight = []
+    else:
+        if weight_transform is Ellipsis:
+            weight = np.array(weight, dtype=np.float)
+            weight[weight < 0] = 0
+            weight[np.isclose(weight, 0)] = 0
+        elif weight_transform is not None:
+            weight = weight_transform(np.asarray(weight))
+        if not pimms.is_vector(weight, 'real'):
+            raise ValueError('weight must be a real-valued vector or property name for such')
+        low_weight = [] if weight_min is None else np.where(weight <= weight_min)[0]
+    # Next, find the mask; these are values that can be included theoretically;
+    all_vertices = np.asarray(range(len(prop)), dtype=np.int)
+    where_nan = np.where(np.isnan(prop))[0]
+    where_inf = np.where(np.isinf(prop))[0]
+    where_ok  = reduce(np.setdiff1d, [all_vertices, where_nan, where_inf])
+    # look at the valid_range...
+    where_inv = [] if valid_range is None else \
+                where_ok[(prop[where_ok] < valid_range[0]) | (prop[where_ok] > valid_range[1])]
+    # Whittle down the mask to what we are sure is in the spec:
+    where_nan = np.union1d(where_nan, where_inv)
+    mask = np.setdiff1d(all_vertices if mask is None else all_vertices[mask], where_nan)
+    # Find the outliers: values specified as outliers or inf values; will build this as we go
+    outliers = [] if outliers is None else all_vertices[outliers]
+    outliers = np.intersect1d(outliers, mask) # outliers not in the mask don't matter anyway
+    outliers = np.union1d(outliers, low_weight) # low-weight vertices are treated as outliers
+    # If there's a data range argument, deal with how it affects outliers
+    if data_range is not None:
+        if hasattr(data_range, '__iter__'):
+            outliers = np.union1d(outliers, mask[np.where(prop[mask] < data_range[0])[0]])
+            outliers = np.union1d(outliers, mask[np.where(prop[mask] > data_range[1])[0]])
+        else:
+            outliers = np.union1d(outliers, mask[np.where(prop[mask] < 0)[0]])
+            outliers = np.union1d(outliers, mask[np.where(prop[mask] > data_range)[0]])
+    # no matter what, trim out the infinite values (even if inf was in the data range)
+    outliers = np.union1d(outliers, mask[np.where(np.isinf(prop[mask]))[0]])
+    # Okay, mark everything in the prop:
+    where_nan = np.asarray(where_nan, dtype=np.int)
+    outliers = np.asarray(outliers, dtype=np.int)
+    if len(where_nan) + len(outliers) > 0:
+        prop = np.array(prop)
+        prop[where_nan] = null
+        prop[outliers]  = clipped
+    if yield_weight:
+        weight = np.array(weight, dtype=np.float)
+        weight[where_nan] = 0
+        weight[outliers] = 0
+    # transform?
+    if transform: prop = transform(prop)
+    # That's it, just return
+    return (prop, weight) if yield_weight else prop
+    
+
 @pimms.immutable
 class TesselationIndex(object):
     '''
@@ -1468,7 +1537,7 @@ class Mesh(VertexSet):
                                        mask=mask, valid_range=valid_range,
                                        weights=weights, weight_min=weight_min,
                                        weight_transform=weight_transform, transform=transform,
-                                       yield_weights=True)
+                                       yield_weight=True)
         prop = np.array(prop)
         if not pimms.is_vector(prop, np.number):
             raise ValueError('non-numerical properties cannot be smoothed')

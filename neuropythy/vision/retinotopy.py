@@ -14,6 +14,7 @@ import neuropythy.geometry           as geo
 import neuropythy.freesurfer         as nyfs
 import neuropythy.mri                as mri
 import neuropythy.freesurfer         as nyfs
+from   neuropythy.util           import zinv
 from   neuropythy.registration   import (mesh_register, java_potential_term)
 from   neuropythy.java           import (to_java_doubles, to_java_ints)
 
@@ -1712,4 +1713,207 @@ def clean_retinotopy(obj, retinotopy='empirical', output_style='visual', weight=
         return (as_retinotopy({'polar_angle':angle, 'eccentricity':eccen}, output_style), res)
     else:
         return as_retinotopy({'polar_angle':angle, 'eccentricity':eccen}, output_style)
-            
+
+def retinotopy_comparison(arg1, arg2, arg3=None,
+                          eccentricity_range=None, polar_angle_range=None, visual_area_mask=None,
+                          weight=Ellipsis, weight_min=None, visual_area=Ellipsis,
+                          method='rmse', distance='scaled', gold=None):
+    '''
+    retinotopy_comparison(dataset1, dataset2) yields a pimms itable comparing the two retinotopy
+      datasets.
+    retinotopy_error(obj, dataset1, dataset2) is equivalent to retinotopy_comparison(x, y) where x
+      and y are retinotopy(obj, dataset1) and retinotopy_data(obj, dataset2).
+    
+    The datasets may be specified in a number of ways, some of which may be incompatible with
+    certain options. The simplest way to specify a dataset is as a vector of complex numbers, which
+    are taken to represent positions in the visual field with (a + bi) corresponding to the
+    coordinate (a deg, b deg) in the visual field. Alternately, an n x 2 or 2 x n matrix will be
+    interpreted as (polar angle, eccentricity) coordinates, in terms of visual degrees (see the
+    as_retinotopy function: as_retinotopy(arg, 'visual') yields this input format). Alternately,
+    the datasets may be mappings such as those retuend by the retinotopy_data function; in this case
+    as_retinotopy is used to extract the visual coordinates (so they need not be specified in visual
+    coordinates specifically in this case). In this last case, additional properties such as the
+    variance explained and pRF size can be returned, making it valuable for more sophisticated error
+    methods or distance metrics.
+
+    The returned dataset will always have a row for each row in the two datasets (which must have
+    the same number of rows). However, many rows may have a weight of 0 even if no weights were 
+    specified in the options; this is because other limitations may have been specified (such as
+    in the eccentricity_range or visual_areas). The returned dataset will always contain the
+    following columns:
+      * 'weight' gives the weight assigned to this particular vertex; the weights will always sum to
+        1 unless all vertices have 0 weight.
+      * 'polar_angle_1' and 'polar_angle_2', 'eccentricity_1', 'eccenticity_2', 'x_1', 'x_2', 'y_1',
+        'y_2', 'z_1', and 'z_2' all give the visual field coordinates in degrees; the z values give
+        complex numbers equivalent to the x/y values.
+      * 'radius_1' and 'radius_2' give the radii (sigma parameters) of the pRF gaussians.
+      * 'polar_angle_error', 'eccentricity_error', and 'center_error' all give the difference
+        between the visual field points in the two datasets; note that polar_angle_error in
+        particular is an error measure of rotations around the visual field and not of visual field
+        position. The 'center_error' is the distance between the centers of the visual field, in
+        degrees. The 'radius_error' value is also given.
+      * 'visual_area_1' and 'visual_area_2' specify the visual areas of the individual datasets; if
+        either of the datasets did not have a visual area, it will be omitted. Additionally, the
+        property 'visual_area' specifies the visual area suggested for use in analyses; this is
+        chosen based on the following: (1) if there is a gold standard dataset specified that has
+        a visual area, use it; (2) if only one of the datasets has a visual area, use it; (3) if
+        both have a visual area, then use the (varea1 == varea2) * varea1 (the areas that agree are
+        kept and all others are set to 0); (4) if neither has a visual area, then this property is
+        omitted. In all cases where a 'visual_area' property is included, those vertices that do not
+        overlap with the given visual_area_option option will be set to 0 along with the
+        corresponding weights.
+      * A variety of other lazily-calculated error metrics are included.
+
+    The following options are accepted:
+      * eccentricity_range (default: None) specifies the range of eccentricity to include in the
+        calculation (in degrees). This may be specified as emax or (emin, emax).
+      * polar_angle_range (default: None) specifies the range of polar angles to include in the
+        calculation. Like eccentricity range it may be specified as (amin, amax) but amax alone is
+        not allowed. Additionally the strings 'lh' and 'rvf' are equivalent to (0,180) and the
+        strings 'rh' and 'lvf' are equivalent to (-180,0).
+      * weight (default: Ellipsis) specifies the weights to be used in the calculation. This may be
+        None to specify that no weights should be used, or a property name or an array of weight
+        values. Alternately, it may be a tuple (w1, w2) of the weights for datasets 1 and 2. If the
+        argument is Ellipsis, then it will use weights if they are found in the retinotopy dataset;
+        both datasets may contain weights in which the product is used.
+      * weight_min (default: None) specifies the minimum weight a vertex must have to be included in
+        the calculation.
+      * visual_area (default: Ellipsis) specifies the visual area labels to be used in the
+        calculation. This may be None to specify that no labels should be used, or a property name
+        or an array of labels. Alternately, it may be a tuple (l1, l2) of the labels for datasets 1 
+        and 2. If the argument is Ellipsis, then it will use labels if they are found in the
+        retinotopy dataset; both datasets may contain labels in which the gold standard's labels are
+        used if there is a gold standard and the overlapping labels are used otherwise.
+      * visual_area_mask (default: None) specifies a list of visual areas included in the
+        calculation; this is applied to all datasets with a visual_area key; see the 'visual_area'
+        columns above and the visual_area option. If None, then no visual areas are filtered;
+        otherwise, arguments should like (1,2,3), which would usually specify that areas V1, V2, and
+        V3, be included.
+      * gold (default: None) specifies which dataset should be considered the gold standard; this
+        should be either 1 or 2. If a gold-standard dataset is specified, then it is used in certain
+        calculations; for example, when scaling an error by eccentricity, the gold-standard's
+        eccentricity will be used unless there is no gold standard, in which case the mean of the
+        two values are used.
+    '''
+    if arg3 is not None: (obj, dsets) = (arg1, [retinotopy_data(arg1, aa) for aa in (arg2,arg3)])
+    else:                (obj, dsets) = (None,    [arg1, arg2])
+    (gi,gold) = (None,False) if not gold else (gold-1,True)
+    # we'll build up this result as we go...
+    result = {}
+    # they must have a retinotopy representation:
+    vis = [as_retinotopy(ds, 'visual') for ds in dsets]
+    ps = (vis[0][0], vis[1][0])
+    es = (vis[0][1], vis[1][1])
+    rs = [ds['radius'] if 'radius' in ds else None for ds in dsets]
+    for ii in (0,1):
+        s = '_%d' % (ii + 1)
+        (p,e) = (ps[ii],es[ii])
+        result['polar_angle'  + s] = p
+        result['eccentricity' + s] = e
+        if rs[ii] is not None: result['radius' + s] = rs[ii]
+        p = np.pi/180.0 * (90.0 - p)
+        (x,y) = (e*np.cos(p), e*np.sin(p))
+        result['x' + s] = x
+        result['y' + s] = y
+        result['z' + s] = x + 1j * y
+    n = len(ps[0])
+    # figure out the weight
+    if isinstance(weight, tuple) and len(weight) == 2:
+        ws = [(None  if w is None                   else
+               ds[w] if pimms.is_str(w) and w in ds else
+               geo.to_property(obj, w))
+              for (w,ds) in zip(weight, dsets)]
+        weight = Ellipsis
+    else:
+        ws = [next((ds[k] for k in ('weight','variance_explained') if k in ds), None)
+              for ds in dsets]
+    if pimms.is_vector(weight, 'real'):
+        wgt = weight
+    elif pimms.is_str(weight):
+        if obj is None: raise ValueError('weight property name but no vertex-set given')
+        wgt = geo.to_property(obj, weight)
+    elif weight is Ellipsis:
+        if gold: wgt = ws[gi]
+        elif ws[0] is None and ws[1] is None: wgt = None
+        elif ws[0] is None: wgt = ws[1]
+        elif ws[1] is None: wgt = ws[0]
+        else: wgt = ws[0] * ws[1]
+    else: raise ValueError('Could not parse weight argument')
+    if wgt is None: wgt = np.ones(n)
+    if ws[0] is not None: result['weight_1'] = ws[0]
+    if ws[1] is not None: result['weight_2'] = ws[1]
+    # figure out the visual areas
+    if isinstance(visual_area, tuple) and len(visual_area) == 2:
+        ls = [(None  if l is None                   else
+               ds[l] if pimms.is_str(l) and l in ds else
+               geo.to_property(obj, l))
+              for (l,ds) in zip(visual_area, dsets)]
+        visual_area = Ellipsis
+    else:
+        ls = [next((ds[k] for k in ('visual_area','label') if k in ds), None)
+              for ds in dsets]
+    if pimms.is_vector(visual_area):
+        lbl = visual_area
+    elif pimms.is_str(visual_area):
+        if obj is None: raise ValueError('visual_area property name but no vertex-set given')
+        lbl = geo.to_property(obj, visual_area)
+    elif visual_area is None:
+        lbl = None
+    elif visual_area is Ellipsis:
+        if gold: lbl = ls[gi]
+        elif ls[0] is None and ls[1] is None: lbl = None
+        elif ls[0] is None: lbl = ls[1]
+        elif ls[1] is None: lbl = ls[0]
+        else: lbl = l[0] * (l[0] == l[1])
+    else: raise ValueError('Could not parse visual_area argument')
+    if ls[0] is not None: result['visual_area_1'] = ls[0]
+    if ls[1] is not None: result['visual_area_2'] = ls[1]
+    # Okay, now let's do some filtering; we clear weights as we go
+    wgt = np.array(wgt)
+    # Weight must be greater than the min
+    if weight_min is not None: wgt[wgt < weight_min] = 0
+    # Visual areas must be in the mask
+    lbl = None if lbl is None else np.array(lbl)
+    if lbl is not None and visual_area_mask is not None:
+        if pimms.is_int(visual_area_mask): visual_area_mask = [visual_area_mask]
+        oomask = (0 == np.sum([lbl == va for va in visual_area_mask], axis=0))
+        wgt[oomask] = 0
+        lbl[oomask] = 0
+    if lbl is not None: result['visual_area'] = lbl
+    # eccen must be in range
+    if eccentricity_range is not None:
+        er = eccentricity_range
+        if pimms.is_real(er): er = (0,er)
+        if gold: wgt[(es[gi] < er[0]) | (es[gi] > er[1])] = 0
+        else:    wgt[(es[0] < er[0]) | (es[0] > er[1]) | (es[1] < er[0]) | (es[1] > er[1])] = 0
+    # angle must be in range
+    if polar_angle_range is not None:
+        pr = polar_angle_range
+        if pimms.is_str(pr):
+            pr = pr.lower()
+            if   pr in ['lh', 'rvf']: pr = (   0, 180)
+            elif pr in ['rh', 'lvf']: pr = (-180,   0)
+            else: raise ValueError('unrecognized polar angle range argument: %s' % pr)
+        if gold: wgt[(ps[gi] < pr[0]) | (ps[gi] > pr[1])] = 0
+        else:    wgt[(ps[0] < pr[0]) | (ps[0] > pr[1]) | (ps[1] < pr[0]) | (ps[1] > pr[1])] = 0
+    # okay! Now we can add the weight into the result
+    result['weight'] = wgt * zinv(np.sum(wgt))
+    # now we add a bunch of calculations we can perform on the data!
+    # first: metrics of distance
+    gsecc = es[gi] if gold else np.mean(es, axis=0)
+    gsang = ps[gi] if gold else np.mean(ps, axis=0)
+    gsrad = rs[gi] if gold else rs[0] if rs[1] is None else rs[1] if rs[0] is None else \
+            np.mean(rs, axis=0)
+    gsecc_inv = zinv(gsecc)
+    gsrad_inv = None if gsrad is None else zinv(gsrad)
+    for (tag,resprop) in [('z', 'center'), ('polar_angle', 'polar_angle'),
+                          ('eccentricity', 'eccentricity'), ('x', 'x'), ('y', 'y')]:
+        serr = result[tag + '_1'] - result[tag + '_2']
+        aerr = np.abs(serr)
+        result[resprop + '_error'] = serr
+        result[resprop + '_abs_error'] = aerr
+        result[resprop + '_scaled_error'] = aerr * gsecc_inv
+        if gsrad_inv is not None:
+            result[resprop + '_radii_error'] = aerr * gsrad_inv
+    return pimms.itable(result)
+        
