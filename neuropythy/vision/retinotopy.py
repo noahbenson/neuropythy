@@ -1223,8 +1223,10 @@ def calc_prediction(registered_map, preregistration_mesh, native_mesh, model):
         addr = preregistration_mesh.address(native_mesh.coordinates)
         natreg_mesh = native_mesh.copy(coordinates=rmesh.unaddress(addr))
         d = model.cortex_to_angle(natreg_mesh)
-        pred = pyr.m(polar_angle=d[0], eccentricity=d[1],
-                     visual_area=np.asarray(d[2], dtype=np.int))
+        (ang,ecc) = d[0:2]
+        lbl = np.asarray(d[2], dtype=np.int)
+        rad = np.asarray([predict_pRF_radius(e, id2n[l]) if l > 0 else 0 for (e,l) in zip(ecc,lbl)])
+        pred = pyr.m(polar_angle=ang, eccentricity=ecc, radius=rad, visual_area=lbl)
         pmesh = natreg_mesh.with_prop(pred)
     return {'registered_mesh'        : rmesh,
             'registration_prediction': rpred,

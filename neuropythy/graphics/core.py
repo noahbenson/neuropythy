@@ -121,6 +121,20 @@ try:
                    (10.0/40.0, 0.0, 0.0),
                    (20.0/40.0, 0.0, 0.0),
                    (40.0/40.0, 1.0, 1.0))})
+    _cmag_cmap = matplotlib.colors.LinearSegmentedColormap(
+        'radius',
+        {'red':   ((0.0,       0.0, 0.0),
+                   ( 2.0/32.0, 1.0, 1.0),
+                   ( 8.0/32.0, 1.0, 1.0),
+                   (32.0/32.0, 1.0, 1.0)),
+         'green': ((0.0,       0.0, 0.0),
+                   ( 2.0/32.0, 0.0, 0.0),
+                   ( 8.0/32.0, 1.0, 1.0),
+                   (32.0/32.0, 1.0, 1.0)),
+         'blue':  ((0.0,       0.0, 0.0),
+                   ( 2.0/32.0, 0.0, 0.0),
+                   ( 8.0/32.0, 0.0, 0.0),
+                   (32.0/32.0, 1.0, 1.0))})
     _vertex_angle_empirical_prefixes = ['prf_', 'measured_', 'empiirical_']
     _vertex_angle_model_prefixes = ['model_', 'predicted_', 'inferred_', 'template_', 'atlas_',
                                     'benson14_', 'benson17_']
