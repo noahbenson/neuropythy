@@ -283,6 +283,7 @@ class Subject(mri.Subject):
         path = os.path.join(path, 'mri')
         fls = [f
                for p in [path, os.path.join(path, 'orig')]
+               if os.path.isdir(p)
                for fname in os.listdir(p) for f in [os.path.join(p, fname)]
                if f[0] != '.'
                if len(f) > 4 and f[-4:].lower() in ['.mgz', '.mgh']

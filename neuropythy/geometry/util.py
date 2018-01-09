@@ -349,17 +349,34 @@ def barycentric_to_cartesian(tri, bc):
         return barycentric_to_cartesian(np.transpose(np.asarray([tri]), (1,2,0)),
                                         np.asarray([bc]).T)[:,0]
     bc = bc if bc.shape[0] == 2 else bc.T
+    if bc.shape[0] != 2: raise ValueError('barycentric matrix did not have a dimension of size 2')
+    n = bc.shape[1]
+    # we know how many bc's there are now; lets reorient tri to match with the last dimension as n
+    if len(tri.shape) == 2:
+        tri = np.transpose([tri for _ in range(n)], (1,2,0))
+    # the possible orientations of tri:
     if tri.shape[0] == 3:
-        tri = tri if (tri.shape[1] == 2 or tri.shape[1] == 3) else np.transpose(tri, (0,2,1))
+        if tri.shape[1] in [2,3] and tri.shape[2] == n:
+            pass # default orientation
+        elif tri.shape[1] == n and tri.shape[2] in [2,3]:
+            tri = np.transpose(tri, (0,2,1))
+        else: raise ValueError('could not deduce triangle dimensions')
     elif tri.shape[1] == 3:
-        tri = tri.T if tri.shape[0] == 2 else np.transpose(tri, (1,2,0))
+        if tri.shape[0] in [2,3] and tri.shape[2] == n:
+            tri = np.transpose(tri, (1,0,2))
+        elif tri.shape[0] == n and tri.shape[2] in [2,3]:
+            tri = np.transpose(tri, (1,2,0))
+        else: raise ValueError('could not deduce triangle dimensions')
     elif tri.shape[2] == 3:
-        tri = np.transpose(tri, (2,0,1) if tri.shape[0] == 2 else (2,1,0))
-    if tri.shape[0] != 3 or (tri.shape[1] != 2 and tri.shape[1] != 3):
+        if tri.shape[0] in [2,3] and tri.shape[1] == n:
+            tri = np.transpose(tri, (2,0,1))
+        elif tri.shape[0] == n and tri.shape[1] in [2,3]:
+            tri = np.transpose(tri, (2,1,0))
+        else: raise ValueError('could not deduce triangle dimensions')
+    else: raise ValueError('At least one dimension of triangles must be 3')
+    if tri.shape[0] != 3 or (tri.shape[1] not in [2,3]):
         raise ValueError('Triangle array did not have dimensions of sizes 3 and (2 or 3)')
-    if bc.shape[0] != 2:
-        raise ValueError('barycentric matrix did not have a dimension of size 2')
-    if tri.shape[2] != bc.shape[1]:
+    if tri.shape[2] != n:
         raise ValueError('number of triangles and coordinates must match')
     (l1,l2) = bc
     (p1, p2, p3) = tri

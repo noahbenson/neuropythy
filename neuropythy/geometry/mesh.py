@@ -21,7 +21,7 @@ else:                        import collections            as colls
 from .util import (triangle_area, triangle_address, alignment_matrix_3D, rotation_matrix_3D,
                    cartesian_to_barycentric_3D, cartesian_to_barycentric_2D,
                    barycentric_to_cartesian, point_in_triangle)
-from neuropythy.util import (ObjectWithMetaData, to_affine)
+from neuropythy.util import (ObjectWithMetaData, to_affine, zinv)
 from neuropythy.io   import (load, importer)
 from functools import reduce
 
@@ -1106,7 +1106,7 @@ class Mesh(VertexSet):
                         np.logical_and,
                         [(x >= mn)&(x <= mx) for (x,mn,mx) in zip(pt[finpts].T,dmins,dmaxs)])
                 else:
-                    insize_q[finpts] = True
+                    inside_q[finpts] = True
             if not inside_q.any(): return res
             res[inside_q] = try_nearest(pt[inside_q])
             return res
@@ -1144,7 +1144,7 @@ class Mesh(VertexSet):
         (m,n) = interp.shape # n: no. of vertices in mesh; m: no. points being interpolated
         # We apply weights first, because they are fairly straightforward:
         if weights is not None:
-            wmtx = sps.li_matrix((n,n))
+            wmtx = sps.lil_matrix((n,n))
             weights = np.array(weights)
             weights[np.logical_not(np.isfinite(weights))] = 0
             weights[weights < 0] = 0
@@ -1376,20 +1376,25 @@ class Mesh(VertexSet):
         '''
         # we have to have a topology and registration for this to work...
         data = np.asarray(data)
+        idxfs = self.tess.indexed_faces
         if len(data.shape) == 1:
             face_id = self.container(data)
             if face_id is None: return None
-            tx = self.coordinates[:,self.tess.indexed_faces[:,face_id]].T
+            tx = self.coordinates[:, idxfs[:,face_id]].T
+            faces = self.tess.faces[:,face_id]
         else:
             data = data if data.shape[1] == 3 or data.shape[1] == 2 else data.T
             face_id = np.asarray(self.container(data))
-            faces = self.tess.indexed_faces
-            null = np.full((faces.shape[0], self.coordinates.shape[0]), np.nan)
-            tx = np.asarray([self.coordinates[:,faces[:,f]].T if f is not None else null
-                             for f in face_id])
+            null = np.full((idxfs.shape[0], self.coordinates.shape[0]), np.nan)
+            tx = np.transpose([self.coordinates[:,idxfs[:,f]] if f is not None else null
+                               for f in face_id],
+                              (2,1,0))
+            faces = self.tess.faces
+            null = [None,None,None]
+            faces = np.transpose([faces[:,f] if f is not None else null for f in face_id])
         bc = cartesian_to_barycentric_3D(tx, data) if self.coordinates.shape[0] == 3 else \
              cartesian_to_barycentric_2D(tx, data)
-        return {'face_id': face_id, 'coordinates': bc}
+        return {'faces': faces, 'coordinates': bc}
 
     def unaddress(self, data):
         '''
@@ -1398,9 +1403,11 @@ class Mesh(VertexSet):
         '''
         if not isinstance(data, dict):
             raise ValueError('address data must be a dictionary')
-        if 'face_id' not in data: raise ValueError('address must contain face_id')
+        if 'faces' not in data: raise ValueError('address must contain faces')
         if 'coordinates' not in data: raise ValueError('address must contain coordinates')
-        face_id = data['face_id']
+        faces = np.asarray(data['faces'])
+        if faces.shape[0] != 3: faces = faces.T
+        if faces is not None: faces = self.tess.index(faces)
         coords = data['coordinates']
         if np.sum(np.logical_not(np.isfinite(coords))) > 0:
             w = np.where(np.logical_not(np.isfinite(coords)))
@@ -1408,19 +1415,19 @@ class Mesh(VertexSet):
                 raise ValueError('%d non-finite coords found when unaddressing' % len(w[0]))
             else:
                 raise ValueError('%d non-finite coords found when unaddressing (%s)' % (len(w),w))
-        faces = self.tess.indexed_faces
-        if all(hasattr(x, '__iter__') for x in (face_id, coords)):
-            null = np.full((faces.shape[0], self.coordinates.shape[0]), np.nan)
-            tx = np.asarray([self.coordinates[:,faces[:,f]].T if f is not None else null
-                             for f in face_id])
-        elif face_id is None:
-            return np.full(self.coordinates.shape[0], np.nan)
+        selfx = self.coordinates
+        if all(len(np.shape(x)) > 1 for x in (faces, coords)):
+            null = np.full((3, selfx.shape[0]), np.nan)
+            tx = np.transpose([selfx[:,ff] if ff[0] is not None else null for ff in faces.T],
+                              (2,1,0))
+        elif faces is None:
+            return np.full(selfx.shape[0], np.nan)
         else:
-            tx = np.asarray(self.coordinates[:,faces[:,face_id]].T)
+            tx = selfx[:,faces].T
         return barycentric_to_cartesian(tx, coords)
 
     def from_image(self, image, affine=None, method=None, fill=0, dtype=None,
-                   native_to_vertex_matrix=None):
+                   native_to_vertex_matrix=None, weight=None):
         '''
         mesh.from_image(image) interpolates the given 3D image array at the values in the given 
           mesh's coordinates and yields the property that results. If image is given as a string,
@@ -1437,6 +1444,9 @@ class Mesh(VertexSet):
           * fill (default: 0) values filled in when a vertex falls outside of the image.
           * native_to_vertex_matrix (default: None) may optionally give a final transformation that
             converts from native subject orientation encoded in images to vertex positions.
+          * weight (default: None) may optionally provide an image whose voxels are weights to use
+            during the interpolation; these weights are in addition to trilinear weights and are
+            ignored in the case of nearest interpolation.
         '''
         if isinstance(image, nib.analyze.SpatialImage):
             # we want to apply the tkr transform by default
@@ -1466,7 +1476,12 @@ class Mesh(VertexSet):
             ok = np.all((ijk >= 0) & [ii < sh for (ii,sh) in zip(ijk, image.shape)], axis=0)
             res[ok] = image[tuple(ijk[:,ok])]
             return res
-        # otherwise, we do linear interpolation; find the 8 neighboring voxels
+        # otherwise, we do linear interpolation; start by parsing the weights if given
+        if weight is None: weight = np.ones(image.shape)
+        elif pimms.is_str(weight): weight = load(weight).get_data()
+        elif isinstance(weight, nib.analyze.SpatialImage): weight = weight.get_data()
+        else: weight = np.asarray(weight)
+        # find the 8 neighboring voxels
         mins = np.floor(xyz)
         maxs = np.ceil(xyz)
         ok = np.all((mins >= 0) & [ii < sh for (ii,sh) in zip(maxs, image.shape)], axis=0)
@@ -1480,7 +1495,12 @@ class Mesh(VertexSet):
                            [maxs[0], maxs[1], mins[2]],
                            maxs],
                           dtype=np.int)
-        wgts = np.asarray([np.prod(1 - np.abs(xyz - row), axis=0) for row in voxs])
+        # trilinear weights
+        wgts_tri = np.asarray([np.prod(1 - np.abs(xyz - row), axis=0) for row in voxs])
+        # weight-image weights
+        wgts_wgt = np.asarray([weight[tuple(row)] for row in voxs])
+        wgts = wgts_tri * wgts_wgt
+        wgts *= zinv(np.sum(wgts, axis=0))
         vals = np.asarray([image[tuple(row)] for row in voxs])
         res[ok] = np.sum(wgts * vals, axis=0)
         return res

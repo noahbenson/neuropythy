@@ -149,10 +149,7 @@ def vertex_prop(m, property=None):
     elif pimms.is_number(property): return property
     elif not pimms.is_str(property): raise ValueError('argument is not property-like: %s'%property)
     elif property in m: return m[property]
-    # see if property_name is a prefix?
-    for (k,v) in six.iteritems(m):
-        if k.startswith(property): return v
-    return None
+    else: return None
 def vertex_weight(m, property=None):
     p = vertex_prop(m, property)
     if p is None:
@@ -365,20 +362,20 @@ def retino_colors(vcolorfn, *args, **kwargs):
         if 'property' in kwargs:
             props = kwargs['property']
             del kwargs['property']
-            if not pimms.is_array(props): props = [props for _ in range(n)]
+            if not (pimms.is_vector(props) or pimms.is_matrix(props)):
+                props = [props for _ in range(n)]
         else: props = None
         if 'weight' in kwargs:
             ws = kwargs['weight']
             del kwargs['weight']
-            if not pimms.is_array(ws): ws = [ws for _ in range(n)]
+            if not pimms.is_vector(ws) and not pimms.is_matrix(ws): ws = [ws for _ in range(n)]
         else: ws = None
         vcolorfn0 = vcolorfn(Ellipsis, **kwargs) if len(kwargs) > 0 else vcolorfn
         if props is None and ws is None: vcfn = lambda m,k:vcolorfn0(m)
         elif props is None:              vcfn = lambda m,k:vcolorfn0(m, weight=ws[k])
         elif ws is None:                 vcfn = lambda m,k:vcolorfn0(m, property=props[k])
-        else:                            vcfn = lambda m,k:vcolorfn0(m, property=props[k],
-                                                                         weight=ws[k])
-        return np.asarray([vcfn(r,k) for (k,r) in enumerate(tbl.rows)])
+        else: vcfn = lambda m,k:vcolorfn0(m, property=props[k], weight=ws[k])
+        return np.asarray([vcfn(r,kk) for (kk,r) in enumerate(tbl.rows)])
     else:
         return vcolorfn(m, **kwargs)
 def angle_colors(*args, **kwargs):
@@ -502,7 +499,7 @@ def cortex_plot(the_map, color=None, plotter=matplotlib.pyplot):
     tri = matplotlib.tri.Triangulation(the_map.coordinates[0],
                                        the_map.coordinates[1],
                                        triangles=the_map.tess.indexed_faces.T)
-    if pimms.is_array(color):
+    if pimms.is_matrix(color):
         colors = color
     else:
         if color is None:         color = vertex_curvature_color

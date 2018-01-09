@@ -563,7 +563,8 @@ class Subject(ObjectWithMetaData):
         # That's everything!
         return arr
     def image_to_cortex(self, image,
-                        surface='midgray', hemi=None, affine=None, method=None, fill=0, dtype=None):
+                        surface='midgray', hemi=None, affine=None, method=None, fill=0, dtype=None,
+                        weight=None):
         '''
         sub.image_to_cortex(image) is equivalent to the tuple
           (sub.lh.from_image(image), sub.rh.from_image(image)).
@@ -573,12 +574,12 @@ class Subject(ObjectWithMetaData):
         hemi = hemi.lower()
         if hemi in ['both', 'lr', 'all', 'auto']:
             return tuple([self.image_to_cortex(image, surface=surface, hemi=h, affine=affine,
-                                               method=method, fill=fill, dtype=dtype)
+                                               method=method, fill=fill, dtype=dtype, weight=weight)
                           for h in ['lh', 'rh']])
         else:
             hemi = getattr(self, hemi)
             return hemi.from_image(image, surface=surface, affine=affine,
-                                   method=method, fill=fill, dtype=dtype,
+                                   method=method, fill=fill, dtype=dtype, weight=weight,
                                    native_to_vertex_matrix=self.native_to_vertex_matrix)
 
 @pimms.immutable
@@ -718,14 +719,14 @@ class Cortex(geo.Topology):
         else:
             raise ValueError('could not understand surface layer: %s' % name)
     def from_image(self, image, surface='midgray', affine=None, method=None, fill=0, dtype=None,
-                   native_to_vertex_matrix=None):
+                   native_to_vertex_matrix=None, weight=None):
         '''
         cortex.from_image(image) is equivalent to cortex.midgray_surface.from_image(image).
         cortex.from_image(image, surface) uses the given surface (see also cortex.surface).
         '''
         mesh = self.surface(surface)
         return mesh.from_image(image, affine=affine, method=method, fill=fill, dtype=dtype,
-                               native_to_vertex_matrix=native_to_vertex_matrix)
+                               native_to_vertex_matrix=native_to_vertex_matrix, weight=weight)
 
 ####################################################################################################
 # These functions deal with cortex_to_image and image_to_cortex interpolation:

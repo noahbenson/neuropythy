@@ -305,7 +305,6 @@ def zinv(x):
     '''
     zinv(x) yields 1/x if x is not close to 0 and 0 otherwise. Automatically threads over arrays.
     '''
-    x = np.asarray(x)
     z = np.isclose(x, 0)
     return np.logical_not(z) / (x + z)
 def zdiv(a, b, null=0):
@@ -313,8 +312,6 @@ def zdiv(a, b, null=0):
     zdiv(a,b) yields a/b if b is not close to 0 and 0 if b is close to 0; automatically threads over
       lists.
     '''
-    a = np.asarray(a)
-    b = np.asarray(b)
     z = np.isclose(b, 0)
     iz = np.logical_not(z)
     res = iz*a / (b + z)

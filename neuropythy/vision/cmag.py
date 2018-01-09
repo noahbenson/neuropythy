@@ -250,7 +250,7 @@ def path_cortical_magnification(mesh, path, mask=None, return_all=False,
     # get the x/y coordinates in visual space
     vis_coords = ecc * np.asarray([np.cos(np.pi/180*(90-ang)), np.sin(np.pi/180*(90-ang))])
     # okay, setup the topology/registrations
-    tess = Tesselation(tris)
+    tess = geo.Tesselation(tris)
     srf_reg = tess.make_mesh(srf.T)
     vis_reg = tess.make_mesh(vis_coords)
     # Now the Great Work begins...
@@ -268,7 +268,7 @@ def path_cortical_magnification(mesh, path, mask=None, return_all=False,
             edge_idx[edge].add(tid)
     # we may need this to find arbitrary intersections:
     all_edges = edge_idx.keys()
-    all_segs = np.asarray([vis_reg.coordinates[us].T for us in np.transpose(all_edges)])
+    all_segs = np.asarray([vis_reg.coordinates[:,us] for us in np.transpose(all_edges)])
     for (tid,next_tid,pt,next_pt) in zip(tids, np.roll(tids,-1), pth, np.roll(pth,-1,axis=0)):
         # This could be the last point or there could be a break;
         # We handle breaks as separate paths
@@ -282,10 +282,10 @@ def path_cortical_magnification(mesh, path, mask=None, return_all=False,
         ss.append(pt)
         # here is the line segment we want to intersect with things
         seg = (pt, next_pt)
-        while not geo.point_in_triangle(vis_reg.coordinates[vis_reg.tess.faces[:,tid]], next_pt):
+        while not geo.point_in_triangle(vis_reg.coordinates[:,vis_reg.tess.faces[:,tid]].T,next_pt):
             # otherwise, we need to find the next neighboring triangle:
             vtcs   = vis_reg.tess.faces[:,tid]
-            tpts   = vis_reg.coordinates[vtcs].T
+            tpts   = vis_reg.coordinates[:,vtcs]
             tsegs  = (tpts, np.roll(tpts, -1, axis=1))
             tedges = [tuple(sorted([u,v])) for (u,v) in zip(vtcs, np.roll(vtcs, -1))]
             tid0 = tid
@@ -434,7 +434,7 @@ def isoangular_path(mesh, pathtype, val, mask=None, min_segment_length=4,
     vis_coords = ecc * np.asarray([np.cos(np.pi/180*(90-ang)), np.sin(np.pi/180*(90-ang))])
     vis_coords = vis_coords.T
     # okay, setup the topology/registrations
-    tess = Tesselation(tris)
+    tess = geo.Tesselation(tris)
     srf_reg = tess.make_mesh(srf.T)
     vis_reg = tess.make_mesh(vis_coords)
     # now the Great Work begins...
