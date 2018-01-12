@@ -1447,7 +1447,7 @@ def predict_retinotopy(sub, template='benson17', registration='fsaverage'):
                for k in ['angle', 'eccen', 'varea', 'sigma']
                for fnm in [os.path.join(spath, '%s.%s_%s' % (h, template, k))]
                for dat in [fsio.read_morph_data(fnm)]}
-            for h in ['lh', 'rh']}
+            for h in hemis}
         
     # Okay, we just need to interpolate over to this subject
     tmpl = retino_tmpls[template]
@@ -1461,8 +1461,8 @@ def predict_retinotopy(sub, template='benson17', registration='fsaverage'):
         fsa = nyfs.subject('fsaverage')
         subj_hems = (sub.lh, sub.rh)
         tmpl_hems = (fsa.lh, fsa.rh)
-    return tuple([th.interpolate(sh, tmpl[h])
-                  for (sh,th,h) in zip(subj_hems, tmpl_hems, ['lh','rh'])])
+    return tuple([th.interpolate(sh, tmpl[h if registration == 'fsaverage' else 'sym'])
+                  for (sh,th,h) in zip(subj_hems, tmpl_hems, ['lh', 'rh'])])
 
 def clean_retinotopy(obj, retinotopy='empirical', output_style='visual', weight=Ellipsis,
                      equality_sigma=0.15, equality_scale=10.0,
