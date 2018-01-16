@@ -375,7 +375,7 @@ def calc_retinotopy(note, error, subject, clean, run_lh, run_rh,
 @pimms.calc('registrations')
 def calc_registrations(note, error, cortices, model, model_sym,
                        weight_min, scale, prior, max_out_eccen, max_steps, max_step_size,
-                       radius_weight, field_sign_weight, resample,
+                       radius_weight, field_sign_weight, resample, invert_rh_angle,
                        part_vol_correct):
     '''
     calc_registrations is the calculator that performs the registrations for the left and right
@@ -389,6 +389,7 @@ def calc_registrations(note, error, cortices, model, model_sym,
         note('Preparing %s Registration...' % h.upper())
         try:
             res[h] = register_retinotopy(ctx, model[h],
+                                         model_hemi='sym' if model_sym else h,
                                          polar_angle='polar_angle',
                                          eccentricity='eccentricity',
                                          weight='weight',
@@ -399,6 +400,7 @@ def calc_registrations(note, error, cortices, model, model_sym,
                                          scale=scale,
                                          prior=prior,
                                          resample=rsamp,
+                                         invert_rh_field_sign=invert_rh_angle,
                                          max_steps=max_steps,
                                          max_step_size=max_step_size,
                                          yield_imap=True)

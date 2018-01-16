@@ -756,7 +756,7 @@ def retinotopy_mesh_field(mesh, mdl,
 def retinotopy_anchors(mesh, mdl,
                        polar_angle=None, eccentricity=None,
                        weight=None, weight_min=0.1,
-                       field_sign_weight=0, field_sign=None,
+                       field_sign_weight=0, field_sign=None, invert_field_sign=False,
                        radius_weight=0, radius_weight_source='Wandell2015', radius=None,
                        model_field_sign=None,
                        model_hemi=Ellipsis,
@@ -922,6 +922,7 @@ def retinotopy_anchors(mesh, mdl,
             field_sign = cmag(mesh, r)['field_sign']
         elif pimms.is_str(field_sign): field_sign = mesh.prop(field_sign)
         field_sign = np.asarray(field_sign)
+        if invert_field_sign: field_sign = -field_sign
         fswgts = 1.0 - 0.25 * np.asarray(
             [(fs - visual_area_field_signs[id2n[l]]) if l in id2n else 0
              for (l,fs) in zip(labs,field_sign[idcs])])**2
@@ -978,6 +979,7 @@ def retinotopy_anchors(mesh, mdl,
 def calc_empirical_retinotopy(cortex,
                               polar_angle=None, eccentricity=None, pRF_radius=None, weight=None,
                               eccentricity_range=None, weight_min=0,
+                              invert_rh_angle=False,
                               partial_voluming_correction=False):
     '''
     calc_empirical_retinotopy computes the value empirical_retinotopy, which is an itable object
@@ -1001,6 +1003,8 @@ def calc_empirical_retinotopy(cortex,
         included in the registration; the default is 0.
       @ partial_voluming_correction May be set to True (default is False) to indicate that partial
         voluming correction should be used to adjust the weights.
+      @ invert_rh_angle May be set to True (default is False) to indicate that the right hemisphere
+        has its polar angle stored with opposite sign to the model polar angle.
 
     Efferent values:
       @ empirical_retinotopy Will be a pimms itable of the empirical retinotopy data to be used in
@@ -1133,10 +1137,17 @@ def calc_initial_state(cortex, model, empirical_retinotopy, resample=Ellipsis, p
             'preregistration_mesh': preregmesh,
             'preregistration_map':  preregmap}
 @pimms.calc('anchors')
-def calc_anchors(preregistration_map, model,
-                 scale=1, sigma=Ellipsis, radius_weight=0, field_sign_weight=0):
+def calc_anchors(preregistration_map, model, model_hemi,
+                 scale=1, sigma=Ellipsis, radius_weight=0, field_sign_weight=0,
+                 invert_rh_field_sign=False):
     '''
     calc_anchors is a calculator that creates a set of anchor instructions for a registration.
+
+    Required afferent parameters:
+      @ invert_rh_field_sign May be set to True (default is False) to indicate that the right
+        hemisphere's field signs will be incorrect relative to the model; this generally should be
+        used whenever invert_rh_angle is also set to True.
+
     '''
     wgts = preregistration_map.prop('weight')
     rads = preregistration_map.prop('radius')
@@ -1148,6 +1159,7 @@ def calc_anchors(preregistration_map, model,
                               weight=wgts, weight_min=0, # taken care of already
                               radius_weight=radius_weight, field_sign_weight=field_sign_weight,
                               scale=scale,
+                              invert_field_sign=(model_hemi == 'rh' and invert_rh_field_sign),
                               **({} if sigma is Ellipsis else {'sigma':sigma}))
     return ancs
 
@@ -1248,7 +1260,7 @@ def register_retinotopy(hemi,
                         weight_min=0.1,
                         eccentricity_range=None,
                         partial_voluming_correction=False,
-                        radius_weight=1, field_sign_weight=1,
+                        radius_weight=1, field_sign_weight=1, invert_rh_field_sign=False,
                         scale=1.0,
                         sigma=Ellipsis,
                         select='close',
@@ -1403,6 +1415,7 @@ def register_retinotopy(hemi,
         weight_min=weight_min,  eccentricity_range=eccentricity_range,
         partial_voluming_correction=partial_voluming_correction,
         radius_weight=radius_weight, field_sign_weight=field_sign_weight,
+        invert_rh_field_sign=invert_rh_field_sign,
         scale=scale, sigma=sigma, select=select, prior=prior, resample=resample, radius=radius,
         max_steps=max_steps, max_step_size=max_step_size, method=method)
     return m if yield_imap else m['predicted_mesh']

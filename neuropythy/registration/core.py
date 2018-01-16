@@ -121,7 +121,7 @@ def java_potential_term(mesh, instructions):
     
 # The mesh_register function
 def mesh_register(mesh, field, max_steps=2000, max_step_size=0.05, max_pe_change=1,
-                  method='random', return_report=False):
+                  method='random', return_report=False, initial_coordinates=None):
     '''
     mesh_register(mesh, field) yields the mesh that results from registering the given mesh by
     minimizing the given potential field description over the position of the vertices in the
@@ -196,6 +196,8 @@ def mesh_register(mesh, field, max_steps=2000, max_step_size=0.05, max_pe_change
         gradient at each individual vertex by drawing from an exponential distribution centered at
         the vertex's actual gradient length. In effect, this can prevent vertices with very large
         gradients from dominating the minimization and often results in the best results.
+      * initial_coordinates (default: None) specifies the start coordinates of the registration;
+        if None, uses those in the given mesh, which is generally desired.
 
     Examples:
       registered_mesh = mesh_register(
@@ -210,48 +212,71 @@ def mesh_register(mesh, field, max_steps=2000, max_step_size=0.05, max_pe_change
     # First, make sure that the arguments are all okay:
     if not isinstance(mesh, geo.Mesh):
         raise RuntimeError('mesh argument must be an instance of neuropythy.geometry.Mesh')
-    if not pimms.is_int(max_steps) or max_steps < 0:
-        raise RuntimeError('max_steps argument must be a positive integer')
-    if not pimms.is_number(max_steps) or max_step_size <= 0:
-        raise RuntimeError('max_step_size must be a positive number')
+    if not pimms.is_vector(max_steps): max_steps = [max_steps]
+    for ms in max_steps:
+        if not pimms.is_int(ms) or ms < 0:
+            raise RuntimeError('max_steps argument must be a positive integer')
+    if not pimms.is_vector(max_step_size): max_step_size = [max_step_size]
+    for mss in max_step_size:
+        if not pimms.is_number(mss) or mss <= 0:
+            raise RuntimeError('max_step_size must be a positive number')
     if not pimms.is_number(max_pe_change) or max_pe_change <= 0 or max_pe_change > 1:
         raise RuntimeError('max_pe_change must be a number x such that 0 < x <= 1')
-    if pimms.is_str(method):
-        method = method.lower()
-        if method == 'nimble': k = 4
-        else:                  k = 0
+    if pimms.is_vector(method):
+        if method[0].lower() == 'nimble' and len(method) > 1 and not pimms.is_str(method[1]):
+            method = [method]
+    else: method = [method]
+    if initial_coordinates is None:
+        init_coords = mesh.coordinates
     else:
-        k = method[1]
-        method = method[0].lower()
+        init_coords = np.asarray(initial_coordinates)
+        if init_coords.shape[0] != mesh.coordinates.shape[0]:
+            init_coords = init_coords.T
     # If steps is 0, we can skip most of this...
-    if max_steps == 0:
+    if np.sum(max_steps) == 0:
         if return_report: return None
-        else: return mesh.coordinates
+        else: return init_coords
     # Otherwise, we run at least some minimization
     max_pe_change = float(max_pe_change)
-    max_steps = int(max_steps)
-    max_step_size = float(max_step_size)
+    nrounds = len(max_steps)
+    if nrounds > 1:
+        if len(max_step_size) == 1: max_step_size = [max_step_size[0] for _ in max_steps]
+        if len(method) == 1:        method        = [method[0]        for _ in max_steps]
     # Parse the field argument.
     faces  = to_java_ints(mesh.tess.indexed_faces)
     edges  = to_java_ints(mesh.tess.indexed_edges)
     coords = to_java_doubles(mesh.coordinates)
+    init_coords = coords if init_coords is mesh.coordinates else to_java_doubles(init_coords)
     potential = _parse_field_arguments(field, faces, edges, coords)
     # Okay, that's basically all we need to do the minimization...
-    minimizer = java_link().jvm.nben.mesh.registration.Minimizer(potential, coords)
-    if method == 'pure':
-        rep = minimizer.step(max_pe_change, max_steps, max_step_size)
-    elif method == 'random':
-        # if k is -1, we do the inverse version where we draw from the 1/mean distribution
-        rep = minimizer.randomStep(max_pe_change, max_steps, max_step_size, k == -1)
-    elif method == 'nimble':
-        rep = minimizer.nimbleStep(max_pe_change, max_steps, max_step_size, int(k))
-    else:
-        raise ValueError('Unrecognized method: %s' % method)
+    rep = []
+    for (method,max_step_size,max_steps) in zip(method, max_step_size, max_steps):
+        minimizer = java_link().jvm.nben.mesh.registration.Minimizer(potential, init_coords)
+        max_step_size = float(max_step_size)
+        max_steps = int(max_steps)
+        if pimms.is_str(method):
+            method = method.lower()
+            if method == 'nimble': k = 4
+            else:                  k = 0
+        else:
+            k = method[1]
+            method = method[0].lower()
+        if method == 'pure':
+            r = minimizer.step(max_pe_change, max_steps, max_step_size)
+        elif method == 'random':
+            # if k is -1, we do the inverse version where we draw from the 1/mean distribution
+            r = minimizer.randomStep(max_pe_change, max_steps, max_step_size, k == -1)
+        elif method == 'nimble':
+            r = minimizer.nimbleStep(max_pe_change, max_steps, max_step_size, int(k))
+        else:
+            raise ValueError('Unrecognized method: %s' % method)
+        rep.append(r)
+        init_coords = minimizer.getX()
     # Return the report if requested
     if return_report:
         return rep
     else:
-        result = minimizer.getX()
+        result = init_coords
         return np.asarray([[x for x in row] for row in result])
 
 # The topology and registration stuff is below:
