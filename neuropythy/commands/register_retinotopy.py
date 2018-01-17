@@ -187,6 +187,7 @@ _retinotopy_parser_instructions = [
     ['u', 'registration-name',      'registration_name', 'retinotopy'],
     ['M', 'max-output-eccen',       'max_out_eccen',     '90'],
     ['I', 'max-input-eccen',        'max_in_eccen',      '90'],
+    ['J', 'min-input-eccen',        'min_in_eccen',      '0'],
     ['d', 'subjects-dir',           'subjects_dir',      None]]
 _retinotopy_parser = CommandLineParser(_retinotopy_parser_instructions)
 
@@ -247,6 +248,7 @@ def _guess_vol_file(fl):
             'registration_name', 
             'max_out_eccen',
             'max_in_eccen',
+            'min_in_eccen',
             'resample',
             'field_sign_weight',
             'radius_weight')
@@ -289,8 +291,8 @@ def calc_arguments(args):
 
     # Now, we want to run a few filters on the options
     # Parse the simple numbers
-    for o in ['weight_min', 'scale', 'max_step_size', 'max_out_eccen', 'max_in_eccen',
-              'field_sign_weight', 'radius_weight']:
+    for o in ['weight_min', 'scale', 'max_step_size', 'max_out_eccen',
+              'max_in_eccen', 'min_in_eccen', 'field_sign_weight', 'radius_weight']:
         opts[o] = float(opts[o])
     opts['max_steps'] = int(opts['max_steps'])
     # Make a note:
@@ -307,7 +309,7 @@ def calc_arguments(args):
                         'error':   error})
 @pimms.calc('cortices')
 def calc_retinotopy(note, error, subject, clean, run_lh, run_rh,
-                    invert_rh_angle, max_in_eccen,
+                    invert_rh_angle, max_in_eccen,, min_in_eccen,
                     angle_lh_file, theta_lh_file,
                     eccen_lh_file, rho_lh_file,
                     weight_lh_file, radius_lh_file,
@@ -364,6 +366,8 @@ def calc_retinotopy(note, error, subject, clean, run_lh, run_rh,
         # and zero-out weights for high eccentricities
         if max_in_eccen is not None:
             props['weight'][props['eccentricity'] > max_in_eccen] = 0
+        if min_in_eccen is not None:
+            props['weight'][props['eccentricity'] < min_in_eccen] = 0
         # Do smoothing, if requested
         if clean:
             note('Cleaning %s retinotopy...' % h.upper())
