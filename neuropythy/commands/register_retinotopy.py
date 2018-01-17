@@ -171,7 +171,7 @@ _retinotopy_parser_instructions = [
     ['g', 'field-sign-weight',      'field_sign_weight', '1.0'],
     ['G', 'radius-weight',          'radius_weight',     '1.0'],
     ['i', 'max-steps',              'max_steps',         '8000'],
-    ['D', 'max-step-size',          'max_step_size',     '0.05'],
+    ['D', 'max-step-size',          'max_step_size',     '0.02'],
     ['p', 'prior',                  'prior',             None],
 
     ['f', 'surf-format',            'surface_format',    'curv'],
