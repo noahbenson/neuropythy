@@ -18,125 +18,178 @@ from neuropythy.util                import CommandLineParser
 from neuropythy.vision              import (register_retinotopy, retinotopy_model, clean_retinotopy,
                                             empirical_retinotopy_data)
 
-info = \
-   '''
-   The register_retinotopy command can be used to register a subject's
-   hemisphere(s) to a model of V1-V3. At least one  subject id (either a freesurfer
-   subject name, if SUBJECTS_DIR is set appropriately in the environment, or a path
-   to a subject directory) must be given. Registration to a retinotopic model of
-   V1-V3 is performed for both hemispheres of all of these subjects.
-   In each subject's freesurfer directory, a variety of output data is deposited:
-    * surf/lh.retinotopy_sym.sphere.reg
-      xhemi/surf/lh.retinotopy_sym.sphere.reg
-      These files contain the registrations of the left and right hemispheres to
-      the retinotopy model. They are in the same format as Freesurfer's other 
-      surface-data files such as surf/lh.white.
-    * surf/lh.angle_predict.mgz   surf/rh.angle_predict.mgz
-      surf/lh.eccen_predict.mgz   surf/rh.eccen_predict.mgz
-      surf/lh.varea_predict.mgz   surf/rh.varea_predict.mgz
-      These files contain predictions of polar angle, eccentricity, and visual-area
-      label for each hemisphere. The files are mgz format, so contain volumes;
-      however, the volumes in each of these files is (1 x 1 x n) where n is the
-      number of vertices in the hemisphere's Freesurfer meshes.
-    * mri/angle_predict.mgz
-      mri/eccen_predict.mgz
-      mri/varea_predict.mgz
-      These contain the data from the above surface data projected into the
-      subject's 3D volume. Note that the volumes are oriented like Freesurfer's
-      mri/brain.mgz file; if you want to convert this to the orientation of your
-      original anatomical scan, use mri_convert:
-       > mri_convert -rl mri/rawavg.mgz mri/angle_predict.mgz \\
-                     mri/scanner.angle_predict.mgz
-   The following options are accepted:
-    * --eccen-lh=|-e<file>
-      --angle-lh=|-a<file>
-      --weight-lh=|-w<file>
-      --eccen-rh=|-A<file>
-      --angle-rh=|-E<file>
-      --weight-rh=|-W<file>
-      Each of these arguments specifies the name of a data file to load in as a
-      representation of the subject's eccentricity, polar angle, or weight; these
-      should be given the names of either an mgh/mgz files whose size is 1 x 1 x n,
-      where n is the number of vertices in the hemisphere for the subject, or a
-      FreeSurfer curv-style filename with n vertices. By default, files in the
-      subject's surf directory that match a template are automatically loaded and
-      used. This template is name <hemi>.<tag><name>, optionally ending with .mgz,
-      where tag is one of (and in order of preference) 'prf_', 'empirical_',
-      'measured_', 'training_', or '', and name is one of 'eccentricity'/'eccen',
-      'polar_angle'/'angle', or 'weight'/'variance_explained'/'vexpl'.
-    * --cutoff=|-c<value>
-      The cutoff value to use for the weight; 0.1 by default. Weights less than
-      this will be truncated to 0.
-    * -N|--no-partial-correction
-      Indicates that partial voluming correction should not be performed.
-    * --angle-radians|-r
-      This flag specifies that the angle-file only is in radians instead of
-      degrees.
-    * --eccen-radians|-R
-      This flag specifies that the eccen-file only is in radians instead of
-      degrees.
-    * --mathematical|-m
-      This flag specifies that the angle file addresses the visual space in the way
-      standard in geometry; i.e., with the right horizontal meridian represented as
-      0 and with the upper vertical meridian represented as 90 degrees or pi/4
-      instead of the convention in which the opper vertical meridian represented as
-      0 and the right horizontal meridian represented as 90 degrees or pi/4
-      radians.
-    * --edge-strength=|-D<weight>
-      --angle-strength=|-T<weight>
-      --functional-strength=|-F<weight>
-      Each of these specifies the strength of the appropriate potential-field
-      component. By default, these are each 1. Note that each field is already
-      normalized by the number of components over which it operates; e.g., the edge
-      strength is normalized by the number of edges in the mesh.
-    * --max-steps=|-s<steps>
-      This option specifies the maximum number of steps to run the registration; by
-      default this is 2000.
-    * --max-step-size=|-S<value>
-      This specifies the max step-size for any single vertex; by default this is
-      0.05.
-    * --prior=|-p<name>
-      This specifies the name of the prior registration to use in the fsaverage_sym
-      subject; by default this is retinotopy. The prior may be omitted if the value
-      "-" or "none" is given.
-    * --eccen-tag=|-y<tag>
-      --angle-tag=|-t<tag>
-      --label-tag=|-l<tag>
-      These options specify the output tag to use for the predicted measurement
-      that results from the registration. By default, these are
-      'eccen_predict', 'angle_predict', and 'varea_predict'.
-      The output files have the name <hemi>.<tag>.mgz
-    * --registration-name=|-u<string>
-      This parameter indicates that the registration file, by default named 
-      lh.retinotopy_sym.sphere.reg, should instead be named lh.<string>.sphere.reg.
-    * --max-output-eccen=|-M<val>
-      This specifies the maximum eccentricity to include in the output; there is no
-      particular need to limit one's output, but it can be done with this argument.
-      By default this is 90.
-    * --no-volume-export|-x
-      --no-surface-export|-z
-      --no-registration-export|-X
-      These flags indicate that the various data produced and written to the
-      filesystem under normal execution should be suppressed. The volume export
-      refers to the predicted volume files exported to the subject's mri directory;
-      the registration export refers to the <hemi>.retinotopy_sym.sphere.reg file,
-      written to the subject's surf directory, that contains the registered
-      coordinates for the subject; and the surface export refers to the
-      <hemi>.eccen_predict.mgz and similar files that are written to the
-      subject's surf directory.
-    * --subjects-dir=|-d
-      Specifies additional subject directory search locations (in addition to the
-      SUBJECTS_DIR environment variable and the FREESURFER_HOME/subjects
-      directories, which are given here in descending search priority) when looking
-      for subjects by name. This option cannot be specified multiple times, but it
-      may contain : characters to separate directories, as in PATH.
-    * --no-overwrite|-n
-      This flag indicates that, when writing output files, no file should ever be
-      replaced, should it already exist.
-    * --
-      This token, by itself, indicates that the arguments that remain should not be
-      processed as flags or options, even if they begin with a -.
-   '''
+info = '''
+The register_retinotopy command can be used to register a subject's
+hemisphere(s) to a model of retinotopy in the early visual cortex. At least one 
+subject id (either a freesurfer subject name, if SUBJECTS_DIR is set
+appropriately in the environment, or a path to a subject directory) must be
+given. Registration to a retinotopic model is performed for both hemispheres of
+all of these subjects.
+
+This process of registration is fundamentally Bayesian in that it finds a
+compromise between prior belief about retinotopy (the model of retinotopy) and
+the observed retinotopic measurements of the subject.
+
+In each subject's freesurfer directory, a variety of output data is deposited:
+ * surf/lh.retinotopy.sphere.reg
+   surf/rh.retinotopy.sphere.reg
+   These files contain the registrations of the left and right hemispheres to
+   the retinotopy model. They are in the same format as Freesurfer's other 
+   surface-data files such as surf/lh.white.
+ * surf/lh.inferred_angle   surf/rh.inferred_angle
+   surf/lh.inferred_eccen   surf/rh.inferred_eccen
+   surf/lh.inferred_varea   surf/rh.inferred_varea
+   surf/lh.inferred_sigma   surf/rh.inferred_sigma
+   These files contain predictions of polar angle, eccentricity, visual-area
+   label, and pRF radius (sigma) for each hemisphere. The files are in
+   freesurfer's 'curv' or 'morphology' format (same as lh.curv); though they
+   may be exported in other formats.
+ * mri/inferred_angle.mgz
+   mri/inferred_eccen.mgz
+   mri/inferred_varea.mgz
+   mri/inferred_sigma.mgz
+   These contain the data from the above surface data projected into the
+   subject's 3D volume. Note that the volumes are oriented like Freesurfer's
+   mri/brain.mgz file; if you want to convert this to the orientation of your
+   original anatomical scan, use mri_convert:
+    > mri_convert -rl mri/rawavg.mgz mri/angle_predict.mgz \\
+                  mri/scanner.angle_predict.mgz
+
+The following options are accepted:
+ * --help|-h
+   Prints this message.
+ * --verbose|-v
+   Specifies that progress messages should be printed during the registration.
+ * --lh-eccen=|-e<file>
+   --lh-angle=|-a<file>
+   --lh-weight=|-w<file>
+   --lh-radius=|-q<file>
+   --lh-theta=|-t<file>
+   --lh-rho=|-r<file>
+   --rh-eccen=|-e<file>
+   --rh-angle=|-a<file>
+   --rh-weight=|-w<file>
+   --rh-radius=|-q<file>
+   --rh-theta=|-t<file>
+   --rh-rho=|-r<file>
+   Each of these arguments specifies the name of a data file to load in as a
+   representation of the subject's eccentricity (eccen), polar angle (angle), 
+   pRF radius (radius), or weight; these should be the names of either an
+    mgh/mgz files whose size is 1 x 1 x n, where n is the number of vertices in
+   the hemisphere for the subject, or a FreeSurfer curv-style filename with n
+   vertices. By default, files in the subject's surf directory that match a
+   name-template are automatically loaded and used. This template is name
+   <hemi>.<tag><name>, optionally ending with .mgz, where tag is one of (and in
+   order of preference) 'prf_', 'empirical_', 'measured_', 'training_', or '',
+   and name is one of 'eccentricity'/'eccen', 'polar_angle'/'angle',
+   'radius'/'prfsz'/'sigma', or 'weight'/'variance_explained'/'vexpl'. Note that
+   the options ?h-theta and ?h-rho specify that the polar angle (theta) or
+   eccentricity (rho) are in radians.
+ * --no-volume-export|-x
+   --no-surface-export|-z
+   --no-registration-export|-X
+   Specifies that either volumes, surfaces, or the registration (.sphere.reg)
+   files should not be exported.
+ * --no-overwrite|-n
+   Specifies that files should not be overwritten if they exist already. 
+ * --no-lh|-k
+   --no-rh|-K
+   Specifies that the given hemisphere should not be registered.
+ * --clean|-c
+   Instructs the algorithm to clean the retinotopy with a basic smoothing
+   routine before performing registration (EXPERIMENTAL).
+ * --model-sym|-S
+   Specifies that the model used should be a version of the Schira2010 model
+   as used in Benson et al. (2014) PLOS Comput Biol; this model is on the
+   fsaverage_sym pseudo-hemisphere.
+ * --no-resample|-b
+   Indicates that the cortical map should not be resampled to a uniform
+   triangle grid immediately prior to registration. This is generally only a
+   good idea when used when the subject being registered is the fsaverage or
+   fsaverage_sym subject.
+ * --no-invert-rh-angle|-V
+   If the RH hemisphere polar angle values do not need to be negated in order to
+   match the model, this option should be given. Note that both the standard and
+   the fsaverage_sym model (see --model-sym option) encode the polar angle
+   values as ranging from 0 degrees (upper vertical meridian) to 180 degrees
+   (lower vertical meridian). Therefore, this option should generally not be
+   used unless your RH data has already been inverted.
+ * --weight-min=|-m<value>
+   The cutoff value to use for the weight; 0.1 by default. Weights less than
+   this will be truncated to 0.
+ * --scale=|-s<weight>
+   Specifies the strength of the functional forces relative to anatomical forces
+   during the registration; higher values will generally result in more warping
+   while lower values will result in less warping. The default value is 20.
+ * --field-sign-weight=|-g<weight>
+   --radius-weight=|-G<weight>
+   These specify the strength of the field-sign-based or radius-based matching
+   techniques. Both the field-sign and the pRF radius are used to modify the
+   weights on the individual vertices prior to the registration. Values of 0
+   indicate that this part of the weight should be ignored while values of 1
+   indicate that the weight should be relatively strong (default is 1 for both).
+ * --max-steps=|-i<steps>
+   This option specifies the maximum number of steps to run the registration; by
+   default this is 2000.
+ * --max-step-size=|-D<value>
+   This specifies the max step-size for any single vertex; by default this is
+   0.05.
+ * --prior=|-p<name>
+   This specifies the name of the prior registration to use in the fsaverage or
+   fsaverage_sym subject; by default this is none.
+ * --eccen-tag=|-y<tag>
+   --angle-tag=|-t<tag>
+   --label-tag=|-l<tag>
+   --radius-tag=|-j<tag>
+   These options specify the output tag to use for the predicted measurement
+   that results from the registration. By default, these are
+   'inferred_eccen', 'inferred_angle', 'inferred_varea', and 'inferred_sigma'.
+   The output files have the name <hemi>.<tag>
+ * --registration-name=|-u<string>
+   This parameter indicates that the registration file, by default named 
+   lh.retinotopy_sym.sphere.reg, should instead be named lh.<string>.sphere.reg.
+ * --max-output-eccen=|-M<val>
+   This specifies the maximum eccentricity to include in the output; there is no
+   particular need to limit one's output, but it can be done with this argument.
+   By default this is 90.
+ * --max-input-eccen=|-I<val>
+   --min-input-eccen=|-J<val>
+   This specifies the minimum/maximum eccentricity to include in the
+   registration. By default these are 90 and 0 degrees, but it is generally a
+   good idea to exclude eccentricity values above those used in the stimulus
+   presentation.
+ * --no-volume-export|-x
+   --no-surface-export|-z
+   --no-registration-export|-X
+   These flags indicate that the various data produced and written to the
+   filesystem under normal execution should be suppressed. The volume export
+   refers to the predicted volume files exported to the subject's mri directory;
+   the registration export refers to the <hemi>.retinotopy_sym.sphere.reg file,
+   written to the subject's surf directory, that contains the registered
+   coordinates for the subject; and the surface export refers to the
+   <hemi>.eccen_predict.mgz and similar files that are written to the
+   subject's surf directory.
+ * --surf-format=|-f<fmt>
+   Specifies that the surface files should be exported in the given format. By
+   default this is curv (FreeSurfer curvature files, such as lh.curv), but
+   mgh, mgz, or nifti are all valid options.
+ * --vol-format=|-F<fmt>
+   Specifies that the volume files should be exported in the given format. By
+   default this is mgz, but mgh or nifti are also valid options.
+ * --surf-outdir=|-o<dir>
+   --vol-outdir=|-O<dir>
+   Specifies the output directories for the surface and volume files; by default
+   this uses the subject's FreeSurfer directory + /surf or /mri.
+ * --subjects-dir=|-d
+   Specifies additional subject directory search locations (in addition to the
+   SUBJECTS_DIR environment variable and the FREESURFER_HOME/subjects
+   directories, which are given here in descending search priority) when looking
+   for subjects by name. This option cannot be specified multiple times, but it
+   may contain : characters to separate directories, as in PATH.
+ * --
+   This token, by itself, indicates that the arguments that remain should not be
+   processed as flags or options, even if they begin with a -.
+'''
 _retinotopy_parser_instructions = [
     # Flags
     ('h', 'help',                   'help',              False),
@@ -151,7 +204,7 @@ _retinotopy_parser_instructions = [
     ('b', 'no-resample',            'resample',          True),
     ('N', 'partial-correction',     'part_vol_correct',  False),
     ('S', 'model-sym',              'model_sym',         False),
-    ('V', 'invert-rh-angle',        'invert_rh_angle',   False),
+    ('V', 'no-invert-rh-angle',     'invert_rh_angle',   True),
     # Options
     ['a', 'lh-angle',               'angle_lh_file',     None],
     ['t', 'lh-theta',               'theta_lh_file',     None],
@@ -167,17 +220,17 @@ _retinotopy_parser_instructions = [
     ['Q', 'rh-radius',              'radius_rh_file',    None],
 
     ['m', 'weight-min',             'weight_min',        '0.1'],
-    ['s', 'scale',                  'scale',             '1.0'],
+    ['s', 'scale',                  'scale',             '20.0'],
     ['g', 'field-sign-weight',      'field_sign_weight', '1.0'],
     ['G', 'radius-weight',          'radius_weight',     '1.0'],
-    ['i', 'max-steps',              'max_steps',         '8000'],
+    ['i', 'max-steps',              'max_steps',         '2500'],
     ['D', 'max-step-size',          'max_step_size',     '0.02'],
     ['p', 'prior',                  'prior',             None],
 
     ['f', 'surf-format',            'surface_format',    'curv'],
     ['F', 'vol-format',             'volume_format',     'mgz'],
     ['o', 'surf-outdir',            'surface_path',      None],
-    ['o', 'vol-outdir',             'volume_path',       None],
+    ['O', 'vol-outdir',             'volume_path',       None],
     ['y', 'eccen-tag',              'eccen_tag',         'inferred_eccen'],
     ['w', 'angle-tag',              'angle_tag',         'inferred_angle'],
     ['l', 'label-tag',              'label_tag',         'inferred_varea'],
