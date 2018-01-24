@@ -59,17 +59,23 @@ setup(
         '': ['LICENSE.txt',
              'neuropythy/lib/nben/target/nben-standalone.jar',
              'neuropythy/lib/models/v123.fmm.gz',
-             'neuropythy/lib/models/benson17.fmm.gz',
              'neuropythy/lib/models/lh.benson17.fmm.gz',
              'neuropythy/lib/models/rh.benson17.fmm.gz',
+             'neuropythy/lib/data/fsaverage/surf/lh.retinotopy_benson17.sphere.reg',
+             'neuropythy/lib/data/fsaverage/surf/lh.benson17_angle'
+             'neuropythy/lib/data/fsaverage/surf/lh.benson17_eccen'
+             'neuropythy/lib/data/fsaverage/surf/lh.benson17_sigma'
+             'neuropythy/lib/data/fsaverage/surf/lh.benson17_varea'
+             'neuropythy/lib/data/fsaverage/surf/rh.retinotopy_benson17.sphere.reg',
+             'neuropythy/lib/data/fsaverage/surf/rh.benson17_angle'
+             'neuropythy/lib/data/fsaverage/surf/rh.benson17_eccen'
+             'neuropythy/lib/data/fsaverage/surf/rh.benson17_sigma'
+             'neuropythy/lib/data/fsaverage/surf/rh.benson17_varea'
              'neuropythy/lib/data/fsaverage_sym/surf/lh.retinotopy_benson14.sphere.reg',
-             'neuropythy/lib/data/fsaverage_sym/surf/lh.retinotopy_benson17.sphere.reg',
-             'neuropythy/lib/data/fsaverage_sym/surf/sym.benson14_angle.mgz',
-             'neuropythy/lib/data/fsaverage_sym/surf/sym.benson14_eccen.mgz',
-             'neuropythy/lib/data/fsaverage_sym/surf/sym.benson14_varea.mgz',
-             'neuropythy/lib/data/fsaverage_sym/surf/sym.benson17_angle.mgz',
-             'neuropythy/lib/data/fsaverage_sym/surf/sym.benson17_eccen.mgz',
-             'neuropythy/lib/data/fsaverage_sym/surf/sym.benson17_varea.mgz']},
+             'neuropythy/lib/data/fsaverage_sym/surf/sym.benson14_angle',
+             'neuropythy/lib/data/fsaverage_sym/surf/sym.benson14_eccen',
+             'neuropythy/lib/data/fsaverage_sym/surf/sym.benson14_sigma',
+             'neuropythy/lib/data/fsaverage_sym/surf/sym.benson14_varea']},
     install_requires=['numpy>=1.2',
                       'scipy>=0.7',
                       'nibabel>=2.0',
