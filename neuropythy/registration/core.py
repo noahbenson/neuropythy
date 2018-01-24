@@ -3,29 +3,12 @@
 # Core tools for registering the cortical surface to a particular potential function
 # By Noah C. Benson
 
-import numpy as np
-import scipy as sp
-import os, sys, gzip
-from numpy.linalg import norm
-from math import pi
-from numbers import Number
-from neuropythy.cortex import (CorticalMesh)
-from neuropythy.freesurfer import (freesurfer_subject, add_subject_path,
-                                   cortex_to_ribbon, cortex_to_ribbon_map,
-                                   Hemisphere, subject_paths)
-from neuropythy.topology import Registration
-from neuropythy.java import (java_link, serialize_numpy,
-                             to_java_doubles, to_java_ints, to_java_array)
-import nibabel.freesurfer.io as fsio
-import nibabel.freesurfer.mghformat as fsmgh
-from pysistence import make_dict
-from array import array
-
-from neuropythy.vision import (RetinotopyModel, SchiraModel,
-                               RetinotopyMeshModel, RegisteredRetinotopyModel)
-
-from py4j.java_gateway import (launch_gateway, JavaGateway, GatewayParameters)
-
+import numpy               as     np
+import neuropythy.geometry as     geo
+from   numpy               import pi
+from   neuropythy.java     import (to_java_doubles, to_java_ints, to_java_array,
+                                   java_link, serialize_numpy)
+import pimms
 
 # These are dictionaries of all the details we have about each of the possible arguments to the
 # mesh_register's field argument:
@@ -33,7 +16,7 @@ _parse_field_data_types = {
     'mesh': ['newStandardMeshPotential', ['edge_scale', 1.0], ['angle_scale', 1.0], 'F', 'X'],
     'edge': {
        'harmonic':      ['newHarmonicEdgePotential',      ['scale', 1.0], ['order', 2.0], 'F', 'X'],
-       'harmonic-log':  ['newHarmonicLogEdgePotential',   ['scale', 1.0], ['order', 2.0], 'F', 'X'],        
+       'harmonic-log':  ['newHarmonicLogEdgePotential',   ['scale', 1.0], ['order', 2.0], 'F', 'X'],
        'lennard-jones': ['newLJEdgePotential',            ['scale', 1.0], ['order', 2.0], 'F', 'X'],
        'infinite-well': ['newWellEdgePotential',          ['scale', 1.0], ['order', 0.5],
                                                           ['min',   0.5], ['max',   3.0],
@@ -46,16 +29,16 @@ _parse_field_data_types = {
                                                           ['min',   0.0], ['max',   pi],
                                                           'F', 'X']},
     'anchor': {
-       'harmonic':      ['newHarmonicAnchorPotential',    ['scale', 1.0], ['shape', 2.0], 0, 1, 'X'],
+       'harmonic':      ['newHarmonicAnchorPotential',    ['scale', 1.0], ['shape', 2.0], 0,1, 'X'],
        'gaussian':      ['newGaussianAnchorPotential',    ['scale', 1.0], ['sigma', 2.0], 
                                                           ['shape', 2.0], 0, 1, 'X']},
     'mesh-field': {
-       'harmonic':      ['newHarmonicMeshPotential',      ['scale', 1.0], ['order', 2.0], 0, 1, 2,
-                                                          3, 4, 'X'],
-       'harmonic-log':  ['newHarmonicLogMeshPotential',   ['scale', 1.0], ['order', 2.0], 0, 1, 2,
-                                                          3, 4, 'X'],
+       'harmonic':      ['newHarmonicMeshPotential',      ['scale', 1.0], ['order', 2.0], 0,1,2,3,4,
+                                                          'X'],
+       'harmonic-log':  ['newHarmonicLogMeshPotential',   ['scale', 1.0], ['order', 2.0], 0,1,2,3,4,
+                                                          'X'],
        'gaussian':      ['newGaussianMeshPotential',      ['scale', 1.0], ['sigma', 0.5],
-                                                          ['order', 2.0], 0, 1, 2, 3, 4, 'X']},
+                                                          ['order', 2.0], 0,1,2,3,4, 'X']},
     'perimeter': {
        'harmonic':      ['newHarmonicPerimeterPotential', ['scale', 1.0], ['shape', 2.0],
                                                           'F', 'X']}};
@@ -68,37 +51,35 @@ def _parse_field_function_argument(argdat, args, faces, edges, coords):
         return coords
     elif argdat == 'E':
         return edges
-    elif isinstance(argdat, (int, long)):
+    elif pimms.is_int(argdat):
         return to_java_array(args[argdat])
     # okay, none of those; must be a list with a default arg
     argname = argdat[0]
     argdflt = argdat[1]
     # see if we can find such an arg...
     for i in range(len(args)):
-        if isinstance(args[i], basestring) and args[i].lower() == argname.lower():
-            return (args[i+1] if (isinstance(args[i+1], Number)
-                                  or np.issubdtype(type(args[i+1]), np.float)) else
-                    to_java_array(args[i+1]))
+        if pimms.is_str(args[i]) and args[i].lower() == argname.lower():
+            return (args[i+1] if pimms.is_number(args[i+1]) else to_java_array(args[i+1]))
     # did not find the arg; use the default:
     return argdflt
 
 def _parse_field_argument(instruct, faces, edges, coords):
     _java = java_link()
-    if isinstance(instruct, basestring):
+    if pimms.is_str(instruct):
         insttype = instruct
         instargs = []
-    elif type(instruct) in [list, tuple]:
+    elif hasattr(instruct, '__iter__'):
         insttype = instruct[0]
         instargs = instruct[1:]
     else:
-        raise RuntimeError('potential field instruction must be list/tuple or string')
+        raise RuntimeError('potential field instruction must be list/tuple-like or a string')
     # look this type up in the types data:
     insttype = insttype.lower()
     if insttype not in _parse_field_data_types:
         raise RuntimeError('Unrecognized field data type: ' + insttype)
     instdata = _parse_field_data_types[insttype]
     # if the data is a dictionary, we must parse on the next arg
-    if isinstance(instdata, dict):
+    if pimms.is_map(instdata):
         shape_name = instargs[0].lower()
         instargs = instargs[1:]
         if shape_name not in instdata:
@@ -115,8 +96,8 @@ def _parse_field_argument(instruct, faces, edges, coords):
 # parse a field potential argument and return a java object that represents it
 def _parse_field_arguments(arg, faces, edges, coords):
     '''See mesh_register.'''
-    if not isinstance(arg, list):
-        raise RuntimeError('field argument must be a list of instructions')
+    if not hasattr(arg, '__iter__'):
+        raise RuntimeError('field argument must be a list-like collection of instructions')
     pot = [_parse_field_argument(instruct, faces, edges, coords) for instruct in arg]
     # make a new Potential sum unless the length is 1
     if len(pot) <= 1:
@@ -140,12 +121,12 @@ def java_potential_term(mesh, instructions):
     
 # The mesh_register function
 def mesh_register(mesh, field, max_steps=2000, max_step_size=0.05, max_pe_change=1,
-                  method='random', return_report=False):
+                  method='random', return_report=False, initial_coordinates=None):
     '''
     mesh_register(mesh, field) yields the mesh that results from registering the given mesh by
     minimizing the given potential field description over the position of the vertices in the
-    mesh. The mesh argument must be a CorticalMesh (see neuropythy.cortex) such as can be read
-    from FreeSurfer using the neuropythy.freesurfer.Subject class. The field argument must be
+    mesh. The mesh argument must be a Mesh object (see neuropythy.geometry) such as can be read
+    from FreeSurfer using the neuropythy.freesurfer_subject function. The field argument must be
     a list of field names and arguments; with the exception of 'mesh' (or 'standard'), the 
     arguments must be a list, the first element of which is the field type name, the second
     element of which is the field shape name, and the final element of which is a dictionary of
@@ -215,6 +196,8 @@ def mesh_register(mesh, field, max_steps=2000, max_step_size=0.05, max_pe_change
         gradient at each individual vertex by drawing from an exponential distribution centered at
         the vertex's actual gradient length. In effect, this can prevent vertices with very large
         gradients from dominating the minimization and often results in the best results.
+      * initial_coordinates (default: None) specifies the start coordinates of the registration;
+        if None, uses those in the given mesh, which is generally desired.
 
     Examples:
       registered_mesh = mesh_register(
@@ -227,50 +210,73 @@ def mesh_register(mesh, field, max_steps=2000, max_step_size=0.05, max_pe_change
     '''
     # Sanity checking:
     # First, make sure that the arguments are all okay:
-    if not isinstance(mesh, CorticalMesh):
-        raise RuntimeError('mesh argument must be an instance of neuropythy.cortex.CorticalMesh')
-    if not isinstance(max_steps, (int, long)) or max_steps < 0:
-        raise RuntimeError('max_steps argument must be a positive integer')
-    if not isinstance(max_steps, (float, int, long)) or max_step_size <= 0:
-        raise RuntimeError('max_step_size must be a positive number')
-    if not isinstance(max_pe_change, (float, int, long)) or max_pe_change <= 0 or max_pe_change > 1:
+    if not isinstance(mesh, geo.Mesh):
+        raise RuntimeError('mesh argument must be an instance of neuropythy.geometry.Mesh')
+    if not pimms.is_vector(max_steps): max_steps = [max_steps]
+    for ms in max_steps:
+        if not pimms.is_int(ms) or ms < 0:
+            raise RuntimeError('max_steps argument must be a positive integer')
+    if not pimms.is_vector(max_step_size): max_step_size = [max_step_size]
+    for mss in max_step_size:
+        if not pimms.is_number(mss) or mss <= 0:
+            raise RuntimeError('max_step_size must be a positive number')
+    if not pimms.is_number(max_pe_change) or max_pe_change <= 0 or max_pe_change > 1:
         raise RuntimeError('max_pe_change must be a number x such that 0 < x <= 1')
-    if isinstance(method, basestring):
-        method = method.lower()
-        if method == 'nimble': k = 4
-        else:                  k = 0
+    if pimms.is_vector(method):
+        if method[0].lower() == 'nimble' and len(method) > 1 and not pimms.is_str(method[1]):
+            method = [method]
+    else: method = [method]
+    if initial_coordinates is None:
+        init_coords = mesh.coordinates
     else:
-        k = method[1]
-        method = method[0].lower()
+        init_coords = np.asarray(initial_coordinates)
+        if init_coords.shape[0] != mesh.coordinates.shape[0]:
+            init_coords = init_coords.T
     # If steps is 0, we can skip most of this...
-    if max_steps == 0:
+    if np.sum(max_steps) == 0:
         if return_report: return None
-        else: return mesh.coordinates
+        else: return init_coords
     # Otherwise, we run at least some minimization
     max_pe_change = float(max_pe_change)
-    max_steps = int(max_steps)
-    max_step_size = float(max_step_size)
+    nrounds = len(max_steps)
+    if nrounds > 1:
+        if len(max_step_size) == 1: max_step_size = [max_step_size[0] for _ in max_steps]
+        if len(method) == 1:        method        = [method[0]        for _ in max_steps]
     # Parse the field argument.
-    faces  = to_java_ints(mesh.indexed_faces)
-    edges  = to_java_ints(mesh.indexed_edges)
+    faces  = to_java_ints(mesh.tess.indexed_faces)
+    edges  = to_java_ints(mesh.tess.indexed_edges)
     coords = to_java_doubles(mesh.coordinates)
+    init_coords = coords if init_coords is mesh.coordinates else to_java_doubles(init_coords)
     potential = _parse_field_arguments(field, faces, edges, coords)
     # Okay, that's basically all we need to do the minimization...
-    minimizer = java_link().jvm.nben.mesh.registration.Minimizer(potential, coords)
-    if method == 'pure':
-        rep = minimizer.step(max_pe_change, max_steps, max_step_size)
-    elif method == 'random':
-        # if k is -1, we do the inverse version where we draw from the 1/mean distribution
-        rep = minimizer.randomStep(max_pe_change, max_steps, max_step_size, k == -1)
-    elif method == 'nimble':
-        rep = minimizer.nimbleStep(max_pe_change, max_steps, max_step_size, int(k))
-    else:
-        raise ValueError('Unrecognized method: %s' % method)
+    rep = []
+    for (method,max_step_size,max_steps) in zip(method, max_step_size, max_steps):
+        minimizer = java_link().jvm.nben.mesh.registration.Minimizer(potential, init_coords)
+        max_step_size = float(max_step_size)
+        max_steps = int(max_steps)
+        if pimms.is_str(method):
+            method = method.lower()
+            if method == 'nimble': k = 4
+            else:                  k = 0
+        else:
+            k = method[1]
+            method = method[0].lower()
+        if method == 'pure':
+            r = minimizer.step(max_pe_change, max_steps, max_step_size)
+        elif method == 'random':
+            # if k is -1, we do the inverse version where we draw from the 1/mean distribution
+            r = minimizer.randomStep(max_pe_change, max_steps, max_step_size, k == -1)
+        elif method == 'nimble':
+            r = minimizer.nimbleStep(max_pe_change, max_steps, max_step_size, int(k))
+        else:
+            raise ValueError('Unrecognized method: %s' % method)
+        rep.append(r)
+        init_coords = minimizer.getX()
     # Return the report if requested
     if return_report:
         return rep
     else:
-        result = minimizer.getX()
+        result = init_coords
         return np.asarray([[x for x in row] for row in result])
 
 # The topology and registration stuff is below:

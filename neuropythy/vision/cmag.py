@@ -3,28 +3,12 @@
 # Cortical magnification caclculation code and utilities.
 # by Noah C. Benson
 
-import numpy                        as np
-import scipy                        as sp
-import scipy.sparse                 as spsparse
-import nibabel.freesurfer.io        as fsio
-import nibabel.freesurfer.mghformat as fsmgh
-
-import os, sys, gzip
-
-from numpy.linalg import norm
-from math         import pi
-from numbers      import Number
-from pysistence   import make_dict
-
-from neuropythy.cortex       import (CorticalMesh)
-from neuropythy.freesurfer   import (freesurfer_subject, add_subject_path,
-                                     cortex_to_ribbon, cortex_to_ribbon_map,
-                                     Hemisphere, subject_paths)
-from neuropythy.topology     import (Registration, Topology)
-from neuropythy.geometry     import (line_segment_intersection_2D, line_intersection_2D,
-                                     segment_intersection_2D, triangle_area,
-                                     point_in_triangle)
-from neuropythy.vision       import (extract_retinotopy_argument)
+import numpy               as np
+import numpy.linalg        as npla
+import neuropythy.geometry as geo
+from   neuropythy.util     import (zinv, zdiv, simplex_summation_matrix)
+from   .retinotopy         import (extract_retinotopy_argument, retinotopy_data, as_retinotopy)
+import pimms
 
 # Three methods to calculate cortical magnification:
 # (1) local projection of the triangle neighborhood then comparison of path across it in the visual
@@ -42,18 +26,121 @@ def _cmag_fill_result(mesh, idcs, vals):
     idcs = {idx:i for (i,idx) in enumerate(idcs)}
     return [vals[idcx[i]] if i in idcs else None for i in mesh.vertex_count]
 
+def cmag(mesh, retinotopy='any', surface=None, to='vertices'):
+    '''
+    cmag(mesh) yields the neighborhood-based cortical magnification for the given mesh.
+    cmag(mesh, retinotopy) uses the given retinotopy argument; this must be interpretable by
+      the as_retinotopy function, or should be the name of a source (such as 'empirical' or
+      'any').
+
+    The neighborhood-based cortical magnification data is yielded as a map whose keys are 'radial',
+    'tangential', 'areal', and 'field_sign'; the units of 'radial' and 'tangential' magnifications 
+    are cortical-distance/degree and the units on the 'areal' magnification is
+    (cortical-distance/degree)^2; the field sign has no unit.
+
+    Note that if the retinotopy source is not given, this function will by default search for any
+    source using the retinotopy_data function.
+
+    The option surface (default None) can be provided to indicate that while the retinotopy and
+    results should be formatted for the given mesh (i.e., the result should have a value for each
+    vertex in mesh), the surface coordinates used to calculate areas on the cortical surface should
+    come from the given surface. The surface option may be a super-mesh of mesh.
+
+    The option to='faces' or to='vertices' (the default) specifies whether the return-values should
+    be for the vertices or the faces of the given mesh. Vertex data are calculated from the face
+    data by summing and averaging.
+    '''
+    # First, find the retino data
+    if pimms.is_str(retinotopy):
+        retino = retinotopy_data(mesh, retinotopy)
+    else:
+        retino = retinotopy
+    # If this is a topology, we want to change to white surface
+    if isinstance(mesh, geo.Topology): mesh = mesh.white_surface
+    # Convert from polar angle/eccen to longitude/latitude
+    vcoords = np.asarray(as_retinotopy(retino, 'geographical'))
+    # note the surface coordinates
+    if surface is None: scoords = mesh.coordinates
+    else:
+        scoords = surface.coordinates
+        if scoords.shape[1] > mesh.vertex_count:
+            scoords = scoords[:, surface.index(mesh.labels)]
+    faces = mesh.tess.indexed_faces
+    sx = mesh.face_coordinates
+    # to understand this calculation, see this stack exchange question:
+    # https://math.stackexchange.com/questions/2431913/gradient-of-angle-between-scalar-fields
+    # each face has a directional magnification; we need to start with the face side lengths
+    (s0,s1,s2) = np.sqrt(np.sum((np.roll(sx, -1, axis=0) - sx)**2, axis=1))
+    # we want a couple other handy values:
+    (s0_2,s1_2,s2_2) = (s0**2, s1**2, s2**2)
+    s0_inv = zinv(s0)
+    b = 0.5 * (s0_2 - s1_2 + s2_2) * s0_inv
+    h = 0.5 * np.sqrt(2*s0_2*(s1_2 + s2_2) - s0_2**2 - (s1_2 - s2_2)**2) * s0_inv
+    h_inv = zinv(h)
+    # get the visual coordinates at each face also
+    vx = np.asarray([vcoords[:,f] for f in faces])
+    # we already have enough data to calculate areal magnification
+    s_areas = geo.triangle_area(*sx)
+    v_areas = geo.triangle_area(*vx)
+    arl_mag = s_areas * zinv(v_areas)
+    # calculate the gradient at each triangle; this array is dimension 2 x 2 x m where m is the
+    # number of triangles; the first dimension is (vx,vy) and the second dimension is (fx,fy); fx
+    # and fy are the coordinates in an arbitrary coordinate system built for each face.
+    # So, to reiterate, grad is ((d(vx0)/d(fx0), d(vx0)/d(fx1)) (d(vx1)/d(fx0), d(vx1)/d(fx1)))
+    dvx0_dfx = (vx[2] - vx[1]) * s0_inv
+    dvx1_dfx = (vx[0] - (vx[1] + b*dvx0_dfx)) * h_inv
+    grad = np.asarray([dvx0_dfx, dvx1_dfx])
+    # Okay, we want to know the field signs; this is just whether the cross product of the two grad
+    # vectors (dvx0/dfx and dvx1/dfx) has a positive z
+    fsgn = np.sign(grad[0,0]*grad[1,1] - grad[0,1]*grad[1,0])
+    # We can calculate the angle too, which is just the arccos of the normalized dot-product
+    grad_norms_2 = np.sum(grad**2, axis=1)
+    grad_norms = np.sqrt(grad_norms_2)
+    (dvx_norms_inv, dvy_norms_inv) = zinv(grad_norms)
+    ngrad = grad * ((dvx_norms_inv, dvx_norms_inv), (dvy_norms_inv, dvy_norms_inv))
+    dp = np.clip(np.sum(ngrad[0] * ngrad[1], axis=0), -1, 1)
+    fang = fsgn * np.arccos(dp)
+    # Great; now we can calculate the drad and dtan; we have dx and dy, so we just need to
+    # calculate the jacobian of ((drad/dvx, drad/dvy), (dtan/dvx, dtan/dvy))
+    vx_ctr = np.mean(vx, axis=0)
+    (x0, y0) = vx_ctr
+    den_inv = zinv(np.sqrt(x0**2 + y0**2))
+    drad_dvx = np.asarray([x0,  y0]) * den_inv
+    dtan_dvx = np.asarray([-y0, x0]) * den_inv
+    # get dtan and drad
+    drad_dfx = np.asarray([np.sum(drad_dvx[i]*grad[:,i], axis=0) for i in [0,1]])
+    dtan_dfx = np.asarray([np.sum(dtan_dvx[i]*grad[:,i], axis=0) for i in [0,1]])
+    # we can now turn these into the magnitudes plus the field sign
+    rad_mag = zinv(np.sqrt(np.sum(drad_dfx**2, axis=0)))
+    tan_mag = zinv(np.sqrt(np.sum(dtan_dfx**2, axis=0)))
+    # this is the entire result if we are doing faces only
+    if to == 'faces':
+        return {'radial': rad_mag, 'tangential': tan_mag, 'areal': arl_mag, 'field_sign': fsgn}
+    # okay, we need to do some averaging!
+    mtx = simplex_summation_matrix(mesh.tess.indexed_faces)
+    cols = np.asarray(mtx.sum(axis=1), dtype=np.float)[:,0]
+    cols_inv = zinv(cols)
+    # for areal magnification, we want to do summation over the s and v areas then divide
+    s_areas = mtx.dot(s_areas)
+    v_areas = mtx.dot(v_areas)
+    arl_mag = s_areas * zinv(v_areas)
+    # for the others, we just average
+    (rad_mag, tan_mag, fsgn) = [cols_inv * mtx.dot(x) for x in (rad_mag, tan_mag, fsgn)]
+    return {'radial': rad_mag, 'tangential': tan_mag, 'areal': arl_mag, 'field_sign': fsgn}
+
 def neighborhood_cortical_magnification(mesh, coordinates):
     '''
     neighborhood_cortical_magnification(mesh, visual_coordinates) yields a list of neighborhood-
     based cortical magnification values for the vertices in the given mesh if their visual field
     coordinates are given by the visual_coordinates matrix (must be like [x_values, y_values]). If
     either x-value or y-value of a coordinate is either None or numpy.nan, then that cortical
-    magnification value is None.
+    magnification value is numpy.nan.
     '''
     idcs = _cmag_coord_idcs(coordinates)
-    neis = mesh.indexed_neighborhoods
+    neis = mesh.tess.indexed_neighborhoods
     coords_vis = np.asarray(coordinates if len(coordinates) == 2 else coordinates.T)
     coords_srf = mesh.coordinates
+    res = np.full((mesh.vertex_count, 3), np.nan, dtype=np.float)
     res = np.array([row for row in [(np.nan,np.nan,np.nan)] for _ in range(mesh.vertex_count)],
                    dtype=np.float)
     for idx in idcs:
@@ -69,9 +156,9 @@ def neighborhood_cortical_magnification(mesh, coordinates):
         # areal is easy
         voronoi_vis = (pts_vis - x0col_vis) * 0.5 + x0col_vis
         voronoi_srf = (pts_srf - x0col_srf) * 0.5 + x0col_srf
-        area_vis = np.sum([triangle_area(x0_vis, a, b)
+        area_vis = np.sum([geo.triangle_area(x0_vis, a, b)
                            for (a,b) in zip(voronoi_vis.T, np.roll(voronoi_vis, 1, axis=1).T)])
-        area_srf = np.sum([triangle_area(x0_srf, a, b)
+        area_srf = np.sum([geo.triangle_area(x0_srf, a, b)
                            for (a,b) in zip(voronoi_srf.T, np.roll(voronoi_srf, 1, axis=1).T)])
         res[idx,2] = np.inf if np.isclose(area_vis, 0) else area_srf/area_vis
         # radial and tangentual we do together because they are very similar:
@@ -82,7 +169,7 @@ def neighborhood_cortical_magnification(mesh, coordinates):
         segs_vis = (pts_vis, np.roll(pts_vis, -1, axis=1))
         segs_vis_t = np.transpose(segs_vis, (2,0,1))
         segs_srf_t = np.transpose(segs_srf, (2,0,1))
-        x0norm_vis = np.linalg.norm(x0_vis)
+        x0norm_vis = npla.norm(x0_vis)
         if not np.isclose(x0norm_vis, 0):
             dirvecs = x0_vis / x0norm_vis
             dirvecs = np.asarray([dirvecs, [-dirvecs[1], dirvecs[0]]])
@@ -90,9 +177,9 @@ def neighborhood_cortical_magnification(mesh, coordinates):
                 dirvec = dirvecs[dirno]
                 line = (x0_vis, x0_vis + dirvec)
                 try:
-                    isects_vis = np.asarray(line_segment_intersection_2D(line, segs_vis))
+                    isects_vis = np.asarray(geo.line_segment_intersection_2D(line, segs_vis))
                     # okay, these will all be nan but two of them; they are the points we care about
-                    isect_idcs = np.unique(np.where(~np.isnan(isects_vis))[1])
+                    isect_idcs = np.unique(np.where(np.logical_not(np.isnan(isects_vis)))[1])
                 except:
                     isect_idcs = []
                 if len(isect_idcs) != 2:
@@ -100,19 +187,19 @@ def neighborhood_cortical_magnification(mesh, coordinates):
                     continue
                 isects_vis = isects_vis[:,isect_idcs].T
                 # we need the distance in visual space
-                len_vis = np.linalg.norm(isects_vis[0] - isects_vis[1])
+                len_vis = npla.norm(isects_vis[0] - isects_vis[1])
                 if np.isclose(len_vis, 0): res[idx,dirno] = np.inf
                 else:
                     # we also need the distances on the surface: find the points by projection
                     fsegs_srf = segs_srf_t[isect_idcs]
                     fsegs_vis = segs_vis_t[isect_idcs]
-                    s02lens_vis = np.linalg.norm(fsegs_vis[:,0] - fsegs_vis[:,1], axis=1)
-                    s01lens_vis = np.linalg.norm(fsegs_vis[:,0] - isects_vis, axis=1)
+                    s02lens_vis = npla.norm(fsegs_vis[:,0] - fsegs_vis[:,1], axis=1)
+                    s01lens_vis = npla.norm(fsegs_vis[:,0] - isects_vis, axis=1)
                     vecs_srf = fsegs_srf[:,1] - fsegs_srf[:,0]
-                    s02lens_srf = np.linalg.norm(vecs_srf, axis=1)
+                    s02lens_srf = npla.norm(vecs_srf, axis=1)
                     isects_srf = np.transpose([(s01lens_vis/s02lens_vis)]) * vecs_srf \
                                  + fsegs_srf[:,0]
-                    len_srf = np.sum(np.linalg.norm(isects_srf - x0_srf, axis=1))
+                    len_srf = np.sum(npla.norm(isects_srf - x0_srf, axis=1))
                     res[idx,dirno] = len_srf / len_vis
     # That's it!
     return res
@@ -149,7 +236,7 @@ def path_cortical_magnification(mesh, path, mask=None, return_all=False,
         srf = srf[okays]
     # okay; now we have the subset we can use; lets get the appropriate triangles...
     okays = set(ids)
-    tris = np.asarray([f for f in mesh.indexed_faces.T if all(a in okays for a in f)]).T
+    tris = np.asarray([f for f in mesh.tess.indexed_faces.T if all(a in okays for a in f)]).T
     # in case anything wasn't connected by triangle:
     okays = set(np.unique(tris))
     idcs = [k for (k,i) in enumerate(ids) if i in okays]
@@ -163,10 +250,10 @@ def path_cortical_magnification(mesh, path, mask=None, return_all=False,
     # get the x/y coordinates in visual space
     vis_coords = ecc * np.asarray([np.cos(np.pi/180*(90-ang)), np.sin(np.pi/180*(90-ang))])
     # okay, setup the topology/registrations
-    topo = Topology(tris, {'surface':srf.T, 'visual':vis_coords})
-    # now the Great Work begins...
-    srf_reg = topo.registrations['surface']
-    vis_reg = topo.registrations['visual']
+    tess = geo.Tesselation(tris)
+    srf_reg = tess.make_mesh(srf.T)
+    vis_reg = tess.make_mesh(vis_coords)
+    # Now the Great Work begins...
     # Find the triangle id's of the containers of the points first
     tids = vis_reg.container(path.T)
     # now step along the triangles starting at the first point...
@@ -175,13 +262,13 @@ def path_cortical_magnification(mesh, path, mask=None, return_all=False,
     pth = path.T
     # to do this we want to have an index of edges to triangles that neighbor them
     edge_idx = {}
-    for (tid,(a,b,c)) in enumerate(vis_reg.triangles):
+    for (tid,(a,b,c)) in enumerate(vis_reg.tess.faces.T):
         for edge in map(tuple, map(sorted, [(a,b), (c,a), (b,c)])):
             if edge not in edge_idx: edge_idx[edge] = set([])
             edge_idx[edge].add(tid)
     # we may need this to find arbitrary intersections:
     all_edges = edge_idx.keys()
-    all_segs = np.asarray([vis_reg.coordinates[us].T for us in np.transpose(all_edges)])
+    all_segs = np.asarray([vis_reg.coordinates[:,us] for us in np.transpose(all_edges)])
     for (tid,next_tid,pt,next_pt) in zip(tids, np.roll(tids,-1), pth, np.roll(pth,-1,axis=0)):
         # This could be the last point or there could be a break;
         # We handle breaks as separate paths
@@ -195,16 +282,16 @@ def path_cortical_magnification(mesh, path, mask=None, return_all=False,
         ss.append(pt)
         # here is the line segment we want to intersect with things
         seg = (pt, next_pt)
-        while not point_in_triangle(vis_reg.coordinates[vis_reg.triangles[tid]], next_pt):
+        while not geo.point_in_triangle(vis_reg.coordinates[:,vis_reg.tess.faces[:,tid]].T,next_pt):
             # otherwise, we need to find the next neighboring triangle:
-            vtcs   = vis_reg.triangles[tid]
-            tpts   = vis_reg.coordinates[vtcs].T
+            vtcs   = vis_reg.tess.faces[:,tid]
+            tpts   = vis_reg.coordinates[:,vtcs]
             tsegs  = (tpts, np.roll(tpts, -1, axis=1))
             tedges = [tuple(sorted([u,v])) for (u,v) in zip(vtcs, np.roll(vtcs, -1))]
             tid0 = tid
             tid0_set = set([tid0])
             projdir = next_pt - pt
-            isect = np.asarray(segment_intersection_2D((pt, next_pt), tsegs))
+            isect = np.asarray(geo.segment_intersection_2D((pt, next_pt), tsegs))
             # there should be 1 or 2 intersections; 1 if this is the first/last step,
             # 2 if there is a triangle crossed by the step
             isect_idcs = np.where(np.isfinite(isect[0]))[0]
@@ -229,9 +316,9 @@ def path_cortical_magnification(mesh, path, mask=None, return_all=False,
             if tid is None:
                 if len(ss) > 1: steps.append(ss)
                 ss = []
-                isect = np.asarray(segment_intersection_2D((pt0, next_pt), all_segs)).T
+                isect = np.asarray(geo.segment_intersection_2D((pt0, next_pt), all_segs)).T
                 # we want to ignore intersections in the current triangle tid0
-                isect_idcs = [idc for idc in np.where(~np.isnan(isect[:,0]))[0]
+                isect_idcs = [idc for idc in np.where(np.logical_not(np.isnan(isect[:,0])))[0]
                               if edge_idx[all_edges[idc]] != tid0_set]
                 if len(isect_idcs) == 0:
                     # nothing left but the last point
@@ -285,9 +372,9 @@ def path_cortical_magnification(mesh, path, mask=None, return_all=False,
             ss_srf = []
 
     # for each path calculate its length in both spaces
-    srf_ds = [[np.linalg.norm(x0 - x1) for (x0,x1) in zip(srf_path[:-1], srf_path[1:])]
+    srf_ds = [[npla.norm(x0 - x1) for (x0,x1) in zip(srf_path[:-1], srf_path[1:])]
               for srf_path in srf_steps]
-    vis_ds = [[np.linalg.norm(x0 - x1) for (x0,x1) in zip(vis_path[:-1], vis_path[1:])]
+    vis_ds = [[npla.norm(x0 - x1) for (x0,x1) in zip(vis_path[:-1], vis_path[1:])]
               for vis_path in vis_steps]
     srf_d = np.sum(np.hstack(srf_ds))
     vis_d = np.sum(np.hstack(vis_ds))
@@ -332,7 +419,7 @@ def isoangular_path(mesh, pathtype, val, mask=None, min_segment_length=4,
         srf = srf[okays]
     # okay; now we have the subset we can use; lets get the appropriate triangles...
     okays = set(ids)
-    tris = np.asarray([f for f in mesh.indexed_faces.T if all(a in okays for a in f)]).T
+    tris = np.asarray([f for f in mesh.tess.indexed_faces.T if all(a in okays for a in f)]).T
     # in case anything wasn't connected by triangle:
     okays = set(np.unique(tris))
     idcs = [k for (k,i) in enumerate(ids) if i in okays]
@@ -347,10 +434,10 @@ def isoangular_path(mesh, pathtype, val, mask=None, min_segment_length=4,
     vis_coords = ecc * np.asarray([np.cos(np.pi/180*(90-ang)), np.sin(np.pi/180*(90-ang))])
     vis_coords = vis_coords.T
     # okay, setup the topology/registrations
-    topo = Topology(tris, {'surface':srf.T, 'visual':vis_coords.T})
+    tess = geo.Tesselation(tris)
+    srf_reg = tess.make_mesh(srf.T)
+    vis_reg = tess.make_mesh(vis_coords)
     # now the Great Work begins...
-    srf_reg = topo.registrations['surface']
-    vis_reg = topo.registrations['visual']
     # Find all triangles that intersect this particular angle line
     pathtype = pathtype.lower()
     trisect = None
