@@ -16,6 +16,13 @@ from   neuropythy.java       import (java_link, serialize_numpy,
                                      to_java_doubles, to_java_ints, to_java_array)
 from   neuropythy.util       import to_affine
 
+# These two variables are intended to provide default orderings to visual areas (but in general,
+# visual areas should be referred to by name OR as a number paired with a model).
+visual_area_names = (None,
+                     'V1', 'V2', 'V3', 'hV4', 'VO1', 'VO2', 'LO1', 'LO2',
+                     'TO1', 'TO2', 'V3b', 'V3a')
+visual_area_numbers = pyr.pmap({v:k for (k,v) in enumerate(visual_area_names)})
+
 @pimms.immutable
 class RetinotopyModel(object):
     '''
@@ -102,7 +109,7 @@ class SchiraModel(RetinotopyModel):
                  shear=((1.0,0.0),(0.0,1.0)), center=(-6.0, 0.0),
                  v1size=1.2, v2size=0.6, v3size=0.4, hv4size=0.9, v3asize=0.9):
         self.area_name_to_id = visual_area_names
-        self.parameters = pyr.m(A=A, V=V, lam=lam, psi=psi, scale=scale, shear=shear,
+        self.parameters = pyr.m(A=A, B=B, lam=lam, psi=psi, scale=scale, shear=shear,
                                 center=center, v1size=v1size, v2size=v2size, v3size=v3size,
                                 hv4size=hv4size, v3asize=v3asize)
     @pimms.param

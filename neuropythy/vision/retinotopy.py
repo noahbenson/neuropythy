@@ -19,7 +19,7 @@ from   neuropythy.registration   import (mesh_register, java_potential_term)
 from   neuropythy.java           import (to_java_doubles, to_java_ints)
 
 from .models import (RetinotopyModel, SchiraModel, RetinotopyMeshModel, RegisteredRetinotopyModel,
-                     load_fmm_model)
+                     load_fmm_model, visual_area_names, visual_area_numbers)
 
 # Tools for extracting retinotopy data from a subject:
 _empirical_retinotopy_names = {
@@ -485,13 +485,6 @@ def retinotopic_field_sign(m, element='vertices', retinotopy=Ellipsis, invert_fi
     vfs = np.asarray([np.mean(tsign[list(ii)]) if len(ii) > 0 else 0 for ii in vfs])
     return vfs
 
-# These two variables are intended to provide default orderings to visual areas (but in general,
-# visual areas should be referred to by name OR as a number paired with a model).
-visual_area_names = (None,
-                     'V1', 'V2', 'V3', 'hV4', 'VO1', 'VO2', 'LO1', 'LO2',
-                     'TO1', 'TO2', 'V3b', 'V3a')
-visual_area_numbers = pyr.pmap({v:k for (k,v) in enumerate(visual_area_names)})
-
 visual_area_field_signs = pyr.pmap({'V1' :-1, 'V2' :1, 'V3' :-1, 'hV4':1,
                                     'VO1':-1, 'VO2':1, 'LO1':1,  'LO2':-1,
                                     'V3b':-1, 'V3a':1, 'TO1':-1, 'TO2':1})
@@ -505,7 +498,7 @@ _default_schira_model = None
 def get_default_schira_model():
     global _default_schira_model
     if _default_schira_model is None:
-        try:
+        #try:
             _default_schira_model = RegisteredRetinotopyModel(
                 SchiraModel(),
                 geo.MapProjection(
@@ -515,7 +508,7 @@ def get_default_schira_model():
                     center_right=[58.58000, -61.84000, -52.39000],
                     radius=np.pi/2.5,
                     method='orthographic'))
-        except: pass
+        #except: raise
     return _default_schira_model
 
 _retinotopy_model_paths = [

@@ -279,7 +279,9 @@ def calc_arguments(args):
     try: sub = subject(args[0])
     except: error('Failed to load subject %s' % args[0])
     # and the model
-    mdl_name = args[1] if len(args) == 2 else 'benson17'
+    if len(args) > 1:       mdl_name = args[1]
+    elif opts['model_sym']: mdl_name = 'schira'
+    else:                   mdl_name = 'benson17'
     try:
         if opts['model_sym']:
             model = {h:retinotopy_model(mdl_name).persist() for h in ['lh', 'rh']}
