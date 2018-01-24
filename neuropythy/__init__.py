@@ -56,6 +56,10 @@ from   geometry   import (VertexSet, Mesh, Tesselation, Topology, to_mesh, to_te
 from   freesurfer import (subject as freesurfer_subject, to_mgh)
 import freesurfer
 
+# things we might want to load but that might fail
+try:    import graphics
+except: pass
+
 
 # Version information...
 __version__ = '0.4.0'
