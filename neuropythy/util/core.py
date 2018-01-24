@@ -264,7 +264,7 @@ def to_affine(aff, dims=None):
         raise ValueError('%dD affine matrix must be %dx%d or %dx%d' % args)
     return aff
         
-def simplex_summation_matrix(simplices, weight=None):
+def simplex_summation_matrix(simplices, weight=None, inverse=False):
     '''
     simplex_summation_matrix(mtx) yields a scipy sparse array matrix that, when dotted with a
       column vector of length m (where m is the number of simplices described in the simplex matrix,
@@ -276,25 +276,42 @@ def simplex_summation_matrix(simplices, weight=None):
 
     The optional argument weight may specify a weight for each face, in which case the summation is
     a weighted sum instead of a flat sum.
+
+    The optional argument inverse=True may be given to indicate that the inverse summation matrix
+    (summation of the vertices onto the simplices) should be returned.
     '''
     simplices = np.asarray(simplices)
     n = np.max(simplices) + 1
     (d,m) = simplices.shape
     rng = range(m)
-    s = sps.csr_matrix(
-        (np.ones(d*m, dtype=np.int),
-         (np.concatenate(simplices), np.concatenate([rng for _ in range(d)]))),
-        shape=(n,m),
-        dtype=np.int)
-    if weight is not None:
-        s = s.dot(sps.csc_matrix((weight, (rng, rng)), shape=(m,m), dtype=np.float))
+    if inverse:
+        if weight is None: f = sps.csr_matrix
+        else:
+            nrng = range(n)
+            ww = sps.csr_matrix((weight, (nrng, nrng)), shape=(n,n), dtype=np.float)
+            f = lambda *args,**kwargs: ww.dot(sps.csc_matrix(*args,**kwargs))
+        s = f((np.ones(d*m, dtype=np.int),
+               (np.concatenate([rng for _ in range(d)]), np.concatenate(simplices))),
+              shape=(m,n),
+              dtype=np.int)
+    else:
+        s = sps.csr_matrix(
+            (np.ones(d*m, dtype=np.int),
+             (np.concatenate(simplices), np.concatenate([rng for _ in range(d)]))),
+            shape=(n,m),
+            dtype=np.int)
+        if weight is not None:
+            s = s.dot(sps.csc_matrix((weight, (rng, rng)), shape=(m,m), dtype=np.float))
     return s
-def simplex_averaging_matrix(simplices, weight=None):
+def simplex_averaging_matrix(simplices, weight=None, inverse=False):
     '''
     Simplex_averaging_matrix(mtx) is equivalent to simplex_simmation_matrix, except that each row of
       the matrix is subsequently normalized such that all rows sum to 1.
+    
+    The optional argument inverse=True may be passed to indicate that the inverse averaging matrix
+    (of vertices onto simplices) should be returned.
     '''
-    m = simplex_summation_matrix(simplices, weight=weight)
+    m = simplex_summation_matrix(simplices, weight=weight, inverse=inverse)
     rs = np.asarray(m.sum(axis=1), dtype=np.float)[:,0]
     invrs = zinv(rs)
     rng = range(m.shape[0])

@@ -482,20 +482,23 @@ _cortex_colormaps = {'angle': angle_colors,     'polar_angle':  angle_colors,
                      'sigma': sigma_colors,     'radius':       sigma_colors,
                      'varea': varea_colors,     'visual_area':  varea_colors,
                      'curv':  curvature_colors, 'curvature':    curvature_colors}
-def cortex_plot(the_map, color=None, plotter=matplotlib.pyplot):
+def cortex_plot(the_map, color=None, axes=None):
     '''
-    cortex_plot(map) yields a plot of the given 2D cortical mesh, map. The following options are
-    accepted:
+    cortex_plot(map) yields a plot of the given 2D cortical mesh, map.
+
+    The following options are accepted:
       * color (default: None) specifies a function that, when passed a single argument, a dict
         of the properties of a single vertex, yields an RGBA list for that vertex. By default,
         uses the curvature colors.
-      * plotter (default: matplotlib.pyplot) specifies a particular plotting object should be
-        used. If plotter is None, then instead of attempting to render the plot, a tuple of
+      * axes (default: None) specifies a particular set of matplotlib pyplot axes that should be
+        used. If axes is Ellipsis, then instead of attempting to render the plot, a tuple of
         (tri, zs, cmap) is returned; in this case, tri is a matplotlib.tri.Triangulation
         object for the given map and zs and cmap are an array and colormap (respectively) that
-        will produce the correct colors. Without plotter equal to None, these would instead
-        be rendered as plotter.tripcolor(tri, zs, cmap, shading='gouraud').
+        will produce the correct colors. Without axes equal to Ellipsis, these would instead
+        be rendered as axes.tripcolor(tri, zs, cmap, shading='gouraud'). If axes is None, then
+        uses the current axes.
     '''
+    if axes is None: axes = matplotlib.pyplot.gca()
     tri = matplotlib.tri.Triangulation(the_map.coordinates[0],
                                        the_map.coordinates[1],
                                        triangles=the_map.tess.indexed_faces.T)
@@ -507,7 +510,7 @@ def cortex_plot(the_map, color=None, plotter=matplotlib.pyplot):
         colors = np.asarray(the_map.map(color))
     cmap = colors_to_cmap(colors)
     zs = np.asarray(range(the_map.vertex_count), dtype=np.float) / (the_map.vertex_count - 1)
-    if plotter is None:
+    if axes is Ellipsis:
         return (tri, zs, cmap)
     else:
-        return plotter.tripcolor(tri, zs, cmap=cmap, shading='gouraud')
+        return axes.tripcolor(tri, zs, cmap=cmap, shading='gouraud')
