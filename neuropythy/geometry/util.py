@@ -12,10 +12,11 @@ def normalize(u):
     normalize(u) yields a vetor with the same direction as u but unit length, or, if u has zero
     length, yields u.
     '''
-    unorm = np.linalg.norm(u)
-    if unorm == 0:
-        return u
-    return np.asarray(u) / unorm
+    u = np.asarray(u)
+    unorm = np.sqrt(np.sum(u**2, axis=0))
+    z = np.isclose(unorm, 0)
+    c = np.logical_not(z) / (unorm + z)
+    return u * c
 
 def vector_angle_cos(u, v):
     '''
@@ -49,6 +50,19 @@ def vector_angle(u, v, direction=None):
             axis2 = -axis2
         return np.arctan2(np.dot(axis2, v), np.dot(axis1, v))
 
+def spherical_distance(pt0, pt1):
+    '''
+    spherical_distance(a, b) yields the angular distance between points a and b, both of which
+      should be expressed in spherical coordinates as (longitude, latitude).
+    If a and/or b are (2 x n) matrices, then the calculation is performed over all columns.
+    The spherical_distance function uses the Haversine formula; accordingly it may suffer from
+    rounding errors in the case of nearly antipodal points.
+    '''
+    dtheta = pt1[0] - pt0[0]
+    dphi   = pt1[1] - pt0[1]
+    a = np.sin(dphi/2)**2 + np.cos(pt0[1]) * np.cos(pt1[1]) * np.sin(dtheta/2)**2
+    return 2 * np.arcsin(np.sqrt(a))
+    
 def rotation_matrix_3D(u, th):
     """
     rotation_matrix_3D(u, t) yields a 3D numpy matrix that rotates any vector about the axis u
@@ -197,10 +211,42 @@ def triangle_area(a,b,c):
     triangle_area(a, b, c) yields the area of the triangle whose vertices are given by the points a,
     b, and c.
     '''
-    sides = np.sqrt(np.sum([(p1.T - p2.T)**2 for (p1,p2) in zip([b,c,a],[c,a,b])], axis=1))
+    (a,b,c) = [np.asarray(x) for x in (a,b,c)]
+    sides = np.sqrt(np.sum([(p1 - p2)**2 for (p1,p2) in zip([b,c,a],[c,a,b])], axis=1))
     s = 0.5 * np.sum(sides, axis=0)
     sides = np.clip(s - sides, 0.0, None)
     return np.sqrt(s * np.prod(sides, axis=0))
+
+def triangle_normal(a,b,c):
+    '''
+    triangle_normal(a, b, c) yields the normal vector of the triangle whose vertices are given by
+      the points a, b, and c. If the points are 2D points, then 3D normal vectors are still yielded,
+      that are always (0,0,1) or (0,0,-1). This function auto-threads over matrices, in which case
+      they must be in equivalent orientations, and the result is returned in whatever orientation
+      they are given in. In some cases, the intended orientation of the matrices is ambiguous (e.g.,
+      if a, b, and c are 2 x 3 matrices), in which case the matrix is always assumed to be given in
+      (dims x vertices) orientation.
+    '''
+    (a,b,c) = [np.asarray(x) for x in (a,b,c)]
+    if len(a.shape) == 1 and len(b.shape) == 1 and len(c.shape) == 1:
+        return triangle_normal(*[np.transpose([x]) for x in (a,b,c)])[:,0]
+    (a,b,c) = [np.transpose([x]) if len(x.shape) == 1 else x for x in (a,b,c)]
+    # find a required number of dimensions, if possible
+    if a.shape[0] in (2,3):
+        dims = a.shape[0]
+        tx = True
+    else:
+        dims = a.shape[1]
+        (a,b,c) = [x.T for x in (a,b,c)]
+        tx = False
+    n = (a.shape[1] if a.shape[1] != 1 else b.shape[1] if b.shape[1] != 1 else
+         c.shape[1] if c.shape[1] != 1 else 1)
+    if dims == 2:
+        (a,b,c) = [np.vstack((x, np.zeros((1,n)))) for x in (a,b,c)]
+    ab = normalize(b - a)
+    ac = normalize(c - a)
+    res = np.cross(ab, ac, axisa=0, axisb=0)
+    return res.T if tx else res
 
 def cartesian_to_barycentric_3D(tri, xy):
     '''
@@ -303,17 +349,34 @@ def barycentric_to_cartesian(tri, bc):
         return barycentric_to_cartesian(np.transpose(np.asarray([tri]), (1,2,0)),
                                         np.asarray([bc]).T)[:,0]
     bc = bc if bc.shape[0] == 2 else bc.T
+    if bc.shape[0] != 2: raise ValueError('barycentric matrix did not have a dimension of size 2')
+    n = bc.shape[1]
+    # we know how many bc's there are now; lets reorient tri to match with the last dimension as n
+    if len(tri.shape) == 2:
+        tri = np.transpose([tri for _ in range(n)], (1,2,0))
+    # the possible orientations of tri:
     if tri.shape[0] == 3:
-        tri = tri if (tri.shape[1] == 2 or tri.shape[1] == 3) else np.transpose(tri, (0,2,1))
+        if tri.shape[1] in [2,3] and tri.shape[2] == n:
+            pass # default orientation
+        elif tri.shape[1] == n and tri.shape[2] in [2,3]:
+            tri = np.transpose(tri, (0,2,1))
+        else: raise ValueError('could not deduce triangle dimensions')
     elif tri.shape[1] == 3:
-        tri = tri.T if tri.shape[0] == 2 else np.transpose(tri, (1,2,0))
+        if tri.shape[0] in [2,3] and tri.shape[2] == n:
+            tri = np.transpose(tri, (1,0,2))
+        elif tri.shape[0] == n and tri.shape[2] in [2,3]:
+            tri = np.transpose(tri, (1,2,0))
+        else: raise ValueError('could not deduce triangle dimensions')
     elif tri.shape[2] == 3:
-        tri = np.transpose(tri, (2,0,1) if tri.shape[0] == 2 else (2,1,0))
-    if tri.shape[0] != 3 or (tri.shape[1] != 2 and tri.shape[1] != 3):
+        if tri.shape[0] in [2,3] and tri.shape[1] == n:
+            tri = np.transpose(tri, (2,0,1))
+        elif tri.shape[0] == n and tri.shape[1] in [2,3]:
+            tri = np.transpose(tri, (2,1,0))
+        else: raise ValueError('could not deduce triangle dimensions')
+    else: raise ValueError('At least one dimension of triangles must be 3')
+    if tri.shape[0] != 3 or (tri.shape[1] not in [2,3]):
         raise ValueError('Triangle array did not have dimensions of sizes 3 and (2 or 3)')
-    if bc.shape[0] != 2:
-        raise ValueError('barycentric matrix did not have a dimension of size 2')
-    if tri.shape[2] != bc.shape[1]:
+    if tri.shape[2] != n:
         raise ValueError('number of triangles and coordinates must match')
     (l1,l2) = bc
     (p1, p2, p3) = tri
@@ -389,9 +452,12 @@ def point_in_triangle(tri, pt):
             t = (d00*d12 - d01*d02) / invDenom
             return False if (t + tol) < 0 or (s + t - tol) > 1 else True
         else:
-            return (np.dot(pt - tri[0], np.cross(tri[0], tri[1] - tri[0])) >= 0 and
-                    np.dot(pt - tri[1], np.cross(tri[1], tri[2] - tri[1])) >= 0 and
-                    np.dot(pt - tri[2], np.cross(tri[2], tri[0] - tri[2])) >= 0)
+            dp1 = np.dot(pt - tri[0], np.cross(tri[0], tri[1] - tri[0]))
+            dp2 = np.dot(pt - tri[1], np.cross(tri[1], tri[2] - tri[1]))
+            db3 = np.dot(pt - tri[2], np.cross(tri[2], tri[0] - tri[2]))
+            return ((dp1 > 0 or np.isclose(dp1, 0)) and
+                    (dp2 > 0 or np.isclose(dp2, 0)) and
+                    (dp3 > 0 or np.isclose(dp3, 0)))
     elif len(tri.shape) == 3 and len(pt.shape) == 2:
         if len(pt) != len(tri):
             raise ValueError('the number of triangles and points must be equal')
@@ -415,7 +481,9 @@ def point_in_triangle(tri, pt):
             x0 = np.sum((pt - tri[:,0]) * np.cross(tri[:,0], tri[:,1] - tri[:,0], axis=1), axis=1)
             x1 = np.sum((pt - tri[:,1]) * np.cross(tri[:,1], tri[:,2] - tri[:,1], axis=1), axis=1)
             x2 = np.sum((pt - tri[:,2]) * np.cross(tri[:,2], tri[:,0] - tri[:,2], axis=1), axis=1)
-            return ((x0 >= 0) & (x1 >= 0) & (x2 >= 0))
+            return (((x0 > 0) | np.isclose(x0, 0)) &
+                    ((x1 > 0) | np.isclose(x1, 0)) &
+                    ((x2 > 0) | np.isclose(x2, 0)))
     elif len(tri.shape) == 3 and len(pt.shape) == 1:
         return point_in_triangle(tri, np.asarray([pt for _ in tri]))
     elif len(tri.shape) == 2 and len(pt.shape) == 1:
@@ -423,3 +491,121 @@ def point_in_triangle(tri, pt):
     else:
         raise ValueError('triangles and pts do not have parallel shapes')
 
+def det4D(m):
+    '''
+    det4D(array) yields the determinate of the given matrix array, which may have more than 2
+      dimensions, in which case the later dimensions are multiplied and added point-wise.
+    '''
+    # I just solved this in Mathematica, copy-pasted, and replaced the string '] m' with ']*m':
+    # Mathematica code: Det@Table[m[i][j], {i, 0, 3}, {j, 0, 3}]
+    return (m[0][3]*m[1][2]*m[2][1]*m[3][0] - m[0][2]*m[1][3]*m[2][1]*m[3][0] -
+            m[0][3]*m[1][1]*m[2][2]*m[3][0] + m[0][1]*m[1][3]*m[2][2]*m[3][0] +
+            m[0][2]*m[1][1]*m[2][3]*m[3][0] - m[0][1]*m[1][2]*m[2][3]*m[3][0] -
+            m[0][3]*m[1][2]*m[2][0]*m[3][1] + m[0][2]*m[1][3]*m[2][0]*m[3][1] +
+            m[0][3]*m[1][0]*m[2][2]*m[3][1] - m[0][0]*m[1][3]*m[2][2]*m[3][1] -
+            m[0][2]*m[1][0]*m[2][3]*m[3][1] + m[0][0]*m[1][2]*m[2][3]*m[3][1] +
+            m[0][3]*m[1][1]*m[2][0]*m[3][2] - m[0][1]*m[1][3]*m[2][0]*m[3][2] -
+            m[0][3]*m[1][0]*m[2][1]*m[3][2] + m[0][0]*m[1][3]*m[2][1]*m[3][2] +
+            m[0][1]*m[1][0]*m[2][3]*m[3][2] - m[0][0]*m[1][1]*m[2][3]*m[3][2] -
+            m[0][2]*m[1][1]*m[2][0]*m[3][3] + m[0][1]*m[1][2]*m[2][0]*m[3][3] +
+            m[0][2]*m[1][0]*m[2][1]*m[3][3] - m[0][0]*m[1][2]*m[2][1]*m[3][3] -
+            m[0][1]*m[1][0]*m[2][2]*m[3][3] + m[0][0]*m[1][1]*m[2][2]*m[3][3])
+def det_4x3(a,b,c,d):
+    '''
+    det_4x3(a,b,c,d) yields the determinate of the matrix formed the given rows, which may have
+      more than 1 dimension, in which case the later dimensions are multiplied and added point-wise.
+      The point's must be 3D points; the matrix is given a fourth column of 1s and the resulting
+      determinant is of this matrix. 
+    '''
+    # I just solved this in Mathematica, copy-pasted, and replaced the string '] m' with ']*m':
+    # Mathematica code: Det@Table[If[j == 3, 1, i[j]], {i, {a, b, c, d}}, {j, 0, 3}]
+    return (a[1]*b[2]*c[0] + a[2]*b[0]*c[1] - a[2]*b[1]*c[0] - a[0]*b[2]*c[1] -
+            a[1]*b[0]*c[2] + a[0]*b[1]*c[2] + a[2]*b[1]*d[0] - a[1]*b[2]*d[0] -
+            a[2]*c[1]*d[0] + b[2]*c[1]*d[0] + a[1]*c[2]*d[0] - b[1]*c[2]*d[0] -
+            a[2]*b[0]*d[1] + a[0]*b[2]*d[1] + a[2]*c[0]*d[1] - b[2]*c[0]*d[1] -
+            a[0]*c[2]*d[1] + b[0]*c[2]*d[1] + a[1]*b[0]*d[2] - a[0]*b[1]*d[2] -
+            a[1]*c[0]*d[2] + b[1]*c[0]*d[2] + a[0]*c[1]*d[2] - b[0]*c[1]*d[2])
+    
+def tetrahedral_barycentric_coordinates(tetra, pt):
+    '''
+    tetrahedral_barycentric_coordinates(tetrahedron, point) yields a list of weights for each vertex
+      in the given tetrahedron in the same order as the vertices given. If all weights are 0, then
+      the point is not inside the tetrahedron.
+    '''
+    # I found a description of this algorithm here (Nov. 2017):
+    # http://steve.hollasch.net/cgindex/geometry/ptintet.html
+    tetra = np.asarray(tetra)
+    if tetra.shape[0] != 4:
+        if tetra.shape[1] == 4:
+            if tetra.shape[0] == 3:
+                tetra = np.transpose(tetra, (1,0) if len(tetra.shape) == 2 else (1,0,2))
+            else:
+                tetra = np.transpose(tetra, (1,2,0))
+        elif tetra.shape[1] == 3:
+            tetra = np.transpose(tetra, (2,1,0))
+        else:
+            tetra = np.transpose(tetra, (2,0,1))
+    elif tetra.shape[1] != 3:
+        tetra = np.transpose(tetra, (0,2,1))
+    if pt.shape[0] != 3: pt = pt.T
+    # Okay, calculate the determinants...
+    d_ = det_4x3(tetra[0], tetra[1], tetra[2], tetra[3])
+    d0 = det_4x3(pt,       tetra[1], tetra[2], tetra[3])
+    d1 = det_4x3(tetra[0], pt,       tetra[2], tetra[3])
+    d2 = det_4x3(tetra[0], tetra[1], pt,       tetra[3])
+    d3 = det_4x3(tetra[0], tetra[1], tetra[2], pt)
+    s_ = np.sign(d_)
+    z_ = (np.isclose(d_, 0) | np.any([s_ != si for si in np.sign([d0,d1,d2,d3])], axis=0))
+    d_inv = np.logical_not(z_) / (d_ + z_)
+    return np.asarray([d_inv * dq for dq in (d0,d1,d2,d3)])
+
+def point_in_tetrahedron(tetra, pt):
+    '''
+    point_in_tetrahedron(tetrahedron, point) yields True if the given point is in the given 
+      tetrahedron. If either tetrahedron or point (or both) are lists of shapes/points, then this
+      calculation is automatically threaded over all the given arguments.
+    '''
+    bcs = tetrahedral_barycentric_coordinates(tetra, pt)
+    return np.logical_not(np.all(np.isclose(bcs, 0), axis=0))
+
+def prism_barycentric_coordinates(tri1, tri2, pt):
+    '''
+    prism_barycentric_coordinates(tri1, tri2, point) yields a list of weights for each vertex
+      in the given tetrahedron in the same order as the vertices given. If all weights are 0, then
+      the point is not inside the tetrahedron. The returned weights are in a 2 x 3 matrix where the
+      first row gives weights for tri1 and the second for tri2.
+    '''
+    pt = np.asarray(pt)
+    tri1 = np.asarray(tri1)
+    tri2 = np.asarray(tri2)
+    (tri1,tri2) = [
+        (np.transpose(tri, (1,0) if len(tri.shape) == 2 else (2,0,1)) if tri.shape[0] != 3 else
+         np.transpose(tri, (0,2,1))                                   if tri.shape[1] != 3 else
+         tri)
+        for tri in (tri1,tri2)]
+    pt = pt.T if pt.shape[0] != 3 else pt
+    # get the individual tetrahedron bc coordinates
+    bcs1 = tetrahedral_barycentric_coordinates([tri1[0], tri1[1], tri1[2], tri2[0]], pt)
+    bcs2 = tetrahedral_barycentric_coordinates([tri1[1], tri1[2], tri2[0], tri2[1]], pt)
+    bcs3 = tetrahedral_barycentric_coordinates([tri1[2], tri2[0], tri2[1], tri2[2]], pt)
+    bcs4 = tetrahedral_barycentric_coordinates([tri1[0], tri1[1], tri2[0], tri2[1]], pt)
+    bcs5 = tetrahedral_barycentric_coordinates([tri1[0], tri1[2], tri2[0], tri2[2]], pt)
+    bcs6 = tetrahedral_barycentric_coordinates([tri1[1], tri1[2], tri2[1], tri2[2]], pt)
+    bcs = ((bcs1[0] + bcs4[0] + bcs5[0],
+            bcs1[1] + bcs2[0] + bcs4[1] + bcs6[0],
+            bcs1[2] + bcs2[1] + bcs3[0] + bcs5[1] + bcs6[1]),
+           (bcs1[3] + bcs2[2] + bcs3[1] + bcs4[2] + bcs5[2],
+            bcs2[3] + bcs3[2] + bcs4[3] + bcs6[2],
+            bcs3[3] + bcs5[3] + bcs6[3]))
+    return np.asarray(bcs)
+
+def point_in_prism(tri1, tri2, pt):
+    '''
+    point_in_prism(tri1, tri2, pt) yields True if the given point is inside the prism that stretches
+      between triangle 1 and triangle 2. Will automatically thread over extended dimensions. If
+      multiple triangles are given, then the vertices must be an earlier dimension than the
+      coordinates; e.g., a 3 x 3 x n array will be assumed to organized such that element [0,1,k] is
+      the y coordinate of the first vertex of the k'th triangle.
+    '''
+    bcs = prism_barycentric_coordinates(tri1, tri2, pt)
+    return np.logical_not(np.isclose(np.sum(bcs[0] + bcs[1], axis=0), 0))

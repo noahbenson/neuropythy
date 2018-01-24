@@ -3,26 +3,58 @@
 # Importing and interpreting of flat mesh models for registration.
 # By Noah C. Benson
 
-import numpy                as     np
-import scipy                as     sp
-import scipy.spatial        as     space
-from   pysistence           import make_dict
-from   numbers              import Number
-import numpy.linalg, os, math, gzip
+import numpy                 as     np
+import numpy.linalg          as     npla
+import scipy                 as     sp
+import scipy.spatial         as     space
+import pyrsistent            as     pyr
+import os, gzip, types, six, pimms
 
 import neuropythy.geometry   as     geo
-import neuropythy.freesurfer as     nfs
-import neuropythy.cortex     as     ncx
-from   neuropythy.immutable  import Immutable
+import neuropythy.mri        as     mri
 from   neuropythy.java       import (java_link, serialize_numpy,
                                      to_java_doubles, to_java_ints, to_java_array)
+from   neuropythy.util       import to_affine
 
-class RetinotopyModel:
+# These two variables are intended to provide default orderings to visual areas (but in general,
+# visual areas should be referred to by name OR as a number paired with a model).
+visual_area_names = (None,
+                     'V1', 'V2', 'V3', 'hV4', 'VO1', 'VO2', 'LO1', 'LO2',
+                     'TO1', 'TO2', 'V3b', 'V3a')
+visual_area_numbers = pyr.pmap({v:k for (k,v) in enumerate(visual_area_names)})
+
+@pimms.immutable
+class RetinotopyModel(object):
     '''
     RetinotopyModel is a class designed to be inherited by other models of retinotopy; any class
     that inherits from RetinotopyModel must implement the following methods to work properly with
     the registration system of the neuropythy library.
     '''
+
+    def __init__(self, area_name_to_id):
+        self.area_name_to_id = area_name_to_id
+    @pimms.param
+    def area_name_to_id(vai):
+        '''
+        mdl.area_name_to_id is a persistent map whose keys are area names (such as 'V1' or 'hV4')
+        and whose values are the area id (a number greater than 0) for that area.
+        mdl.area_name_to_id is a parameter which may be provided as a lsit of area names, in which
+        case the first is assumed to be area 1, the next area 2, etc.
+        '''
+        if vai is None: return None
+        if not pimms.is_map(vai): return pyr.pmap({nm:(ii+1) for (ii,nm) in enumerate(vai)})
+        if pimms.is_lazy_map(vai): return vai
+        elif pimms.is_pmap(vai): return vai
+        else: return pyr.pmap(vai)
+    @pimms.value
+    def area_id_to_name(area_name_to_id):
+        '''
+        mdl.area_id_to_name is a persistent map whose keys are area id's and whose values are the
+        associated area's name.
+        '''
+        if area_name_to_id is None: return None
+        return pyr.pmap({v:k for (k,v) in six.iteritems(area_name_to_id)})
+    # Methods that must be overloaded!
     def angle_to_cortex(self, theta, rho):
         '''
         model.angle_to_cortex(theta, rho) yields a (k x 2) matrix in which each row corresponds to
@@ -47,6 +79,7 @@ class RetinotopyModel:
             'Object with base class RetinotopyModel did not override cortex_to_angle')
 
 # How we construct a Schira Model:
+@pimms.immutable
 class SchiraModel(RetinotopyModel):
     '''
     The SchiraModel class is a class that inherits from RetinotopyModel and acts as a Python wrapper
@@ -58,67 +91,75 @@ class SchiraModel(RetinotopyModel):
     '''
 
     # These are the accepted arguments to the model:
-    default_parameters = {
-        'A': 1.05,
-        'B': 90.0,
-        'lambda': 0.4,
-        'psi': 0.15,
-        'scale': [21.0, 21.0],
-        'shear': [[1.0, 0.0], [0.0, 1.0]],
-        'center': [-6.0, 0.0],
-        'v1size': 1.2,
-        'v2size': 0.6,
-        'v3size': 0.4,
-        'hv4size': 0.9,
-        'v3asize': 0.9}
-    # This function checks the given arguments to see if they are okay:
-    def __check_parameters(self, parameters):
-        # we don't care if there are extra parameters; we just make sure the given parameters make
-        # sense, then return the full set of parameters
-        opts = {
-            k: parameters[k] if k in parameters else v
-            for (k,v) in SchiraModel.default_parameters.iteritems()}
-        return opts
+    default_parameters = pyr.pmap({'A': 1.05,
+                                   'B': 90.0,
+                                   'lam': 0.4,
+                                   'psi': 0.15,
+                                   'scale': (21.0, 21.0),
+                                   'shear': ((1.0, 0.0), (0.0, 1.0)),
+                                   'center': (-6.0, 0.0),
+                                   'v1size': 1.2,
+                                   'v2size': 0.6,
+                                   'v3size': 0.4,
+                                   'hv4size': 0.9,
+                                   'v3asize': 0.9})
+    visual_area_names = ('V1', 'V2', 'V3')
 
-    # This class is immutable: don't change the params to change the model; 
-    # don't change the java object!
-    def __setattr__(self, name, val):
-        raise ValueError('The SchiraModel class is immutable; its objects cannot be edited')
+    def __init__(self, A=1.05, B=90.0, lam=0.4, psi=0.15, scale=(21.0, 21.0),
+                 shear=((1.0,0.0),(0.0,1.0)), center=(-6.0, 0.0),
+                 v1size=1.2, v2size=0.6, v3size=0.4, hv4size=0.9, v3asize=0.9):
+        self.area_name_to_id = visual_area_names
+        self.parameters = pyr.m(A=A, B=B, lam=lam, psi=psi, scale=scale, shear=shear,
+                                center=center, v1size=v1size, v2size=v2size, v3size=v3size,
+                                hv4size=hv4size, v3asize=v3asize)
+    @pimms.param
+    def parameters(params):
+        '''
+        mdl.parameters is a persistent map of the parameters for the given SchiraModel object mdl.
+        '''
+        if not pimms.is_pmap(params): params = pyr.pmap(params)
+        # do the translations that we need...
+        scale = params['scale']
+        if pimms.is_number(scale):
+            params = params.set('scale', (scale, scale))
+        elif not isinstance(scale, types.TupleType):
+            params = params.set('scale', tuple(scale))
+        shear = params['shear']
+        if pimms.is_number(shear) and np.isclose(shear, 0):
+            params = params.set('shear', ((1, 0), (0, 1)))
+        elif shear[0][0] != 1 or shear[1][1] != 1:
+            raise RuntimeError('shear matrix diagonal elements must be 1!')
+        elif not isinstance(shear, types.TupleType) or \
+             not all(isinstance(s, types.TupleType) for s in shear):
+            params.set('shear', tuple([tuple(s) for s in shear]))
+        center = params['center']
+        if pimms.is_number(center) and np.isclose(center, 0):
+            params = params.set('center', (0.0, 0.0))
+        return params
 
-    def __init__(self, **opts):
-        # start by getting the proper parameters
-        params = self.__check_parameters(opts)
-        # Now, do the translations that we need...
-        if isinstance(params['scale'], Number) or np.issubdtype(type(params['scale']), np.float):
-            params['scale'] = [params['scale'], params['scale']]
-        if (isinstance(params['shear'], Number) or np.issubdtype(type(params['shear']), np.float)) \
-           and params['shear'] == 0:
-            params['shear'] = [[1, 0], [0, 1]]
-        elif params['shear'][0][0] != 1 or params['shear'][1][1] != 1:
-            raise RuntimeError('shear matrix [0,0] elements and [1,1] elements must be 1!')
-        if ((isinstance(params['center'], Number)
-             or np.issubdtype(type(params['center']), np.float))
-            and params['center'] == 0):
-            params['center'] = [0.0, 0.0]
-        self.__dict__['parameters'] = make_dict(params)
+    @pimms.value
+    def _java_object(parameters):
+        '''
+        mdl._java_object is the java representation of the SchiraModel object mdl.
+        '''
         # Okay, let's construct the object...
-        self.__dict__['_java_object'] = java_link().jvm.nben.neuroscience.SchiraModel(
-            params['A'],
-            params['B'],
-            params['lambda'],
-            params['psi'],
-            params['v1size'],
-            params['v2size'],
-            params['v3size'],
-            params['hv4size'],
-            params['v3asize'],
-            params['center'][0],
-            params['center'][1],
-            params['scale'][0],
-            params['scale'][1],
-            params['shear'][0][1],
-            params['shear'][1][0])
-    
+        return java_link().jvm.nben.neuroscience.SchiraModel(
+            parameters['A'],
+            parameters['B'],
+            parameters['lam'],
+            parameters['psi'],
+            parameters['v1size'],
+            parameters['v2size'],
+            parameters['v3size'],
+            parameters['hv4size'],
+            parameters['v3asize'],
+            parameters['center'][0],
+            parameters['center'][1],
+            parameters['scale'][0],
+            parameters['scale'][1],
+            parameters['shear'][0][1],
+            parameters['shear'][1][0])
+
     def angle_to_cortex(self, theta, rho):
         iterTheta = hasattr(theta, '__iter__')
         iterRho = hasattr(rho, '__iter__')
@@ -152,9 +193,14 @@ class SchiraModel(RetinotopyModel):
                                                    to_java_doubles(y))
         else:
             return self._java_object.cortexToAngle(x, y)
-        return np.asarray([[c for c in r] for r in jarr])
-        
+        dat = np.asarray([[c for c in r] for r in jarr])
+        a = dat[:,2]
+        a = np.round(np.abs(a))
+        a[a > 3] = 0
+        dat[:,2] = a
+        return dat
 
+@pimms.immutable
 class RetinotopyMeshModel(RetinotopyModel):
     '''
     RetinotopyMeshModel is a class that represents a retinotopic map or set of retinotopic maps on
@@ -166,108 +212,170 @@ class RetinotopyMeshModel(RetinotopyModel):
     vertex.
     '''
 
-    def __init__(self, triangles, coordinates, angles, eccens, area_ids, transform=None):
-        triangles   = np.asarray(triangles)
-        coordinates = np.asarray(coordinates)
-        triangles   = triangles   if triangles.shape[1] == 3   else triangles.T
-        coordinates = coordinates if coordinates.shape[1] == 2 else coordinates.T
-        angles      = np.asarray(angles)
-        eccens      = np.asarray(eccens)
-        area_ids    = np.asarray(map(int, area_ids))
-        # The forward model is the projection from cortical map -> visual angle
-        self.forward = geo.Mesh(triangles, coordinates)
-        # The inverse model is a set of meshes from visual field space to the cortical map
-        xs = coordinates[:,0]
-        ys = coordinates[:,1]
-        zs = eccens * np.exp(1j * (90 - angles)/180*math.pi)
-        coords = np.asarray([zs.real, zs.imag]).T
-        self.inverse = {
-            area: geo.Mesh(np.asarray(tris), coords)
-            # Iterate over all the unique areas;
-            for area in list(set(area_ids) - set([0]))
-            # bind the triangles (0 area_ids indicate borders):
-            for tris in [[t for t in triangles if (set(area_ids[t]) - set([0])) == set([area])]]}
-        # Note the transform:
-        self.transform = np.asarray(transform) if transform is not None else None
-        self.itransform = numpy.linalg.inv(transform) if transform is not None else None
-        # Save the data:
-        self.data = {}
-        self.data['x'] = xs
-        self.data['y'] = ys
-        self.data['polar_angle'] = angles
-        self.data['eccentricity'] = eccens
-        # we have to fix the area_ids to be the mean of their neighbors when on a boundary:
+    def __init__(self, triangles, coordinates, angles, eccens, area_ids, transform=None,
+                 area_name_to_id=None):
+        self.faces = triangles
+        self.cortical_coordinates = coordinates
+        self.polar_angles = angles
+        self.eccentricities = eccens
+        self.visual_areas = area_ids
+        self.transform = transform
+        self.area_name_to_id = area_name_to_id
+            
+
+    @pimms.param
+    def faces(tris):
+        'mdl.faces is the triangle matrix for the given retinotopy mesh model mdl.'
+        tris = np.asarray(tris, dtype=np.int)
+        if tris.shape[0] != 3: tris = tris.T
+        if tris.shape[0] != 3: raise ValueError('triangle matrix must have 3 rows or columns')
+        return pimms.imm_array(tris)
+    @pimms.param
+    def cortical_coordinates(coords):
+        '''
+        mdl.cortical_coordinates is the coordinate matrix for the given retinotopy mesh model mdl's
+        representation of the cortical surface.
+        '''
+        coords = np.asarray(coords)
+        if coords.shape[0] != 2: coords = coords.T
+        if coords.shape[0] != 2: raise ValueError('coordinate matrix must have 2 rows or columns')
+        return pimms.imm_array(coords)
+    @pimms.param
+    def polar_angles(angs):
+        'mdl.polar_angles is the vector of polar angle values for the given retinotopy mesh model.'
+        return pimms.imm_array(angs)
+    @pimms.param
+    def eccentricities(eccs):
+        'mdl.eccentrities is the vector of eccentricity values for the given retinotopy mesh model.'
+        return pimms.imm_array(eccs)
+    @pimms.param
+    def visual_areas(labs):
+        'mdl.visual_areas is the vector of visual area labels for the given retinotopy mesh model.'
+        return pimms.imm_array(labs)
+    @pimms.param
+    def transform(tx):
+        '''
+        mdl.transform is the matrix for the affine transform applied to the coordinates on the
+        cortical surface representation
+        '''
+        if tx is None: return None
+        tx = to_affine(tx)
+        if np.array_equal(tx, np.eye(3)): return None
+        tx.setflags(write=False)
+        return tx
+
+    @pimms.value
+    def inverse_transform(transform):
+        '''
+        mdl.inverse_transform is the inverse transform (see RetinotopyMeshModel.transform).
+        '''
+        if transform is None: return None
+        return pimms.imm_array(npla.inv(transform))
+    @pimms.value
+    def visual_coordinates(polar_angles, eccentricities):
+        '''
+        mdl.cortical_coordinates is the coordinate matrix for the given retinotopy mesh model mdl's
+        representation of the cortical surface.
+        '''
+        z = eccentricities * np.exp(1j * np.pi/180.0 * (90.0 - polar_angles))
+        return pimms.imm_array([z.real, z.imag])
+    @pimms.value
+    def cleaned_visual_areas(visual_areas, faces):
+        '''
+        mdl.cleaned_visual_areas is the same as mdl.visual_areas except that vertices with visual
+        area values of 0 (boundary values) are given the mode of their neighbors.
+        '''
+        area_ids = np.array(visual_areas)
         boundaryNeis = {}
         for (b,inside) in [(b, set(inside))
-                           for t in triangles
+                           for t in faces.T
                            for (bound, inside) in [([i for i in t if area_ids[i] == 0],
                                                     [i for i in t if area_ids[i] != 0])]
                            if len(bound) > 0 and len(inside) > 0
                            for b in bound]:
-            if b not in boundaryNeis: boundaryNeis[b] = inside
-            else: boundaryNeis[b] |= inside
-        for (b,neis) in boundaryNeis.iteritems():
-            area_ids[b] = np.mean(area_ids[list(neis)])
-        self.data['id'] = area_ids
+            if b in boundaryNeis: boundaryNeis[b] |= inside
+            else:                 boundaryNeis[b] =  inside
+        for (b,neis) in six.iteritems(boundaryNeis):
+            area_ids[b] = np.argmax(np.bincount(area_ids[list(neis)]))
+        return pimms.imm_array(np.asarray(area_ids, dtype=np.int))
+    @pimms.value
+    def tess(faces, cortical_coordinates, visual_coordinates,
+             polar_angles, eccentricities, cleaned_visual_areas):
+        'mdl.tess is the tesselation object for mesh model.'
+        props = pimms.itable({'polar_angle':  polar_angles,
+                              'eccentricity': eccentricities,
+                              'visual_area':  cleaned_visual_areas,
+                              'cortical_coordinates': cortical_coordinates.T,
+                              'visual_coordinates':   visual_coordinates.T})
+        if isinstance(faces, geo.Tesselation): return faces.copy(properties=props)
+        return geo.Tesselation(faces, properties=props).persist()
+    @pimms.value
+    def cortical_mesh(tess, cortical_coordinates):
+        '''
+        mdl.cortical_mesh is the mesh object that represents the 2D cortical surface of the model.
+        '''
+        return tess.make_mesh(cortical_coordinates).persist()
+    @pimms.value
+    def visual_meshes(tess, visual_coordinates, cleaned_visual_areas):
+        '''
+        mdl.visual_meshes is a map of meshes; the keys of the map are the unique visual area id's
+        in the given retinotopy mesh model (mdl) and the values are the meshes that represent them.
+        '''
+        visual_areas = cleaned_visual_areas
+        def _make_submesh(area_label):
+            def _fn():
+                idx = np.where(visual_areas == area_label)[0]
+                st = tess.subtess(idx)
+                return st.make_mesh(visual_coordinates[:, st.labels]).persist()
+            return _fn
+        return pimms.lazy_map({k:_make_submesh(k) for k in np.unique(visual_areas) if k != 0})
 
+    
     def cortex_to_angle(self, x, y):
         'See RetinotopyModel.cortex_to_angle.'
-        if not hasattr(x, '__iter__'):
-            return self.cortex_to_angle([x], [y])[0]
+        if not pimms.is_vector(x): return self.cortex_to_angle([x], [y])[0]
         # start by applying the transform to the points
-        tx = self.itransform
-        xy = np.asarray([x,y]).T if tx is None else np.dot(tx, [x,y,[1 for i in x]])[0:2].T
+        tx = self.inverse_transform
+        xy = np.asarray([x,y]).T if tx is None else np.dot(tx, [x,y,np.ones(len(x))])[0:2].T
         # we only need to interpolate from the inverse mesh in this case
-        interp_ae = self.forward.interpolate(
+        interp_ae = self.cortical_mesh.interpolate(
             xy,
-            [self.data[tt] for tt in ['polar_angle', 'eccentricity']],
-            method='automatic',
-            null=np.nan)
-        interp_id = self.forward.interpolate(
+            [self.polar_angles, self.eccentricities],
+            method='linear')
+        interp_id = self.cortical_mesh.interpolate(
             xy,
-            self.data['id'],
-            method='nearest',
-            null=np.nan)
+            self.visual_areas,
+            method='nearest')
         interp = np.asarray([interp_ae[0], interp_ae[1], interp_id])
         bad = np.where(np.isnan(np.prod(interp, axis=0)))[0]
         interp[:,bad] = 0.0
         return interp
-
     def angle_to_cortex(self, theta, rho):
         'See help(neuropythy.registration.RetinotopyModel.angle_to_cortex).'
-        if not hasattr(theta, '__iter__'):
-            return self.angle_to_cortex([theta], [rho])[0]
+        #TODO: This should be made to work correctly with visual area boundaries: this could be done
+        # by, for each area (e.g., V2) looking at its boundaries (with V1 and V3) and flipping the
+        # adjacent triangles so that there is complete coverage of each hemifield, guaranteed.
+        if not pimms.is_vector(theta): return self.angle_to_cortex([theta], [rho])[0]
         theta = np.asarray(theta)
         rho = np.asarray(rho)
         zs = np.asarray(
-            rho * np.exp([np.complex(z) for z in 1j * ((90.0 - theta)/180.0*math.pi)]),
+            rho * np.exp([np.complex(z) for z in 1j * ((90.0 - theta)/180.0*np.pi)]),
             dtype=np.complex)
         coords = np.asarray([zs.real, zs.imag]).T
         # we step through each area in the forward model and return the appropriate values
         tx = self.transform
-        xvals = self.data['x']
-        yvals = self.data['y']
-        res = np.asarray(
-            [[self.inverse[area].interpolate(coords, xvals, smoothing=1),
-              self.inverse[area].interpolate(coords, yvals, smoothing=1)]
-             for area in map(int, sorted(list(set(self.data['id']))))
-             if area != 0]
-        ).transpose((2,0,1))
+        res = np.transpose(
+            [msh.interpolate(coords, msh.prop('cortical_coordinates'), method='linear')
+             for area in sorted(self.visual_meshes.keys())
+             for msh in [self.visual_meshes[area]]],
+            (1,0,2))
         if tx is not None:
             res = np.asarray(
-                [[np.dot(tx, [xy[0], xy[1], 1])[0:2] if xy[0] is not None else [None, None]
-                  for xy in ptdat]
-                 for ptdat in res])
-        # there's a chance that the coords are outside the triangle mesh; we want to make sure
-        # that these get handled correctly...
-        for (i,ptdat) in enumerate(res):
-            for row in ptdat:
-                if None in set(row.flatten()) and rho[i] > 86 and rho[i] <= 90:
-                    # we try to get a fixed version by reducing rho slightly
-                    res[i] = self.angle_to_cortex(theta[i], rho[i] - 0.5);
+                [np.dot(tx, np.vstack((area_xy.T, np.ones(len(area_xy)))))[0:2].T
+                 for area_xy in res])
         return res
 
-             
+@pimms.immutable
 class RegisteredRetinotopyModel(RetinotopyModel):
     '''
     RegisteredRetinotopyModel is a class that represents a retinotopic map or set of retinotopic
@@ -283,36 +391,36 @@ class RegisteredRetinotopyModel(RetinotopyModel):
     coordinates.
     '''
 
-    def __init__(self, model, **projection_params):
+    def __init__(self, model, mapproj):
         '''
-        RegisteredRetinotopyModel(model, <projection parameters...>) yields a
-        retinotopy mesh model object in which the given RetinotopyModel object model describes
-        the 2D retinotopy that is predicted for the vertices that result from a map projection,
-        defined using the given projection_params dictionary, of the given registration. In other
-        words, the resulting RegisteredRetinotopyModel will, when given a hemisphere object to
-        which to apply the model, will look up the appropriate registration (by the name
-        registration_name) make a map projection of using the given projection_params dictionary,
-        and apply the model to the resulting coordinates.
-        See also neuropythy.freesurfer's Hemisphere.projection_data method for details on the
-        projection parameters;
+        RegisteredRetinotopyModel(retinotopy_model, map_projection) yields a retinotopy mesh model
+        object in which the given RetinotopyModel object describes the 2D retinotopy that is
+        predicted for the vertices that result from a map projection, defined using the given
+        MapProjection object, of the given registration. In other words, the resulting
+        RegisteredRetinotopyModel will, when given a cortex object to which to apply the model, will
+        look up the appropriate registration (found in the map projection) make a map projection of
+        the cortex using the projection, and apply the model to the resulting coordinates. See also
+        neuropythy.geometry.MapProjection.
         '''
         self.model = model
-        if 'registration' not in projection_params:
-            projection_params['registration'] = 'fsaverage_sym'
-        if 'chirality' in projection_params:
-            chirality = projection_params['chirality']
-        elif 'hemi' in projection_params:
-            chirality = projection_params['hemi']
-        elif 'hemisphere' in projection_params:
-            chirality = projection_params['hemisphere']
-        else:
-            chirality = None
-        if chirality is None:
-            self.projection_data = nfs.Hemisphere._make_projection(**projection_params)
-        else:
-            sub = nfs.freesurfer_subject(projection_params['registration'])
-            hemi = sub.LH if chirality.upper() == 'LH' else sub.RH
-            self.projection_data = hemi.projection_data(**projection_params)
+        self.map_projection = mapproj
+        self.area_name_to_id = model.area_name_to_id
+    @pimms.param
+    def model(mdl):
+        '''
+        rrm.model is the retinotopy model object for the RegisteredRetinotopyModel object rrm.
+        '''
+        if not isinstance(mdl, RetinotopyModel):
+            raise ValueError('given parameter model must be a RetinotopyModel instance')
+        return mdl.persist()
+    @pimms.param
+    def map_projection(mp):
+        '''
+        rrm.map_projection is the MapProjection object for the RegisteredRetinotopyModel object rrm.
+        '''
+        if not isinstance(mp, geo.MapProjection):
+            raise ValueError('given parameter map_projection must be a MapProjection instance')
+        return mp.persist()
 
     def save(self, f):
         '''
@@ -323,55 +431,59 @@ class RegisteredRetinotopyModel(RetinotopyModel):
         '''
         if not isinstance(self.model, RetinotopyMeshModel):
             raise ValueError('Only RetinotopyMeshModels can be saved to an fmm file')
-        if isinstance(f, basestring):
+        if pimms.is_str(f):
             with open(f, 'w') as fl:
                 self.save(fl)
             return f
         m = self.model
-        x0 = self.projection_data['center']
-        x1 = self.projection_data['center_right']
+        x0 = self.map_projection.center
+        x1 = self.map_projection.center_right
         tx = np.eye(3) if m.transform is None else m.transform
+        chir = self.map_projection.chirality
+        if chir is not None: chir = chir.upper()
         for ln in ['Flat Mesh Model Version: 1.0',
-                   'Points: %d' % m.forward.coordinates.shape[0],
-                   'Triangles: %d' % m.forward.triangles.shape[0],
-                   'Registration: %s' % self.projection_data['registration'],
-                   'Hemisphere: %s' % self.projection_data['hemi'].upper(),
+                   'Points: %d' % m.coordinates.shape[1],
+                   'Triangles: %d' % m.faces.shape[1],
+                   'Registration: %s' % self.map_projection.registration,
+                   'Hemisphere: %s' % chir,
                    'Center: %f,%f,%f' % (x0[0], x0[1], x0[2]),
                    'OnXAxis: %f,%f,%f' % (x1[0], x1[1], x1[2]),
-                   'Method: %s' % self.projection_data['method'].capitalize(),
+                   'Method: %s' % self.map_projection.method.capitalize(),
                    'Transform: [%f,%f,%f;%f,%f,%f;%f,%f,%f]' % tuple(tuple(x) for x in tx)]:
             f.write(ln + '\n')
-        for (x,y,t,r,a) in zip(**[m.data[u] for u in ['x','y', 'polar_angle','eccentricity','id']]):
+        if self.area_name_to_id:
+            lbls = [x for (_,x) in sorted(six.iteritems(self.area_name_to_id), key=lambda x:x[0])]
+            f.write('AreaNames: [%s]\n' % ' '.join(lbls))
+        (xs,ys) = m.coordinates
+        for (x,y,t,r,a) in zip(xs, ys, m.polar_angles, m.eccentricities, m.visual_areas):
             f.write('%f,%f :: %f,%f,%f\n' % (x,y,t,r,a))
-        for (a,b,c) in zip(**(m.triangles.T + 1)):
+        for (a,b,c) in zip(**(m.faces + 1)):
             f.write('%d,%d,%d\n' % (a,b,c))
         return f
     def cortex_to_angle(self, *args):
         '''
         The cortex_to_angle method of the RegisteredRetinotopyModel class is identical to that
-        of the RetinotopyModel class, but the method may be given a map, mesh, or hemisphere, in
+        of the RetinotopyModel class, but the method may be given a map, mesh, or cortex, in
         which case the result is applied to the coordinates after the appropriate transformation (if
         any) is first applied.
         '''
         if len(args) == 1:
-            if isinstance(args[0], ncx.CorticalMesh):
+            if isinstance(args[0], geo.Mesh):
                 if args[0].coordinates.shape[0] == 2:
                     X = args[0].coordinates
                     return self.model.cortex_to_angle(X[0], X[1])
                 else:
-                    m = self.projection_data['forward_function'](args[0])
-                    res = np.zeros((3, args[0].coordinates.shape[1]))
+                    m = self.map_projection(args[0])
+                    res = np.zeros((3, args[0].vertex_count))
                     c2a = np.asarray(self.cortex_to_angle(m.coordinates))
-                    res[:, m.vertex_labels] = c2a if len(c2a) == len(res) else c2a.T
+                    res[:, m.labels] = c2a if len(c2a) == len(res) else c2a.T
                     return res
-            elif isinstance(args[0], nfs.Hemisphere):
-                regname = self.projection_data['registration']
-                if regname is None or regname == 'native':
-                    regname = args[0].subject.id
-                if regname not in args[0].topology.registrations:
-                    raise ValueError('given hemisphere is not registered to ' + regname)
-                else:
-                    return self.cortex_to_angle(args[0].registration_mesh(regname))
+            elif isinstance(args[0], mri.Cortex):
+                m = self.map_projection(args[0])
+                res = np.zeros((3, args[0].vertex_count))
+                c2a = np.asarray(self.cortex_to_angle(m.coordinates))
+                res[:, m.labels] = c2a if len(c2a) == len(res) else c2a.T
+                return res
             else:
                 X = np.asarray(args[0])
                 if len(X.shape) != 2:
@@ -380,13 +492,12 @@ class RegisteredRetinotopyModel(RetinotopyModel):
                 if X.shape[0] == 2:
                     return self.model.cortex_to_angle(X[0], X[1])
                 elif X.shape[0] == 3:
-                    Xp = self.projection_data['forward_function'](X)
+                    Xp = self.map_projection(X)
                     return self.model.cortex_to_angle(Xp[0], Xp[1])
                 else:
                     raise ValueError('coordinate matrix must be 2 or 3 dimensional')
         else:
             return self.model.cortex_to_angle(*args)
-                    
     def angle_to_cortex(self, *args):
         '''
         The angle_to_cortex method of the RegisteredRetinotopyModel class is identical to that
@@ -394,9 +505,9 @@ class RegisteredRetinotopyModel(RetinotopyModel):
         which case the result is applied to the 'polar_angle' and 'eccentricity' properties.
         '''
         if len(args) == 1:
-            if isinstance(args[0], CorticalMesh) or isinstance(args[0], nfs.Hemisphere):
-                ang = ncx.retinotopy_data(args[0])
-                ecc = ncx.retinotopy_data(args[0])
+            if isinstance(args[0], geo.Mesh) or isinstance(args[0], mri.Cortex):
+                ang = vis.retinotopy_data(args[0], 'polar_angle')
+                ecc = vis.retinotopy_data(args[0], 'eccentricity')
                 return self.model.angle_to_cortex(ang, ecc)
             else:
                 tr = np.asarray(args)
@@ -405,9 +516,8 @@ class RegisteredRetinotopyModel(RetinotopyModel):
                 return self.model.angle_to_cortex(tr[0], tr[1])
         else:
             return self.model.angle_to_cortex(*args)
-                    
 
-def load_fmm_model(filename, radius=math.pi/3.0, sphere_radius=100.0):
+def load_fmm_model(filename, radius=np.pi/3.0, sphere_radius=100.0):
     '''
     load_fmm_model(filename) yields the fmm model indicated by the given file name. Fmm models are
     triangle meshes that define a field value at every vertex as well as the parameters of a
@@ -449,33 +559,37 @@ def load_fmm_model(filename, radius=math.pi/3.0, sphere_radius=100.0):
     tx = np.asarray(
         [map(float, row.split(','))
          for row in lines[8].split(':')[1].strip(' \t[]').split(';')])
+    if lines[9].startswith('AreaNames: ['):
+        # we load the area names
+        s = lines[9][12:-1]
+        area_names = tuple(s.split(' '))
+        l0 = 10        
+    else:
+        area_names = None
+        l0 = 9
     crds = []
-    for row in lines[9:(n+9)]:
-        try:
-            (left,right) = row.split(' :: ')
-            crds.append(map(float, left.split(',')))
-        except:
-            print row
-            raise
+    for row in lines[l0:(n+l0)]:
+        (left,right) = row.split(' :: ')
+        crds.append(map(float, left.split(',')))
     crds = np.asarray([map(float, left.split(','))
-                       for row in lines[9:(n+9)]
+                       for row in lines[l0:(n+l0)]
                        for (left,right) in [row.split(' :: ')]])
     vals = np.asarray([map(float, right.split(','))
-                       for row in lines[9:(n+9)]
+                       for row in lines[l0:(n+l0)]
                        for (left,right) in [row.split(' :: ')]])
     tris = -1 + np.asarray(
         [map(int, row.split(','))
-         for row in lines[(n+9):(n+m+9)]])
-    mdl = RegisteredRetinotopyModel(
+         for row in lines[(n+l0):(n+m+l0)]])
+    return RegisteredRetinotopyModel(
         RetinotopyMeshModel(tris, crds,
-                            90 - 180/math.pi*vals[:,0], vals[:,1], vals[:,2],
-                            transform=tx),
-        registration=reg,
-        center=center,
-        center_right=onxaxis,
-        method=method,
-        radius=radius,
-        sphere_radius=sphere_radius,
-        chirality=hemi)
-    return mdl
+                            90-180/np.pi*vals[:,0], vals[:,1], np.asarray(vals[:,2], dtype=np.int),
+                            transform=tx,
+                            area_name_to_id=area_names),
+        geo.MapProjection(registration=reg,
+                          center=center,
+                          center_right=onxaxis,
+                          method=method,
+                          radius=radius,
+                          sphere_radius=sphere_radius,
+                          chirality=hemi))
 
