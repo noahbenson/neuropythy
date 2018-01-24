@@ -46,7 +46,6 @@ setup(
               'neuropythy.util',
               'neuropythy.java',
               'neuropythy.geometry', 
-              'neuropythy.immutable',
               'neuropythy.topology',
               'neuropythy.freesurfer',
               'neuropythy.cortex',
