@@ -709,12 +709,12 @@ class Cortex(geo.Topology):
                 return self.midgray_surface # in case it's been provided via overloading
             return self.surfaces[name]
         elif pimms.is_vector(name, 'real') and len(name) == 1:
-            x0 = self.white_surface
+            x0 = self.white_surface.coordinates
             dx = self.white_to_pial_vectors
             return self.make_mesh(x0 + name[0]*dx)
         elif pimms.is_real(name):
-            x0 = self.white_surface
-            x1 = self.pial_surface
+            x0 = self.white_surface.coordinates
+            x1 = self.pial_surface.coordinates
             return self.make_mesh((1 - name)*x0 + name*x1)
         else:
             raise ValueError('could not understand surface layer: %s' % name)
