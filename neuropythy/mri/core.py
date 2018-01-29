@@ -724,7 +724,7 @@ class Cortex(geo.Topology):
         cortex.from_image(image) is equivalent to cortex.midgray_surface.from_image(image).
         cortex.from_image(image, surface) uses the given surface (see also cortex.surface).
         '''
-        mesh = self.surface(surface)
+        mesh = self.surface(surface) if not isinstance(surface, geo.Mesh) else surface
         return mesh.from_image(image, affine=affine, method=method, fill=fill, dtype=dtype,
                                native_to_vertex_matrix=native_to_vertex_matrix, weight=weight)
 
