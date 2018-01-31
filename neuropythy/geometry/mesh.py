@@ -1965,7 +1965,7 @@ class MapProjection(ObjectWithMetaData):
         x = np.asarray(x)
         if x.shape[0] != 2:
             if x.shape[1] != 2: raise ValueError('coordinates are not 2D')
-            else: return self.forward(x.T).T
+            else: return self.inverse(x.T).T
         ones = np.ones((1, x.shape[1]))
         # first, un-apply the post-transform
         ptx = self.inverse_post_affine
