@@ -4,4 +4,5 @@
 
 from .core import (Subject, subject,
                    find_subject_path, subject_paths, add_subject_path, clear_subject_paths,
-                   tkr_vox2ras, to_mgh)
+                   to_mgh)
+from neuropythy.geometry import tkr_vox2ras

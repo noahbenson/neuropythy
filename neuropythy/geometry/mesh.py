@@ -25,6 +25,33 @@ from neuropythy.util import (ObjectWithMetaData, to_affine, zinv)
 from neuropythy.io   import (load, importer)
 from functools import reduce
 
+# This function creates the tkr matrix for a volume given the dims
+def tkr_vox2ras(img, zooms=None):
+    '''
+    tkr_vox2ras(img) yields the FreeSurfer tkr VOX2RAS matrix for the given nibabel image object
+      img. The img must have a get_shape() method and header member with a get_zooms() method.
+    tkr_vox2ras(hdr) operates on a nibabel image header object.
+    tkr_vox2ras(shape, zooms) operates on the shape (e.g., for FreeSurfer subjects (256,256,256))
+      and the zooms or voxel dimensions (e.g., for FreeSurfer subjects, (1.0, 1.0, 1.0)).
+    '''
+    if zooms is not None:
+        # let's assume that they passed shape, zooms
+        shape = img
+    else:
+        try:    img = img.header
+        except: pass
+        try:    (shape, zooms) = (img.get_data_shape(), img.get_zooms())
+        except: raise ValueError('single argument must be nibabel image or header')
+    # Okay, we have shape and zooms...
+    zooms = zooms[0:3]
+    shape = shape[0:3]
+    (dC, dR, dS) = zooms
+    (nC, nR, nS) = 0.5 * (np.asarray(shape) * zooms)
+    return np.asarray([[-dC,   0,   0,  nC],
+                       [  0,   0,  dS, -nS],
+                       [  0, -dR,   0,  nR],
+                       [  0,   0,   0,   1]])
+
 @pimms.immutable
 class VertexSet(ObjectWithMetaData):
     '''
@@ -1447,20 +1474,27 @@ class Mesh(VertexSet):
           * weight (default: None) may optionally provide an image whose voxels are weights to use
             during the interpolation; these weights are in addition to trilinear weights and are
             ignored in the case of nearest interpolation.
+          * native_to_vertex_matrix (default: None) specifies a matrix that aligns the surface
+            coordinates with their subject's 'native' orientation; None is equivalnet to the
+            identity matrix.
         '''
+        if native_to_vertex_matrix is None:
+            native_to_vertex_matrix = np.eye(4)
+        native_to_vertex_matrix = to_affine(native_to_vertex_matrix)
+        if pimms.is_str(image): image = load(image)
         if isinstance(image, nib.analyze.SpatialImage):
-            # we want to apply the tkr transform by default
+            # we want to apply the image's affine transform by default
             if affine is None: affine = image.affine
             image = image.get_data()
-        elif pimms.is_str(image):
-            return self.from_image(load(image), affine=affine, method=method, fill=fill)
         image = np.asarray(image)
         if affine is None:
+            # wild guess: the inverse of the tkr_vox2ras matrix without alignment to native
+            affine = np.dot(np.linalg.inv(native_to_vertex_matrix),
+                            tkr_vox2ras(image.shape[0:3], (1.0, 1.0, 1.0)))
             ijk0 = np.asarray(image.shape) * 0.5
             affine = to_affine(([[-1,0,0],[0,0,-1],[0,1,0]], ijk0), 3)
         else: affine = to_affine(affine, 3)
-        if native_to_vertex_matrix is not None:
-            affine = np.dot(to_affine(native_to_vertex_matrix), affine)
+        affine = np.dot(native_to_vertex_matrix, affine)
         affine = npla.inv(affine)
         if method is not None: method = method.lower()
         if method is None or method in ['auto', 'automatic']:
