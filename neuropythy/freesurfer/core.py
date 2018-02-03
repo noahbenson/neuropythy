@@ -109,6 +109,33 @@ def find_subject_path(sub):
                  if is_freesurfer_subject_path(p)),
                 None)
 
+# This function creates the tkr matrix for a volume given the dims
+def tkr_vox2ras(img, zooms=None):
+    '''
+    tkr_vox2ras(img) yields the FreeSurfer tkr VOX2RAS matrix for the given nibabel image object
+      img. The img must have a get_shape() method and header member with a get_zooms() method.
+    tkr_vox2ras(hdr) operates on a nibabel image header object.
+    tkr_vox2ras(shape, zooms) operates on the shape (e.g., for FreeSurfer subjects (256,256,256))
+      and the zooms or voxel dimensions (e.g., for FreeSurfer subjects, (1.0, 1.0, 1.0)).
+    '''
+    if zooms is not None:
+        # let's assume that they passed shape, zooms
+        shape = img
+    else:
+        try:    img = img.header
+        except: pass
+        try:    (shape, zooms) = (img.get_data_shape(), img.get_zooms())
+        except: raise ValueError('single argument must be nibabe image or header')
+    # Okay, we have shape and zooms...
+    zooms = zooms[0:3]
+    shape = shape[0:3]
+    (dC, dR, dS) = zooms
+    (nC, nR, nS) = 0.5 * (np.asarray(shape) * zooms)
+    return np.asarray([[-dC,   0,   0,  nC],
+                       [  0,   0,  dS, -nS],
+                       [  0, -dR,   0,  nR],
+                       [  0,   0,   0,   1]])
+
 # Used to load immutable-like mgh objects
 def _load_imm_mgh(flnm):
     img = fsmgh.load(flnm)

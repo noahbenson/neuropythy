@@ -1468,7 +1468,8 @@ class Mesh(VertexSet):
         if dtype is None: dtype = image.dtype
         # okay, these are actually pretty simple; first transform the coordinates
         xyz = affine.dot(np.vstack((self.coordinates, np.ones(self.vertex_count))))[0:3]
-        res = np.full(self.vertex_count, fill, dtype=dtype)
+        # remember: this might be a 4d or higher-dim image...
+        res = np.full((self.vertex_count,) + image.shape[3:], fill, dtype=dtype)
         # now find the nearest voxel centers...
         # if we are doing nearest neighbor; we're basically done already:
         if method == 'nearest':
@@ -1484,7 +1485,7 @@ class Mesh(VertexSet):
         # find the 8 neighboring voxels
         mins = np.floor(xyz)
         maxs = np.ceil(xyz)
-        ok = np.all((mins >= 0) & [ii < sh for (ii,sh) in zip(maxs, image.shape)], axis=0)
+        ok = np.all((mins >= 0) & [ii < sh for (ii,sh) in zip(maxs, image.shape[0:3])], axis=0)
         (mins,maxs,xyz) = [x[:,ok] for x in (mins,maxs,xyz)]
         voxs = np.asarray([mins,
                            [mins[0], mins[1], maxs[2]],
@@ -1499,6 +1500,10 @@ class Mesh(VertexSet):
         wgts_tri = np.asarray([np.prod(1 - np.abs(xyz - row), axis=0) for row in voxs])
         # weight-image weights
         wgts_wgt = np.asarray([weight[tuple(row)] for row in voxs])
+        # note that there might be a 4D image here
+        if len(wgts_wgt.shape) > len(wgts_tri.shape):
+            for _ in range(len(wgts_wgt.shape) - len(wgts_tri.shape)):
+                wgts_tri = np.expand_dims(wgts_tri, -1)
         wgts = wgts_tri * wgts_wgt
         wgts *= zinv(np.sum(wgts, axis=0))
         vals = np.asarray([image[tuple(row)] for row in voxs])

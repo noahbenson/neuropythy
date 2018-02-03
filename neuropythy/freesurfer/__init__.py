@@ -4,4 +4,4 @@
 
 from .core import (Subject, subject,
                    find_subject_path, subject_paths, add_subject_path, clear_subject_paths,
-                   to_mgh)
+                   tkr_vox2ras, to_mgh)
