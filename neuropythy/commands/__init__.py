@@ -3,15 +3,17 @@
 # The main function, if neuropythy is invoked directly as command.
 # By Noah C. Benson
 
-import os, sys, math
-import pysistence
+import pyrsistent as _pyr
 
-import register_retinotopy
-import benson14_retinotopy
-import surface_to_image
+import register_retinotopy as _reg
+import benson14_retinotopy as _b14
+import surface_to_image    as _s2i
 
 # The commands that can be run by main:
-commands = pysistence.make_dict(
-    register_retinotopy = register_retinotopy.main,
-    benson14_retinotopy = benson14_retinotopy.main,
-    surface_to_image    = surface_to_image.main)
+commands = _pyr.m(
+    register_retinotopy = _reg.main,
+    benson14_retinotopy = _b14.main,
+    surface_to_image    = _s2i.main)
+
+__all__ = ['commands']
+

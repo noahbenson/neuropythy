@@ -14,12 +14,14 @@ MAINTAINER Noah C. Benson <nben@nyu.edu>
 # Install some stuff...
 RUN apt-get -y update
 RUN apt-get -y install g++ make python2.7 python-dev python-setuptools python-numpy \
-                       python-scipy libxml2 libxml2-dev zlib1g zlib1g-dev git \
+                       python-scipy python-pip libxml2 libxml2-dev zlib1g zlib1g-dev git \
                        software-properties-common python-software-properties
 RUN add-apt-repository ppa:webupd8team/java -y && apt-get -y update
 RUN echo debconf shared/accepted-oracle-license-v1-1 select true | debconf-set-selections
 RUN echo debconf shared/accepted-oracle-license-v1-1 seen true | debconf-set-selections
 RUN apt-get -y install oracle-java8-installer
+
+RUN pip install --upgrade setuptools
 
 # Copy the README and license over.
 COPY contents/LICENSE.txt  /LICENSE.txt
