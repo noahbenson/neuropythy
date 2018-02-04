@@ -417,6 +417,7 @@ def calc_retinotopy(note, error, subject, clean, run_lh, run_rh,
         if h == 'rh' and invert_rh_angle:
             props['polar_angle'] = -props['polar_angle']
         # and zero-out weights for high eccentricities
+        props['weight'] = np.array(props['weight'])
         if max_in_eccen is not None:
             props['weight'][props['eccentricity'] > max_in_eccen] = 0
         if min_in_eccen is not None:
