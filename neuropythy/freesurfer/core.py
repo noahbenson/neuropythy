@@ -17,9 +17,9 @@ import os, warnings, six, pimms
 # Subject Directory and where to find Subjects
 _subjects_dirs = pyr.v()
 if 'SUBJECTS_DIR' in os.environ:
-    sd = os.environ['SUBJECTS_DIR']
-    if os.path.isdir(sd):
-        _subjects_dirs = _subjects_dirs.append(sd)
+    for sd in os.environ['SUBJECTS_DIR'].split(':'):
+        if os.path.isdir(sd):
+            _subjects_dirs = _subjects_dirs.append(sd)
 if 'FREESURFER_HOME' in os.environ:
     fsh = os.path.join(os.environ['FREESURFER_HOME'], 'subjects')
     if os.path.isdir(fsh):
