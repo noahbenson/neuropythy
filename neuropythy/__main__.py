@@ -3,8 +3,7 @@
 # The main function, if neuropythy is invoked directly as command.
 # By Noah C. Benson
 
-import os, sys, math
-import pysistence
+import sys
 
 from neuropythy.commands import (commands)
 
