@@ -61,15 +61,15 @@ setup(
              'neuropythy/lib/models/lh.benson17.fmm.gz',
              'neuropythy/lib/models/rh.benson17.fmm.gz',
              'neuropythy/lib/data/fsaverage/surf/lh.retinotopy_benson17.sphere.reg',
-             'neuropythy/lib/data/fsaverage/surf/lh.benson17_angle'
-             'neuropythy/lib/data/fsaverage/surf/lh.benson17_eccen'
-             'neuropythy/lib/data/fsaverage/surf/lh.benson17_sigma'
-             'neuropythy/lib/data/fsaverage/surf/lh.benson17_varea'
+             'neuropythy/lib/data/fsaverage/surf/lh.benson17_angle',
+             'neuropythy/lib/data/fsaverage/surf/lh.benson17_eccen',
+             'neuropythy/lib/data/fsaverage/surf/lh.benson17_sigma',
+             'neuropythy/lib/data/fsaverage/surf/lh.benson17_varea',
              'neuropythy/lib/data/fsaverage/surf/rh.retinotopy_benson17.sphere.reg',
-             'neuropythy/lib/data/fsaverage/surf/rh.benson17_angle'
-             'neuropythy/lib/data/fsaverage/surf/rh.benson17_eccen'
-             'neuropythy/lib/data/fsaverage/surf/rh.benson17_sigma'
-             'neuropythy/lib/data/fsaverage/surf/rh.benson17_varea'
+             'neuropythy/lib/data/fsaverage/surf/rh.benson17_angle',
+             'neuropythy/lib/data/fsaverage/surf/rh.benson17_eccen',
+             'neuropythy/lib/data/fsaverage/surf/rh.benson17_sigma',
+             'neuropythy/lib/data/fsaverage/surf/rh.benson17_varea',
              'neuropythy/lib/data/fsaverage_sym/surf/lh.retinotopy_benson14.sphere.reg',
              'neuropythy/lib/data/fsaverage_sym/surf/sym.benson14_angle',
              'neuropythy/lib/data/fsaverage_sym/surf/sym.benson14_eccen',

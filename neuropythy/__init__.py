@@ -62,7 +62,7 @@ except: pass
 
 
 # Version information...
-__version__ = '0.4.5'
+__version__ = '0.4.6'
 
 
 
