@@ -84,7 +84,7 @@ def to_java_array(m):
     '''
     if not hasattr(m, '__iter__'): return m
     m = np.asarray(m)
-    if np.issubdtype(m.dtype, np.int) or all(isinstance(x, num.Integral) for x in m):
+    if np.issubdtype(m.dtype, np.dtype(int).type) or all(isinstance(x, num.Integral) for x in m):
         return to_java_ints(m)
     else:
         return to_java_doubles(m)

@@ -584,11 +584,12 @@ retinotopy_model.cache = {}
 
 # Tools for retinotopy registration:
 def _retinotopy_vectors_to_float(ang, ecc, wgt, weight_min=0):
-    (ang, ecc, wgt) = np.asarray(
-        [aew if pimms.is_vector(aew, 'float') and aew[2] > weight_min else (0,0,0)
-         for aew in zip(ang, ecc, wgt)]).T
-    #wgt = np.clip((wgt - weight_min) / (1.0 - weight_min), 0, 1)
-    wgt[wgt <= weight_min] = 0
+    ok = np.isfinite(wgt) & np.isfinite(ecc) & np.isfinite(ang)
+    ok[ok] &= wgt[ok] > weight_min
+    bad = np.logical_not(ok)
+    if np.sum(bad) > 0:
+        wgt = np.array(wgt)
+        wgt[bad] = 0
     return (ang, ecc, wgt)
 
 def retinotopy_mesh_field(mesh, mdl,
@@ -690,6 +691,8 @@ def retinotopy_mesh_field(mesh, mdl,
     (polar_angle, eccentricity, weight) = _retinotopy_vectors_to_float(
         polar_angle, eccentricity, weight,
         weight_min=weight_min)
+    if np.sum(weight > 0) == 0:
+        raise ValueError('No positive weights found')
     idcs = [i for (i,w) in enumerate(weight) if w > 0]
     # Okay, let's get the model data ready
     mdl_1s = np.ones(mdl.forward.coordinates.shape[0])
@@ -877,6 +880,8 @@ def retinotopy_anchors(mesh, mdl,
     (polar_angle, eccentricity, weight) = _retinotopy_vectors_to_float(
         polar_angle, eccentricity, weight,
         weight_min=weight_min)
+    if np.sum(weight > 0) == 0:
+        raise ValueError('No positive weights found')
     idcs = np.where(weight > 0)[0]
     # Interpret the select arg if necessary (but don't apply it yet)
     select = ['close', [40]] if select == 'close'   else \
