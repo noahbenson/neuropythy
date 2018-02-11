@@ -483,7 +483,7 @@ def save_surface_files(note, error, registrations, subject,
     elif surface_format in ['mgh', 'mgz']:
         def export(flnm, p):
             flnm = flnm + '.' + surface_format
-            dt = np.int32 if np.issubdtype(p.dtype, np.int) else np.float32
+            dt = np.int32 if np.issubdtype(p.dtype, np.dtype(int).type) else np.float32
             img = fsmgh.MGHImage(np.asarray([[p]], dtype=dt), np.eye(4))
             img.to_filename(flnm)
             return flnm
@@ -491,7 +491,7 @@ def save_surface_files(note, error, registrations, subject,
         surface_format = 'nii' if surface_format == 'nii' else 'nii.gz'
         def export(flnm, p):
             flnm = flnm + '.' + surface_format
-            dt = np.int32 if np.issubdtype(p.dtype, np.int) else np.float32
+            dt = np.int32 if np.issubdtype(p.dtype, np.dtype(int).type) else np.float32
             img = nib.Nifti1Image(np.asarray([[p]], dtype=dt), np.eye(4))
             img.to_filename(flnm)
             return flnm
@@ -529,7 +529,7 @@ def save_volume_files(note, error, registrations, subject,
         volume_format = 'mgh' if volume_format == 'mgh' else 'mgz'
         def export(flnm, d):
             flnm = flnm + '.' + volume_format
-            dt = np.int32 if np.issubdtype(d.dtype, np.int) else np.float32
+            dt = np.int32 if np.issubdtype(d.dtype, np.dtype(int).type) else np.float32
             img = fsmgh.MGHImage(np.asarray(d, dtype=dt), subject.voxel_to_vertex_matrix)
             img.to_filename(flnm)
             return flnm
@@ -537,7 +537,7 @@ def save_volume_files(note, error, registrations, subject,
         volume_format = 'nii' if volume_format == 'nii' else 'nii.gz'
         def export(flnm, p):
             flnm = flnm + '.' + volume_format
-            dt = np.int32 if np.issubdtype(p.dtype, np.int) else np.float32
+            dt = np.int32 if np.issubdtype(p.dtype, np.dtype(int).type) else np.float32
             img = nib.Nifti1Image(np.asarray(p, dtype=dt), subject.voxel_to_vertex_matrix)
             img.to_filename(flnm)
             return flnm
