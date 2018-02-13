@@ -14,7 +14,8 @@ fi
 # A few things we do first:
 # (1) Make sure SUBJECTS_DIR is setup correctly
 SUBJECTS_DIR=""
-[ -d /subjects ] && SUBJECTS_DIR="/subjects"
+[ -d /required_subjects ] && SUBJECTS_DIR="/required_subjects"
+[ -d /subjects ] && SUBJECTS_DIR="$SUBJECTS_DIR:/subjects"
 [ -d /freesurfer_subjects ] && SUBJECTS_DIR="$SUBJECTS_DIR:/freesurfer_subjects"
 
 # Okay, now invoke neuropythy

@@ -22,10 +22,14 @@ RUN echo debconf shared/accepted-oracle-license-v1-1 seen true | debconf-set-sel
 RUN apt-get -y install oracle-java8-installer
 
 RUN pip install --upgrade setuptools
+RUN mkdir -p /required_subjects
 
 # Copy the README and license over.
-COPY contents/LICENSE.txt  /LICENSE.txt
-COPY contents/README.md    /README.md
+COPY contents/LICENSE.txt              /LICENSE.txt
+COPY contents/README.md                /README.md
+COPY contents/required_subjects.tar.gz /
+
+RUN cd / && tar zxvf required_subjects.tar.gz && rm /required_subjects.tar.gz
 
 # Install python, and get the neuropythy library working.
 RUN cd /opt && git clone https://github.com/noahbenson/neuropythy
