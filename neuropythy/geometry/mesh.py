@@ -1402,6 +1402,8 @@ class Mesh(VertexSet):
         address the point in the first mesh then unaddress it in the second mesh.
         '''
         # we have to have a topology and registration for this to work...
+        if isinstance(data, Mesh):
+            return self.address(data.coordinates)
         data = np.asarray(data)
         idxfs = self.tess.indexed_faces
         if len(data.shape) == 1:
