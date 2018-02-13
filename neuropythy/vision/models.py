@@ -14,7 +14,7 @@ import neuropythy.geometry   as     geo
 import neuropythy.mri        as     mri
 from   neuropythy.java       import (java_link, serialize_numpy,
                                      to_java_doubles, to_java_ints, to_java_array)
-from   neuropythy.util       import to_affine
+from   neuropythy.util       import (to_affine, library_path)
 
 # These two variables are intended to provide default orderings to visual areas (but in general,
 # visual areas should be referred to by name OR as a number paired with a model).
@@ -531,7 +531,7 @@ def load_fmm_model(filename, radius=np.pi/3.0, sphere_radius=100.0):
         the model. Note that in Freesurfer, spheres have a radius of 100.
     '''
     if not os.path.exists(filename):
-        models_path = os.path.join(os.path.dirname(__file__), '..', 'lib', 'models')
+        models_path = os.path.join(library_path(), 'models')
         # we look for it in a number of ways:
         fname = next((fnm
                       for beg in ['', models_path] for end in ['', '.fmm', '.fmm.gz']

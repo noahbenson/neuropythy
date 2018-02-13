@@ -13,6 +13,8 @@ import neuropythy.mri               as mri
 import neuropythy.io                as nyio
 import os, warnings, six, pimms
 
+from neuropythy.util import library_path
+
 ####################################################################################################
 # Subject Directory and where to find Subjects
 _subjects_dirs = pyr.v()
@@ -182,9 +184,9 @@ class Subject(mri.Subject):
                                            _auto_retino_names]
                                  for (k,a) in six.iteritems(d)})
     @staticmethod
-    def _cortex_from_path(chirality, name, surf_path, data_path, data_prefix=Ellipsis):
+    def _cortex_from_path(subid, chirality, name, surf_path, data_path, data_prefix=Ellipsis):
         '''
-        Subject._cortex_from_path(chirality, name, spath, dpath) yields a Cortex object
+        Subject._cortex_from_path(subid, chirality, name, spath, dpath) yields a Cortex object
           that has been loaded from the given path. The given spath should be the path from which
           to load the structural information (like lh.sphere and rh.white) while the dpath is the
           path from which to load the non-structural information (like lh.thickness or rh.curv).
@@ -244,17 +246,22 @@ class Subject(mri.Subject):
         # okay, now we can do the same for the relevant registrations; since the sphere registration
         # is the same as the sphere surface, we can just copy that one over:
         regs = {'native': lambda:surfs['sphere']}
-        for flnm in os.listdir(surf_path):
-            if flnm.startswith(chirality + '.') and flnm.endswith('.sphere.reg'):
-                mid = flnm[(len(chirality)+1):-11]
-                if mid == '': mid = 'fsaverage'
-                regs[mid] = _make_surf_loader(os.path.join(surf_path, flnm))
+        # see if our subject id has special neuropythy datafiles...
+        surf_paths = [surf_path]
+        extra_path = os.path.join(library_path(), 'data', subid, 'surf')
+        if os.path.isdir(extra_path): surf_paths.insert(0, extra_path)
+        for surf_path in surf_paths:
+            for flnm in os.listdir(surf_path):
+                if flnm.startswith(chirality + '.') and flnm.endswith('.sphere.reg'):
+                    mid = flnm[(len(chirality)+1):-11]
+                    if mid == '': mid = 'fsaverage'
+                    regs[mid] = _make_surf_loader(os.path.join(surf_path, flnm))
         regs = pimms.lazy_map(regs)
         # great; now we can actually create the cortex object itself
         return mri.Cortex(chirality, tess, surfs, regs).persist()
     
     @pimms.value
-    def hemis(path):
+    def hemis(name, path):
         '''
         sub.hemis is a persistent map of hemisphere names ('lh', 'rh', possibly others) for the
         given freesurfer subject sub. Other hemispheres may include lhx and rhx (mirror-inverted
@@ -265,12 +272,12 @@ class Subject(mri.Subject):
         # properties based on the above auto-property data
         ctcs = {}
         for h in ['lh', 'rh']:
-            ctcs[h] = Subject._cortex_from_path(h, h, surf_path, surf_path)
+            ctcs[h] = Subject._cortex_from_path(name, h, h, surf_path, surf_path)
         # we also want to check for the xhemi subject
         xpath = os.path.join(path, 'xhemi', 'surf')
         if os.path.isdir(xpath):
             for (h,xh) in zip(['lh', 'rh'], ['rhx', 'lhx']):
-                ctcs[xh] = Subject._cortex_from_path(h, xh, xpath, surf_path)
+                ctcs[xh] = Subject._cortex_from_path(name, h, xh, xpath, surf_path)
         # that's all!
         return pimms.lazy_map(ctcs)
     @pimms.value

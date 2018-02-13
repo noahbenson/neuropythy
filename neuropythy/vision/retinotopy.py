@@ -14,7 +14,7 @@ import neuropythy.geometry           as geo
 import neuropythy.freesurfer         as nyfs
 import neuropythy.mri                as mri
 import neuropythy.freesurfer         as nyfs
-from   neuropythy.util           import zinv
+from   neuropythy.util           import (zinv, library_path)
 from   neuropythy.registration   import (mesh_register, java_potential_term)
 from   neuropythy.java           import (to_java_doubles, to_java_ints)
 
@@ -511,10 +511,7 @@ def get_default_schira_model():
         #except: raise
     return _default_schira_model
 
-_retinotopy_model_paths = [
-    os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        'lib', 'models')]
+_retinotopy_model_paths = [os.path.join(library_path(), 'models')]
 def retinotopy_model(name='benson17', hemi=None,
                      radius=np.pi/2.5, sphere_radius=100.0,
                      search_paths=None, update=False):
@@ -1438,7 +1435,7 @@ def predict_retinotopy(sub, template='benson17', registration='fsaverage'):
     retino_tmpls = _retinotopy_templates[registration]
     hemis = ['lh','rh'] if registration == 'fsaverage' else ['sym']
     if template not in retino_tmpls:
-        libdir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'lib', 'data')
+        libdir = os.path.join(library_path(), 'data')
         search_paths = nyfs.subject_paths() + [libdir]
         filenames = ['%s.%s_%s' % (hname,template,fnm)
                      for fnm in ['angle','eccen','varea','sigma']

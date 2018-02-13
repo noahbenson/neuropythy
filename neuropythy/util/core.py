@@ -8,7 +8,7 @@ import scipy.sparse                 as sps
 import pyrsistent                   as pyr
 import nibabel                      as nib
 import nibabel.freesurfer.mghformat as fsmgh
-import types, inspect, pimms
+import types, inspect, pimms, os
 
 @pimms.immutable
 class CommandLineParser(object):
@@ -334,3 +334,9 @@ def zdiv(a, b, null=0):
     res = iz*a / (b + z)
     res[z] = null
     return res
+
+def library_path():
+    '''
+    library_path() yields the path of the neuropythy library.
+    '''
+    return os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'lib'))

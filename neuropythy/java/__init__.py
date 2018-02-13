@@ -9,6 +9,7 @@ import numbers as num
 import os, sys, gzip
 
 from array import array
+from neuropythy.util import library_path
 
 # Java start:
 _java_port = None
@@ -19,9 +20,7 @@ def _init_registration():
     global _java, _java_port
     if _java is not None: return
     _java_port = launch_gateway(
-        classpath=os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            'lib', 'nben', 'target', 'nben-standalone.jar'),
+        classpath=os.path.join(library_path(), 'nben', 'target', 'nben-standalone.jar'),
         javaopts=['-Xmx2g'],
         die_on_exit=True)
     _java = JavaGateway(gateway_parameters=GatewayParameters(port=_java_port))
