@@ -136,7 +136,7 @@ The following options are accepted:
    0.05.
  * --prior=|-p<name>
    This specifies the name of the prior registration to use in the fsaverage or
-   fsaverage_sym subject; by default this is none.
+   fsaverage_sym subject; by default this is 'retinotopy'.
  * --eccen-tag=|-y<tag>
    --angle-tag=|-t<tag>
    --label-tag=|-l<tag>
@@ -225,7 +225,7 @@ _retinotopy_parser_instructions = [
     ['G', 'radius-weight',          'radius_weight',     '1.0'],
     ['i', 'max-steps',              'max_steps',         '2500'],
     ['D', 'max-step-size',          'max_step_size',     '0.02'],
-    ['p', 'prior',                  'prior',             None],
+    ['p', 'prior',                  'prior',             'retinotopy_benson17'],
 
     ['f', 'surf-format',            'surface_format',    'curv'],
     ['F', 'vol-format',             'volume_format',     'mgz'],
@@ -530,7 +530,7 @@ def save_volume_files(note, error, registrations, subject,
         def export(flnm, d):
             flnm = flnm + '.' + volume_format
             dt = np.int32 if np.issubdtype(d.dtype, np.dtype(int).type) else np.float32
-            img = fsmgh.MGHImage(np.asarray(d, dtype=dt), subject.voxel_to_vertex_matrix)
+            img = fsmgh.MGHImage(np.asarray(d, dtype=dt), subject.voxel_to_native_matrix)
             img.to_filename(flnm)
             return flnm
     elif volume_format in ['nifti', 'nii', 'niigz', 'nii.gz']:
@@ -538,7 +538,7 @@ def save_volume_files(note, error, registrations, subject,
         def export(flnm, p):
             flnm = flnm + '.' + volume_format
             dt = np.int32 if np.issubdtype(p.dtype, np.dtype(int).type) else np.float32
-            img = nib.Nifti1Image(np.asarray(p, dtype=dt), subject.voxel_to_vertex_matrix)
+            img = nib.Nifti1Image(np.asarray(p, dtype=dt), subject.voxel_to_native_matrix)
             img.to_filename(flnm)
             return flnm
     else:

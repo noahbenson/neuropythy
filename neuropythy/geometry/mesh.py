@@ -2291,7 +2291,7 @@ def to_mesh(obj, properties=None, meta_data=None):
         coordinate indices that make-up the triangles
     '''
     if isinstance(obj, Mesh):
-        res = mesh
+        res = obj
         if properties is not None: res = res.with_prop(properties)
         if meta_data is not None: res = res.with_meta(meta_data)
         return res

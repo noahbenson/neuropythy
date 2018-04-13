@@ -523,8 +523,8 @@ def save_freesurfer_geometry(filename, obj, volume_info=None, create_stamp=None)
     All options that can be given to the to_mgh function can also be passed to this function; they
     are used to modify the object prior to exporting it.
     '''
-    obj = to_mesh(obj)
-    fsio.write_geometry(filename, obj.coordinates.T, obj.faces.T,
+    obj = geo.to_mesh(obj)
+    fsio.write_geometry(filename, obj.coordinates.T, obj.tess.faces.T,
                         volume_info=volume_info, create_stamp=create_stamp)
     return filename
 @nyio.importer('freesurfer_morph', ('curv',))

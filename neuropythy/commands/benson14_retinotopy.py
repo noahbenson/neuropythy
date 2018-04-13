@@ -25,18 +25,18 @@ info = \
    appropriately in the environment, or a path to a subject directory) must be
    given. In each subject's freesurfer directory, a variety of output data is
    deposited:
-    * surf/lh.angle_benson14  surf/rh.angle_benson14
-      surf/lh.eccen_benson14  surf/rh.eccen_benson14
-      surf/lh.varea_benson14  surf/rh.varea_benson14
-      surf/lh.sigma_benson14  surf/rh.sigma_benson14
+    * surf/lh.benson14_angle  surf/rh.benson14_angle
+      surf/lh.benson14_eccen  surf/rh.benson14_eccen
+      surf/lh.benson14_varea  surf/rh.benson14_varea
+      surf/lh.benson14_sigma  surf/rh.benson14_sigma
       These files contain predictions of polar angle, eccentricity, visual-area
       label, and pRF radius for each surface vertex in each hemisphere of the
       subject's hemispheres. The files are, by default, in FreeSurfer's curv
       format, but their format can be modified with the --surf-format flag.
-    * mri/angle_benson14.mgz
-      mri/eccen_benson14.mgz
-      mri/varea_benson14.mgz
-      mri/sigma_benson14.mgz
+    * mri/benson14_angle.mgz
+      mri/benson14_eccen.mgz
+      mri/benson14_varea.mgz
+      mri/benson14_sigma.mgz
       These contain the data from the above surface data projected into the
       subject's 3D volume. Note that the volumes are oriented like Freesurfer's
       mri/brain.mgz file; if you want to convert this to the orientation of your
