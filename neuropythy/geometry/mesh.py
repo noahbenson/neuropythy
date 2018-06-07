@@ -115,6 +115,7 @@ class VertexSet(ObjectWithMetaData):
         '''
         obj.properties is an itable of property values given to the vertex-set obj.
         '''
+        _properties = pyr.m() if _properties is None else _properties
         return _properties.set('index', indices).set('label', labels)
     @pimms.value
     def repr(vertex_count):
