@@ -448,7 +448,7 @@ def to_mgh(obj, like=None, header=None, affine=None, extra=Ellipsis):
         if isinstance(obj, nib.analyze.SpatialImage):
             header = obj.header
         else:
-            header = fsmgh.MGHHeader()
+            header = None
     if affine is None:
         if isinstance(obj, nib.analyze.SpatialImage):
             affine = obj.affine
