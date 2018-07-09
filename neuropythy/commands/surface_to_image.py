@@ -40,13 +40,13 @@ info = \
        These options specify the surface data files that are to be projected to
        the subject's ribbon.
      * -m|--method=<name>
-       Specifies the method that should be used. Supported options are weighted
-       (the default) or max. Both methods find the overlap between the lines from
-       the white to the pial surface vertices and the individual ribbon voxels; the
-       'weighted' method assigns a value to each voxel by performing a weighted
-       average of the vertex values whose white-pial lines pass through it using
-       the lengths of the intersecting lines as weights, while the 'max' method
-       uses the longest line passing through the voxel.
+       Specifies the method that should be used. Supported options are linear,
+       nearest, and auto (the default). Both linear and nearest methods find the
+       position of the voxel-center in the cortical sheet. The linear option linearly
+       interpolates between the three vertices that form the triangle faces of the
+       prism containing the voxel-center while the nearest option uses the nearest of
+       these three vertices. If the auto option is used, then chooses nearest for int
+       data and linear for floating-point data.
      * -f|--fill=<value>
        The fill value (default: 0) is inserted in everywhere in the volume that is
        not part of the ribbon.
@@ -154,7 +154,7 @@ def main(args):
     if lhfl is None and rhfl is None: raise ValueError('No surfaces provided')
     # check the method
     method = opts['method'].lower()
-    if method not in ['linears', 'lines', 'nearest', 'auto']:
+    if method not in ['linear', 'lines', 'nearest', 'auto']:
         raise ValueError('Unsupported method: %s' % method)
     # and the datatype
     if opts['dtype'] is None: dtyp = None
