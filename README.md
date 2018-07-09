@@ -69,7 +69,7 @@ these commands may be invoked by calling Neuropythy's main function and passing 
 command as the first argument followed by any additional command arguments. The argument --help may
 be passed for further information about each command.
 
- * **surface_to_ribbon**. This command projects data on the cortical surface into a volume the same
+ * **surface_to_image**. This command projects data on the cortical surface into a volume the same
    orientation as the subject's mri/orig.mgz file. The algorithm used tends to be much cleaner than
    that used by FreeSurfer's mri_surf2vol.
  * **benson14_retinotopy**. This command applies the anatomically-defined template of retinotopy
@@ -100,7 +100,7 @@ be passed for further information about each command.
 If neuropythy is installed on your machine, then you can execute a command like so:
 
 ```bash
-> python -m neuropythy.__main__ surface_to_ribbon --help
+> python -m neuropythy.__main__ surface_to_image --help
 > python -m neuropythy.__main__ benson14_retinotopy bert
 ```
 
