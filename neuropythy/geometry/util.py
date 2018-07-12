@@ -572,8 +572,10 @@ def prism_barycentric_coordinates(tri1, tri2, pt):
     '''
     prism_barycentric_coordinates(tri1, tri2, point) yields a list of weights for each vertex
       in the given tetrahedron in the same order as the vertices given. If all weights are 0, then
-      the point is not inside the tetrahedron. The returned weights are in a 2 x 3 matrix where the
-      first row gives weights for tri1 and the second for tri2.
+      the point is not inside the tetrahedron. The returned weights are (a,b,d) in a numpy array;
+      the values a, b, and c are the barycentric coordinates corresponding to the three points of
+      the triangles (where c = (1 - a - b) and the value d is the fractional distance (in the range
+      [0,1]) of the point between tri1 (d=0) and tri2 (d=1).
     '''
     pt = np.asarray(pt)
     tri1 = np.asarray(tri1)
@@ -597,7 +599,10 @@ def prism_barycentric_coordinates(tri1, tri2, pt):
            (bcs1[3] + bcs2[2] + bcs3[1] + bcs4[2] + bcs5[2],
             bcs2[3] + bcs3[2] + bcs4[3] + bcs6[2],
             bcs3[3] + bcs5[3] + bcs6[3]))
-    return np.asarray(bcs)
+    # convert into (a,b,c,d) coordinates
+    abc = np.sum(bcs, axis=0)
+    d = np.sum(bcs[1], axis=0)
+    return np.asarray((abc[0], abc[1], d))
 
 def point_in_prism(tri1, tri2, pt):
     '''
@@ -608,4 +613,4 @@ def point_in_prism(tri1, tri2, pt):
       the y coordinate of the first vertex of the k'th triangle.
     '''
     bcs = prism_barycentric_coordinates(tri1, tri2, pt)
-    return np.logical_not(np.isclose(np.sum(bcs[0] + bcs[1], axis=0), 0))
+    return np.logical_not(np.isclose(np.sum(bcs, axis=0), 0))

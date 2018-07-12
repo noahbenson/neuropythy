@@ -101,7 +101,7 @@ The following options are accepted:
  * --model-sym|-S
    Specifies that the model used should be a version of the Schira2010 model
    as used in Benson et al. (2014) PLOS Comput Biol; this model is on the
-   fsaverage_sym pseudo-hemisphere.
+   fsaverage_benson17 pseudo-hemisphere.
  * --no-resample|-b
    Indicates that the cortical map should not be resampled to a uniform
    triangle grid immediately prior to registration. This is generally only a
@@ -147,7 +147,7 @@ The following options are accepted:
    The output files have the name <hemi>.<tag>
  * --registration-name=|-u<string>
    This parameter indicates that the registration file, by default named 
-   lh.retinotopy_sym.sphere.reg, should instead be named lh.<string>.sphere.reg.
+   lh.retinotopy.sphere.reg, should instead be named lh.<string>.sphere.reg.
  * --max-output-eccen=|-M<val>
    This specifies the maximum eccentricity to include in the output; there is no
    particular need to limit one's output, but it can be done with this argument.

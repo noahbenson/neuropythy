@@ -318,6 +318,81 @@ def simplex_averaging_matrix(simplices, weight=None, inverse=False):
     diag = sps.csr_matrix((invrs, (rng, rng)), dtype=np.float)
     return diag.dot(sps.csc_matrix(m, dtype=np.float))
 
+def is_image(image):
+    '''
+    is_image(img) yields True if img is an instance if nibabe.analuze.SpatialImage and false
+      otherwise.
+    '''
+    return isinstance(image, nib.analyze.SpatialImage)
+
+def is_address(data):
+    '''
+    is_address(addr) yields True if addr is a valid address dict for addressing positions on a mesh
+      or in a cortical sheet and False otherwise.
+    '''
+    return (isinstance(data, dict) and 'faces' in data and 'coordinates' in data)
+
+def address_data(data, dims=None, surface=0.5, strict=True):
+    '''
+    address_data(addr) yields the tuple (faces, coords) of the address data where both faces and
+      coords are guaranteed to be numpy arrays with sizes (3 x n) and (d x n); this will coerce
+      the data found in addr if necessary to do this. If the data is not valid, then an error is
+      raised. If the address is empty, this yields (None, None).
+
+    The following options may be given:
+       * dims (default None) specifies the dimensions requested for the coordinates. If 2, then
+         the final dimension is dropped from 3D coordinates; if 3 then will add the optional
+         surface argument as the final dimension of 2D coordinates.
+       * surface (default: 0.5) specifies the surface to use for 2D addresses when a 3D address;
+         is requested. If None, then an error will be raised when this condition is encountered.
+         This should be either 'white', 'pial', 'midgray', or a real number in the range [0,1]
+         where 0 is the white surface and 1 is the pial surface.
+       * strict (default: True) specifies whether an error should be raised when there are
+         non-finite values found in the faces or the coordinates matrices. These values are usually
+         indicative of an attempt to address a point that was not inside the mesh/cortex.
+    '''
+    if data is None: return (None, None)
+    if not is_address(data): raise ValueError('argument is not an address')
+    faces = np.asarray(data['faces'])
+    coords = np.asarray(data['coordinates'])
+    if len(faces.shape) > 2 or len(coords.shape) > 2:
+        raise ValueError('address data contained high-dimensional arrays')
+    elif len(faces.shape) != len(coords.shape):
+        raise ValueError('address data faces and coordinates are different shapes')
+    elif len(faces) == 0: return (None, None)
+    if len(faces.shape) == 2 and faces.shape[0] != 3: faces = faces.T
+    if faces.shape[0] != 3: raise ValueError('address contained bad face matrix')
+    if len(coords.shape) == 2 and coords.shape[0] not in (2,3): coords = coords.T
+    if coords.shape[0] not in (2,3): raise ValueError('address coords are neither 2D nor 3D')
+    if dims is None: dims = coords.shape[0]
+    elif coords.shape[0] != dims:
+        if dims == 2: coords = coords[:2]
+        else:
+            if surface is None: raise ValueError('address data must be 3D')
+            elif pimms.is_str(surface):
+                surface = surface.lower()
+                if surface == 'pial': surface = 1
+                elif surface == 'white': surface = 0
+                elif surface in ('midgray', 'mid', 'middle'): surface = 0.5
+                else: raise ValueError('unrecognized surface name: %s' % surface)
+            if not pimms.is_real(surface) or surface < 0 or surface > 1:
+                raise ValueError('surface must be a real number in [0,1]')
+            coords = np.vstack((coords, np.full((1, coords.shape[1]), surface)))
+    if strict:
+        if np.sum(np.logical_not(np.isfinite(coords))) > 0:
+            w = np.where(np.logical_not(np.isfinite(coords)))
+            if len(w[0]) > 10:
+                raise ValueError('address contains %d non-finite coords' % len(w[0]))
+            else:
+                raise ValueError('address contains %d non-finite coords (%s)' % (len(w),w))
+        if np.sum(np.logical_not(np.isfinite(faces))) > 0:
+            w = np.where(np.logical_not(np.isfinite(faces)))
+            if len(w[0]) > 10:
+                raise ValueError('address contains %d non-finite faces' % len(w[0]))
+            else:
+                raise ValueError('address contains %d non-finite faces (%s)' % (len(w[0]),w))
+    return (faces, coords)
+
 def zinv(x):
     '''
     zinv(x) yields 1/x if x is not close to 0 and 0 otherwise. Automatically threads over arrays.

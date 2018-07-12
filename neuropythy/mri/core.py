@@ -12,7 +12,7 @@ import neuropythy.geometry as geo
 import pyrsistent          as pyr
 import os, sys, types, six, itertools, pimms
 
-from neuropythy.util import (ObjectWithMetaData, to_affine)
+from neuropythy.util import (ObjectWithMetaData, to_affine, is_image, is_address, address_data)
 
 if sys.version_info[0] == 3: from   collections import abc as colls
 else:                        import collections            as colls
@@ -727,6 +727,110 @@ class Cortex(geo.Topology):
         mesh = self.surface(surface) if not isinstance(surface, geo.Mesh) else surface
         return mesh.from_image(image, affine=affine, method=method, fill=fill, dtype=dtype,
                                native_to_vertex_matrix=native_to_vertex_matrix, weight=weight)
+    def address(self, data, idcs=None, native_to_vertex_matrix=None):
+        '''
+        cortex.address(points) yields the barycentric coordinates of the given point or points; the
+          return value is a dict whose keys are 'face_id' and 'coordinates'. The address may be used
+          to interpolate or unaddress either from a surface mesh or from a cortex.
+        cortex.address(image, idcs) yields the addresses of the voxels with the given indices in the
+          given image. The indices should either be a boolean mask image the same size as data or be
+          identical in format to the return value value of numpy.where().
+        cortex.address(image) is equivalent to cortex.address(image, mask) where mask is equivalent
+          to (numpy.isfinite(image) & image.astype(numpy.bool)).
+
+        If an image is provided as input then the optional argument native_to_vertex_matrix may
+        provide an affine-transformation from the image's native coordinate system to the cortex's
+        vertex coordinate system.
+        '''
+        if is_image(data):
+            arr = np.asarray(data.get_data())
+            if idcs is None: idcs = np.isfinte(arr) & arr.astype(np.bool)
+            if pimms.is_array(idcs, None, 3): idcs = np.where(idcs)
+            aff = data.affine
+            idcs = np.asarray(idcs)
+            if idcs.shape[0] != 3: idcs = idcs.T
+            if native_to_vertex_matrix is not None:
+                aff = np.dot(native_to_vertex_matrix, aff)
+            xyz = np.dot(
+                aff,
+                np.concatenate((idcs, np.ones(1 if len(idcs.shape) == 1 else (1, idcs.shape[1])))))
+            return self.address(xyz[:3])
+        # data must be a point matrix then
+        data = np.asarray(data)
+        if len(data.shape) > 2: raise ValueError('point or point matrix required')
+        if len(data.shape) == 2: xyz = data.T if data.shape[0] == 3 else data
+        else:                    xyz = np.asarray([data])
+        # now, get the barycentric coordinates...
+        n = len(xyz)
+        fcount = self.tess.face_count
+        # get some relevant structure data
+        (wsrf, psrf) = (self.white_surface, self.pial_surface)
+        (fwcoords,fpcoords) = (wsrf.face_coordinates, psrf.face_coordinates)
+        fids = range(fcount)
+        fids = np.concatenate((fids, fids))
+        faces = np.concatenate((self.tess.indexed_faces, self.tess.indexed_faces), axis=-1)
+        face_centers = np.hstack((wsrf.face_centers, psrf.face_centers))
+        try:    shash = spspace.cKDTree(face_centers.T)
+        except: shash = spspace.KDTree(face_centers.T)
+        (whsh, phsh) = [s.face_hash for s in (wsrf, psrf)]
+        # Okay, for each voxel (xyz), we want to find the closest face centers; from those
+        # centers, we find the ones for which the nearest point in the plane of the face to the
+        # voxel lies inside the face, and of those we find the closest; this nearest point is
+        # then used for trilinear interpolation of the points in the prism.
+        (N, sofar) = (256, 0)
+        # go ahead and make the results
+        res_fs = np.full((3, n),     -1, dtype=np.int)
+        res_xs = np.full((3, n), np.nan, dtype=np.float)
+        # Okay, we look for those isect's within the triangles
+        ii = np.asarray(range(n)) # the subset not yet matched
+        idcs = []
+        for i in range(N):
+            if len(ii) == 0: break
+            if i >= sofar:
+                sofar = max(4, 2*sofar)
+                idcs = shash.query(xyz[ii], sofar)[1].T
+            # we look at just the i'th column of the indices
+            col = fids[idcs[i]]
+            bcs = geo.prism_barycentric_coordinates(fwcoords[:,:,col], fpcoords[:,:,col], xyz[ii].T)
+            # figure out which ones were discovered to be in this prism
+            outp   = np.isclose(np.sum(bcs, axis=0), 0)
+            inp    = np.logical_not(outp)
+            ii_inp = ii[inp]
+            # for those in their prisms, we capture the face id's and coordinates
+            res_fs[:, ii_inp] = faces[:, col[inp]]
+            res_xs[:, ii_inp] = bcs[:, inp]
+            # trim down those that matched so we don't keep looking for them
+            ii = ii[outp]
+            idcs = idcs[:,outp]
+            # And continue!
+        # and return the data
+        return {'faces': res_fs, 'coordinates': res_xs}
+    def unaddress(self, data, surface=0.5):
+        '''
+        cortex.unaddress(address) yields the (3 x n) coordinate matrix of the given addresses (or,
+          if address is singular, the 3D vector) in the given cortex. If the address is a 2D instead
+          of a 3D address, then the mid-gray position is returned by default.
+
+        The following options may be given:
+          * surface (default: 0.5) specifies the surface to use for 2D addresses; this should be
+            either 'white', 'pial', 'midgray', or a real number in the range [0,1] where 0 is the
+            white surface and 1 is the pial surface.
+        '''
+        (faces, coords) = address_data(data, 3, surface=surface)
+        (bc, ds) = (coords[:2], coords[2])
+        faces = self.tess.index(faces)
+        (wx, px) = (self.white_surface.coordinates, self.pial_surface.coordinates)
+        if all(len(np.shape(x)) > 1 for x in (faces, coords)):
+            (wtx, ptx) = [
+                np.transpose([sx[:,ff] if ff[0] >= 0 else null for ff in faces.T], (2,1,0))
+                for null in [np.full((3, wx.shape[0]), np.nan)]
+                for sx   in (wx, px)]
+        elif faces == -1:
+            return np.full(selfx.shape[0], np.nan)
+        else:
+            (wtx, ptx) = [sx[:,faces].T for sx in (wx, px)]
+        (wu, pu) = [barycentric_to_cartesian(tx, bc) for tx in (wtx, ptx)]
+        return wu*ds + pu*(1 - ds)
 
 ####################################################################################################
 # These functions deal with cortex_to_image and image_to_cortex interpolation:
@@ -761,7 +865,7 @@ def _vertex_to_voxel_linear_interpolation(hemi, gray_indices, image_shape, voxel
         # we look at just the i'th column of the indices
         col = fids[idcs[i]]
         bcs = geo.prism_barycentric_coordinates(fwcoords[:,:,col], fpcoords[:,:,col], xyz[ii].T)
-        bcs = bcs[0] + bcs[1] # since the layers are the same in this case...
+        bcs = bcs[0:3] # since the layers are the same in this case...
         outp = np.isclose(np.sum(bcs, axis=0), 0)
         inp = np.logical_not(outp)
         # for those in their prisms, we linearly interpolate using the bc coordinates

@@ -21,7 +21,7 @@ else:                        import collections            as colls
 from .util import (triangle_area, triangle_address, alignment_matrix_3D, rotation_matrix_3D,
                    cartesian_to_barycentric_3D, cartesian_to_barycentric_2D,
                    barycentric_to_cartesian, point_in_triangle)
-from neuropythy.util import (ObjectWithMetaData, to_affine, zinv)
+from neuropythy.util import (ObjectWithMetaData, to_affine, zinv, is_image, address_data)
 from neuropythy.io   import (load, importer)
 from functools import reduce
 
@@ -378,7 +378,9 @@ class TesselationIndex(object):
     requests to obtain indices of vertices, edges, and faces in a tesselation object. Generally,
     this is done via the __getitem__ (index[item]) method. In the case that you wish to obtain the
     vertex indices for an edge or face but don't wish to obtain the index of the edge or face
-    itself, the __call__ (index(item)) method can be used.
+    itself, the __call__ (index(item)) method can be used. Note that when looking up the indices of
+    vertices, negative values are ignored/passed through. In this way, you can indicate a missing
+    vertex in a list with a -1 without being affected by indexing.
     '''
 
     def __init__(self, vertex_index, edge_index, face_index):
@@ -411,7 +413,7 @@ class TesselationIndex(object):
             return {k:self[k] for k in index}
         elif pimms.is_vector(index):
             vi = self.vertex_index
-            return np.asarray([vi[k] for k in index])
+            return np.asarray([vi[k] if k >= 0 else k for k in index])
         elif pimms.is_matrix(index):
             m = np.asarray(index)
             if m.shape[0] != 2 and m.shape[0] != 3: m = m.T
@@ -422,13 +424,13 @@ class TesselationIndex(object):
     def __call__(self, index):
         vi = self.vertex_index
         if isinstance(index, tuple):
-            return tuple([vi[i] for i in index])
+            return tuple([vi[k] if k >= 0 else k for k in index])
         elif isinstance(index, colls.Set):
-            return set([vi[k] for k in index])
+            return set([vi[k] if k >= 0 else k for k in index])
         elif pimms.is_vector(index):
-            return np.asarray([vi[k] for k in index], dtype=np.int)
+            return np.asarray([vi[k] if k >= 0 else k for k in index], dtype=np.int)
         elif pimms.is_matrix(index):
-            return np.asarray([[vi[k] for k in u] for u in index], dtype=np.int)
+            return np.asarray([[vi[k] if k >= 0 else k for k in u] for u in index], dtype=np.int)
         else:
             return vi[index]
 
@@ -1420,7 +1422,7 @@ class Mesh(VertexSet):
                                for f in face_id],
                               (2,1,0))
             faces = self.tess.faces
-            null = [None,None,None]
+            null = [-1, -1, -1]
             faces = np.transpose([faces[:,f] if f is not None else null for f in face_id])
         bc = cartesian_to_barycentric_3D(tx, data) if self.coordinates.shape[0] == 3 else \
              cartesian_to_barycentric_2D(tx, data)
@@ -1431,26 +1433,15 @@ class Mesh(VertexSet):
         mesh.unaddress(A) yields a coordinate matrix that is the result of unaddressing the given
         address dictionary A in the given mesh. See also mesh.address.
         '''
-        if not isinstance(data, dict):
-            raise ValueError('address data must be a dictionary')
-        if 'faces' not in data: raise ValueError('address must contain faces')
-        if 'coordinates' not in data: raise ValueError('address must contain coordinates')
-        faces = np.asarray(data['faces'])
-        if faces.shape[0] != 3: faces = faces.T
-        if faces is not None: faces = self.tess.index(faces)
-        coords = data['coordinates']
-        if np.sum(np.logical_not(np.isfinite(coords))) > 0:
-            w = np.where(np.logical_not(np.isfinite(coords)))
-            if len(w[0]) > 10:
-                raise ValueError('%d non-finite coords found when unaddressing' % len(w[0]))
-            else:
-                raise ValueError('%d non-finite coords found when unaddressing (%s)' % (len(w),w))
+        (faces, coords) = address_data(data, 2)
+        faces = self.tess.index(faces)
         selfx = self.coordinates
         if all(len(np.shape(x)) > 1 for x in (faces, coords)):
-            null = np.full((3, selfx.shape[0]), np.nan)
-            tx = np.transpose([selfx[:,ff] if ff[0] is not None else null for ff in faces.T],
+            tx = np.transpose([selfx[:,ff] if ff[0] >= 0 else null
+                               for null in [np.full((3, selfx.shape[0]), np.nan)]
+                               for ff in faces.T],
                               (2,1,0))
-        elif faces is None:
+        elif faces == -1:
             return np.full(selfx.shape[0], np.nan)
         else:
             tx = selfx[:,faces].T
@@ -1485,7 +1476,7 @@ class Mesh(VertexSet):
             native_to_vertex_matrix = np.eye(4)
         native_to_vertex_matrix = to_affine(native_to_vertex_matrix)
         if pimms.is_str(image): image = load(image)
-        if isinstance(image, nib.analyze.SpatialImage):
+        if is_image(image):
             # we want to apply the image's affine transform by default
             if affine is None: affine = image.affine
             image = image.get_data()
