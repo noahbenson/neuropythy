@@ -829,7 +829,7 @@ class Cortex(geo.Topology):
             return np.full(selfx.shape[0], np.nan)
         else:
             (wtx, ptx) = [sx[:,faces].T for sx in (wx, px)]
-        (wu, pu) = [barycentric_to_cartesian(tx, bc) for tx in (wtx, ptx)]
+        (wu, pu) = [geo.barycentric_to_cartesian(tx, bc) for tx in (wtx, ptx)]
         return wu*ds + pu*(1 - ds)
 
 ####################################################################################################
