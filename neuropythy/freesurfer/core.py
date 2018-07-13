@@ -461,6 +461,9 @@ def to_mgh(obj, like=None, header=None, affine=None, extra=Ellipsis):
     else:
         obj = np.asarray(obj)
     if len(obj.shape) < 3: obj = np.asarray([[obj]])
+    # make sure the dtype isn't a high-bit integer
+    if np.issubdtype(obj.dtype, np.integer) and obj.dtype.itemsize > 4:
+        obj = np.asarray(obj, dtype=np.int32)
     # Okay, make a new object now...
     obj = fsmgh.MGHImage(obj, affine, header=header, extra=extra)
     # Okay, that's it!
