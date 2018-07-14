@@ -1,8 +1,9 @@
 # Ignore all the compiled files
 *.pyc
 
-# And this particular notebook
+# And these particular notebook
 scratch.ipynb
+debug.ipynb
 
 # This is a backup
 *-backup
@@ -16,3 +17,7 @@ dist
 
 # My push script is local
 push.sh
+
+# These are necessary for the docker, but too big to store on github
+docker/contents/required_subjects.tar.gz
+docker/contents/required_subjects
