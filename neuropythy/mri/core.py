@@ -78,20 +78,19 @@ class Subject(ObjectWithMetaData):
         elif pimms.is_pmap(imgs): return imgs
         elif pimms.is_map(imgs):  return pyr.pmap(imgs)
         else: raise ValueError('images must be a mapping')
-    @pimms.param
-    def voxel_to_vertex_matrix(mtx):
-        '''
-        sub.voxel_to_vertex_matrix is the 4x4 affine transformation matrix that converts from
-        (i,j,k) indices in the subject's image/voxel space to (x,y,z) coordinates in the subject's
-        cortical surface space.
-        '''
-        return pimms.imm_array(to_affine(mtx, 3))
     @pimms.value
-    def vertex_to_voxel_matrix(voxel_to_vertex_matrix):
+    def native_to_vertex_matrix(native_to_voxel_matrix, voxel_to_vertex_matrix):
         '''
-        sub.vertex_to_voxel_matrix is the inverse matrix of sub.voxel_to_vertex_matrix.
+        sub.native_to_vertex_matrix is the affine transformation matrix that converts from the
+        subject's 'native' orientation to the vertex orientation.
         '''
-        return pimms.imm_array(npla.inv(voxel_to_vertex_matrix))
+        return pimms.imm_array(np.dot(voxel_to_vertex_matrix, native_to_voxel_matrix))
+    @pimms.value
+    def vertex_to_native_matrix(native_to_vertex_matrix):
+        '''
+        sub.vertex_to_native_matrix is the inverse matrix of sub.native_to_vertex_matrix.
+        '''
+        return pimms.imm_array(npla.inv(native_to_vertex_matrix))
     @pimms.param
     def voxel_to_native_matrix(mtx):
         '''
@@ -108,18 +107,19 @@ class Subject(ObjectWithMetaData):
         '''
         return pimms.imm_array(npla.inv(voxel_to_native_matrix))
     @pimms.value
-    def native_to_vertex_matrix(native_to_voxel_matrix, voxel_to_vertex_matrix):
+    def vertex_to_voxel_matrix(voxel_to_vertex_matrix):
         '''
-        sub.native_to_vertex_matrix is the affine transformation matrix that converts from the
-        subject's 'native' orientation to the vertex orientation.
+        sub.vertex_to_voxel_matrix is the inverse matrix of sub.voxel_to_vertex_matrix.
         '''
-        return pimms.imm_array(np.dot(voxel_to_vertex_matrix, native_to_voxel_matrix))
-    @pimms.value
-    def vertex_to_native_matrix(native_to_vertex_matrix):
+        return pimms.imm_array(npla.inv(voxel_to_vertex_matrix))
+    @pimms.param
+    def voxel_to_vertex_matrix(mtx):
         '''
-        sub.vertex_to_native_matrix is the inverse matrix of sub.native_to_vertex_matrix.
+        sub.voxel_to_vertex_matrix is the 4x4 affine transformation matrix that converts from
+        (i,j,k) indices in the subject's image/voxel space to (x,y,z) coordinates in the subject's
+        cortical surface space.
         '''
-        return pimms.imm_array(npla.inv(native_to_vertex_matrix))
+        return pimms.imm_array(to_affine(mtx, 3))
 
     # Aliases for hemispheres
     @pimms.value
@@ -178,12 +178,16 @@ class Subject(ObjectWithMetaData):
         '''
         sub.lh_gray_indices is equivalent to numpy.where(sub.lh_gray_mask).
         '''
+        if lh_gray_mask is None: return None
+        if is_image(lh_gray_mask): lh_gray_mask = lh_gray_mask.get_data()
         return tuple([pimms.imm_array(x) for x in np.where(lh_gray_mask)])
     @pimms.value
     def rh_gray_indices(rh_gray_mask):
         '''
         sub.rh_gray_indices is equivalent to numpy.where(sub.rh_gray_mask).
         '''
+        if rh_gray_mask is None: return None
+        if is_image(rh_gray_mask): rh_gray_mask = rh_gray_mask.get_data()
         return tuple([pimms.imm_array(x) for x in np.where(rh_gray_mask)])
     @pimms.value
     def gray_indices(lh_gray_indices, rh_gray_indices):
@@ -204,6 +208,7 @@ class Subject(ObjectWithMetaData):
         subject's lh, represented as 3-tuples.
         '''
         if lh_white_mask is None: return None
+        if is_image(lh_white_mask): lh_white_mask = lh_white_mask.get_data()
         idcs = np.transpose(np.where(lh_white_mask))
         return frozenset([tuple(row) for row in idcs])
     @pimms.value
@@ -213,6 +218,7 @@ class Subject(ObjectWithMetaData):
         subject's rh, represented as 3-tuples.
         '''
         if rh_white_mask is None: return None
+        if is_image(rh_white_mask): rh_white_mask = rh_white_mask.get_data()
         idcs = np.transpose(np.where(rh_white_mask))
         return frozenset([tuple(row) for row in idcs])
     @pimms.value
@@ -228,7 +234,8 @@ class Subject(ObjectWithMetaData):
     @pimms.value
     def image_dimensions(images):
         '''
-        sub.image_dimensions is a tuple of the size of an anatomical image for the given subject.
+        sub.image_dimensions is a tuple of the default size of an anatomical image for the given
+        subject.
         '''
         if images is None or len(images) == 0: return None
         if pimms.is_lazy_map(images):
@@ -239,6 +246,7 @@ class Subject(ObjectWithMetaData):
             key = next(images.iterkeys(), None)
         img = images[key]
         if img is None: return None
+        if is_image(img): img = img.get_data()
         return np.asarray(img).shape
 
     @pimms.value
@@ -638,9 +646,9 @@ class Cortex(geo.Topology):
         surfaces 'white' and 'pial'.
         '''
         def _make_mesh(name):
-            val = surface_coordinates[name]
-            if isinstance(val, geo.Mesh): val = val.coordinates
             def _lambda():
+                val = surface_coordinates[name]
+                if isinstance(val, geo.Mesh): val = val.coordinates
                 return geo.Mesh(tess, val, properties=properties).persist()
             return _lambda
         return pimms.lazy_map({k:_make_mesh(k) for k in six.iterkeys(surface_coordinates)})

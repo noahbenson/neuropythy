@@ -49,6 +49,7 @@ setup(
               'neuropythy.geometry', 
               'neuropythy.mri',
               'neuropythy.freesurfer',
+              'neuropythy.hcp',
               'neuropythy.registration',
               'neuropythy.vision',
               'neuropythy.graphics',

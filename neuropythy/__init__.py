@@ -15,6 +15,9 @@ submodules = ('neuropythy.util.core',
               'neuropythy.mri',
               'neuropythy.freesurfer.core',
               'neuropythy.freesurfer',
+              'neuropythy.hcp.files',
+              'neuropythy.hcp.core',
+              'neuropythy.hcp',
               'neuropythy.registration.core',
               'neuropythy.registration',
               'neuropythy.vision.models',
@@ -54,15 +57,16 @@ from   vision     import (retinotopy_data, empirical_retinotopy_data, predicted_
                           retinotopy_comparison)
 from   geometry   import (VertexSet, Mesh, Tesselation, Topology, to_mesh, to_tess, to_property)
 from   freesurfer import (subject as freesurfer_subject, to_mgh)
+from   hcp        import (subject as hcp_subject)
 import freesurfer
+import hcp
 
 # things we might want to load but that might fail
 try:    import graphics
 except: pass
 
-
 # Version information...
-__version__ = '0.5.0'
+__version__ = '0.6.0'
 
 
 
