@@ -52,6 +52,7 @@ def add_subject_path(path, index=None):
         tests = [add_subject_path(p, index=index) for p in reversed(paths)]
         return all(t for t in tests)
     else:
+        path = os.path.expanduser(path)
         if not os.path.isdir(path): return False
         if path in _subjects_dirs:  return True
         try:
@@ -107,7 +108,10 @@ def to_subject_id(s):
     '''
     if not pimms.is_number(s) and not pimms.is_str(s):
         raise ValueError('invalid type for subject id: %s' % str(type(s)))
-    if pimms.is_str(s) and os.path.isdir(s): s = s.split(os.sep)[-1]
+    if pimms.is_str(s):
+        try: s = os.path.expanduser(s)
+        except: pass
+        if os.path.isdir(s): s = s.split(os.sep)[-1]
     s = int(s)
     if s > 999999 or s < 100000:
         raise ValueError('subject ids must be 6-digit integers whose first digit is > 0')
@@ -159,7 +163,7 @@ def detect_credentials():
         if all((utag + s) in os.environ for s in ['_KEY', '_SECRET']):
             return (os.environ[utag + '_KEY'], os.environ[utag + '_SECRET'])
         for pth in ['%s-credentials', '%s-passwd', 'passwd-%s']:
-            pth = os.userexpand('~/.' + (pth % tag))
+            pth = os.path.expanduser('~/.' + (pth % tag))
             if os.path.isfile(pth):
                 try: return load_credentials(pth)
                 except: pass
@@ -1421,6 +1425,7 @@ def download(sid, credentials=None, subjects_path=None, overwrite=False, release
     if subjects_path is None:
         subjects_path = next((sd for sd in _subjects_dirs if os.path.isdir(sd)), None)
         if subjects_path is None: raise ValueError('No subjects path given or found')
+    else: subjects_path = os.path.expanduser(subjects_path)
     # Make sure we can connect to the bucket first...
     fs = s3fs.S3FileSystem(key=s3fs_key, secret=s3fs_secret)
     # Okay, make sure the release is found
@@ -1458,7 +1463,10 @@ def auto_download(status,
       download(), and they are passed to download() when auto-downloading occurs.
     auto_download(False) disables automatic downloading.
 
-    Automatic downloading is disabled by default.
+    Automatic downloading is disabled by default unless the environment variable
+    HCP_AUTO_DOWNLOAD is set to true. In this case, the database and release are derived from
+    the environment variables HCP_AUTO_DATABASE and HCP_AUTO_RELEASE, and the variable
+    HCP_AUTO_PATH can be used to override the default subjects path.
     '''
     global _auto_download_options
     if status:
@@ -1473,6 +1481,7 @@ def auto_download(status,
         if subjects_path is None:
             subjects_path = next((sd for sd in _subjects_dirs if os.path.isdir(sd)), None)
             if subjects_path is None: raise ValueError('No subjects path given or found')
+        else: subjects_path = os.path.expanduser(subjects_path)
         fs = s3fs.S3FileSystem(key=s3fs_key, secret=s3fs_secret)
         hcpbase = '/'.join([database, release])
         if not fs.exists(hcpbase):
@@ -1484,7 +1493,6 @@ def auto_download(status,
                 try: sids.add(int(f))
                 except: pass
         _auto_download_options = dict(
-            credentials=credentials,
             subjects_path=subjects_path,
             overwrite=overwrite,
             release=release,
@@ -1493,6 +1501,15 @@ def auto_download(status,
             s3fs=fs)
     else:
         _auto_download_options = None
+# See if the environment lets auto-downloading start out on
+if 'HCP_AUTO_DOWNLOAD' in os.environ and \
+   os.environ['HCP_AUTO_DOWNLOAD'].lower() in ('on', 'yes', 'true', '1'):
+    args = {}
+    if 'HCP_AUTO_RELEASE'  in os.environ: args['release']  = os.environ['HCP_AUTO_RELEASE']
+    if 'HCP_AUTO_DATABASE' in os.environ: args['database'] = os.environ['HCP_AUTO_DATABASE']
+    if 'HCP_AUTO_PATH'     in os.environ: args['subjects_path'] = os.environ['HCP_AUTO_PATH']
+    try: auto_download(True, **args)
+    except: pass
 def _auto_downloadable(sid):
     if _auto_download_options is None: return False
     sid = to_subject_id(sid)
@@ -1511,8 +1528,10 @@ def subject_filemap(sid, subject_path=None):
     # see if sid is a subject id
     if pimms.is_int(sid):
         if subject_path is None: sdir = find_subject_path(sid)
-        else: sdir = os.path.join(subject_path, str(sid))
+        else: sdir = os.path.expanduser(os.path.join(subject_path, str(sid)))
     elif pimms.is_str(sid):
+        try: sid = os.path.expanduser(sid)
+        except: pass
         sdir = sid if os.path.isdir(sid) else find_subject_path(sid)
         sid  = int(sdir.split(os.sep)[-1])
     else: raise ValueError('Cannot understand HCP subject ID %s' % sid)
