@@ -306,21 +306,21 @@ class Subject(mri.Subject):
         sub.images is a persistent map of MRImages tracked by the given subject sub; in freesurfer
         subjects these are renamed and converted from their typical freesurfer filenames (such as
         'ribbon') to forms that conform to the neuropythy naming conventions (such as 'gray_mask').
-        To access the original data (as a nibabel.freesurfer.mghformat.MGHImage object), use the
-        sub.mgh_image map.
+        To access data by their original names, use the sub.mgh_image map.
         '''
         ims = {}
-        def _make_imm_arr(arr):
+        def _make_imm_mask(arr, val, eq=True):
+            arr = (arr == val) if eq else (arr != val)
             arr.setflags(write=False)
-            return arr
+            return fsmgh.MGHImage(arr, mgh_images['ribbon'].affine, mgh_images['ribbon'].header)
         # start with the ribbon:
-        ims['lh_gray_mask']  = lambda:_make_imm_arr(mgh_images['ribbon'].get_data() == 3)
-        ims['lh_white_mask'] = lambda:_make_imm_arr(mgh_images['ribbon'].get_data() == 2)
-        ims['rh_gray_mask']  = lambda:_make_imm_arr(mgh_images['ribbon'].get_data() == 42)
-        ims['rh_white_mask'] = lambda:_make_imm_arr(mgh_images['ribbon'].get_data() == 41)
-        ims['brain_mask']    = lambda:_make_imm_arr(mgh_images['ribbon'].get_data() != 0)
+        ims['lh_gray_mask']  = lambda:_make_imm_mask(mgh_images['ribbon'].get_data(), 3)
+        ims['lh_white_mask'] = lambda:_make_imm_mask(mgh_images['ribbon'].get_data(), 2)
+        ims['rh_gray_mask']  = lambda:_make_imm_mask(mgh_images['ribbon'].get_data(), 42)
+        ims['rh_white_mask'] = lambda:_make_imm_mask(mgh_images['ribbon'].get_data(), 41)
+        ims['brain_mask']    = lambda:_make_imm_mask(mgh_images['ribbon'].get_data(), 0, False)
         # next, do the standard ones:
-        def _make_accessor(nm): return lambda:mgh_images[nm].get_data()
+        def _make_accessor(nm): return lambda:mgh_images[nm]
         for (tname, name) in zip(['original', 'normalized', 'segmentation', 'brain'],
                                  ['orig',     'norm',       'aseg',         'brain']):
             ims[tname] = _make_accessor(name)
