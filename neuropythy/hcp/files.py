@@ -190,7 +190,7 @@ def _data_load(filename, data):
         # download it...
         basedir = os.path.split(filename)[0]
         if not os.path.isdir(basedir): os.makedirs(basedir, 0755)
-        print 'Downloading file %s ...' % filename
+        #print 'Downloading file %s ...' % filename
         fs.get(hcp_flnm, filename)
     # If the data says it's a cifti...
     if 'cifti' in data and data['cifti']:
