@@ -61,7 +61,7 @@ def add_subject_path(path, index=None):
             else:
                 sd = _subjects_dirs.tolist()
                 sd.insert(index, path)
-                _subjects_dirs = pyr.pvec(sd)
+                _subjects_dirs = pyr.pvector(sd)
             return True
         except:
             return False
