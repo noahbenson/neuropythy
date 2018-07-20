@@ -18,14 +18,6 @@ from neuropythy.util import library_path
 ####################################################################################################
 # Subject Directory and where to find Subjects
 _subjects_dirs = pyr.v()
-if 'SUBJECTS_DIR' in os.environ:
-    for sd in os.environ['SUBJECTS_DIR'].split(':'):
-        if os.path.isdir(sd):
-            _subjects_dirs = _subjects_dirs.append(sd)
-if 'FREESURFER_HOME' in os.environ:
-    fsh = os.path.join(os.environ['FREESURFER_HOME'], 'subjects')
-    if os.path.isdir(fsh):
-        _subjects_dirs = _subjects_dirs.append(fsh)
 
 def subject_paths():
     '''
@@ -74,19 +66,19 @@ def add_subject_path(path, index=0):
             else:
                 sd = _subjects_dirs.tolist()
                 sd.insert(index, path)
-                _subjects_dirs = pyr.pvec(sd)
+                _subjects_dirs = pyr.pvector(sd)
             return True
         except:
             return False
 
+# Try a few common subjects pahts spots
+add_subject_path('/Applications/freesurfer/subjects')
+add_subject_path('/opt/freesurfer/subjects')
 # add the SUBJECTS_DIR environment variable...
-if 'FREESURFER_HOME' in os.environ:
-    add_subject_path(os.path.join(os.environ['FREESURFER_HOME'], 'subjects'))
 if 'SUBJECTS_DIR' in os.environ:
     add_subject_path(os.environ['SUBJECTS_DIR'])
-# Try a few other common spots
-add_subject_path('/Applications/freesurfer/subjects', None)
-add_subject_path('/opt/freesurfer/subjects', None)
+if 'FREESURFER_HOME' in os.environ:
+    add_subject_path(os.path.join(os.environ['FREESURFER_HOME'], 'subjects'))
 
 def is_freesurfer_subject_path(path):
     '''
