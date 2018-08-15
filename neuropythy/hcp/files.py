@@ -186,7 +186,8 @@ def _data_load(filename, data):
         db = _auto_download_options['database']
         rl = _auto_download_options['release']
         # parse the path apart by subject directory
-        relpath = filename.split(str(sid) + os.sep)[-1]
+        splt = str(sid) + os.sep
+        relpath = splt.join(filename.split(splt)[1:])
         hcp_sdir = '/'.join([db, rl, str(sid)])
         if not fs.exists(hcp_sdir):
             raise ValueError('Subject %d not found in release' % sid)
@@ -265,6 +266,8 @@ def _load_fsLR_atlasroi(filename, data):
     if atl != 'native': _load_fsLR_atlasroi.atlases[atl] = rois
     return rois
 _load_fsLR_atlasroi.atlases = {}
+def _load_fsmorph(filename, data):
+    return nyio.load(filename, 'freesurfer_morph')
 
 # The description of the entire subject directory that we care about:
 subject_directory_structure = {
@@ -284,6 +287,42 @@ subject_directory_structure = {
                 'brainmask_fs.nii.gz':              {'type':'image', 'name':'brainmask'},
                 'ribbon.nii.gz':                    {'type':'image', 'name':'ribbon'},
                 'wmparc.nii.gz':                    {'type':'image', 'name':'wm_parcellation'},
+                '{0[id]}': {
+                    'type': 'dir',
+                    'contents': {
+                        'surf': {
+                            'type': 'dir',
+                            'contents': {
+                                'lh.area': (
+                                    {'type':'property',          'name':'white_vertex_area',
+                                     'hemi':'lh_native_MSMSulc', 'load':_load_fsmorph},
+                                    {'type':'property',          'name':'white_vertex_area',
+                                     'hemi':'lh_native_MSMAll',  'load':_load_fsmorph}),
+                                'lh.area.mid': (
+                                    {'type':'property',          'name':'midgray_vertex_area',
+                                     'hemi':'lh_native_MSMSulc', 'load':_load_fsmorph},
+                                    {'type':'property',          'name':'midgray_vertex_area',
+                                     'hemi':'lh_native_MSMAll',  'load':_load_fsmorph}),
+                                'lh.area.pial': (
+                                    {'type':'property',          'name':'pial_vertex_area',
+                                     'hemi':'lh_native_MSMSulc', 'load':_load_fsmorph},
+                                    {'type':'property',          'name':'pial_vertex_area',
+                                     'hemi':'lh_native_MSMAll',  'load':_load_fsmorph}),
+                                'rh.area': (
+                                    {'type':'property',          'name':'white_vertex_area',
+                                     'hemi':'rh_native_MSMSulc', 'load':_load_fsmorph},
+                                    {'type':'property',          'name':'white_vertex_area',
+                                     'hemi':'rh_native_MSMAll',  'load':_load_fsmorph}),
+                                'rh.area.mid': (
+                                    {'type':'property',          'name':'midgray_vertex_area',
+                                     'hemi':'rh_native_MSMSulc', 'load':_load_fsmorph},
+                                    {'type':'property',          'name':'midgray_vertex_area',
+                                     'hemi':'rh_native_MSMAll',  'load':_load_fsmorph}),
+                                'rh.area.pial': (
+                                    {'type':'property',          'name':'pial_vertex_area',
+                                     'hemi':'rh_native_MSMSulc', 'load':_load_fsmorph},
+                                    {'type':'property',          'name':'pial_vertex_area',
+                                     'hemi':'rh_native_MSMAll',  'load':_load_fsmorph})}}}},
                 'Native': {
                     'type':'dir',
                     'contents': {
