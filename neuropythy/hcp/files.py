@@ -175,28 +175,32 @@ def detect_credentials():
 # This structure details how neuropythy understands an HCP subject to be structured.
 
 # A few loading functions used by the description below
+# Used to auto-download a single file
+def _auto_download_file(filename, data):
+    sid = data['id']
+    if os.path.isfile(filename): return filename
+    if _auto_download_options is None or not _auto_downloadable(sid): return None
+    fs = _auto_download_options['s3fs']
+    db = _auto_download_options['database']
+    rl = _auto_download_options['release']
+    # parse the path apart by subject directory
+    splt = str(sid) + os.sep
+    relpath = splt.join(filename.split(splt)[1:])
+    hcp_sdir = '/'.join([db, rl, str(sid)])
+    if not fs.exists(hcp_sdir):
+        raise ValueError('Subject %d not found in release' % sid)
+    hcp_flnm = '/'.join([hcp_sdir, relpath])
+    # download it...
+    basedir = os.path.split(filename)[0]
+    if not os.path.isdir(basedir): os.makedirs(basedir, 0755)
+    #print 'Downloading file %s ...' % filename
+    fs.get(hcp_flnm, filename)
+    return filename
 # Used to load immutable-like mgh objects
 def _data_load(filename, data):
     sid = data['id']
-    # First, see if the file exists, and whether we can auto-download it
-    if not os.path.isfile(filename):
-        if _auto_download_options is None or not _auto_downloadable(sid):
-            raise ValueError('File %s not found' % filename)
-        fs = _auto_download_options['s3fs']
-        db = _auto_download_options['database']
-        rl = _auto_download_options['release']
-        # parse the path apart by subject directory
-        splt = str(sid) + os.sep
-        relpath = splt.join(filename.split(splt)[1:])
-        hcp_sdir = '/'.join([db, rl, str(sid)])
-        if not fs.exists(hcp_sdir):
-            raise ValueError('Subject %d not found in release' % sid)
-        hcp_flnm = '/'.join([hcp_sdir, relpath])
-        # download it...
-        basedir = os.path.split(filename)[0]
-        if not os.path.isdir(basedir): os.makedirs(basedir, 0755)
-        #print 'Downloading file %s ...' % filename
-        fs.get(hcp_flnm, filename)
+    # First, see if the file exists
+    if not os.path.isfile(filename): raise ValueError('File %s not found' % filename)
     # If the data says it's a cifti...
     if 'cifti' in data and data['cifti']:
         res = nib.load(filename).get_data()
@@ -215,6 +219,8 @@ def _data_load(filename, data):
         raise ValueError('unrecognized data type: %s' % data['type'])
     return res
 def _load(filename, data):
+    # firs check about auto-downloading
+    if not os.path.isfile(filename): _auto_download_file(filename, data)
     if 'load' in data and data['load'] is not None:
         res = data['load'](filename, data)
     else:
@@ -294,34 +300,34 @@ subject_directory_structure = {
                             'type': 'dir',
                             'contents': {
                                 'lh.area': (
-                                    {'type':'property',          'name':'white_vertex_area',
+                                    {'type':'property',          'name':'white_surface_area',
                                      'hemi':'lh_native_MSMSulc', 'load':_load_fsmorph},
-                                    {'type':'property',          'name':'white_vertex_area',
+                                    {'type':'property',          'name':'white_surface_area',
                                      'hemi':'lh_native_MSMAll',  'load':_load_fsmorph}),
                                 'lh.area.mid': (
-                                    {'type':'property',          'name':'midgray_vertex_area',
+                                    {'type':'property',          'name':'midgray_surface_area',
                                      'hemi':'lh_native_MSMSulc', 'load':_load_fsmorph},
-                                    {'type':'property',          'name':'midgray_vertex_area',
+                                    {'type':'property',          'name':'midgray_surface_area',
                                      'hemi':'lh_native_MSMAll',  'load':_load_fsmorph}),
                                 'lh.area.pial': (
-                                    {'type':'property',          'name':'pial_vertex_area',
+                                    {'type':'property',          'name':'pial_surface_area',
                                      'hemi':'lh_native_MSMSulc', 'load':_load_fsmorph},
-                                    {'type':'property',          'name':'pial_vertex_area',
+                                    {'type':'property',          'name':'pial_surface_area',
                                      'hemi':'lh_native_MSMAll',  'load':_load_fsmorph}),
                                 'rh.area': (
-                                    {'type':'property',          'name':'white_vertex_area',
+                                    {'type':'property',          'name':'white_surface_area',
                                      'hemi':'rh_native_MSMSulc', 'load':_load_fsmorph},
-                                    {'type':'property',          'name':'white_vertex_area',
+                                    {'type':'property',          'name':'white_surface_area',
                                      'hemi':'rh_native_MSMAll',  'load':_load_fsmorph}),
                                 'rh.area.mid': (
-                                    {'type':'property',          'name':'midgray_vertex_area',
+                                    {'type':'property',          'name':'midgray_surface_area',
                                      'hemi':'rh_native_MSMSulc', 'load':_load_fsmorph},
-                                    {'type':'property',          'name':'midgray_vertex_area',
+                                    {'type':'property',          'name':'midgray_surface_area',
                                      'hemi':'rh_native_MSMAll',  'load':_load_fsmorph}),
                                 'rh.area.pial': (
-                                    {'type':'property',          'name':'pial_vertex_area',
+                                    {'type':'property',          'name':'pial_surface_area',
                                      'hemi':'rh_native_MSMSulc', 'load':_load_fsmorph},
-                                    {'type':'property',          'name':'pial_vertex_area',
+                                    {'type':'property',          'name':'pial_surface_area',
                                      'hemi':'rh_native_MSMAll',  'load':_load_fsmorph})}}}},
                 'Native': {
                     'type':'dir',
