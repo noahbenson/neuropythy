@@ -93,7 +93,9 @@ class VertexSet(ObjectWithMetaData):
         '''
         vset.indices is the list of vertex indices for the given vertex-set vset.
         '''
-        return pimms.imm_array(np.asarray(range(vertex_count), dtype=np.int))
+        idcs = np.arange(0, vertex_count, 1, dtype=np.int)
+        idcs.setflags(write=False)
+        return idcs
     @pimms.require
     def validate_vertex_properties_size(_properties, vertex_count):
         '''
@@ -203,7 +205,75 @@ class VertexSet(ObjectWithMetaData):
         '''
         idcs = np.where(self.map(f))[0]
         return idcs if indices else self.labels[idcs]
+    def mask(self, m, indices=False):
+        '''
+        obj.mask(m) yields the set of vertex labels from the given vertex-set object obj that
+          correspond to the mask m.
 
+        The mask m may take any of the following forms:
+           * a list of vertex indices
+           * a boolean array (one value per vertex)
+           * a property name, which can be cast to a boolean array
+           * a tuple (property, value) where property is a list of values, one per vertex, and value
+             is the value that must match in order for a vertex to be included (this is basically
+             equivalent to the mask (property == value); note that property may also be a property
+             name
+           * a tuple (property, min, max), which specifies that the property must be between min and
+             max for a vertex to be included (min < p <= max)
+           * a tuple (property, (val1, val2...)), which specifies that the property must be any of
+             the values in (val1, val2...) for a vertex to be included
+           * None, indicating that all labels should be returned
+        
+        Note that the optional argument indices (default: False) may be set to true to yield the
+        vertex indices instead of the vertex labels.
+        '''
+        return to_mask(self, m, indices=indices)
+        
+def to_mask(obj, m, indices=False):
+    '''
+    to_mask(obj, m) yields the set of indices from the given vertex-set or itable object obj that
+      correspond to the given mask m.
+    
+    The mask m may take any of the following forms:
+       * a list of vertex indices
+       * a boolean array (one value per vertex)
+       * a property name, which can be cast to a boolean array
+       * a tuple (property, value) where property is a list of values, one per vertex, and value
+         is the value that must match in order for a vertex to be included (this is basically
+         equivalent to the mask (property == value); note that property may also be a property
+         name
+       * a tuple (property, min, max), which specifies that the property must be between min and
+         max for a vertex to be included (min < p <= max)
+       * a tuple (property, (val1, val2...)), which specifies that the property must be any of
+         the values in (val1, val2...) for a vertex to be included
+       * None, indicating that all labels should be returned
+    
+    Note that the optional argument indices (default: False) may be set to true to yield the
+    vertex indices instead of the vertex labels. If obj is not a VertexSet object, then this
+    option is ignored.
+    '''
+    if isinstance(obj, VertexSet):
+        lbls = obj.labels
+        idcs = obj.indices
+        obj = obj.properties
+    else:
+        obj = pimms.itable(obj)
+        lbls = np.arange(0, obj.row_count, 1, dtype=np.int)
+        idcs = lbls
+    if m is None: return idcs if indices else lbls
+    if isinstance(m, tuple):
+        if len(m) == 0: return np.asarray([], dtype=np.int)
+        p = to_property(obj, m[0])
+        if len(m) == 2 and hasattr(m[1], '__iter__'):
+            m = reduce(lambda q,u: np.logical_or(q, p == u), m)
+        elif len(m) == 2:
+            m = (p == m[1])
+        elif len(m) == 3:
+            m = np.logical_and(m[0] < p, p <= m[1])
+    elif pimms.is_str(m):
+        m = np.asarray(obj[m], dtype=np.bool)
+    # at this point, m should be a boolean array or a list of indices
+    return idcs[m] if indices else lbls[m]
 def to_property(obj, prop=None,
                 dtype=Ellipsis,
                 outliers=None,  data_range=None,    clipped=np.inf,
@@ -339,6 +409,8 @@ def to_property(obj, prop=None,
                 where_ok[(prop[where_ok] < valid_range[0]) | (prop[where_ok] > valid_range[1])]
     # Whittle down the mask to what we are sure is in the spec:
     where_nan = np.union1d(where_nan, where_inv)
+    # make sure we interpret mask correctly...
+    mask = to_mask(obj, mask, indices=True)
     mask = np.setdiff1d(all_vertices if mask is None else all_vertices[mask], where_nan)
     # Find the outliers: values specified as outliers or inf values; will build this as we go
     outliers = [] if outliers is None else all_vertices[outliers]
