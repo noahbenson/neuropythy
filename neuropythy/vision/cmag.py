@@ -6,9 +6,318 @@
 import numpy               as np
 import numpy.linalg        as npla
 import neuropythy.geometry as geo
+import neuropythy.mri      as mri
 from   neuropythy.util     import (zinv, zdiv, simplex_summation_matrix)
 from   .retinotopy         import (extract_retinotopy_argument, retinotopy_data, as_retinotopy)
 import pimms
+
+def disk_projection_cmag(mesh, retinotopy='any', surface=None):
+    '''
+    disk_projection_cmag(mesh) yields the cortical magnification based on the projection of disks
+      on the cortical surface into the visual field.
+    '''
+    # First, find the retino data
+    if pimms.is_str(retinotopy):
+        retino = retinotopy_data(mesh, retinotopy)
+    else:
+        retino = retinotopy
+    # Convert from polar angle/eccen to longitude/latitude
+    vcoords = np.asarray(as_retinotopy(retino, 'geographical'))
+    # note the surface coordinates
+    if surface is None:
+        tess = mesh.tess
+        scoords = mesh.coordinates
+    elif pimms.is_str(surface):
+        if not isinstance(mesh, mri.Cortex):
+            raise ValueError('named surfaces can only be used with cortex objects')
+        surface = surface.lower()
+        if   surface in ['white']:                         mesh = mesh.white_surface
+        elif surface in ['middle', 'midgray', 'mid-gray']: mesh = mesh.midgray_surface
+        elif surface in ['pial']:                          mesh = mesh.pial_surface
+        elif surface in mesh.surfaces:                     mesh = mesh.surfaces[surface]
+        else: raise ValueError('Unrecognized surface: %s' % surface)
+        scoords = mesh.coordinates
+        tess = mesh.tess
+    elif isinstance(surface, geo.Mesh):
+        tess = mesh.tess
+        scoords = surface.coordinates
+        if scoords.shape[1] > tess.vertex_count:
+            scoords = scoords[:, surface.tess.index(tess.labels)]
+    else: raise ValueError('Could not understand surface option')
+    faces = tess.indexed_faces
+    # okay, we have the data organized into scoords, vcoords, and faces;
+    # let's get sfx and vfx (surface face coords and visual face coords)
+    (sfx,vfx) = [np.asarray([x[:,ii] for ii in faces]) for x in (scoords,vcoords)]
+    # TODO
+    raise ValueError('Not yet implemented')
+    
+
+@pimms.immutable
+class FieldOfView(object):
+    '''
+    FieldOfView is a class that represents and calculates the field of view in a cortical area.
+    '''
+    def __init__(self, angle, eccen, sigma,
+                 scale=None, weight=None, search_scale=3.0, bins=6):
+        self.polar_angle = angle
+        self.eccentricity = eccen
+        self.sigma = sigma
+        self.weight = weight
+        self.bins = bins
+        self.search_scale = search_scale
+        self.scale = scale
+    @pimms.param
+    def polar_angle(pa):  return pimms.imm_array(pa)
+    @pimms.param
+    def eccentricity(ec): return pimms.imm_array(ec)
+    @pimms.param
+    def sigma(r):         return pimms.imm_array(r)
+    @pimms.param
+    def scale(s): return s
+    @pimms.param
+    def weight(w):
+        if w is None: return None
+        w = np.array(w)
+        w /= np.sum(w)
+        w.setflags(write=False)
+        return w
+    @pimms.param
+    def bins(h): return h
+    @pimms.param
+    def search_scale(s): return s
+    @pimms.value
+    def theta(polar_angle):
+        return pimms.imm_array(np.mod(np.pi/180.0*(90 - polar_angle) + np.pi, 2*np.pi) - np.pi)
+    @pimms.value
+    def coordinates(theta, eccentricity):
+        x = eccentricity * np.cos(theta)
+        y = eccentricity * np.sin(theta)
+        return pimms.imm_array(np.transpose([x,y]))
+    @pimms.value
+    def _weight(weight, polar_angle):
+        if weight is None: weight = np.ones(len(polar_angle))
+        weight = weight / np.sum(weight)
+        weight.setflags(write=False)
+        return weight
+    @pimms.value
+    def sigma_bin_walls(sigma, bins):
+        import scipy, scipy.cluster, scipy.cluster.vq as vq
+        std = np.std(sigma)
+        if np.isclose(std, 0): return pimms.imm_array([0, np.max(sigma)])
+        cl = sorted(std * vq.kmeans(sigma/std, bins)[0])
+        cl = np.mean([cl[:-1],cl[1:]], axis=0)
+        return pimms.imm_array(np.concatenate(([0], cl, [np.max(sigma)])))
+    @pimms.value
+    def sigma_bins(sigma, sigma_bin_walls):
+        bins = []
+        for (mn,mx) in zip(sigma_bin_walls[:-1], sigma_bin_walls[1:]):
+            ii = np.logical_and(mn < sigma, sigma <= mx)
+            bins.append(pimms.imm_array(np.where(ii)[0]))
+        return tuple(bins)
+    @pimms.value
+    def bin_query_distances(sigma_bins, sigma, search_scale):
+        return tuple([np.max(sigma[ii])*search_scale for ii in sigma_bins])
+    @pimms.value
+    def spatial_hashes(coordinates, sigma_bins):
+        import scipy, scipy.spatial
+        try:    from scipy.spatial import cKDTree as shash
+        except: from scipy.spatial import KDTree  as shash
+        return tuple([shash(coordinates[ii]) for ii in sigma_bins])
+    # Methods
+    def __call__(self, x, y=None):
+        if y is not None: x = (x,y)
+        x = np.asarray(x)
+        if len(x.shape) == 1: return self([x])[0]
+        x = np.transpose(x) if x.shape[0] == 2 else x
+        crd = self.coordinates
+        sig = self.sigma
+        wts = self._weight
+        res = np.zeros(x.shape[0])
+        c1 = 1.0 / np.sqrt(2.0 * np.pi)
+        for (sh, qd, bi) in zip(self.spatial_hashes, self.bin_query_distances, self.sigma_bins):
+            neis = sh.query_ball_point(x, qd)
+            res += [
+                np.sum(wts[ii] * c1/s * np.exp(-0.5 * d2/s**2))
+                for (ni,pt) in zip(neis,x)
+                for ii in [bi[ni]]
+                for (s,d2) in [(sig[ii], np.sum((crd[ii] - pt)**2, axis=1))]]
+        return res
+def field_of_view(mesh, retinotopy='any', mask=None, search_scale=3.0, bins=6):
+    '''
+    field_of_view(obj) yields a field-of-view function for the given vertex-set object or mapping of
+      retinotopy data obj.
+
+    The field-of-view function is a measurement of how much total pRF weight there is at each point
+    in the visual field; essentially it is the sum of all visual-field Gaussian pRFs, where the
+    Gaussian's are normalized both by the pRF size (i.e., each pRF is a 2D normal distribution whose
+    center comes from its polar angle and eccentricity and whose sigma parameter is the pRF radius)
+    and the weight (if any weight such as the variance explained is included in the retinotopy data,
+    then the normal distributions are multiplied by this weight, otherwise weights are considered to
+    be uniform). Note that the weights are normalized by their sum, so the resulting field-of-view
+    function should be a valid probability distribution over the visual field.
+
+    The returned object fov = field_of_view(obj) is a special field-of-view object that can be
+    called as fov(x, y) or fov(coord) where x and y may be lists or values and coord may be a 2D
+    vector or an (n x 2) matrix.
+
+    The following options may be provided (also in argument order):
+      * retinotopy (default: 'any') specifies the retinotopy data to be used; if this is a string,
+        then runs retinotopy_data(obj, retinotopy) and uses the result, otherwise runs
+        retinotopy_data(retinotopy) and uses the result; note that this must have a radius parameter
+        as well as polar angle and eccentricity or equivalent parameters that specify the pRF center
+      * mask (default: None) specifies the mask that should be used; this is interpreted by a call
+        to mesh.mask(mask)
+      * search_scale (default: 3.0) specifies how many Gaussian standard deviations away from a pRF
+        center should be included when calculating the sum of Gaussians at a point
+      * bins (default: 6) specifies the number of bins to divide the pRFs into based on the radius
+        value; this is used to prune the search of pRFs that overlap a point to just those
+        reasonanly close to the point in question
+    '''
+    # First, find the retino data
+    if pimms.is_str(retinotopy):
+        retino = retinotopy_data(mesh, retinotopy)
+    else:
+        retino = retinotopy_data(retinotopy)
+    # Convert from polar angle/eccen to longitude/latitude
+    (ang,ecc) = as_retinotopy(retino, 'visual')
+    if 'radius' not in retino:
+        raise ValueError('Retinotopy data must contain a radius, sigma, or size value')
+    sig = retino['radius']
+    wgt = next((retino[q] for q in ('variance_explained', 'weight') if q in retino), None)
+    # Get the indices we care about
+    ii = geo.to_mask(mesh, mask, indices=True)
+    return FieldOfView(ang[ii], ecc[ii], sig[ii], weight=wgt[ii],
+                       search_scale=search_scale, bins=bins)
+
+@pimms.immutable
+class ArealCorticalMagnification(object):
+    '''
+    ArealCorticalMagnification is a class that represents and calculates coritcal magnification.
+    '''
+    def __init__(self, angle, eccen, sarea, weight=None, nnearest=200):
+        self.polar_angle = angle
+        self.eccentricity = eccen
+        self.surface_area = sarea
+        self.weight = weight
+        self.nnearest = nnearest
+    @pimms.param
+    def polar_angle(pa):  return pimms.imm_array(pa)
+    @pimms.param
+    def eccentricity(ec): return pimms.imm_array(ec)
+    @pimms.param
+    def surface_area(sa): return pimms.imm_array(sa)
+    @pimms.param
+    def weight(w):
+        if w is None: return None
+        w = np.array(w)
+        w /= np.sum(w)
+        w.setflags(write=False)
+        return w
+    @pimms.param
+    def nnearest(s): return int(s)
+    @pimms.value
+    def theta(polar_angle):
+        return pimms.imm_array(np.mod(np.pi/180.0*(90 - polar_angle) + np.pi, 2*np.pi) - np.pi)
+    @pimms.value
+    def coordinates(theta, eccentricity):
+        x = eccentricity * np.cos(theta)
+        y = eccentricity * np.sin(theta)
+        return pimms.imm_array(np.transpose([x,y]))
+    @pimms.value
+    def _weight(weight, surface_area):
+        if weight is None: weight = np.ones(len(surface_area))
+        weight = weight * surface_area
+        weight /= np.sum(weight)
+        weight.setflags(write=False)
+        return weight
+    @pimms.value
+    def spatial_hash(coordinates):
+        import scipy, scipy.spatial
+        try:    from scipy.spatial import cKDTree as shash
+        except: from scipy.spatial import KDTree  as shash
+        return shash(coordinates)
+    # Static helper function
+    @staticmethod
+    def _xy_to_matrix(x, y=None):
+        if y is not None: x = (x,y)
+        x = np.asarray(x)
+        return x if len(x.shape) == 1 or x.shape[1] == 2 else x.T
+    # Methods
+    def nearest(self, x, y=None, n=Ellipsis):
+        n = self.nnearest if n is Ellipsis else n
+        x = ArealCorticalMagnification._xy_to_matrix(x,y)
+        return self.spatial_hash.query(x, n)
+    def __call__(self, x, y=None):
+        (d,ii) = self.nearest(x, y)
+        carea = self.surface_area[ii.flatten()]
+        if len(d.shape) == 1:
+            varea = np.pi * d[-1]**2
+            carea = np.sum(carea)
+        else:
+            varea = np.pi * d[:,-1]**2
+            carea = np.sum(np.split(carea, d.shape[0]), axis=1)
+        return carea / varea
+    def visual_pooling_area(self, x, y=None):
+        (d,ii) = self.nearest(x, y)
+        return d[-1] if len(d.shape) == 1 else d[:,-1]    
+def areal_cmag(mesh, retinotopy='any', mask=None, surface_area=None, weight=None, nnearest=None):
+    '''
+    areal_cmag(obj) yields an areal cortical magnification function for the given vertex-set object
+      or mapping of retinotopy data obj. If obj is a mapping of retinotopy data, then it must also
+      contain the key 'surface_area' specifying the surface area of each vertex in mm^2.
+
+    The areal cmag function is a measurement of how much surface area in a retinotopy dataset is
+    found within a circle found in the visual field. The size of the circle is chosen automatically
+    by looking up the <n> nearest neighbors of the point in question, summing their surface areas,
+    and dividing by the area of the circle in the visual field that is big enough to hold them.
+
+    The returned object cm = areal_cmag(obj) is a special cortical magnification object that can be
+    called as cm(x, y) or cm(coord) where x and y may be lists or values and coord may be a 2D
+    vector or an (n x 2) matrix. The yielded value(s) will always be in units mm^2 / deg^2.
+
+    The following options may be provided (also in argument order):
+      * retinotopy (default: 'any') specifies the retinotopy data to be used; if this is a string,
+        then runs retinotopy_data(obj, retinotopy) and uses the result, otherwise runs
+        retinotopy_data(retinotopy) and uses the result; note that this must have a radius parameter
+        as well as polar angle and eccentricity or equivalent parameters that specify the pRF center
+      * mask (default: None) specifies the mask that should be used; this is interpreted by a call
+        to mesh.mask(mask)
+      * surface_area (default: 'midgray_surface_area') specifies the vertex area property that
+        should be used; this is interpreted by a call to mesh.property(surface_area) so may be
+        either a property name or a list of values
+      * weight (default: None) specifies additional weights that should be used; this is generally
+        discouraged
+      * nnearest (default: None) specifies the number of nearest neighbors to search for when
+        calculating the magnification; if None, then uses int(numpy.ceil(numpy.sqrt(n) * np.log(n)))
+        where n is the number of vertices included in the mask
+    '''
+    # First, find the retino data
+    if pimms.is_str(retinotopy):
+        retino = retinotopy_data(mesh, retinotopy)
+    else:
+        retino = retinotopy_data(retinotopy)
+    # Convert from polar angle/eccen to longitude/latitude
+    (ang,ecc) = as_retinotopy(retino, 'visual')
+    # get the surface area
+    if surface_area is None: surface_area = 'midgray_surface_area'
+    if pimms.is_str(surface_area):
+        if surface_area in retino: surface_area = retino[surface_area]
+        elif isinstance(mesh, geo.VertexSet): surface_area = mesh.property(surface_area)
+        else: surface_area = mesh[surface_area]
+    # get the weight
+    if weight is not None:
+        if pimms.is_str(weight):
+            if weight in retino: weight = retino[weight]
+            elif isinstance(mesh, geo.VertexSet): weight = mesh.property(weight)
+            else: weight = mesh[weight]
+    wgt = next((retino[q] for q in ('variance_explained', 'weight') if q in retino), None)
+    # Get the indices we care about
+    ii = geo.to_mask(mesh, mask, indices=True)
+    # get our nnearest
+    if nnearest is None: nnearest = int(np.ceil(np.sqrt(len(ii)) * np.log(len(ii))))
+    return ArealCorticalMagnification(ang[ii], ecc[ii], surface_area[ii],
+                                      weight=(None if wgt is None else wgt[ii]),
+                                      nnearest=nnearest)
 
 # Three methods to calculate cortical magnification:
 # (1) local projection of the triangle neighborhood then comparison of path across it in the visual

@@ -12,5 +12,5 @@ from .retinotopy import (empirical_retinotopy_data, predicted_retinotopy_data, r
                          retinotopy_data, as_retinotopy, retinotopic_field_sign,
                          clean_retinotopy, predict_pRF_radius)
 from .cmag       import (neighborhood_cortical_magnification, path_cortical_magnification,
-                         isoangular_path, cmag)
+                         isoangular_path, cmag, areal_cmag, field_of_view)
 
