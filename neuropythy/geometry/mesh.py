@@ -175,7 +175,7 @@ class VertexSet(ObjectWithMetaData):
     def property(self, prop,
                  dtype=Ellipsis,
                  outliers=None,  data_range=None,    clipped=np.inf,
-                 weights=None,   weight_min=0,       weight_transform=Ellipsis,
+                 weight=None,    weight_min=0,       weight_transform=Ellipsis,
                  mask=None,      valid_range=None,   null=np.nan,
                  transform=None, yield_weight=False):
         '''
@@ -2002,7 +2002,7 @@ class MapProjection(ObjectWithMetaData):
           proj.in_domain(x.coordinates).
         '''
         x = x.coordinates if isinstance(x, Mesh) else np.asarray(x)
-        if pimms.is_vector(x): return np.asarray(self.where_domain([x])[0], dtype=np.bool)
+        if pimms.is_vector(x): return np.asarray(self.in_domain([x])[0], dtype=np.bool)
         if x.shape[0] != 3: x = x.T
         # no radius means we don't actually do any trimming
         if self.radius is None: return np.ones(x.shape[1], dtype=np.bool)
