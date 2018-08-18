@@ -11,7 +11,7 @@ import neuropythy.geometry as geo
 import pyrsistent          as pyr
 import os, sys, types, six, itertools, pimms
 
-from neuropythy.util       import (ObjectWithMetaData, to_affine)
+from neuropythy.util       import (ObjectWithMetaData, to_affine, times, zdivide, plus, minus)
 from neuropythy.vision     import (visual_area_names, visual_area_numbers)
 
 if sys.version_info[0] == 3: from   collections import abc as colls
@@ -242,6 +242,35 @@ try:
         'log_cmag':         (cmap_log_cmag,         (np.log(0.5), np.log(32.0)))}
     for (k,(cmap,_)) in six.iteritems(colormaps): matplotlib.cm.register_cmap(k, cmap)
 except: pass
+
+def to_rgba(val):
+    '''
+    to_rgba(val) is identical to matplotlib.colors.to_rgba(val) except that it operates over lists
+      as well as individual elements to yield matrices of rgba values. In addition, it always yields
+      numpy vectors or matrices.
+    '''
+    if pimms.is_npmatrix(val) and val.shape[1] == 4: return val
+    try: return np.asarray(matplotlib.colors.to_rgba(val))
+    except: return np.asarray([matplotlib.colors.to_rgba(u) for u in val])
+
+def color_overlap(color1, *args):
+    '''
+    color_overlap(color1, color2...) yields the rgba value associated with overlaying color2 on top
+      of color1 followed by any additional colors (overlaid left to right). This respects alpha
+      values when calculating the results.
+    Note that colors may be lists of colors, in which case a matrix of RGBA values is yielded.
+    '''
+    args = list(args)
+    args.insert(0, color1)
+    rgba = np.asarray([0.5,0.5,0.5,0])
+    for c in args:
+        c = to_rgba(c)
+        a = c[...,3]
+        a0 = rgba[...,3]
+        if np.isclose(rgba[...,3], 0).all(): rgba = np.ones(rgba.shape) * c
+        elif np.isclose(a, 0).all(): continue
+        else: rgba = times(a, c) + times(1-a, rgba)
+    return rgba
 
 _vertex_angle_empirical_prefixes = ['prf_', 'measured_', 'empiirical_']
 _vertex_angle_model_prefixes = ['model_', 'predicted_', 'inferred_', 'template_', 'atlas_',
@@ -691,7 +720,9 @@ def cortex_plot(the_map,
         triangulation = matplotlib.tri.Triangulation(the_map.coordinates[0], the_map.coordinates[1],
                                                      triangles=the_map.tess.indexed_faces.T)
     # okay, let's interpret the color
-    if color is None: return None
+    if color is None:
+        color = np.full((the_map.vertex_count, 4), 0.5)
+        color[:,3] = 0
     try:
         clr = matplotlib.colors.to_rgba(color)
         # This is an rgb color to plot...
@@ -708,7 +739,7 @@ def cortex_plot(the_map,
         color = apply_cmap(p, cmap, vmin=vmin, vmax=vmax)
     if not pimms.is_matrix(color):
         # must be a function; let's try it...
-        color = map(matplotlib.colors.to_rgba, the_map.map(color))
+        color = to_rgba(the_map.map(color))
     color = np.array(color)
     if color.shape[1] != 4: color = np.hstack([color, np.ones([color.shape[0], 1])])
     # okay, and the background...
@@ -716,7 +747,7 @@ def cortex_plot(the_map,
         if pimms.is_str(background) and background.lower() in ['curvature', 'curv']:
             background = apply_cmap(the_map.prop('curvature'), cmap_curvature, vmin=-1, vmax=1)
         else:
-            try: background = np.ones((the_map.vertex_count, 4)) * matplotlib.colors.to_rgba(clr)
+            try: background = np.ones((the_map.vertex_count, 4)) * to_rgba(background)
             except: raise ValueError('plot background failed: must be a color or curvature')
     # okay, let's check on alpha...
     if alpha is not None:
@@ -734,9 +765,6 @@ def cortex_plot(the_map,
         color[:,3] = tmp
     # then, blend with the background if need be
     if background is not None:
-        rgb = color[:,:3]
-        rgb = (rgb.T*alpha + background[:,:3].T*(1 - alpha))
-        color[:,:3] = rgb.T
-        color[:,3] = 1.0 # background is opaque
+        color = color_overlap(background, color)
     # finally, we can make the plot!
     return cortex_rgba_plot(the_map, color, axes=axes, triangulation=triangulation)
