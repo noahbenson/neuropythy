@@ -410,6 +410,82 @@ def zdiv(a, b, null=0):
     res[z] = null
     return res
 
+def plus(*args):
+    '''
+    plus(a, b...) returns the sum of all the values as a numpy array object. Unlike numpy's add
+      function or a+b syntax, plus will thread over the earliest dimension possible; thus if a.shape
+      a.shape is (4,2) and b.shape is 4, plus(a,b) is a equivalent to
+      [ai+bi for (ai,bi) in zip(a,b)].
+    '''
+    if len(args) == 0: return np.asarray(1)
+    def f(a,b):
+        b = np.asarray(b)
+        if len(a.shape) == 0 or len(b.shape) == 0: return a + b
+        if len(a.shape) > len(b.shape): (a,b) = (b,a)
+        a = np.reshape(a, np.shape(a) + tuple(np.ones(len(b.shape) - len(a.shape), dtype=np.int)))
+        return a + b
+    return reduce(f, args[1:], np.asarray(args[0]))
+def minus(*args):
+    '''
+    minus(a, b...) returns the sum of all the values as a numpy array object. Unlike numpy's
+      subtract function or a - b syntax, minus will thread over the earliest dimension possible;
+      thus if a.shape a.shape is (4,2) and b.shape is 4, a - b is a equivalent to
+      [ai-bi for (ai,bi) in zip(a,b)].
+    '''
+    if len(args) == 0: return np.asarray(1)
+    def f(a,b):
+        b = np.asarray(b)
+        if len(a.shape) == 0 or len(b.shape) == 0: return a + b
+        if len(a.shape) > len(b.shape): (a,b) = (b,a)
+        a = np.reshape(a, np.shape(a) + tuple(np.ones(len(b.shape) - len(a.shape), dtype=np.int)))
+        return a + b
+    return reduce(f, args[1:], np.asarray(args[0]))
+def times(*args):
+    '''
+    times(a, b...) returns the product of all the values as a numpy array object. Unlike numpy's
+      multiply function or a*b syntax, times will thread over the earliest dimension possible; thus
+      if a.shape is (4,2) and b.shape is 4, times(a,b) is a equivalent to
+      [ai*bi for (ai,bi) in zip(a,b)].
+    '''
+    if len(args) == 0: return np.asarray(1)
+    def f(a,b):
+        b = np.asarray(b)
+        if len(a.shape) == 0 or len(b.shape) == 0: return a*b
+        if len(a.shape) > len(b.shape): (a,b) = (b,a)
+        a = np.reshape(a, np.shape(a) + tuple(np.ones(len(b.shape) - len(a.shape), dtype=np.int)))
+        return a*b
+    return reduce(f, args[1:], np.asarray(args[0]))
+def divide(*args):
+    '''
+    divide(a, b...) returns the product of all the values as a numpy array object. Unlike numpy's
+      divide function or a/b syntax, divide will thread over the earliest dimension possible; thus
+      if a.shape is (4,2) and b.shape is 4, divide(a,b) is a equivalent to
+      [ai/bi for (ai,bi) in zip(a,b)].
+    '''
+    if len(args) == 0: return np.asarray(1)
+    def f(a,b):
+        b = np.asarray(b)
+        if len(a.shape) == 0 or len(b.shape) == 0: return a / b
+        if len(a.shape) > len(b.shape): (a,b) = (b,a)
+        a = np.reshape(a, np.shape(a) + tuple(np.ones(len(b.shape) - len(a.shape), dtype=np.int)))
+        return a / b
+    return reduce(f, args[1:], np.asarray(args[0]))
+def zdivide(*args):
+    '''
+    zdivide(a, b...) returns the quotient of all the values as a numpy array object. Unlike numpy's
+      divide function or a/b syntax, zdivide will thread over the earliest dimension possible; thus
+      if a.shape is (4,2) and b.shape is 4, zdivide(a,b) is a equivalent to
+      [ai*zinv(bi) for (ai,bi) in zip(a,b)].
+    '''
+    if len(args) == 0: return np.asarray(1)
+    def f(a,b):
+        b = np.asarray(b)
+        if len(a.shape) == 0 or len(b.shape) == 0: return a * zinv(b)
+        if len(a.shape) > len(b.shape): (a,b) = (b,a)
+        a = np.reshape(a, np.shape(a) + tuple(np.ones(len(b.shape) - len(a.shape), dtype=np.int)))
+        return a * zinv(b)
+    return reduce(f, args[1:], np.asarray(args[0]))
+
 def library_path():
     '''
     library_path() yields the path of the neuropythy library.
