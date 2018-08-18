@@ -640,7 +640,7 @@ class Cortex(geo.Topology):
         else:
             raise ValueError('surface_coordinates must be a mapping object')
     @pimms.value
-    def surfaces(surface_coordinates, properties, tess):
+    def surfaces(surface_coordinates, properties, tess, chirality):
         '''
         cortex.surfaces is a mapping of the surfaces of the given cortex; this must include the
         surfaces 'white' and 'pial'.
@@ -649,7 +649,8 @@ class Cortex(geo.Topology):
             def _lambda():
                 val = surface_coordinates[name]
                 if isinstance(val, geo.Mesh): val = val.coordinates
-                return geo.Mesh(tess, val, properties=properties).persist()
+                m = geo.Mesh(tess, val, properties=properties, meta_data={'chirality':chirality})
+                return m.persist()
             return _lambda
         return pimms.lazy_map({k:_make_mesh(k) for k in six.iterkeys(surface_coordinates)})
     @pimms.require
