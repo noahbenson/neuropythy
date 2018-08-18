@@ -920,7 +920,7 @@ subject_directory_structure = {
                          'name':'fsaverage',
                          'hemi':'lh_native_MSMSulc'},
                         {'type':'registration',
-                         'name':'fsaverge',
+                         'name':'fsaverage',
                          'hemi':'lh_native_MSMAll'}),
                     '{0[id]}.L.sphere.MSMAll.native.surf.gii': {
                         'type':'registration',
@@ -1046,7 +1046,7 @@ subject_directory_structure = {
                          'name':'fsaverage',
                          'hemi':'rh_native_MSMSulc'},
                         {'type':'registration',
-                         'name':'fsaverge',
+                         'name':'fsaverage',
                          'hemi':'rh_native_MSMAll'}),
                     '{0[id]}.R.sphere.MSMAll.native.surf.gii': {
                         'type':'registration',
