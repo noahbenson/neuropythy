@@ -494,6 +494,12 @@ def load_freesurfer_geometry(filename, to='mesh', warn=False):
             (xs, fs, info) = fsio.read_geometry(filename, read_metadata=True)
     else:
         (xs, fs, info) = fsio.read_geometry(filename, read_metadata=True)
+    # see if there's chirality data here...
+    filename = os.path.split(filename)[1]
+    filename = filename.lower()
+    if   filename.startswith('lh'): info['chirality'] = 'lh.'
+    elif filename.startswith('rh'): info['chirality'] = 'rh.'
+    # parse it into something
     to = to.lower()
     if to in ['mesh', 'auto', 'automatic']:
         return geo.Mesh(fs, xs, meta_data=info)
