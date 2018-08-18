@@ -17,129 +17,236 @@ from neuropythy.vision     import (visual_area_names, visual_area_numbers)
 if sys.version_info[0] == 3: from   collections import abc as colls
 else:                        import collections            as colls
 
-
 # Below are various graphics-related functions; some are wrapped in a try block in case matplotlib
 # is not installed.
+def _matplotlib_load_error(*args, **kwargs):
+    raise RuntimeError('load failure: the requested object could not be loaded, probably because ' +
+                       'you do not have matplotlib installed correctly')
+cmap_curvature = _matplotlib_load_error
+cmap_polar_angle_sym = _matplotlib_load_error
+cmap_polar_angle_lh = _matplotlib_load_error
+cmap_polar_angle_rh = _matplotlib_load_error
+cmap_polar_angle = _matplotlib_load_error
+cmap_theta_sym = _matplotlib_load_error
+cmap_theta_lh = _matplotlib_load_error
+cmap_theta_rh = _matplotlib_load_error
+cmap_theta = _matplotlib_load_error
+cmap_eccentricity = _matplotlib_load_error
+cmap_log_eccentricity = _matplotlib_load_error
+cmap_radius = _matplotlib_load_error
+cmap_log_radius = _matplotlib_load_error
+cmap_log_cmag = _matplotlib_load_error
+
 try:
-    import matplotlib, matplotlib.pyplot, matplotlib.tri
+    import matplotlib, matplotlib.pyplot, matplotlib.tri, matplotlib.colors
+    # we use this below
+    blend_cmap = matplotlib.colors.LinearSegmentedColormap.from_list
     
-    _curv_cmap_dict = {
-        name: ((0.0, 0.0, 0.5),
-               (0.5, 0.5, 0.2),
-               (1.0, 0.2, 0.0))
-        for name in ['red', 'green', 'blue']}
-    _curv_cmap = matplotlib.colors.LinearSegmentedColormap('curv', _curv_cmap_dict)
-    _angle_cmap_withneg = matplotlib.colors.LinearSegmentedColormap(
-        'polar_angle_full',
-        {'red':   ((0.000, 1.0,   1.0),
-                   (0.250, 0.5,   0.5),
-                   (0.500, 0.0,   0.0),
-                   (0.625, 0.0,   0.0),
-                   (0.750, 0.0,   0.0),
-                   (0.875, 0.833, 0.833),
-                   (1.000, 1.0,   1.0)),
-         'green': ((0.000, 0.0,   0.0),
-                   (0.250, 0.0,   0.0),
-                   (0.500, 0.0,   0.0),
-                   (0.625, 0.833, 0.833),
-                   (0.750, 0.667, 0.667),
-                   (0.875, 0.833, 0.833),
-                   (1.000, 0.0,   0.0)),
-         'blue':  ((0.000, 0.0,   0.0),
-                   (0.250, 0.5,   0.5),
-                   (0.500, 1.0,   1.0),
-                   (0.625, 0.833, 0.833),
-                   (0.750, 0.0,   0.0),
-                   (0.875, 0.0,   0.0),
-                   (1.000, 0.0,   0.0))})
-    _angle_cmap = matplotlib.colors.LinearSegmentedColormap(
+    cmap_curvature = matplotlib.colors.LinearSegmentedColormap(
+        'curv',
+        {name: ((0.0, 0.0, 0.5), (0.5, 0.5, 0.2), (1.0, 0.2, 0.0))
+         for name in ['red', 'green', 'blue']})
+    cmap_curvature.__doc__ = '''
+    cmap_curvature is a colormap for plotting the curvature of a vertex; note that this colormap
+    assumes FreeSurfer's standard way of storing curvature where negative values indicate gyri and
+    positive values indicate sulci.
+    Values passed to cmap_curvature should be scaled such that (-1,1) -> (0,1).
+    '''
+    
+    cmap_polar_angle_sym = blend_cmap(
+        'polar_angle_sym',
+        [(0.5,0,0), (1,1,0), (0,0.5,0), (0,1,1), (0,0,0.5), (0,1,1), (0,0.5,0), (1,1,0), (0.5,0,0)])
+    cmap_polar_angle_sym.__doc__ = '''
+    cmap_polar_angle_sym is a colormap for plotting the pRF polar angle of a vertex.
+    Values passed to cmap_polar_angle_sym should be scaled such that (-180,180 deg) -> (0,1).
+
+    cmap_polar_angle_sym is a circular colormap that is left-right symmetric with green representing
+    the horizontal meridian, blue representing the upper vertical meridian, and red representing the
+    lower vertical meridian.
+    '''
+    cmap_polar_angle_lh = blend_cmap(
+        'polar_angle_lh',
+        [(0.5,0,0), (0.75,0,0.5), (1,0,1), (0.5,0,0.75), (0,0,0.5), (0,1,1), (0,0.5,0), (1,1,0), (0.5,0,0)])
+    cmap_polar_angle_lh.__doc__ = '''
+    cmap_polar_angle_lh is a colormap for plotting the pRF polar angle of a vertex.
+    Values passed to cmap_polar_angle_lh should be scaled such that (-180,180 deg) -> (0,1).
+
+    cmap_polar_angle_lh is a circular colormap that emphasizes colors in the right visual field; the
+    left visual field appears mostly magenta.
+    '''
+    cmap_polar_angle_rh = blend_cmap(
+        'polar_angle_rh',
+        [(0.5,0,0), (1,1,0), (0,0.5,0), (0,1,1), (0,0,0.5), (1,0,1), (0.5,0,0.75), (0.75,0,0.5), (0.5,0,0)])
+    cmap_polar_angle_rh.__doc__ = '''
+    cmap_polar_angle_rh is a colormap for plotting the pRF polar angle of a vertex.
+    Values passed to cmap_polar_angle_rh should be scaled such that (-180,180 deg) -> (0,1).
+
+    cmap_polar_angle_rh is a circular colormap that emphasizes colors in the left visual field; the
+    right visual field appears mostly magenta.
+    '''
+    cmap_polar_angle = blend_cmap(
         'polar_angle',
-        {'red':   ((0.000, 1.0,   1.0),
-                   (0.250, 0.5,   0.5),
-                   (0.500, 0.0,   0.0),
-                   (0.625, 0.0,   0.0),
-                   (0.750, 0.0,   0.0),
-                   (0.875, 0.833, 0.833),
-                   (1.000, 1.0,   1.0)),
-         'green': ((0.000, 0.0,   0.0),
-                   (0.250, 0.0,   0.0),
-                   (0.500, 0.0,   0.0),
-                   (0.625, 0.833, 0.833),
-                   (0.750, 0.667, 0.667),
-                   (0.875, 0.833, 0.833),
-                   (1.000, 0.0,   0.0)),
-         'blue':  ((0.000, 0.0,   0.0),
-                   (0.250, 0.5,   0.5),
-                   (0.500, 1.0,   1.0),
-                   (0.625, 0.833, 0.833),
-                   (0.750, 0.0,   0.0),
-                   (0.875, 0.0,   0.0),
-                   (1.000, 0.0,   0.0))})
-    _eccen_cmap = matplotlib.colors.LinearSegmentedColormap(
+         [(0.5,0,0), (1,0,1), (0,0,0.5), (0,1,1), (0,0.5,0), (1,1,0), (0.5,0,0)])
+    cmap_polar_angle.__doc__ = '''
+    cmap_polar_angle is a colormap for plotting the pRF polar angle of a vertex.
+    Values passed to cmap_polar_angle should be scaled such that (-180,180 deg) -> (0,1).
+
+    cmap_polar_angle is a 6-pronged circular colormap; note that it does not have dark or bright
+    values at the horizontal meridia as cmap_polar_angle_sym, cmap_polar_angle_lh, and
+    cmap_polar_angle_rh do.
+    '''
+    cmap_theta_sym = blend_cmap(
+        'theta_sym',
+        [(0.5,0,0), (1,1,0), (0,0.5,0), (0,1,1), (0,0,0.5), (0,1,1), (0,0.5,0), (1,1,0), (0.5,0,0)])
+    cmap_theta_sym.__doc__ = '''
+    cmap_theta_sym is a colormap for plotting the pRF theta of a vertex.
+    Values passed to cmap_theta_sym should be scaled such that (-pi,pi rad) -> (0,1). Note that 0 is
+    the right right horizontal meridian and positive is the counter-clockwise direction.
+
+    cmap_theta_sym is a circular colormap that is left-right symmetric with green representing
+    the horizontal meridian, blue representing the upper vertical meridian, and red representing the
+    lower vertical meridian.
+    '''
+    cmap_theta_lh = blend_cmap(
+        'theta_lh',
+        [(0.5,0,0), (1,1,0), (0,0.5,0), (0,1,1), (0,0,0.5), (0.5,0,0.75), (1,0,1), (0.75,0,0.5), (0.5,0,0)])
+    cmap_theta_lh.__doc__ = '''
+    cmap_theta_lh is a colormap for plotting the pRF theta of a vertex.
+    Values passed to cmap_theta_lh should be scaled such that (-pi,pi rad) -> (0,1). Note that 0 is
+    the right right horizontal meridian and positive is the counter-clockwise direction.
+
+    cmap_theta_lh is a circular colormap that emphasizes colors in the right visual field; the
+    left visual field appears mostly magenta.
+    '''
+    cmap_theta_rh = blend_cmap(
+        'theta_rh',
+        [(0.5,0,0), (0.75,0,0.5), (0.5,0,0.75), (1,0,1), (0,0,0.5), (0,1,1), (0,0.5,0), (1,1,0), (0.5,0,0)])
+    cmap_theta_rh.__doc__ = '''
+    cmap_theta_rh is a colormap for plotting the pRF theta of a vertex.
+    Values passed to cmap_theta_rh should be scaled such that (-pi,pi rad) -> (0,1). Note that 0 is
+    the right right horizontal meridian and positive is the counter-clockwise direction.
+
+    cmap_theta_rh is a circular colormap that emphasizes colors in the left visual field; the
+    right visual field appears mostly magenta.
+    '''
+    cmap_theta = blend_cmap(
+        'theta',
+        [(0,       cmap_polar_angle(0.25)),
+         ( 1.0/12, (  1,  0,  1)),
+         ( 3.0/12, (0.5,  0,  0)),
+         ( 5.0/12, (  1,  1,  0)),
+         ( 7.0/12, (  0,0.5,  0)),
+         ( 9.0/12, (  0,  1,  1)),
+         (11.0/12, (  0,  0,0.5)),
+         (1,       cmap_polar_angle(0.25))])
+    cmap_theta.__doc__ = '''
+    cmap_theta is a colormap for plotting the pRF theta of a vertex.
+    Values passed to cmap_theta should be scaled such that (-pi,pi rad) -> (0,1). Note that 0 is the
+    right right horizontal meridian and positive is the counter-clockwise direction.
+
+    cmap_theta is a 6-pronged circular colormap; note that it does not have dark or bright
+    values at the horizontal meridia as cmap_theta_sym, cmap_theta_lh, and
+    cmap_theta_rh do.
+    '''
+    cmap_eccentricity = blend_cmap(
         'eccentricity',
-        {'red':   ((0.0,       0.0, 0.0),
-                   (2.5/90.0,  0.5, 0.5),
-                   (5.0/90.0,  1.0, 1.0),
-                   (10.0/90.0, 1.0, 1.0),
-                   (20.0/90.0, 0.0, 0.0),
-                   (40.0/90.0, 0.0, 0.0),
-                   (90.0/90.0, 1.0, 1.0)),
-         'green': ((0.0,       0.0, 0.0),
-                   (2.5/90.0,  0.0, 0.0),
-                   (5.0/90.0,  0.0, 0.0),
-                   (10.0/90.0, 1.0, 1.0),
-                   (20.0/90.0, 1.0, 1.0),
-                   (40.0/90.0, 1.0, 1.0),
-                   (90.0/90.0, 1.0, 1.0)),
-         'blue':  ((0.0,       0.0, 0.0),
-                   (2.5/90.0,  0.5, 0.5),
-                   (5.0/90.0,  0.0, 0.0),
-                   (10.0/90.0, 0.0, 0.0),
-                   (20.0/90.0, 0.0, 0.0),
-                   (40.0/90.0, 1.0, 1.0),
-                   (90.0/90.0, 1.0, 1.0))})
-    _sigma_cmap = matplotlib.colors.LinearSegmentedColormap(
+        [(0,       (  0,  0,  0)),
+         (1.25/90, (  0,  0,0.5)),
+         (2.5/90,  (  1,  0,  1)),
+         (5.0/90,  (0.5,  0,  0)),
+         (10.0/90, (  1,  1,  0)),
+         (20.0/90, (  0,0.5,  0)),
+         (40.0/90, (  0,  1,  1)),
+         (1,       (  1,  1,  1))])
+    cmap_eccentricity.__doc__ = '''
+    cmap_eccentricity is a colormap for plotting the pRF eccentricity of a vertex.
+    Values passed to cmap_eccentricity should be scaled such that (0,90 deg) -> (0,1).
+    '''
+    cmap_log_eccentricity = blend_cmap(
+        'log_eccentricity',
+        [(0,     (  0,  0,  0)),
+         (1.0/7, (  0,  0,0.5)),
+         (2.0/7, (  1,  0,  1)),
+         (3.0/7, (0.5,  0,  0)),
+         (4.0/7, (  1,  1,  0)),
+         (5.0/7, (  0,0.5,  0)),
+         (6.0/7, (  0,  1,  1)),
+         (1,     (  1,  1,  1))])
+    cmap_log_eccentricity.__doc__ = '''
+    cmap_log_eccentricity is a colormap for plotting the log of eccentricity.
+    Values passed to cmap_log_cmag should be scaled however desired, but note that the colormap
+    itself runs linearly from 0 to 1, so eccentricity data should be log-transformed
+    then scaled before being passed.
+    '''
+    cmap_radius = blend_cmap(
         'radius',
-        {'red':   ((0.0,       0.0, 0.0),
-                   (1.25/40.0, 0.5, 0.5),
-                   ( 2.5/40.0, 0.0, 0.0),
-                   ( 5.0/40.0, 0.0, 0.0),
-                   (10.0/40.0, 0.0, 0.0),
-                   (20.0/40.0, 1.0, 1.0),
-                   (40.0/40.0, 1.0, 1.0)),
-         'green': ((0.0,       0.0, 0.0),
-                   (1.25/40.0, 0.0, 0.0),
-                   ( 2.5/40.0, 0.0, 0.0),
-                   ( 5.0/40.0, 1.0, 1.0),
-                   (10.0/40.0, 1.0, 1.0),
-                   (20.0/40.0, 1.0, 1.0),
-                   (40.0/40.0, 1.0, 1.0)),
-         'blue':  ((0.0,       0.0, 0.0),
-                   (1.25/40.0, 0.5, 0.5),
-                   ( 2.5/40.0, 1.0, 1.0),
-                   ( 5.0/40.0, 1.0, 1.0),
-                   (10.0/40.0, 0.0, 0.0),
-                   (20.0/40.0, 0.0, 0.0),
-                   (40.0/40.0, 1.0, 1.0))})
-    _cmag_cmap = matplotlib.colors.LinearSegmentedColormap(
-        'radius',
-        {'red':   ((0.0,       0.0, 0.0),
-                   ( 2.0/32.0, 1.0, 1.0),
-                   ( 8.0/32.0, 1.0, 1.0),
-                   (32.0/32.0, 1.0, 1.0)),
-         'green': ((0.0,       0.0, 0.0),
-                   ( 2.0/32.0, 0.0, 0.0),
-                   ( 8.0/32.0, 1.0, 1.0),
-                   (32.0/32.0, 1.0, 1.0)),
-         'blue':  ((0.0,       0.0, 0.0),
-                   ( 2.0/32.0, 0.0, 0.0),
-                   ( 8.0/32.0, 0.0, 0.0),
-                   (32.0/32.0, 1.0, 1.0))})
-    _vertex_angle_empirical_prefixes = ['prf_', 'measured_', 'empiirical_']
-    _vertex_angle_model_prefixes = ['model_', 'predicted_', 'inferred_', 'template_', 'atlas_',
-                                    'benson14_', 'benson17_']
-    _vertex_angle_prefixes = ([''] + _vertex_angle_model_prefixes + _vertex_angle_model_prefixes)
+        [(0,       (  0,  0,  0)),
+         (1.25/30, (  0,  0,0.5)),
+         (2.5/30,  (  1,  0,  1)),
+         (5.0/30,  (0.5,  0,  0)),
+         (10.0/30, (  1,  1,  0)),
+         (20.0/30, (  0,0.5,  0)),
+         (40.0/30, (  0,  1,  1)),
+         (1,       (  1,  1,  1))])
+    cmap_radius.__doc__ = '''
+    cmap_radius is a colormap for plotting the pRF radius (sigma) of a vertex.
+    Values passed to cmap_radius should be scaled such that (0,30 deg) -> (0,1).
+    '''
+    cmap_log_radius = blend_cmap(
+        'log_radius',
+        [(0,     (  0,  0,  0)),
+         (1.0/7, (  0,  0,0.5)),
+         (2.0/7, (  1,  0,  1)),
+         (3.0/7, (0.5,  0,  0)),
+         (4.0/7, (  1,  1,  0)),
+         (5.0/7, (  0,0.5,  0)),
+         (6.0/7, (  0,  1,  1)),
+         (1,     (  1,  1,  1))])
+    cmap_log_radius.__doc__ = '''
+    cmap_log_radius is a colormap for plotting the log of radius.
+    Values passed to cmap_log_cmag should be scaled however desired, but note that the colormap
+    itself runs linearly from 0 to 1, so radius data should be log-transformed then scaled before
+    being passed.
+    '''
+    cmap_log_cmag = blend_cmap(
+        'log_cmag',
+        [(0,     (  0,  0,  0)),
+         (1.0/7, (  0,  0,0.5)),
+         (2.0/7, (  1,  0,  1)),
+         (3.0/7, (0.5,  0,  0)),
+         (4.0/7, (  1,  1,  0)),
+         (5.0/7, (  0,0.5,  0)),
+         (6.0/7, (  0,  1,  1)),
+         (1,     (  1,  1,  1))])
+    cmap_log_cmag.__doc__ = '''
+    cmap_log_cmag is a colormap for plotting the log of cortical magnification.
+    Values passed to cmap_log_cmag should be scaled however desired, but note that the colormap
+    itself runs linearly from 0 to 1, so cortical magnification data should be log-transformed
+    then scaled before being passed.
+    '''
+
+    colormaps = {
+        'curvature':        (cmap_curvature,        (-1,1)),
+        'polar_angle_sym':  (cmap_polar_angle_sym,  (-180,180)),
+        'polar_angle_lh':   (cmap_polar_angle_lh,   (-180,180)),
+        'polar_angle_rh':   (cmap_polar_angle_rh,   (-180,180)),
+        'polar_angle':      (cmap_polar_angle,      (-180,180)),
+        'theta_sym':        (cmap_theta_sym,        (-np.pi,np.pi)),
+        'theta_lh':         (cmap_theta_lh,         (-np.pi,np.pi)),
+        'theta_rh':         (cmap_theta_rh,         (-np.pi,np.pi)),
+        'theta':            (cmap_theta,            (-np.pi,np.pi)),
+        'eccentricity':     (cmap_eccentricity,     (0,90)),
+        'log_eccentricity': (cmap_log_eccentricity, (np.log(0.5), np.log(90.0))),
+        'radius':           (cmap_radius,           (0, 40)), 
+        'log_radius':       (cmap_log_radius,       (np.log(0.25), np.log(40.0))),
+        'log_cmag':         (cmap_log_cmag,         (np.log(0.5), np.log(32.0)))}
+    for (k,(cmap,_)) in six.iteritems(colormaps): matplotlib.cm.register_cmap(k, cmap)
 except: pass
+
+_vertex_angle_empirical_prefixes = ['prf_', 'measured_', 'empiirical_']
+_vertex_angle_model_prefixes = ['model_', 'predicted_', 'inferred_', 'template_', 'atlas_',
+                                'benson14_', 'benson17_']
+_vertex_angle_prefixes = ([''] + _vertex_angle_model_prefixes + _vertex_angle_model_prefixes)
 
 def vertex_curvature_color(m):
     return [0.2,0.2,0.2,1.0] if m['curvature'] > -0.025 else [0.7,0.7,0.7,1.0]
@@ -213,7 +320,6 @@ def vertex_varea(m, property=None):
                 None)
 def vertex_angle_color(m, weight_min=0.2, weighted=True, hemi=None, property=Ellipsis,
                        weight=Ellipsis, null_color='curvature'):
-    global _angle_cmap_withneg
     if m is Ellipsis:
         kw0 = {'weight_min':weight_min, 'weighted':weighted, 'hemi':hemi,
                'property':property, 'weight':weight, 'null_color':null_color}
@@ -243,14 +349,13 @@ def vertex_angle_color(m, weight_min=0.2, weighted=True, hemi=None, property=Ell
     w = vertex_weight(m, property=weight) if weighted else None
     if weighted and (not pimms.is_number(w) or w < weight_min):
         return nullColor
-    angColor = np.asarray(_angle_cmap_withneg((ang + 180.0) / 360.0))
+    angColor = np.asarray(cmap_polar_angle_sym((ang + 180.0) / 360.0))
     if weighted:
         return angColor*w + nullColor*(1-w)
     else:
         return angColor
 def vertex_eccen_color(m, weight_min=0.1, weighted=True, hemi=None,
                        property=Ellipsis, null_color='curvature', weight=Ellipsis):
-    global _eccen_cmap
     if m is Ellipsis:
         kw0 = {'weight_min':weight_min, 'weighted':weighted, 'hemi':hemi,
                'property':property, 'weight':weight, 'null_color':null_color}
@@ -271,14 +376,13 @@ def vertex_eccen_color(m, weight_min=0.1, weighted=True, hemi=None,
     w = vertex_weight(m, property=weight) if weighted else None
     if weighted and (not pimms.is_number(w) or w < weight_min):
         return nullColor
-    eccColor = np.asarray(_eccen_cmap((ecc if 0 < ecc < 90 else 0 if ecc < 0 else 90)/90.0))
+    eccColor = np.asarray(cmap_eccentricity((ecc if 0 < ecc < 90 else 0 if ecc < 0 else 90)/90.0))
     if weighted:
         return eccColor*w + nullColor*(1-w)
     else:
         return eccColor
 def vertex_sigma_color(m, weight_min=0.1, weighted=True, hemi=None,
                        property=Ellipsis, null_color='curvature', weight=Ellipsis):
-    global _sigma_cmap
     if m is Ellipsis:
         kw0 = {'weight_min':weight_min, 'weighted':weighted, 'hemi':hemi,
                'property':property, 'weight':weight, 'null_color':null_color}
@@ -299,7 +403,7 @@ def vertex_sigma_color(m, weight_min=0.1, weighted=True, hemi=None,
     w = vertex_weight(m, property=weight) if weighted else None
     if weighted and (not pimms.is_number(w) or w < weight_min):
         return nullColor
-    sigColor = np.asarray(_sigma_cmap((sig if 0 < sig < 40 else 0 if sig < 0 else 40)/40.0))
+    sigColor = np.asarray(cmap_radius(sig/30.0))
     if weighted:
         return sigColor*w + nullColor*(1-w)
     else:
@@ -477,19 +581,98 @@ def colors_to_cmap(colors):
          for col in [colors[:,clridx]]},
         N=(len(colors)))
 
-_cortex_colormaps = {'angle': angle_colors,     'polar_angle':  angle_colors,
-                     'eccen': eccen_colors,     'eccentricity': eccen_colors,
-                     'sigma': sigma_colors,     'radius':       sigma_colors,
-                     'varea': varea_colors,     'visual_area':  varea_colors,
-                     'curv':  curvature_colors, 'curvature':    curvature_colors}
-def cortex_plot(the_map, color=None, axes=None):
+def guess_cortex_cmap(pname):
+    '''
+    guess_cortex_cmap(proptery_name) yields a tuple (cmap, (vmin, vmax)) of a cortical color map
+      appropriate to the given property name and the suggested value scaling for the cmap. If the
+      given property is not a string or is not recognized then the log_eccentricity axis is used
+      and the suggested vmin and vmax are None.
+    '''
+    if not pimms.is_str(pname): return (log_eccentricity, None, None)
+    if pname in colormaps: return colormaps[pname]
+    # check each manually
+    for (k,v) in six.iteritems(colormaps):
+        if pname.endswith(k): return v
+    for (k,v) in six.iteritems(colormaps):
+        if pname.startswith(k): return v
+    return (log_eccentricity, None, None)
+def apply_cmap(zs, cmap, vmin=None, vmax=None):
+    '''
+    apply_cmap(z, cmap) applies the given cmap to the values in z; if vmin and/or vmad are passed,
+      they are used to scale z.
+    '''
+    if vmin is None: vmin = np.min(zs)
+    if vmax is None: vmax = np.max(zs)
+    return cmap((zs - vmin) / (vmax - vmin))
+def cortex_cmap_plot(the_map, zs, cmap, vmin=None, vmax=None, axes=None, triangulation=None):
+    '''
+    cortex_cmap_plot(map, zs, cmap, axes) plots the given cortical map values zs on the given axes
+      using the given given color map and yields the resulting polygon collection object.
+    cortex_cmap_plot(map, zs, cmap) uses matplotlib.pyplot.gca() for the axes.
+
+    The following options may be passed:
+      * triangulation (None) may specify the triangularion object for the mesh if it has already
+        been created; otherwise it is generated fresh.
+      * axes (None) specify the axes on which to plot; if None, then matplotlib.pyplot.gca() is
+        used. If Ellipsis, then a tuple (triangulation, z, cmap) is returned; to recreate the plot,
+        one would call:
+          axes.tripcolor(triangulation, z, cmap, shading='gouraud', vmin=vmin, vmax=vmax)
+      * vmin (default: None) specifies the minimum value for scaling the property when one is passed
+        as the color option. None means to use the min value of the property.
+      * vmax (default: None) specifies the maximum value for scaling the property when one is passed
+        as the color option. None means to use the max value of the property.
+    '''
+    if triangulation is None:
+        triangulation = matplotlib.tri.Triangulation(the_map.coordinates[0], the_map.coordinates[1],
+                                                     triangles=the_map.tess.indexed_faces.T)
+    if axes is Ellipsis: return (triangulation, zs, cmap)
+    return axes.tripcolor(triangulation, zs, cmap=cmap, shading='gouraud', vmin=vmin, vmax=vmax)
+def cortex_rgba_plot(the_map, rgba, axes=None, triangulation=None):
+    '''
+    cortex_rgba_plot(map, rgba, axes) plots the given cortical map on the given axes using the given
+      (n x 4) matrix of vertex colors and yields the resulting polygon collection object.
+    cortex_rgba_plot(map, rgba) uses matplotlib.pyplot.gca() for the axes.
+
+    The option triangulation may also be passed if the triangularion object has already been
+    created; otherwise it is generated fresh.
+    '''
+    cmap = colors_to_cmap(rgba)
+    zs = np.linspace(0.0, 1.0, the_map.vertex_count)
+    return cortex_cmap_plot(the_map, zs, cmap, axes=axes, triangulation=triangulation)
+def cortex_plot(the_map,
+                color=None, cmap=None, vmin=None, vmax=None, alpha=None,
+                background='curvature', mask=None, axes=None, triangulation=None):
     '''
     cortex_plot(map) yields a plot of the given 2D cortical mesh, map.
 
     The following options are accepted:
-      * color (default: None) specifies a function that, when passed a single argument, a dict
-        of the properties of a single vertex, yields an RGBA list for that vertex. By default,
-        uses the curvature colors.
+      * color (default: None) specifies the color to plot for each vertex; this argument may take a
+        number of forms:
+          * None, do not plot a color over the background (the default)
+          * a matrix of RGB or RGBA values, one per vertex
+          * a property vector or a string naming a property, in which case the cmap, vmin, and vmax
+            arguments are used to generate colors
+          * a function that, when passed a single argument, a dict of the properties of a single
+            vertex, yields an RGB or RGBA list for that vertex.
+      * cmap (default: 'log_eccentricity') specifies the colormap to use in plotting if the color
+        argument provided is a property.
+      * vmin (default: None) specifies the minimum value for scaling the property when one is passed
+        as the color option. None means to use the min value of the property.
+      * vmax (default: None) specifies the maximum value for scaling the property when one is passed
+        as the color option. None means to use the max value of the property.
+      * background (default: 'curvature') specifies the default background color to plot for the
+        cortical surface; it may be None, 'curvature', or a color.
+      * alpha (default None) specifies the alpha values to use for the color plot. If None, then
+        leaves the alpha values from color unchanged. If a single number, then all alpha values in
+        color are multiplied by that value. If a list of values, one per vertex, then this vector
+        is multiplied by the alpha values. Finally, any negative value is set instead of multiplied.
+        So, for example, if there were 3 vertices with:
+          * color = ((0,0,0,1), (0,0,1,0.5), (0,0,0.75,0,8))
+          * alpha = (-0.5, 1, 0.5)
+        then the resulting colors plotted will be ((0,0,0,0.5), (0,0,1,0.5), (0,0,0.75,0,4)).
+      * mask (default: None) specifies a mask to use for the mesh; thi sis passed through map.mask()
+        to figure out the masking. Those vertices not in the mask are not plotted (but they will be
+        plotted in the background if it is not None).
       * axes (default: None) specifies a particular set of matplotlib pyplot axes that should be
         used. If axes is Ellipsis, then instead of attempting to render the plot, a tuple of
         (tri, zs, cmap) is returned; in this case, tri is a matplotlib.tri.Triangulation
@@ -497,20 +680,62 @@ def cortex_plot(the_map, color=None, axes=None):
         will produce the correct colors. Without axes equal to Ellipsis, these would instead
         be rendered as axes.tripcolor(tri, zs, cmap, shading='gouraud'). If axes is None, then
         uses the current axes.
+      * triangulation (default: None) specifies the matplotlib triangulation object to use, if one
+        already exists; otherwise a new one is made.
     '''
+    # parse the axes
     if axes is None: axes = matplotlib.pyplot.gca()
-    tri = matplotlib.tri.Triangulation(the_map.coordinates[0],
-                                       the_map.coordinates[1],
-                                       triangles=the_map.tess.indexed_faces.T)
-    if pimms.is_matrix(color):
-        colors = color
-    else:
-        if color is None:         color = vertex_curvature_color
-        elif pimms.is_str(color): color = _cortex_colormaps[color]
-        colors = np.asarray(the_map.map(color))
-    cmap = colors_to_cmap(colors)
-    zs = np.asarray(range(the_map.vertex_count), dtype=np.float) / (the_map.vertex_count - 1)
-    if axes is Ellipsis:
-        return (tri, zs, cmap)
-    else:
-        return axes.tripcolor(tri, zs, cmap=cmap, shading='gouraud')
+    # go ahead and make the triangles
+    if triangulation is None: 
+        triangulation = matplotlib.tri.Triangulation(the_map.coordinates[0], the_map.coordinates[1],
+                                                     triangles=the_map.tess.indexed_faces.T)
+    # okay, let's interpret the color
+    if color is None: return None
+    try:
+        clr = matplotlib.colors.to_rgba(color)
+        # This is an rgb color to plot...
+        color = np.ones((the_map.vertex_count,4)) * matplotlib.colors.to_rgba(clr)
+    except: pass
+    if pimms.is_vector(color) or pimms.is_str(color):
+        # it's a property that gets interpreted via the colormap
+        p = the_map.property(color)
+        # if the colormap is none, we can try to guess it
+        if cmap is None:
+            (cmap,(vmn,vmx)) = guess_cortex_cmap(color)
+            if vmin is None: vmin = vmn
+            if vmax is None: vmax = vmx
+        color = apply_cmap(p, cmap, vmin=vmin, vmax=vmax)
+    if not pimms.is_matrix(color):
+        # must be a function; let's try it...
+        color = map(matplotlib.colors.to_rgba, the_map.map(color))
+    color = np.array(color)
+    if color.shape[1] != 4: color = np.hstack([color, np.ones([color.shape[0], 1])])
+    # okay, and the background...
+    if background is not None:
+        if pimms.is_str(background) and background.lower() in ['curvature', 'curv']:
+            background = apply_cmap(the_map.prop('curvature'), cmap_curvature, vmin=-1, vmax=1)
+        else:
+            try: background = np.ones((the_map.vertex_count, 4)) * matplotlib.colors.to_rgba(clr)
+            except: raise ValueError('plot background failed: must be a color or curvature')
+    # okay, let's check on alpha...
+    if alpha is not None:
+        if pimms.is_number(alpha): alpha = np.full(color.shape[0], alpha)
+        else: alpha = the_map.property(alpha)
+        color[:,3] *= alpha
+        neg = (alpha < 0)
+        color[neg,3] = -alpha[neg]
+    alpha = color[:,3]
+    # and the mask...
+    if mask is not None:
+        ii = the_map.mask(mask, indices=True)
+        tmp = np.zeros(len(color))
+        tmp[ii] = color[ii,3]
+        color[:,3] = tmp
+    # then, blend with the background if need be
+    if background is not None:
+        rgb = color[:,:3]
+        rgb = (rgb.T*alpha + background[:,:3].T*(1 - alpha))
+        color[:,:3] = rgb.T
+        color[:,3] = 1.0 # background is opaque
+    # finally, we can make the plot!
+    return cortex_rgba_plot(the_map, color, axes=axes, triangulation=triangulation)
