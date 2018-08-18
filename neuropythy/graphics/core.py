@@ -603,6 +603,7 @@ def apply_cmap(zs, cmap, vmin=None, vmax=None):
     '''
     if vmin is None: vmin = np.min(zs)
     if vmax is None: vmax = np.max(zs)
+    if pimms.is_str(cmap): cmap = matplotlib.cm.get_cmap(cmap)
     return cmap((zs - vmin) / (vmax - vmin))
 def cortex_cmap_plot(the_map, zs, cmap, vmin=None, vmax=None, axes=None, triangulation=None):
     '''
