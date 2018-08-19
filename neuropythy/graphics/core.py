@@ -8,14 +8,18 @@ import scipy               as sp
 import scipy.sparse        as sps
 import scipy.spatial       as spspace
 import neuropythy.geometry as geo
+import neuropythy.mri      as mri
+import neuropythy.io       as nyio
 import pyrsistent          as pyr
-import os, sys, types, six, itertools, pimms
+import os, sys, types, six, itertools, atexit, shutil, tempfile, pimms
 
 from neuropythy.util       import (ObjectWithMetaData, to_affine, times, zdivide, plus, minus)
 from neuropythy.vision     import (visual_area_names, visual_area_numbers)
 
 if sys.version_info[0] == 3: from   collections import abc as colls
 else:                        import collections            as colls
+
+# 2D Graphics ######################################################################################
 
 # Below are various graphics-related functions; some are wrapped in a try block in case matplotlib
 # is not installed.
@@ -252,7 +256,6 @@ def to_rgba(val):
     if pimms.is_npmatrix(val) and val.shape[1] == 4: return val
     try: return np.asarray(matplotlib.colors.to_rgba(val))
     except: return np.asarray([matplotlib.colors.to_rgba(u) for u in val])
-
 def color_overlap(color1, *args):
     '''
     color_overlap(color1, color2...) yields the rgba value associated with overlaying color2 on top
@@ -609,7 +612,6 @@ def colors_to_cmap(colors):
          for (clridx,clrname) in enumerate(['red', 'green', 'blue', 'alpha'])
          for col in [colors[:,clridx]]},
         N=(len(colors)))
-
 def guess_cortex_cmap(pname):
     '''
     guess_cortex_cmap(proptery_name) yields a tuple (cmap, (vmin, vmax)) of a cortical color map
@@ -634,11 +636,12 @@ def apply_cmap(zs, cmap, vmin=None, vmax=None):
     if vmax is None: vmax = np.max(zs)
     if pimms.is_str(cmap): cmap = matplotlib.cm.get_cmap(cmap)
     return cmap((zs - vmin) / (vmax - vmin))
-def cortex_cmap_plot(the_map, zs, cmap, vmin=None, vmax=None, axes=None, triangulation=None):
+
+def cortex_cmap_plot_2D(the_map, zs, cmap, vmin=None, vmax=None, axes=None, triangulation=None):
     '''
-    cortex_cmap_plot(map, zs, cmap, axes) plots the given cortical map values zs on the given axes
-      using the given given color map and yields the resulting polygon collection object.
-    cortex_cmap_plot(map, zs, cmap) uses matplotlib.pyplot.gca() for the axes.
+    cortex_cmap_plot_2D(map, zs, cmap, axes) plots the given cortical map values zs on the given
+      axes using the given given color map and yields the resulting polygon collection object.
+    cortex_cmap_plot_2D(map, zs, cmap) uses matplotlib.pyplot.gca() for the axes.
 
     The following options may be passed:
       * triangulation (None) may specify the triangularion object for the mesh if it has already
@@ -657,28 +660,29 @@ def cortex_cmap_plot(the_map, zs, cmap, vmin=None, vmax=None, axes=None, triangu
                                                      triangles=the_map.tess.indexed_faces.T)
     if axes is Ellipsis: return (triangulation, zs, cmap)
     return axes.tripcolor(triangulation, zs, cmap=cmap, shading='gouraud', vmin=vmin, vmax=vmax)
-def cortex_rgba_plot(the_map, rgba, axes=None, triangulation=None):
+def cortex_rgba_plot_2D(the_map, rgba, axes=None, triangulation=None):
     '''
-    cortex_rgba_plot(map, rgba, axes) plots the given cortical map on the given axes using the given
-      (n x 4) matrix of vertex colors and yields the resulting polygon collection object.
-    cortex_rgba_plot(map, rgba) uses matplotlib.pyplot.gca() for the axes.
+    cortex_rgba_plot_2D(map, rgba, axes) plots the given cortical map on the given axes using the
+      given (n x 4) matrix of vertex colors and yields the resulting polygon collection object.
+    cortex_rgba_plot_2D(map, rgba) uses matplotlib.pyplot.gca() for the axes.
 
     The option triangulation may also be passed if the triangularion object has already been
     created; otherwise it is generated fresh.
     '''
     cmap = colors_to_cmap(rgba)
     zs = np.linspace(0.0, 1.0, the_map.vertex_count)
-    return cortex_cmap_plot(the_map, zs, cmap, axes=axes, triangulation=triangulation)
-def cortex_plot(the_map,
-                color=None, cmap=None, vmin=None, vmax=None, alpha=None,
-                background='curvature', mask=None, axes=None, triangulation=None):
+    return cortex_cmap_plot_2D(the_map, zs, cmap, axes=axes, triangulation=triangulation)
+def cortex_plot_colors(the_map,
+                       color=None, cmap=None, vmin=None, vmax=None, alpha=None,
+                       underlay='curvature', mask=None):
     '''
-    cortex_plot(map) yields a plot of the given 2D cortical mesh, map.
+    cortex_plot_colors(mesh, opts...) yields the cortex colors as a matrix of RGBA rows for the
+      given mesh and options. 
 
     The following options are accepted:
       * color (default: None) specifies the color to plot for each vertex; this argument may take a
         number of forms:
-          * None, do not plot a color over the background (the default)
+          * None, do not plot a color over the underlay (the default)
           * a matrix of RGB or RGBA values, one per vertex
           * a property vector or a string naming a property, in which case the cmap, vmin, and vmax
             arguments are used to generate colors
@@ -690,7 +694,7 @@ def cortex_plot(the_map,
         as the color option. None means to use the min value of the property.
       * vmax (default: None) specifies the maximum value for scaling the property when one is passed
         as the color option. None means to use the max value of the property.
-      * background (default: 'curvature') specifies the default background color to plot for the
+      * underlay (default: 'curvature') specifies the default underlay color to plot for the
         cortical surface; it may be None, 'curvature', or a color.
       * alpha (default None) specifies the alpha values to use for the color plot. If None, then
         leaves the alpha values from color unchanged. If a single number, then all alpha values in
@@ -702,23 +706,8 @@ def cortex_plot(the_map,
         then the resulting colors plotted will be ((0,0,0,0.5), (0,0,1,0.5), (0,0,0.75,0,4)).
       * mask (default: None) specifies a mask to use for the mesh; thi sis passed through map.mask()
         to figure out the masking. Those vertices not in the mask are not plotted (but they will be
-        plotted in the background if it is not None).
-      * axes (default: None) specifies a particular set of matplotlib pyplot axes that should be
-        used. If axes is Ellipsis, then instead of attempting to render the plot, a tuple of
-        (tri, zs, cmap) is returned; in this case, tri is a matplotlib.tri.Triangulation
-        object for the given map and zs and cmap are an array and colormap (respectively) that
-        will produce the correct colors. Without axes equal to Ellipsis, these would instead
-        be rendered as axes.tripcolor(tri, zs, cmap, shading='gouraud'). If axes is None, then
-        uses the current axes.
-      * triangulation (default: None) specifies the matplotlib triangulation object to use, if one
-        already exists; otherwise a new one is made.
+        plotted in the underlay if it is not None).
     '''
-    # parse the axes
-    if axes is None: axes = matplotlib.pyplot.gca()
-    # go ahead and make the triangles
-    if triangulation is None: 
-        triangulation = matplotlib.tri.Triangulation(the_map.coordinates[0], the_map.coordinates[1],
-                                                     triangles=the_map.tess.indexed_faces.T)
     # okay, let's interpret the color
     if color is None:
         color = np.full((the_map.vertex_count, 4), 0.5)
@@ -742,13 +731,13 @@ def cortex_plot(the_map,
         color = to_rgba(the_map.map(color))
     color = np.array(color)
     if color.shape[1] != 4: color = np.hstack([color, np.ones([color.shape[0], 1])])
-    # okay, and the background...
-    if background is not None:
-        if pimms.is_str(background) and background.lower() in ['curvature', 'curv']:
-            background = apply_cmap(the_map.prop('curvature'), cmap_curvature, vmin=-1, vmax=1)
+    # okay, and the underlay...
+    if underlay is not None:
+        if pimms.is_str(underlay) and underlay.lower() in ['curvature', 'curv']:
+            underlay = apply_cmap(the_map.prop('curvature'), cmap_curvature, vmin=-1, vmax=1)
         else:
-            try: background = np.ones((the_map.vertex_count, 4)) * to_rgba(background)
-            except: raise ValueError('plot background failed: must be a color or curvature')
+            try: underlay = np.ones((the_map.vertex_count, 4)) * to_rgba(underlay)
+            except: raise ValueError('plot underlay failed: must be a color or curvature')
     # okay, let's check on alpha...
     if alpha is not None:
         if pimms.is_number(alpha): alpha = np.full(color.shape[0], alpha)
@@ -763,8 +752,275 @@ def cortex_plot(the_map,
         tmp = np.zeros(len(color))
         tmp[ii] = color[ii,3]
         color[:,3] = tmp
-    # then, blend with the background if need be
-    if background is not None:
-        color = color_overlap(background, color)
+    # then, blend with the underlay if need be
+    if underlay is not None:
+        color = color_overlap(underlay, color)
+    return color
+
+def cortex_plot_2D(the_map,
+                   color=None, cmap=None, vmin=None, vmax=None, alpha=None,
+                   underlay='curvature', mask=None, axes=None, triangulation=None):
+    '''
+    cortex_plot_2D(map) yields a plot of the given 2D cortical mesh, map.
+
+    The following options are accepted:
+      * color (default: None) specifies the color to plot for each vertex; this argument may take a
+        number of forms:
+          * None, do not plot a color over the underlay (the default)
+          * a matrix of RGB or RGBA values, one per vertex
+          * a property vector or a string naming a property, in which case the cmap, vmin, and vmax
+            arguments are used to generate colors
+          * a function that, when passed a single argument, a dict of the properties of a single
+            vertex, yields an RGB or RGBA list for that vertex.
+      * cmap (default: 'log_eccentricity') specifies the colormap to use in plotting if the color
+        argument provided is a property.
+      * vmin (default: None) specifies the minimum value for scaling the property when one is passed
+        as the color option. None means to use the min value of the property.
+      * vmax (default: None) specifies the maximum value for scaling the property when one is passed
+        as the color option. None means to use the max value of the property.
+      * underlay (default: 'curvature') specifies the default underlay color to plot for the
+        cortical surface; it may be None, 'curvature', or a color.
+      * alpha (default None) specifies the alpha values to use for the color plot. If None, then
+        leaves the alpha values from color unchanged. If a single number, then all alpha values in
+        color are multiplied by that value. If a list of values, one per vertex, then this vector
+        is multiplied by the alpha values. Finally, any negative value is set instead of multiplied.
+        So, for example, if there were 3 vertices with:
+          * color = ((0,0,0,1), (0,0,1,0.5), (0,0,0.75,0,8))
+          * alpha = (-0.5, 1, 0.5)
+        then the resulting colors plotted will be ((0,0,0,0.5), (0,0,1,0.5), (0,0,0.75,0,4)).
+      * mask (default: None) specifies a mask to use for the mesh; thi sis passed through map.mask()
+        to figure out the masking. Those vertices not in the mask are not plotted (but they will be
+        plotted in the underlay if it is not None).
+      * axes (default: None) specifies a particular set of matplotlib pyplot axes that should be
+        used. If axes is Ellipsis, then instead of attempting to render the plot, a tuple of
+        (tri, zs, cmap) is returned; in this case, tri is a matplotlib.tri.Triangulation
+        object for the given map and zs and cmap are an array and colormap (respectively) that
+        will produce the correct colors. Without axes equal to Ellipsis, these would instead
+        be rendered as axes.tripcolor(tri, zs, cmap, shading='gouraud'). If axes is None, then
+        uses the current axes.
+      * triangulation (default: None) specifies the matplotlib triangulation object to use, if one
+        already exists; otherwise a new one is made.
+    '''
+    # parse the axes
+    if axes is None: axes = matplotlib.pyplot.gca()
+    # process the colors
+    color = cortex_plot_colors(the_map, color=color, cmap=cmap, vmin=vmin, vmax=vmax, alpha=alpha,
+                               underlay=underlay, mask=mask)
     # finally, we can make the plot!
-    return cortex_rgba_plot(the_map, color, axes=axes, triangulation=triangulation)
+    return cortex_rgba_plot_2D(the_map, color, axes=axes, triangulation=triangulation)
+
+
+# 3D Graphics ######################################################################################
+
+def _pysurfer_load_error(*args, **kwargs):
+    raise RuntimeError('load failure: the requested object could not be loaded, probably because ' +
+                       'you do not have PySurfer installed correctly')
+pysurfer_temp_path = _pysurfer_load_error
+cortex_plot_3D = _pysurfer_load_error
+try:
+    import surfer
+
+    # The FreeSurfer-ish directory that we use to communicate with PySurfer
+    _pysurfer_temp_fsdir = None
+    def pysurfer_temp_path(path=Ellipsis, auto_delete=Ellipsis, create=False):
+        '''
+        pysurfer_temp_path() yields the path being used internally by neuropythy to communicate with
+          the surfer module (PySurfer).
+        pysurfer_temp_path(None) creates a temporary directory for use with PySurfer and yields its
+          path. By default, an atexit function is registered to delete this directory, but this may
+          overloaded by passing the option auto_delete=False.
+        pysurfer_temp_path(newpath) updates the PySurfer path to be the given path and yields its
+          absolute path. If this path does not exist, an exception is thrown; though this behavior
+          may be overloaded by passing the option create=True. By default, this directory will not
+          be deleted at exit, but an atexit function to delete the directory can be registered by
+          calling passing the option auto_delete=True.
+
+        If pysurfer_temp_path() is called prior to any setting calls, then pysurfer_temp_path(None)
+        is called to initialize the path.
+        '''
+        global _pysurfer_temp_fsdir
+        if path is Ellipsis:
+            if _pysurfer_temp_fsdir is None: return pysurfer_temp_path(None)
+            else: return _pysurfer_temp_fsdir
+        elif path is None:
+            if auto_delete is Ellipsis: auto_delete = True
+            path = tempfile.mkdtemp(prefix='neuropythy_surfer_tmpdir_')
+        elif not pimms.is_str(path):
+            raise ValueError('Could not understand path argument; must be a string or None')
+        path = os.path.abspath(os.path.expanduser(path))
+        if os.path.isfile(path):
+            raise ValueError('Given path is a file')
+        if create and not os.path.isdir(path):
+            os.makedirs(path, 0750)
+        if not os.path.isdir(path):
+            raise ValueError('No such path: %s' % path)
+        # if auto-delete is a thing, set it up:
+        if auto_delete is True: atexit.register(shutil.rmtree, path)
+        # and set then return the path
+        _pysurfer_temp_fsdir = path
+        return path
+
+except: pass
+
+def cortex_plot_3D(mesh,
+                   color=None, cmap=None, vmin=None, vmax=None, alpha=None,
+                   underlay='curvature', mask=None, hemi=None, surface='white',
+                   title=None, size=800, views=['lat'],
+                   background='white', foreground='black', figure=None,
+                   offset=True, show_toolbar=False, offscreen=False, colorbar=False,
+                   interaction='trackball', config_opts=None, curv=None):
+    '''
+    cortex_plot_3D(mesh) yields a PySurfer Brain object for the given 3D cortical mesh. Mesh may
+      alternately be a pair (lmesh, rmesh) or a subject object, in which case a paired Brain object
+      is returned.
+
+    The following options are accepted:
+      * color (default: None) specifies the color to plot for each vertex; this argument may take a
+        number of forms:
+          * None, do not plot a color over the underlay (the default)
+          * a matrix of RGB or RGBA values, one per vertex
+          * a property vector or a string naming a property, in which case the cmap, vmin, and vmax
+            arguments are used to generate colors
+          * a function that, when passed a single argument, a dict of the properties of a single
+            vertex, yields an RGB or RGBA list for that vertex.
+      * cmap (default: 'log_eccentricity') specifies the colormap to use in plotting if the color
+        argument provided is a property.
+      * vmin (default: None) specifies the minimum value for scaling the property when one is passed
+        as the color option. None means to use the min value of the property.
+      * vmax (default: None) specifies the maximum value for scaling the property when one is passed
+        as the color option. None means to use the max value of the property.
+      * underlay (default: 'curvature') specifies the default underlay color to plot for the
+        cortical surface; it may be None, 'curvature', or a color.
+      * alpha (default None) specifies the alpha values to use for the color plot. If None, then
+        leaves the alpha values from color unchanged. If a single number, then all alpha values in
+        color are multiplied by that value. If a list of values, one per vertex, then this vector
+        is multiplied by the alpha values. Finally, any negative value is set instead of multiplied.
+        So, for example, if there were 3 vertices with:
+          * color = ((0,0,0,1), (0,0,1,0.5), (0,0,0.75,0,8))
+          * alpha = (-0.5, 1, 0.5)
+        then the resulting colors plotted will be ((0,0,0,0.5), (0,0,1,0.5), (0,0,0.75,0,4)).
+      * mask (default: None) specifies a mask to use for the mesh; thi sis passed through map.mask()
+        to figure out the masking. Those vertices not in the mask are not plotted (but they will be
+        plotted in the underlay if it is not None).
+      * hemi (defaut: None) specifies the hemisphere to use. If the passed mesh object is actually a
+        subject or mesh pair then this specifies which hemisphere to use. If the passed object is a
+        mesh, then this overrides its chirality, if specified in meta_data. If two hemispheres are
+        given, then this may be 'both' or 'split' in accordinace with PySurfer's Brain() class.
+      * surface (default: 'white') specifies the surface to use if the mesh object passed is in fact
+        either a cortex or subject object.
+    '''
+    # First, see if we've been passed a cortex or subject object...
+    if isinstance(mesh, mri.Cortex):
+        hemi = mesh.chirality
+        mesh = mesh.surface(surface)
+    elif isinstance(mesh, mri.Subject):
+        if hemi is None or hemi.lower() in ('lr', 'both', 'all'):
+            hemi = 'both'
+            mesh = (mesh.lh.surface(surface), mesh.rh.surface(surface))
+        elif hemi.lower() == 'split':
+            hemi = 'split'
+            mesh = (mesh.lh.surface(surface), mesh.rh.surface(surface))
+        else:
+            mesh = mesh.hemis[hemi]
+            hemi = mesh.chirality
+            mesh = mesh.surface(surface)
+    elif isinstance(mesh, geo.Mesh):
+        if hemi is None:
+            if 'chirality' in mesh.meta_data:
+                hemi = mesh.meta_data['chirality']
+            else: hemi = 'lh'
+    elif pimms.is_vetor(mesh) and len(mesh) == 2:
+        mesh = tuple(mesh)
+        if hemi is None: hemi = 'both'
+        elif hemi.lower() == 'lh': mesh = mesh[0]
+        elif hemi.lower() == 'rh': mesh = mesh[1]
+    # Then, figure out the subject directory for this mesh
+    pydir = pysurfer_temp_path()
+    if isinstance(mesh, geo.Mesh): sid = 'sub_%d'    % id(mesh)
+    else:                          sid = 'sub_%d_%d' % (id(mesh[0]), id(mesh[1]))
+    sdir = os.path.join(pydir, sid)
+    if not os.path.isdir(sdir): os.makedirs(os.path.join(sdir, sid, 'surf'), 0750)
+    # make the files if necessary
+    hs = ('lh','rh') if hemi in ['split','both'] else [hemi]
+    ms = [mesh] if isinstance(mesh, geo.Mesh) else mesh
+    for (h,m) in zip(hs,ms):
+        flnm = os.path.join(sdir, sid, 'surf', '%s.%s' % (h, surface))
+        if not os.path.isfile(flnm):
+            nyio.save(flnm, m, 'freesurfer_geometry')
+        # also need the curv files
+        flnm = os.path.join(sdir, sid, 'surf', '%s.curv' % h)
+        if not os.path.isfile(flnm):
+            nyio.save(flnm, m.prop('curvature'), 'freesurfer_morph')
+    # okay, now we can create the brain object...
+    brain = surfer.Brain(sid, hemi, surface, subjects_dir=sdir,
+                         title=title, size=size, background=background, foreground=foreground,
+                         figure=figure, views=views, offset=offset, show_toolbar=show_toolbar,
+                         offscreen=offscreen, interaction=interaction, config_opts=config_opts,
+                         curv=None)
+    # process the colors
+    rgba = np.concatenate([cortex_plot_colors(m, color=color, cmap=cmap, vmin=vmin, vmax=vmax,
+                                              alpha=alpha, underlay=underlay, mask=mask)
+                           for m in ms])
+    n = len(rgba)
+    for (h,m,i0) in zip(hs,ms,[0] if len(hs) == 1 else [0,ms[0].vertex_count]):
+        zs = np.arange(i0, i0 + m.vertex_count, 1.0) / (n - 1)
+        cmap = colors_to_cmap(rgba)
+        brain.add_data(zs[:,None], min=0, max=1, colormap=rgba*255.0, hemi=h,
+                       time_label=None, colorbar=False)
+    return brain
+
+def cortex_plot(mesh, *args, **opts):
+    '''
+    cortex_plot(mesh) calls either cortex_plot_2D or cortex_plot_3D depending on the dimensionality
+      of the given mesh, and yields the resulting graphics object. All optional arguments supported
+      by each is supported by cortex plot.
+
+    The following options are accepted:
+      * color (default: None) specifies the color to plot for each vertex; this argument may take a
+        number of forms:
+          * None, do not plot a color over the underlay (the default)
+          * a matrix of RGB or RGBA values, one per vertex
+          * a property vector or a string naming a property, in which case the cmap, vmin, and vmax
+            arguments are used to generate colors
+          * a function that, when passed a single argument, a dict of the properties of a single
+            vertex, yields an RGB or RGBA list for that vertex.
+      * cmap (default: 'log_eccentricity') specifies the colormap to use in plotting if the color
+        argument provided is a property.
+      * vmin (default: None) specifies the minimum value for scaling the property when one is passed
+        as the color option. None means to use the min value of the property.
+      * vmax (default: None) specifies the maximum value for scaling the property when one is passed
+        as the color option. None means to use the max value of the property.
+      * underlay (default: 'curvature') specifies the default underlay color to plot for the
+        cortical surface; it may be None, 'curvature', or a color.
+      * alpha (default None) specifies the alpha values to use for the color plot. If None, then
+        leaves the alpha values from color unchanged. If a single number, then all alpha values in
+        color are multiplied by that value. If a list of values, one per vertex, then this vector
+        is multiplied by the alpha values. Finally, any negative value is set instead of multiplied.
+        So, for example, if there were 3 vertices with:
+          * color = ((0,0,0,1), (0,0,1,0.5), (0,0,0.75,0,8))
+          * alpha = (-0.5, 1, 0.5)
+        then the resulting colors plotted will be ((0,0,0,0.5), (0,0,1,0.5), (0,0,0.75,0,4)).
+      * mask (default: None) specifies a mask to use for the mesh; thi sis passed through map.mask()
+        to figure out the masking. Those vertices not in the mask are not plotted (but they will be
+        plotted in the underlay if it is not None).
+      * hemi (defaut: None) specifies the hemisphere to use. If the passed mesh object is actually a
+        subject or mesh pair then this specifies which hemisphere to use. If the passed object is a
+        mesh, then this overrides its chirality, if specified in meta_data. If two hemispheres are
+        given, then this may be 'both' or 'split' in accordinace with PySurfer's Brain() class.
+      * surface (default: 'white') specifies the surface to use if the mesh object passed is in fact
+        either a cortex or subject object.
+      * axes (default: None) specifies a particular set of matplotlib pyplot axes that should be
+        used. If axes is Ellipsis, then instead of attempting to render the plot, a tuple of
+        (tri, zs, cmap) is returned; in this case, tri is a matplotlib.tri.Triangulation
+        object for the given map and zs and cmap are an array and colormap (respectively) that
+        will produce the correct colors. Without axes equal to Ellipsis, these would instead
+        be rendered as axes.tripcolor(tri, zs, cmap, shading='gouraud'). If axes is None, then
+        uses the current axes.
+      * triangulation (default: None) specifies the matplotlib triangulation object to use, if one
+        already exists; otherwise a new one is made.
+    '''
+    if not isinstance(mesh, geo.Mesh) or mesh.coordinates.shape[0] > 2:
+        # must be a 3D call
+        return cortex_plot_3D(mesh, *args, **opts)
+    else:
+        return cortex_plot_2D(mesh, *args, **opts)
