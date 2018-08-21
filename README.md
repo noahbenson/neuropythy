@@ -42,13 +42,10 @@ and they must be found on your PYTHONPATH in order to use neuropythy.
 
 ### Optional Dependencies
 
- * **[python-igraph &ge; 0.7.1](http://igraph.org/python/)**. You can only create graph objects from
-   cortical surface meshes if you have installed the [python-igraph](http://igraph.org/python/)
-   library; it is not required otherwise.
  * **[Matplotlib &ge; 1.5.3](http://matplitlib.org/)**. A few functions for plotting cortical maps
-   are defined in the neuropythy.cortex package. These are not defined if matplotlib is not imported
-   successfully. The functions in question are cortex_plot, vertex_angle_color, vertex_eccen_color,
-   and a few helper functions.
+   are defined in the neuropythy.graphics package. These are not defined if matplotlib is not
+   imported successfully. The primary interface to this functionality is the
+   neuropythy.graphics.cortex_plot as well as some helper functions and colormaps.
  * **[Java &ge; 1.8](http://www.oracle.com/technetwork/java/javase/downloads/index.html)**.
    The registration algorithm employed by the register_retinotopy command is performed by
    a Java library embedded in the neuropythy Python library. This library is the
@@ -60,6 +57,11 @@ and they must be found on your PYTHONPATH in order to use neuropythy.
    installed and working. For help getting Java configured to work with Py4j, see the
    [Py4j installation page](https://www.py4j.org/install.html).
 
+### Python Version #################################################################################
+
+Neuropythy has been used extensively with Python 2.7; recently some effort has been made to make it
+compatible with Python 3. In theory it should work with Python 3; however, relatively little testing
+has been done.
 
 ## Commands ########################################################################################
 
