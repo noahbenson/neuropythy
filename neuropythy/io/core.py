@@ -6,7 +6,7 @@
 import numpy                        as np
 import pyrsistent                   as pyr
 import nibabel                      as nib
-import os, types, six, pimms
+import os, six, pimms
 
 # The list of import-types we understand
 importers = pyr.m()
