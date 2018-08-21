@@ -10,14 +10,10 @@ import scipy.spatial       as spspace
 import neuropythy.geometry as geo
 import neuropythy.mri      as mri
 import neuropythy.io       as nyio
-import pyrsistent          as pyr
-import os, sys, types, six, itertools, atexit, shutil, tempfile, pimms
+import os, sys, six, itertools, atexit, shutil, tempfile, pimms
 
-from neuropythy.util       import (ObjectWithMetaData, to_affine, times, zdivide, plus, minus)
-from neuropythy.vision     import (visual_area_names, visual_area_numbers)
-
-if sys.version_info[0] == 3: from   collections import abc as colls
-else:                        import collections            as colls
+from ..util            import (times, zdivide, plus, minus)
+from ..vision          import (visual_area_names, visual_area_numbers)
 
 # 2D Graphics ######################################################################################
 
@@ -113,7 +109,8 @@ try:
     '''
     cmap_theta_lh = blend_cmap(
         'theta_lh',
-        [(0.5,0,0), (1,1,0), (0,0.5,0), (0,1,1), (0,0,0.5), (0.5,0,0.75), (1,0,1), (0.75,0,0.5), (0.5,0,0)])
+        [(0.5,0,0), (1,1,0), (0,0.5,0), (0,1,1), (0,0,0.5),
+         (0.5,0,0.75), (1,0,1), (0.75,0,0.5), (0.5,0,0)])
     cmap_theta_lh.__doc__ = '''
     cmap_theta_lh is a colormap for plotting the pRF theta of a vertex.
     Values passed to cmap_theta_lh should be scaled such that (-pi,pi rad) -> (0,1). Note that 0 is
@@ -124,7 +121,8 @@ try:
     '''
     cmap_theta_rh = blend_cmap(
         'theta_rh',
-        [(0.5,0,0), (0.75,0,0.5), (0.5,0,0.75), (1,0,1), (0,0,0.5), (0,1,1), (0,0.5,0), (1,1,0), (0.5,0,0)])
+        [(0.5,0,0), (0.75,0,0.5), (0.5,0,0.75), (1,0,1),
+         (0,0,0.5), (0,1,1), (0,0.5,0), (1,1,0), (0.5,0,0)])
     cmap_theta_rh.__doc__ = '''
     cmap_theta_rh is a colormap for plotting the pRF theta of a vertex.
     Values passed to cmap_theta_rh should be scaled such that (-pi,pi rad) -> (0,1). Note that 0 is
@@ -270,9 +268,9 @@ def color_overlap(color1, *args):
         c = to_rgba(c)
         a = c[...,3]
         a0 = rgba[...,3]
-        if np.isclose(rgba[...,3], 0).all(): rgba = np.ones(rgba.shape) * c
-        elif np.isclose(a, 0).all(): continue
-        else: rgba = times(a, c) + times(1-a, rgba)
+        if   np.isclose(a0, 0).all(): rgba = np.ones(rgba.shape) * c
+        elif np.isclose(a,  0).all(): continue
+        else:                         rgba = times(a, c) + times(1-a, rgba)
     return rgba
 
 _vertex_angle_empirical_prefixes = ['prf_', 'measured_', 'empiirical_']
@@ -812,64 +810,63 @@ def cortex_plot_2D(the_map,
 
 # 3D Graphics ######################################################################################
 
-def _pysurfer_load_error(*args, **kwargs):
-    raise RuntimeError('load failure: the requested object could not be loaded, probably because ' +
-                       'you do not have PySurfer installed correctly')
-pysurfer_temp_path = _pysurfer_load_error
-cortex_plot_3D = _pysurfer_load_error
-try:
-    import surfer
-
-    # The FreeSurfer-ish directory that we use to communicate with PySurfer
-    _pysurfer_temp_fsdir = None
-    def pysurfer_temp_path(path=Ellipsis, auto_delete=Ellipsis, create=False):
-        '''
-        pysurfer_temp_path() yields the path being used internally by neuropythy to communicate with
-          the surfer module (PySurfer).
-        pysurfer_temp_path(None) creates a temporary directory for use with PySurfer and yields its
-          path. By default, an atexit function is registered to delete this directory, but this may
-          overloaded by passing the option auto_delete=False.
-        pysurfer_temp_path(newpath) updates the PySurfer path to be the given path and yields its
-          absolute path. If this path does not exist, an exception is thrown; though this behavior
-          may be overloaded by passing the option create=True. By default, this directory will not
-          be deleted at exit, but an atexit function to delete the directory can be registered by
-          calling passing the option auto_delete=True.
-
-        If pysurfer_temp_path() is called prior to any setting calls, then pysurfer_temp_path(None)
-        is called to initialize the path.
-        '''
-        global _pysurfer_temp_fsdir
-        if path is Ellipsis:
-            if _pysurfer_temp_fsdir is None: return pysurfer_temp_path(None)
-            else: return _pysurfer_temp_fsdir
-        elif path is None:
-            if auto_delete is Ellipsis: auto_delete = True
-            path = tempfile.mkdtemp(prefix='neuropythy_surfer_tmpdir_')
-        elif not pimms.is_str(path):
-            raise ValueError('Could not understand path argument; must be a string or None')
-        path = os.path.abspath(os.path.expanduser(path))
-        if os.path.isfile(path):
-            raise ValueError('Given path is a file')
-        if create and not os.path.isdir(path):
-            os.makedirs(path, 0750)
-        if not os.path.isdir(path):
-            raise ValueError('No such path: %s' % path)
-        # if auto-delete is a thing, set it up:
-        if auto_delete is True: atexit.register(shutil.rmtree, path)
-        # and set then return the path
-        _pysurfer_temp_fsdir = path
-        return path
-
-except: pass
-
-def cortex_plot_3D(mesh,
-                   color=None, cmap=None, vmin=None, vmax=None, alpha=None,
-                   underlay='curvature', mask=None, hemi=None, surface='white',
-                   title=None, size=800, views=['lat'],
-                   background='white', foreground='black', figure=None,
-                   offset=True, show_toolbar=False, offscreen=False, colorbar=False,
-                   interaction='trackball', config_opts=None, curv=None):
-    '''
+# If we're using Python 2, we're compatible with pysurfer:
+if six.PY2:
+    def _pysurfer_load_error(*args, **kwargs):
+        raise RuntimeError('load failure: the requested object could not be loaded, probably ' +
+                           'because you do not have PySurfer installed correctly')
+    pysurfer_temp_path = _pysurfer_load_error
+    cortex_plot_3D = _pysurfer_load_error
+    try:
+        import surfer
+    
+        # The FreeSurfer-ish directory that we use to communicate with PySurfer
+        _pysurfer_temp_fsdir = None
+        def pysurfer_temp_path(path=Ellipsis, auto_delete=Ellipsis, create=False):
+            '''
+            pysurfer_temp_path() yields the path being used internally by neuropythy to communicate
+              with the surfer module (PySurfer).
+            pysurfer_temp_path(None) creates a temporary directory for use with PySurfer and yields
+              its path. By default, an atexit function is registered to delete this directory, but
+              this may overloaded by passing the option auto_delete=False.
+            pysurfer_temp_path(newpath) updates the PySurfer path to be the given path and yields
+              its absolute path. If this path does not exist, an exception is thrown; though this
+              behavior may be overloaded by passing the option create=True. By default, this
+              directory will not be deleted at exit, but an atexit function to delete the directory
+              can be registered by calling passing the option auto_delete=True.
+    
+            If pysurfer_temp_path() is called prior to any setting calls, then
+            pysurfer_temp_path(None) is called to initialize the path.
+            '''
+            global _pysurfer_temp_fsdir
+            if path is Ellipsis:
+                if _pysurfer_temp_fsdir is None: return pysurfer_temp_path(None)
+                else: return _pysurfer_temp_fsdir
+            elif path is None:
+                if auto_delete is Ellipsis: auto_delete = True
+                path = tempfile.mkdtemp(prefix='neuropythy_surfer_tmpdir_')
+            elif not pimms.is_str(path):
+                raise ValueError('Could not understand path argument; must be a string or None')
+            path = os.path.abspath(os.path.expanduser(path))
+            if os.path.isfile(path):
+                raise ValueError('Given path is a file')
+            if create and not os.path.isdir(path):
+                os.makedirs(path, 0o750)
+            if not os.path.isdir(path):
+                raise ValueError('No such path: %s' % path)
+            # if auto-delete is a thing, set it up:
+            if auto_delete is True: atexit.register(shutil.rmtree, path)
+            # and set then return the path
+            _pysurfer_temp_fsdir = path
+            return path
+        def cortex_plot_3D(mesh,
+                           color=None, cmap=None, vmin=None, vmax=None, alpha=None,
+                           underlay='curvature', mask=None, hemi=None, surface='white',
+                           title=None, size=800, views=['lat'],
+                           background='white', foreground='black', figure=None,
+                           offset=True, show_toolbar=False, offscreen=False, colorbar=False,
+                           interaction='trackball', config_opts=None, curv=None):
+            '''
     cortex_plot_3D(mesh) yields a PySurfer Brain object for the given 3D cortical mesh. Mesh may
       alternately be a pair (lmesh, rmesh) or a subject object, in which case a paired Brain object
       is returned.
@@ -909,65 +906,79 @@ def cortex_plot_3D(mesh,
       * surface (default: 'white') specifies the surface to use if the mesh object passed is in fact
         either a cortex or subject object.
     '''
-    # First, see if we've been passed a cortex or subject object...
-    if isinstance(mesh, mri.Cortex):
-        hemi = mesh.chirality
-        mesh = mesh.surface(surface)
-    elif isinstance(mesh, mri.Subject):
-        if hemi is None or hemi.lower() in ('lr', 'both', 'all'):
-            hemi = 'both'
-            mesh = (mesh.lh.surface(surface), mesh.rh.surface(surface))
-        elif hemi.lower() == 'split':
-            hemi = 'split'
-            mesh = (mesh.lh.surface(surface), mesh.rh.surface(surface))
-        else:
-            mesh = mesh.hemis[hemi]
-            hemi = mesh.chirality
-            mesh = mesh.surface(surface)
-    elif isinstance(mesh, geo.Mesh):
-        if hemi is None:
-            if 'chirality' in mesh.meta_data:
-                hemi = mesh.meta_data['chirality']
-            else: hemi = 'lh'
-    elif pimms.is_vetor(mesh) and len(mesh) == 2:
-        mesh = tuple(mesh)
-        if hemi is None: hemi = 'both'
-        elif hemi.lower() == 'lh': mesh = mesh[0]
-        elif hemi.lower() == 'rh': mesh = mesh[1]
-    # Then, figure out the subject directory for this mesh
-    pydir = pysurfer_temp_path()
-    if isinstance(mesh, geo.Mesh): sid = 'sub_%d'    % id(mesh)
-    else:                          sid = 'sub_%d_%d' % (id(mesh[0]), id(mesh[1]))
-    sdir = os.path.join(pydir, sid)
-    if not os.path.isdir(sdir): os.makedirs(os.path.join(sdir, sid, 'surf'), 0750)
-    # make the files if necessary
-    hs = ('lh','rh') if hemi in ['split','both'] else [hemi]
-    ms = [mesh] if isinstance(mesh, geo.Mesh) else mesh
-    for (h,m) in zip(hs,ms):
-        flnm = os.path.join(sdir, sid, 'surf', '%s.%s' % (h, surface))
-        if not os.path.isfile(flnm):
-            nyio.save(flnm, m, 'freesurfer_geometry')
-        # also need the curv files
-        flnm = os.path.join(sdir, sid, 'surf', '%s.curv' % h)
-        if not os.path.isfile(flnm):
-            nyio.save(flnm, m.prop('curvature'), 'freesurfer_morph')
-    # okay, now we can create the brain object...
-    brain = surfer.Brain(sid, hemi, surface, subjects_dir=sdir,
-                         title=title, size=size, background=background, foreground=foreground,
-                         figure=figure, views=views, offset=offset, show_toolbar=show_toolbar,
-                         offscreen=offscreen, interaction=interaction, config_opts=config_opts,
-                         curv=None)
-    # process the colors
-    rgba = np.concatenate([cortex_plot_colors(m, color=color, cmap=cmap, vmin=vmin, vmax=vmax,
-                                              alpha=alpha, underlay=underlay, mask=mask)
-                           for m in ms])
-    n = len(rgba)
-    for (h,m,i0) in zip(hs,ms,[0] if len(hs) == 1 else [0,ms[0].vertex_count]):
-        zs = np.arange(i0, i0 + m.vertex_count, 1.0) / (n - 1)
-        cmap = colors_to_cmap(rgba)
-        brain.add_data(zs[:,None], min=0, max=1, colormap=rgba*255.0, hemi=h,
-                       time_label=None, colorbar=False)
-    return brain
+            # First, see if we've been passed a cortex or subject object...
+            if isinstance(mesh, mri.Cortex):
+                hemi = mesh.chirality
+                mesh = mesh.surface(surface)
+            elif isinstance(mesh, mri.Subject):
+                if hemi is None or hemi.lower() in ('lr', 'both', 'all'):
+                    hemi = 'both'
+                    mesh = (mesh.lh.surface(surface), mesh.rh.surface(surface))
+                elif hemi.lower() == 'split':
+                    hemi = 'split'
+                    mesh = (mesh.lh.surface(surface), mesh.rh.surface(surface))
+                else:
+                    mesh = mesh.hemis[hemi]
+                    hemi = mesh.chirality
+                    mesh = mesh.surface(surface)
+            elif isinstance(mesh, geo.Mesh):
+                if hemi is None:
+                    if 'chirality' in mesh.meta_data:
+                        hemi = mesh.meta_data['chirality']
+                    else: hemi = 'lh'
+            elif pimms.is_vetor(mesh) and len(mesh) == 2:
+                mesh = tuple(mesh)
+                if hemi is None: hemi = 'both'
+                elif hemi.lower() == 'lh': mesh = mesh[0]
+                elif hemi.lower() == 'rh': mesh = mesh[1]
+            # Then, figure out the subject directory for this mesh
+            pydir = pysurfer_temp_path()
+            if isinstance(mesh, geo.Mesh): sid = 'sub_%d'    % id(mesh)
+            else:                          sid = 'sub_%d_%d' % (id(mesh[0]), id(mesh[1]))
+            sdir = os.path.join(pydir, sid)
+            if not os.path.isdir(sdir): os.makedirs(os.path.join(sdir, sid, 'surf'), 0o750)
+            # make the files if necessary
+            hs = ('lh','rh') if hemi in ['split','both'] else [hemi]
+            ms = [mesh] if isinstance(mesh, geo.Mesh) else mesh
+            for (h,m) in zip(hs,ms):
+                flnm = os.path.join(sdir, sid, 'surf', '%s.%s' % (h, surface))
+                if not os.path.isfile(flnm):
+                    nyio.save(flnm, m, 'freesurfer_geometry')
+                # also need the curv files
+                flnm = os.path.join(sdir, sid, 'surf', '%s.curv' % h)
+                if not os.path.isfile(flnm):
+                    nyio.save(flnm, m.prop('curvature'), 'freesurfer_morph')
+            # okay, now we can create the brain object...
+            brain = surfer.Brain(sid, hemi, surface, subjects_dir=sdir,
+                                 title=title, size=size,
+                                 background=background, foreground=foreground,
+                                 figure=figure, views=views, offset=offset,
+                                 show_toolbar=show_toolbar, offscreen=offscreen,
+                                 interaction=interaction, config_opts=config_opts,
+                                 curv=None)
+            # process the colors
+            rgba = np.concatenate(
+                [cortex_plot_colors(m, color=color, cmap=cmap, vmin=vmin, vmax=vmax,
+                                    alpha=alpha, underlay=underlay, mask=mask)
+                 for m in ms])
+            n = len(rgba)
+            for (h,m,i0) in zip(hs,ms,[0] if len(hs) == 1 else [0,ms[0].vertex_count]):
+                zs = np.arange(i0, i0 + m.vertex_count, 1.0) / (n - 1)
+                cmap = colors_to_cmap(rgba)
+                brain.add_data(zs[:,None], min=0, max=1, colormap=rgba*255.0, hemi=h,
+                               time_label=None, colorbar=False)
+            return brain
+    except: pass
+else:
+    # If we are in Python 3, we're compatible with pycortex
+    def _pycortex_load_error(*args, **kwargs):
+        raise RuntimeError('load failure: the requested object could not be loaded, probably ' +
+                           'because you do not have PyCortex installed correctly')
+    cortex_plot_3D = _pycortex_load_error
+    try:
+        import cortex
+    except: pass
+
 
 def cortex_plot(mesh, *args, **opts):
     '''
