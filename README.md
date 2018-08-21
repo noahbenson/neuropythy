@@ -35,7 +35,7 @@ The neuropythy library depends on a few other libraries, all freely available:
  * [scipy](http://www.scipy.org/) &ge; 0.7.0
  * [nibabel](https://github.com/nipy/nibabel) &ge; 1.2
  * [pyrsistent](https://github.com/tobgu/pyrsistent) &ge; 0.11.0
- * [pimms](https://github.com/noahbenson/pimms) &ge 0.2.8
+ * [pimms](https://github.com/noahbenson/pimms) &ge; 0.2.8
  * [py4j](https://www.py4j.org/) &ge; 0.10
 
 These libaries should be installed automatically for you if you use pip or setuptools (see above),
