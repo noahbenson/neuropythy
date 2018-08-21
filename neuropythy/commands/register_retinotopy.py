@@ -13,9 +13,9 @@ import nibabel.freesurfer.mghformat as     fsmgh
 import pyrsistent                   as     pyr
 import os, sys, six, pimms
 
-from neuropythy.freesurfer          import (subject, add_subject_path)
-from neuropythy.util                import CommandLineParser
-from neuropythy.vision              import (register_retinotopy, retinotopy_model, clean_retinotopy,
+from ..freesurfer                   import (subject, add_subject_path)
+from ..util                         import CommandLineParser
+from ..vision                       import (register_retinotopy, retinotopy_model, clean_retinotopy,
                                             empirical_retinotopy_data)
 
 info = '''

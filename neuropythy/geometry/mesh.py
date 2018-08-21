@@ -13,17 +13,18 @@ import scipy.optimize               as spopt
 import nibabel                      as nib
 import nibabel.freesurfer.mghformat as fsmgh
 import pyrsistent                   as pyr
-import sys, six, pimms
+import collections                  as colls
+import sys, six, types, pimms
 
-if sys.version_info[0] == 3: from   collections import abc as colls
-else:                        import collections            as colls
-
-from .util import (triangle_area, triangle_address, alignment_matrix_3D, rotation_matrix_3D,
-                   cartesian_to_barycentric_3D, cartesian_to_barycentric_2D,
-                   barycentric_to_cartesian, point_in_triangle)
-from neuropythy.util import (ObjectWithMetaData, to_affine, zinv, is_image, address_data)
-from neuropythy.io   import (load, importer)
+from .util  import (triangle_area, triangle_address, alignment_matrix_3D, rotation_matrix_3D,
+                    cartesian_to_barycentric_3D, cartesian_to_barycentric_2D,
+                    barycentric_to_cartesian, point_in_triangle)
+from ..util import (ObjectWithMetaData, to_affine, zinv, is_image, address_data)
+from ..io   import (load, importer)
 from functools import reduce
+
+if six.PY2: (_tuple_type, _list_type) = (types.TupleType, types.ListType)
+else:       (_tuple_type, _list_type) = (tuple, list)
 
 # This function creates the tkr matrix for a volume given the dims
 def tkr_vox2ras(img, zooms=None):
@@ -2338,7 +2339,7 @@ def to_tess(obj, properties=None, meta_data=None):
     elif isinstance(obj, Mesh): res = obj.tess
     elif isinstance(obj, Topology): res = obj.tess
     elif pimms.is_matrix(obj, 'number'): res = Tesselation(obj)
-    elif isinstance(obj, types.TupleType) and len(obj) == 2 and pimms.is_matrix(obj[1], 'int'):
+    elif isinstance(obj, _tuple_type) and len(obj) == 2 and pimms.is_matrix(obj[1], 'int'):
         res = Tesselation(obj[1])
     else: raise ValueError('Cannot deduce how object is a tesselation')
     if properties is not None: res = res.with_prop(properties)
@@ -2359,7 +2360,7 @@ def to_mesh(obj, properties=None, meta_data=None):
         if properties is not None: res = res.with_prop(properties)
         if meta_data is not None: res = res.with_meta(meta_data)
         return res
-    elif isinstance(obj, types.TupleType) and len(obj) == 2:
+    elif isinstance(obj, _tuple_type) and len(obj) == 2:
         return Mesh(obj[1], obj[0], properties=properties, meta_data=meta_data)
     else:
         raise ValueError('Could not deduce how object can be convertex into a mesh')

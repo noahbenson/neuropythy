@@ -3,11 +3,10 @@
 # Core tools for registering the cortical surface to a particular potential function
 # By Noah C. Benson
 
-import numpy               as     np
-import neuropythy.geometry as     geo
-from   numpy               import pi
-from   neuropythy.java     import (to_java_doubles, to_java_ints, to_java_array,
-                                   java_link, serialize_numpy)
+import numpy  as     np
+from   numpy  import pi
+from   ..java import (to_java_doubles, to_java_ints, to_java_array, java_link, serialize_numpy)
+from   ..     import geometry as geo
 import pimms
 
 # These are dictionaries of all the details we have about each of the possible arguments to the

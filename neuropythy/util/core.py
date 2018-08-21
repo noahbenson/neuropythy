@@ -3,12 +3,16 @@
 # This file implements the command-line tools that are available as part of neuropythy as well as
 # a number of other random utilities.
 
-import numpy                        as np
-import scipy.sparse                 as sps
-import pyrsistent                   as pyr
-import nibabel                      as nib
-import nibabel.freesurfer.mghformat as fsmgh
-import types, inspect, pimms, os
+import types, inspect, pimms, os, six
+import numpy                             as np
+import scipy.sparse                      as sps
+import pyrsistent                        as pyr
+import nibabel                           as nib
+import nibabel.freesurfer.mghformat      as fsmgh
+from   functools                    import reduce
+
+if six.PY2: (_tuple_type, _list_type) = (types.TupleType, types.ListType)
+else:       (_tuple_type, _list_type) = (tuple, list)
 
 @pimms.immutable
 class CommandLineParser(object):
@@ -117,7 +121,7 @@ class CommandLineParser(object):
         
     def __call__(self, *args):
         if len(args) > 0 and not isinstance(args[0], basestring) and \
-           isinstance(args[0], (types.ListType, types.TupleType)):
+           isinstance(args[0], (_list_type, _tuple_type)):
             args = list(args)
             return self.__call__(*(list(args[0]) + args[1:]))
         parse_state = None
@@ -228,7 +232,7 @@ def to_affine(aff, dims=None):
       that the returned matrix will be of size (dims+1) x (dims+1).
     '''
     if aff is None: return None
-    if isinstance(aff, types.TupleType):
+    if isinstance(aff, _tuple_type):
         # allowed to be (mtx, offset)
         if (len(aff) != 2                       or
             not pimms.is_matrix(aff[0], 'real') or
@@ -425,21 +429,21 @@ def plus(*args):
         a = np.reshape(a, np.shape(a) + tuple(np.ones(len(b.shape) - len(a.shape), dtype=np.int)))
         return a + b
     return reduce(f, args[1:], np.asarray(args[0]))
-def minus(*args):
+def minus(a, b):
     '''
-    minus(a, b...) returns the sum of all the values as a numpy array object. Unlike numpy's
-      subtract function or a - b syntax, minus will thread over the earliest dimension possible;
-      thus if a.shape a.shape is (4,2) and b.shape is 4, a - b is a equivalent to
+    minus(a, b) returns the difference a - b as a numpy array object. Unlike numpy's subtract
+      function or a - b syntax, minus will thread over the earliest dimension possible; this if
+      a.shape a.shape is (4,2) and b.shape is 4, a - b is a equivalent to
       [ai-bi for (ai,bi) in zip(a,b)].
     '''
-    if len(args) == 0: return np.asarray(1)
-    def f(a,b):
-        b = np.asarray(b)
-        if len(a.shape) == 0 or len(b.shape) == 0: return a + b
-        if len(a.shape) > len(b.shape): (a,b) = (b,a)
+    a = np.asarray(a)
+    b = np.asarray(b)
+    if len(a.shape) == 0 or len(b.shape) == 0: return a + b
+    if len(a.shape) <= len(b.shape):
         a = np.reshape(a, np.shape(a) + tuple(np.ones(len(b.shape) - len(a.shape), dtype=np.int)))
-        return a + b
-    return reduce(f, args[1:], np.asarray(args[0]))
+    else:
+        b = np.reshape(b, np.shape(b) + tuple(np.ones(len(a.shape) - len(b.shape), dtype=np.int)))
+    return a - b
 def times(*args):
     '''
     times(a, b...) returns the product of all the values as a numpy array object. Unlike numpy's
@@ -455,36 +459,34 @@ def times(*args):
         a = np.reshape(a, np.shape(a) + tuple(np.ones(len(b.shape) - len(a.shape), dtype=np.int)))
         return a*b
     return reduce(f, args[1:], np.asarray(args[0]))
-def divide(*args):
+def divide(a, b):
     '''
-    divide(a, b...) returns the product of all the values as a numpy array object. Unlike numpy's
-      divide function or a/b syntax, divide will thread over the earliest dimension possible; thus
-      if a.shape is (4,2) and b.shape is 4, divide(a,b) is a equivalent to
-      [ai/bi for (ai,bi) in zip(a,b)].
+    divide(a, b) returns the quotient a / b as a numpy array object. Unlike numpy's divide function
+      or a/b syntax, divide will thread over the earliest dimension possible; thus if a.shape is
+      (4,2) and b.shape is 4, divide(a,b) is a equivalent to [ai/bi for (ai,bi) in zip(a,b)].
     '''
-    if len(args) == 0: return np.asarray(1)
-    def f(a,b):
-        b = np.asarray(b)
-        if len(a.shape) == 0 or len(b.shape) == 0: return a / b
-        if len(a.shape) > len(b.shape): (a,b) = (b,a)
+    a = np.asarray(a)
+    b = np.asarray(b)
+    if len(a.shape) == 0 or len(b.shape) == 0: return a / b
+    if len(a.shape) <= len(b.shape):
         a = np.reshape(a, np.shape(a) + tuple(np.ones(len(b.shape) - len(a.shape), dtype=np.int)))
-        return a / b
-    return reduce(f, args[1:], np.asarray(args[0]))
-def zdivide(*args):
+    else:
+        b = np.reshape(b, np.shape(b) + tuple(np.ones(len(a.shape) - len(b.shape), dtype=np.int)))
+    return a / b
+def zdivide(a, b):
     '''
-    zdivide(a, b...) returns the quotient of all the values as a numpy array object. Unlike numpy's
-      divide function or a/b syntax, zdivide will thread over the earliest dimension possible; thus
-      if a.shape is (4,2) and b.shape is 4, zdivide(a,b) is a equivalent to
-      [ai*zinv(bi) for (ai,bi) in zip(a,b)].
+    zdivide(a, b) returns the quotient a / b as a numpy array object. Unlike numpy's divide function
+      or a/b syntax, zdivide will thread over the earliest dimension possible; thus if a.shape is
+      (4,2) and b.shape is 4, zdivide(a,b) is a equivalent to [ai*zinv(bi) for (ai,bi) in zip(a,b)].
     '''
-    if len(args) == 0: return np.asarray(1)
-    def f(a,b):
-        b = np.asarray(b)
-        if len(a.shape) == 0 or len(b.shape) == 0: return a * zinv(b)
-        if len(a.shape) > len(b.shape): (a,b) = (b,a)
+    a = np.asarray(a)
+    b = np.asarray(b)
+    if len(a.shape) == 0 or len(b.shape) == 0: return a / b
+    if len(a.shape) <= len(b.shape):
         a = np.reshape(a, np.shape(a) + tuple(np.ones(len(b.shape) - len(a.shape), dtype=np.int)))
-        return a * zinv(b)
-    return reduce(f, args[1:], np.asarray(args[0]))
+    else:
+        b = np.reshape(b, np.shape(b) + tuple(np.ones(len(a.shape) - len(b.shape), dtype=np.int)))
+    return a * zinv(b)
 
 def library_path():
     '''

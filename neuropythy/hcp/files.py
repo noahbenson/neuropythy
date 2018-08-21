@@ -4,8 +4,8 @@
 # by Noah C. Benson
 
 import os, six, pimms, pyrsistent as pyr, nibabel as nib, numpy as np
-import neuropythy.io as nyio
-from neuropythy.util import is_image
+from .. import io as nyio
+from ..util import is_image
 
 # this isn't required, but if we can load it we will use it for auto-downloading subject data
 try:    import s3fs
@@ -84,7 +84,7 @@ def find_subject_path(sid):
     if _auto_download_options is None or not _auto_downloadable(sid): return None
     pth = os.path.join(_auto_download_options['subjects_path'], sub)
     if os.path.isdir(pth): return pth
-    try: os.makedirs(pth, 0755)
+    try: os.makedirs(pth, 0o755)
     except: return None
     return pth
 
@@ -192,7 +192,7 @@ def _auto_download_file(filename, data):
     hcp_flnm = '/'.join([hcp_sdir, relpath])
     # download it...
     basedir = os.path.split(filename)[0]
-    if not os.path.isdir(basedir): os.makedirs(basedir, 0755)
+    if not os.path.isdir(basedir): os.makedirs(basedir, 0o755)
     #print 'Downloading file %s ...' % filename
     fs.get(hcp_flnm, filename)
     return filename
@@ -1491,7 +1491,7 @@ def download(sid, credentials=None, subjects_path=None, overwrite=False, release
         if not overwrite and os.path.isfile(loc_flnm): continue
         # gotta download it!
         basedir = os.path.split(loc_flnm)[0]
-        if not os.path.isdir(basedir): os.makedirs(basedir, 0755)
+        if not os.path.isdir(basedir): os.makedirs(basedir, 0o755)
         fs.get(hcp_flnm, loc_flnm)
         pulled.append(loc_flnm)
     return pulled
@@ -1585,7 +1585,7 @@ def subject_filemap(sid, subject_path=None):
             # we didn't find it, but we have a place to put it
             sdir = _auto_download_options['subjects_path']
             sdir = os.path.join(sdir, str(sid))
-            if not os.path.isdir(sdir): os.makedirs(sdir, 0755)
+            if not os.path.isdir(sdir): os.makedirs(sdir, 0o755)
         else:
             raise ValueError('Could not find HCP subject %s' % sid)
     ff = {'id':sid}

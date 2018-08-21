@@ -8,12 +8,14 @@ import nibabel                      as nib
 import nibabel.freesurfer.io        as fsio
 import nibabel.freesurfer.mghformat as fsmgh
 import pyrsistent                   as pyr
-import neuropythy.geometry          as geo
-import neuropythy.mri               as mri
-import neuropythy.io                as nyio
 import os, warnings, six, pimms
 
-from neuropythy.util import library_path
+from .. import geometry as geo
+from .. import mri      as mri
+from .. import io       as nyio
+#import ..io as nyio
+
+from ..util import library_path
 
 ####################################################################################################
 # Subject Directory and where to find Subjects

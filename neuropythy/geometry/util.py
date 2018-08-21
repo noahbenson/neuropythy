@@ -113,12 +113,14 @@ def alignment_matrix_2D(u, v):
     '''
     return rotation_matrix_2D(vector_angle_2D(u, v, direction=True))
 
-def line_intersection_2D(((x1,y1),(x2,y2)), ((x3,y3),(x4,y4))):
+def line_intersection_2D(abarg, cdarg):
     '''
     line_intersection((a, b), (c, d)) yields the intersection point between the lines that pass
     through the given pairs of points. If any lines are parallel, (numpy.nan, numpy.nan) is
     returned; note that a, b, c, and d can all be 2 x n matrices of x and y coordinate row-vectors.
     '''
+    ((x1,y1),(x2,y2)) = abarg
+    ((x3,y3),(x4,y4)) = cdarg
     dx12 = (x1 - x2)
     dx34 = (x3 - x4)
     dy12 = (y1 - y2)
@@ -140,13 +142,15 @@ def line_intersection_2D(((x1,y1),(x2,y2)), ((x3,y3),(x4,y4))):
         yi[unit] = np.nan
         return (xi, yi)
 
-def segment_intersection_2D((p1,p2), (p3,p4)):
+def segment_intersection_2D(p12arg, p34arg):
     '''
     segment_intersection((a, b), (c, d)) yields the intersection point between the line segments
     that pass from point a to point b and from point c to point d. If there is no intersection
     point, then (numpy.nan, numpy.nan) is returned.
     '''
-    pi = np.asarray(line_intersection_2D((p1,p2), (p3,p4)))
+    (p1,p2) = p12arg
+    (p3,p4) = p34arg
+    pi = np.asarray(line_intersection_2D(p12arg, p34arg))
     p1 = np.asarray(p1)
     p2 = np.asarray(p2)
     p3 = np.asarray(p3)
@@ -176,13 +180,15 @@ def segment_intersection_2D((p1,p2), (p3,p4)):
         yi[bad] = np.nan
         return (xi,yi)
 
-def line_segment_intersection_2D((p1,p2), (p3,p4)):
+def line_segment_intersection_2D(p12arg, p34arg):
     '''
     line_segment_intersection((a, b), (c, d)) yields the intersection point between the line
     passing through points a and b and the line segment that passes from point c to point d. If
     there is no intersection point, then (numpy.nan, numpy.nan) is returned.
     '''
-    pi = np.asarray(line_intersection_2D((p1,p2), (p3,p4)))
+    (p1,p2) = p12arg
+    (p3,p4) = p34arg
+    pi = np.asarray(line_intersection_2D(p12arg, p34arg))
     p3 = np.asarray(p3)
     u34 = p4 - p3
     cfn = lambda px,iis: (px if iis is None or len(px.shape) == 1 or px.shape[1] == len(iis) else

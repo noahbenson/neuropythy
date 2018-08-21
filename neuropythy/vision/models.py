@@ -10,11 +10,14 @@ import scipy.spatial         as     space
 import pyrsistent            as     pyr
 import os, gzip, types, six, pimms
 
-import neuropythy.geometry   as     geo
-import neuropythy.mri        as     mri
-from   neuropythy.java       import (java_link, serialize_numpy,
+from ..           import geometry as geo
+from ..           import mri      as mri
+from ..java       import (java_link, serialize_numpy,
                                      to_java_doubles, to_java_ints, to_java_array)
-from   neuropythy.util       import (to_affine, library_path)
+from ..util       import (to_affine, library_path)
+
+if six.PY2: (_tuple_type, _list_type) = (types.TupleType, types.ListType)
+else:       (_tuple_type, _list_type) = (tuple, list)
 
 # These two variables are intended to provide default orderings to visual areas (but in general,
 # visual areas should be referred to by name OR as a number paired with a model).
@@ -122,15 +125,15 @@ class SchiraModel(RetinotopyModel):
         scale = params['scale']
         if pimms.is_number(scale):
             params = params.set('scale', (scale, scale))
-        elif not isinstance(scale, types.TupleType):
+        elif not isinstance(scale, _tuple_type):
             params = params.set('scale', tuple(scale))
         shear = params['shear']
         if pimms.is_number(shear) and np.isclose(shear, 0):
             params = params.set('shear', ((1, 0), (0, 1)))
         elif shear[0][0] != 1 or shear[1][1] != 1:
             raise RuntimeError('shear matrix diagonal elements must be 1!')
-        elif not isinstance(shear, types.TupleType) or \
-             not all(isinstance(s, types.TupleType) for s in shear):
+        elif not isinstance(shear, _tuple_type) or \
+             not all(isinstance(s, _tuple_type) for s in shear):
             params.set('shear', tuple([tuple(s) for s in shear]))
         center = params['center']
         if pimms.is_number(center) and np.isclose(center, 0):
@@ -546,7 +549,7 @@ def load_fmm_model(filename, radius=np.pi/3.0, sphere_radius=100.0):
         raise ValueError('Given filename (%s) is not a file!' % filename)
     gz = True if len(filename) > 3 and filename[-3:] == '.gz' else False
     lines = None
-    with (gzip.open(filename, 'rb') if gz else open(filename, 'r')) as f:
+    with (gzip.open(filename, 'rt') if gz else open(filename, 'rt')) as f:
         lines = f.read().split('\n')
     if len(lines) < 3 or lines[0] != 'Flat Mesh Model Version: 1.0':
         raise ValueError('Given file does not contain to a valid flat mesh model!')
@@ -554,11 +557,11 @@ def load_fmm_model(filename, radius=np.pi/3.0, sphere_radius=100.0):
     m = int(lines[2].split(':')[1].strip())
     reg = lines[3].split(':')[1].strip()
     hemi = lines[4].split(':')[1].strip().upper()
-    center = map(float, lines[5].split(':')[1].strip().split(','))
-    onxaxis = map(float, lines[6].split(':')[1].strip().split(','))
+    center = list(map(float, lines[5].split(':')[1].strip().split(',')))
+    onxaxis = list(map(float, lines[6].split(':')[1].strip().split(',')))
     method = lines[7].split(':')[1].strip().lower()
     tx = np.asarray(
-        [map(float, row.split(','))
+        [list(map(float, row.split(',')))
          for row in lines[8].split(':')[1].strip(' \t[]').split(';')])
     if lines[9].startswith('AreaNames: ['):
         # we load the area names
@@ -571,15 +574,15 @@ def load_fmm_model(filename, radius=np.pi/3.0, sphere_radius=100.0):
     crds = []
     for row in lines[l0:(n+l0)]:
         (left,right) = row.split(' :: ')
-        crds.append(map(float, left.split(',')))
-    crds = np.asarray([map(float, left.split(','))
+        crds.append(list(map(float, left.split(','))))
+    crds = np.asarray([list(map(float, left.split(',')))
                        for row in lines[l0:(n+l0)]
                        for (left,right) in [row.split(' :: ')]])
-    vals = np.asarray([map(float, right.split(','))
+    vals = np.asarray([list(map(float, right.split(',')))
                        for row in lines[l0:(n+l0)]
                        for (left,right) in [row.split(' :: ')]])
     tris = -1 + np.asarray(
-        [map(int, row.split(','))
+        [list(map(int, row.split(',')))
          for row in lines[(n+l0):(n+m+l0)]])
     return RegisteredRetinotopyModel(
         RetinotopyMeshModel(tris, crds,

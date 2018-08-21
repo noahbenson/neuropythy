@@ -3,13 +3,15 @@
 # Cortical magnification caclculation code and utilities.
 # by Noah C. Benson
 
+import pimms
 import numpy               as np
 import numpy.linalg        as npla
-import neuropythy.geometry as geo
-import neuropythy.mri      as mri
+
+from .. import geometry as geo
+from .. import mri      as mri
+
 from   neuropythy.util     import (zinv, zdiv, simplex_summation_matrix)
 from   .retinotopy         import (extract_retinotopy_argument, retinotopy_data, as_retinotopy)
-import pimms
 
 def disk_projection_cmag(mesh, retinotopy='any', surface=None):
     '''

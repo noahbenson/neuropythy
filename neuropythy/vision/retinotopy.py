@@ -10,16 +10,18 @@ import nibabel.freesurfer.io        as fsio
 import pyrsistent                   as pyr
 import os, sys, gzip, six, types, pimms
 
-import neuropythy.geometry           as geo
-import neuropythy.freesurfer         as nyfs
-import neuropythy.mri                as mri
-import neuropythy.freesurfer         as nyfs
-from   neuropythy.util           import (zinv, library_path)
-from   neuropythy.registration   import (mesh_register, java_potential_term)
-from   neuropythy.java           import (to_java_doubles, to_java_ints)
+from .. import geometry       as geo
+from .. import freesurfer     as nyfs
+from .. import mri            as mri
+from ..util               import (zinv, library_path)
+from ..registration       import (mesh_register, java_potential_term)
+from ..java               import (to_java_doubles, to_java_ints)
 
 from .models import (RetinotopyModel, SchiraModel, RetinotopyMeshModel, RegisteredRetinotopyModel,
                      load_fmm_model, visual_area_names, visual_area_numbers)
+
+if six.PY2: (_tuple_type, _list_type) = (types.TupleType, types.ListType)
+else:       (_tuple_type, _list_type) = (tuple, list)
 
 # Tools for extracting retinotopy data from a subject:
 _empirical_retinotopy_names = {
@@ -265,7 +267,8 @@ def as_retinotopy(data, output_style='visual', units=Ellipsis, prefix=None, suff
         mem_dat = lambda k: k in pnames
         get_dat = lambda k: data.prop(pnames[k])
     else:
-        data = {k.lower():v for (k,v) in data.iteritems()}
+        def _make_lambda(data,k): return lambda:data[k]
+        data = pimms.lazy_map({k.lower():_make_lambda(data,k) for k in six.iterkeys(data)})
         mem_dat = lambda k: k in data
         get_dat = lambda k: data[k]
     # Check in a particular order:
@@ -405,7 +408,7 @@ pRF_data_Wandell2015 = pyr.pmap(
               "TO1": {'m':1.37441, 'b':0.17240}, "TO2": {'m':1.65694, 'b':0.00000}})})
 pRF_data_Kay2013 = pyr.pmap(
     {k.lower():pyr.pmap({'m':v, 'b':0.5})
-     for (k,v) in {'V1':0.16, 'V2':0.18, 'V3':0.25, 'hV4':0.36}.iteritems()})
+     for (k,v) in six.iteritems({'V1':0.16, 'V2':0.18, 'V3':0.25, 'hV4':0.36})})
 pRF_data = pyr.pmap({'wandell2015':pRF_data_Wandell2015, 'kay2013':pRF_data_Kay2013})
 def predict_pRF_radius(eccentricity, visual_area='V1', source='Wandell2015'):
     '''
@@ -884,7 +887,7 @@ def retinotopy_anchors(mesh, mdl,
     select = ['close', [40]] if select == 'close'   else \
              ['close', [40]] if select == ['close'] else \
              select
-    lttyp = (types.ListType, types.TupleType)
+    lttyp = (_list_type, _tuple_type)
     if select is None:
         select = lambda a,b: b
     elif isinstance(select, lttyp) and len(select) == 2 and select[0] == 'close':

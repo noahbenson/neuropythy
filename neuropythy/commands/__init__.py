@@ -5,9 +5,9 @@
 
 import pyrsistent as _pyr
 
-import register_retinotopy as _reg
-import benson14_retinotopy as _b14
-import surface_to_image    as _s2i
+from . import register_retinotopy as _reg
+from . import benson14_retinotopy as _b14
+from . import surface_to_image    as _s2i
 
 # The commands that can be run by main:
 commands = _pyr.m(

@@ -12,10 +12,10 @@ import nibabel.freesurfer.io        as     fsio
 import nibabel.freesurfer.mghformat as     fsmgh
 import os, sys, six, pimms
 
-from   neuropythy.freesurfer        import (subject, add_subject_path)
-from   neuropythy.util              import CommandLineParser
-from   neuropythy.vision            import (predict_retinotopy, retinotopy_model, clean_retinotopy)
-import neuropythy.io                as     nyio
+from   ..freesurfer                 import (subject, add_subject_path)
+from   ..util                       import CommandLineParser
+from   ..vision                     import (predict_retinotopy, retinotopy_model, clean_retinotopy)
+from   ..                           import io as nyio
 
 info = \
    '''

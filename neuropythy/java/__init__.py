@@ -8,8 +8,8 @@ import scipy   as sp
 import numbers as num
 import os, sys, gzip
 
-from array import array
-from neuropythy.util import library_path
+from array  import array
+from ..util import library_path
 
 # Java start:
 _java_port = None

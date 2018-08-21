@@ -43,33 +43,36 @@ def reload_neuropythy():
       # ... some nonsense that breaks the library ...
       ny = ny.reload_neuropythy()
     '''
-    import sys
+    import sys, six
+    if not six.PY2:
+        try:    from importlib import reload
+        except: from imp import reload
     for mdl in submodules:
         if mdl in sys.modules:
             sys.modules[mdl] = reload(sys.modules[mdl])
     return reload(sys.modules['neuropythy'])
 
-from   io         import (load, save, to_nifti)
-from   mri        import (Cortex, Subject)
-from   vision     import (retinotopy_data, empirical_retinotopy_data, predicted_retinotopy_data,
-                          register_retinotopy, retinotopy_anchors, retinotopy_model,
-                          neighborhood_cortical_magnification, as_retinotopy, retinotopy_data,
-                          retinotopy_comparison)
-from   geometry   import (VertexSet, Mesh, Tesselation, Topology,
-                          to_mesh, to_tess, to_property, to_mask)
-from   freesurfer import (subject as freesurfer_subject, to_mgh)
-from   hcp        import (subject as hcp_subject)
-import freesurfer
-import hcp
+from   .io         import (load, save, to_nifti)
+from   .mri        import (Cortex, Subject)
+from   .vision     import (retinotopy_data, empirical_retinotopy_data, predicted_retinotopy_data,
+                           register_retinotopy, retinotopy_anchors, retinotopy_model,
+                           neighborhood_cortical_magnification, as_retinotopy, retinotopy_data,
+                           retinotopy_comparison)
+from   .geometry   import (VertexSet, Mesh, Tesselation, Topology,
+                           to_mesh, to_tess, to_property, to_mask)
+from   .freesurfer import (subject as freesurfer_subject, to_mgh)
+from   .hcp        import (subject as hcp_subject)
+from . import freesurfer
+from . import hcp
 
 # things we might want to load but that might fail
 try:
-    import graphics
-    from  graphics import cortex_plot
+    from .graphics import cortex_plot
+    from .         import graphics
 except: pass
 
 # Version information...
-__version__ = '0.6.1'
+__version__ = '0.6.2'
 
 
 
