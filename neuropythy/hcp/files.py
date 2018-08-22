@@ -865,10 +865,12 @@ subject_directory_structure = {
                     '{0[id]}.L.atlasroi.native.shape.gii': (
                         {'type':'property',
                          'name':'atlas',
-                         'hemi':'lh_native_MSMSulc'},
+                         'hemi':'lh_native_MSMSulc',
+                         'filt':lambda x:x.astype(np.bool)},
                         {'type':'property',
                          'name':'atlas',
-                         'hemi':'lh_native_MSMAll'}),
+                         'hemi':'lh_native_MSMAll',
+                         'filt':lambda x:x.astype(np.bool)}),
                     '{0[id]}.L.curvature.native.shape.gii': (
                         {'type':'property',
                          'name':'curvature',
@@ -991,10 +993,12 @@ subject_directory_structure = {
                     '{0[id]}.R.atlasroi.native.shape.gii': (
                         {'type':'property',
                          'name':'atlas',
-                         'hemi':'rh_native_MSMSulc'},
+                         'hemi':'rh_native_MSMSulc',
+                         'filt':lambda x:x.astype(np.bool)},
                         {'type':'property',
                          'name':'atlas',
-                         'hemi':'rh_native_MSMAll'}),
+                         'hemi':'rh_native_MSMAll',
+                         'filt':lambda x:x.astype(np.bool)}),
                     '{0[id]}.R.curvature.native.shape.gii': (
                         {'type':'property',
                          'name':'curvature',
@@ -1058,6 +1062,302 @@ subject_directory_structure = {
                         'name':'fs_LR',
                         'tool':'MSMSulc',
                         'hemi':'rh_native_MSMSulc'}}},
+            'fsaverage_LR59k': {
+                'type':'dir',
+                'contents': {
+                    '{0[id]}.L.BA.59k_fs_LR.label.gii': (
+                        {'type':'property',
+                         'name':'brodmann_area',
+                         'hemi':'lh_LR59k_MSMSulc'},
+                        {'type':'property',
+                         'name':'brodmann_area',
+                         'hemi':'lh_LR59k_MSMAll'}),
+                    '{0[id]}.L.aparc.59k_fs_LR.label.gii': (
+                        {'type':'property',
+                         'name':'parcellation_2005',
+                         'hemi':'lh_LR59k_MSMSulc'},
+                        {'type':'property',
+                         'name':'parcellation_2005',
+                         'hemi':'lh_LR59k_MSMAll'}),
+                    '{0[id]}.L.aparc.a2009s.59k_fs_LR.label.gii': (
+                        {'type':'property',
+                         'name':'parcellation',
+                         'hemi':'lh_LR59k_MSMSulc'},
+                        {'type':'property',
+                         'name':'parcellation',
+                         'hemi':'lh_LR59k_MSMAll'}),
+                    '{0[id]}.L.atlasroi.59k_fs_LR.shape.gii': (
+                        {'type':'property',
+                         'name':'atlas',
+                         'hemi':'lh_LR59k_MSMSulc',
+                         'load':_load_fsLR_atlasroi,
+                         'filt':lambda x:x[0].astype(np.bool)},
+                        {'type':'property',
+                         'name':'atlas',
+                         'hemi':'lh_LR59k_MSMAll',
+                         'load':_load_fsLR_atlasroi,
+                         'filt':lambda x:x[0].astype(np.bool)}),
+                    '{0[id]}.L.ArealDistortion_FS.59k_fs_LR.shape.gii': (
+                        {'type':'property',
+                         'name':'areal_distortion_fs',
+                         'hemi':'lh_LR59k_MSMSulc'},
+                        {'type':'property',
+                         'name':'areal_distortion_fs',
+                         'hemi':'lh_LR59k_MSMAll'}),
+                    '{0[id]}.L.ArealDistortion_MSMSulc.59k_fs_LR.shape.gii': {
+                        'type':'property',
+                        'name':'areal_distortion',
+                        'hemi':'lh_LR59k_MSMSulc'},
+                    '{0[id]}.L.MyelinMap.59k_fs_LR.func.gii': {
+                        'type':'property',
+                        'name':'myelin',
+                        'hemi':'lh_LR59k_MSMSulc'},
+                    #'{0[id]}.L.MyelinMap_BC.59k_fs_LR.func.gii': {
+                    #    'type':'property',
+                    #    'name':'myelin_bc',
+                    #    'hemi':'lh_LR59k_MSMSulc'},
+                    '{0[id]}.L.SmoothedMyelinMap.59k_fs_LR.func.gii': {
+                        'type':'property',
+                        'name':'myelin_smooth',
+                        'hemi':'lh_LR59k_MSMSulc'},
+                    #'{0[id]}.L.SmoothedMyelinMap_BC.59k_fs_LR.func.gii': {
+                    #    'type':'property',
+                    #    'name':'myelin_smooth_bc',
+                    #    'hemi':'lh_LR59k_MSMSulc'},
+                    '{0[id]}.L.curvature.59k_fs_LR.shape.gii': {
+                        'type':'property',
+                        'name':'curvature',
+                        'hemi':'lh_LR59k_MSMSulc',
+                        'filt':lambda c: -c},
+                    '{0[id]}.L.sulc.59k_fs_LR.shape.gii': {
+                        'type':'property',
+                        'name':'convexity',
+                        'hemi':'lh_LR59k_MSMSulc'},
+                    #'{0[id]}.L.corrThickness.59k_fs_LR.shape.gii': {
+                    #    'type':'property',
+                    #    'name':'thickness',
+                    #    'hemi':'lh_LR59k_MSMSulc'},
+                    '{0[id]}.L.thickness.59k_fs_LR.shape.gii': {
+                        'type':'property',
+                        'name':'thickness_uncorrected',
+                        'hemi':'lh_LR59k_MSMSulc'},
+                    '{0[id]}.L.white.59k_fs_LR.surf.gii': {
+                        'type':'surface',
+                        'name':'white',
+                        'hemi':'lh_LR59k_MSMSulc'},
+                    '{0[id]}.L.midthickness.59k_fs_LR.surf.gii': {
+                        'type':'surface',
+                        'name':'midgray',
+                        'hemi':'lh_LR59k_MSMSulc'},
+                    '{0[id]}.L.pial.59k_fs_LR.surf.gii': {
+                        'type':'surface',
+                        'name':'pial',
+                        'hemi':'lh_LR59k_MSMSulc'},
+                    '{0[id]}.L.inflated.59k_fs_LR.surf.gii': {
+                        'type':'surface',
+                        'name':'inflated',
+                        'hemi':'lh_LR59k_MSMSulc'},
+                    '{0[id]}.L.very_inflated.59k_fs_LR.surf.gii': {
+                        'type':'surface',
+                        'name':'very_inflated',
+                        'hemi':'lh_LR59k_MSMSulc'},
+                    '{0[id]}.L.white_1.6mm_MSMAll.59k_fs_LR.surf.gii': {
+                        'type':'surface',
+                        'name':'white',
+                        'hemi':'lh_LR59k_MSMAll'},
+                    '{0[id]}.L.midthickness_1.6mm_MSMAll.59k_fs_LR.surf.gii': {
+                        'type':'surface',
+                        'name':'midgray',
+                        'hemi':'lh_LR59k_MSMAll'},
+                    '{0[id]}.L.pial_1.6mm_MSMAll.59k_fs_LR.surf.gii': {
+                        'type':'surface',
+                        'name':'pial',
+                        'hemi':'lh_LR59k_MSMAll'},
+                    '{0[id]}.L.inflated_1.6mm_MSMAll.59k_fs_LR.surf.gii': {
+                        'type':'surface',
+                        'name':'inflated',
+                        'hemi':'lh_LR59k_MSMAll'},
+                    '{0[id]}.L.very_inflated_1.6mm_MSMAll.59k_fs_LR.surf.gii': {
+                        'type':'surface',
+                        'name':'very_inflated',
+                        'hemi':'lh_LR59k_MSMAll'},
+                    '{0[id]}.L.flat.59k_fs_LR.surf.gii': (
+                        {'type':'surface',
+                         'name':'flat',
+                         'hemi':'lh_LR59k_MSMSulc'},
+                        {'type':'surface',
+                         'name':'flat',
+                         'hemi':'lh_LR59k_MSMAll'}),
+                    '{0[id]}.L.sphere.59k_fs_LR.surf.gii': (
+                        {'type':'registration',
+                         'name':'fs_LR',
+                         'hemi':'lh_LR59k_MSMSulc'},
+                        {'type':'registration',
+                         'name':'fs_LR',
+                         'hemi':'lh_LR59k_MSMAll'}),
+                    '{0[id]}.R.BA.59k_fs_LR.label.gii': (
+                        {'type':'property',
+                         'name':'brodmann_area',
+                         'hemi':'rh_LR59k_MSMSulc'},
+                        {'type':'property',
+                         'name':'brodmann_area',
+                         'hemi':'rh_LR59k_MSMAll'}),
+                    '{0[id]}.R.aparc.59k_fs_LR.label.gii': (
+                        {'type':'property',
+                         'name':'parcellation_2005',
+                         'hemi':'rh_LR59k_MSMSulc'},
+                        {'type':'property',
+                         'name':'parcellation_2005',
+                         'hemi':'rh_LR59k_MSMAll'}),
+                    '{0[id]}.R.aparc.a2009s.59k_fs_LR.label.gii': (
+                        {'type':'property',
+                         'name':'parcellation',
+                         'hemi':'rh_LR59k_MSMSulc'},
+                        {'type':'property',
+                         'name':'parcellation',
+                         'hemi':'rh_LR59k_MSMAll'}),
+                    '{0[id]}.R.atlasroi.59k_fs_LR.shape.gii': (
+                        {'type':'property',
+                         'name':'atlas',
+                         'hemi':'rh_LR59k_MSMSulc',
+                         'load':_load_fsLR_atlasroi,
+                         'filt':lambda x:x[1].astype(np.bool)},
+                        {'type':'property',
+                         'name':'atlas',
+                         'hemi':'rh_LR59k_MSMAll',
+                         'load':_load_fsLR_atlasroi,
+                         'filt':lambda x:x[1].astype(np.bool)}),
+                    '{0[id]}.R.ArealDistortion_FS.59k_fs_LR.shape.gii': (
+                        {'type':'property',
+                         'name':'areal_distortion_fs',
+                         'hemi':'rh_LR59k_MSMSulc'},
+                        {'type':'property',
+                         'name':'areal_distortion_fs',
+                         'hemi':'rh_LR59k_MSMAll'}),
+                    '{0[id]}.R.ArealDistortion_MSMSulc.59k_fs_LR.shape.gii': {
+                        'type':'property',
+                        'name':'areal_distortion',
+                        'hemi':'rh_LR59k_MSMSulc'},
+                    '{0[id]}.R.MyelinMap.59k_fs_LR.func.gii': {
+                        'type':'property',
+                        'name':'myelin',
+                        'hemi':'rh_LR59k_MSMSulc'},
+                    #'{0[id]}.R.MyelinMap_BC.59k_fs_LR.func.gii': {
+                    #    'type':'property',
+                    #    'name':'myelin_bc',
+                    #    'hemi':'rh_LR59k_MSMSulc'},
+                    '{0[id]}.R.SmoothedMyelinMap.59k_fs_LR.func.gii': {
+                        'type':'property',
+                        'name':'myelin_smooth',
+                        'hemi':'rh_LR59k_MSMSulc'},
+                    #'{0[id]}.R.SmoothedMyelinMap_BC.59k_fs_LR.func.gii': {
+                    #    'type':'property',
+                    #    'name':'myelin_smooth_bc',
+                    #    'hemi':'rh_LR59k_MSMSulc'},
+                    '{0[id]}.R.curvature.59k_fs_LR.shape.gii': {
+                        'type':'property',
+                        'name':'curvature',
+                        'hemi':'rh_LR59k_MSMSulc',
+                        'filt':lambda c: -c},
+                    '{0[id]}.R.sulc.59k_fs_LR.shape.gii': {
+                        'type':'property',
+                        'name':'convexity',
+                        'hemi':'rh_LR59k_MSMSulc'},
+                    #'{0[id]}.R.corrThickness.59k_fs_LR.shape.gii': {
+                    #    'type':'property',
+                    #    'name':'thickness',
+                    #    'hemi':'rh_LR59k_MSMSulc'},
+                    '{0[id]}.R.thickness.59k_fs_LR.shape.gii': {
+                        'type':'property',
+                        'name':'thickness_uncorrected',
+                        'hemi':'rh_LR59k_MSMSulc'},
+                    '{0[id]}.R.white.59k_fs_LR.surf.gii': {
+                        'type':'surface',
+                        'name':'white',
+                        'hemi':'rh_LR59k_MSMSulc'},
+                    '{0[id]}.R.midthickness.59k_fs_LR.surf.gii': {
+                        'type':'surface',
+                        'name':'midgray',
+                        'hemi':'rh_LR59k_MSMSulc'},
+                    '{0[id]}.R.pial.59k_fs_LR.surf.gii': {
+                        'type':'surface',
+                        'name':'pial',
+                        'hemi':'rh_LR59k_MSMSulc'},
+                    '{0[id]}.R.inflated.59k_fs_LR.surf.gii': {
+                        'type':'surface',
+                        'name':'inflated',
+                        'hemi':'rh_LR59k_MSMSulc'},
+                    '{0[id]}.R.very_inflated.59k_fs_LR.surf.gii': {
+                        'type':'surface',
+                        'name':'very_inflated',
+                        'hemi':'rh_LR59k_MSMSulc'},
+                    '{0[id]}.R.white_1.6mm_MSMAll.59k_fs_LR.surf.gii': {
+                        'type':'surface',
+                        'name':'white',
+                        'hemi':'rh_LR59k_MSMAll'},
+                    '{0[id]}.R.midthickness_1.6mm_MSMAll.59k_fs_LR.surf.gii': {
+                        'type':'surface',
+                        'name':'midgray',
+                        'hemi':'rh_LR59k_MSMAll'},
+                    '{0[id]}.R.pial_1.6mm_MSMAll.59k_fs_LR.surf.gii': {
+                        'type':'surface',
+                        'name':'pial',
+                        'hemi':'rh_LR59k_MSMAll'},
+                    '{0[id]}.R.inflated_1.6mm_MSMAll.59k_fs_LR.surf.gii': {
+                        'type':'surface',
+                        'name':'inflated',
+                        'hemi':'rh_LR59k_MSMAll'},
+                    '{0[id]}.R.very_inflated_1.6mm_MSMAll.59k_fs_LR.surf.gii': {
+                        'type':'surface',
+                        'name':'very_inflated',
+                        'hemi':'rh_LR59k_MSMAll'},
+                    '{0[id]}.R.flat.59k_fs_LR.surf.gii': (
+                        {'type':'surface',
+                         'name':'flat',
+                         'hemi':'rh_LR59k_MSMSulc',
+                         'load':_load_atlas_sphere},
+                        {'type':'surface',
+                         'name':'flat',
+                         'hemi':'rh_LR59k_MSMAll',
+                         'load':_load_atlas_sphere}),
+                    '{0[id]}.R.sphere.59k_fs_LR.surf.gii': (
+                        {'type':'registration',
+                         'name':'fs_LR',
+                         'hemi':'rh_LR59k_MSMSulc',
+                         'load':_load_atlas_sphere},
+                        {'type':'registration',
+                         'name':'fs_LR',
+                         'hemi':'rh_LR59k_MSMAll',
+                         'load':_load_atlas_sphere}),
+                    '{0[id]}.ArealDistortion_1.6mm_MSMAll.59k_fs_LR.dscalar.nii': {
+                        'type':'property',
+                        'name':'areal_distortion',
+                        'hemi':('lh_LR59k_MSMAll', 'rh_LR59k_MSMAll')},
+                    #'{0[id]}.MyelinMap_BC_1.6mm_MSMAll.59k_fs_LR.dscalar.nii': {
+                    #    'type':'property',
+                    #    'name':'myelin_bc',
+                    #    'hemi':('lh_LR59k_MSMAll', 'rh_LR59k_MSMAll')},
+                    #'{0[id]}.SmoothedMyelinMap_BC_1.6mm_MSMAll.59k_fs_LR.dscalar.nii': {
+                    #    'type':'property',
+                    #    'name':'myelin_smooth_bc',
+                    #    'hemi':('lh_LR59k_MSMAll', 'rh_LR59k_MSMAll')},
+                    '{0[id]}.curvature_1.6mm_MSMAll.59k_fs_LR.dscalar.nii': {
+                        'type':'property',
+                        'name':'curvature',
+                        'hemi':('lh_LR59k_MSMAll', 'rh_LR59k_MSMAll'),
+                        'filt':lambda c: -c},
+                    '{0[id]}.sulc_1.6mm_MSMAll.59k_fs_LR.dscalar.nii': {
+                        'type':'property',
+                        'name':'convexity',
+                        'hemi':('lh_LR59k_MSMAll', 'rh_LR59k_MSMAll')},
+                    #'{0[id]}.corrThickness_1.6mm_MSMAll.59k_fs_LR.dscalar.nii': {
+                    #    'type':'property',
+                    #    'name':'thickness',
+                    #    'hemi':('lh_LR59k_MSMAll', 'rh_LR59k_MSMAll')},
+                    '{0[id]}.thickness_1.6mm_MSMAll.59k_fs_LR.dscalar.nii': {
+                        'type':'property',
+                        'name':'thickness_uncorrected',
+                        'hemi':('lh_LR59k_MSMAll', 'rh_LR59k_MSMAll')}}},
             'fsaverage_LR32k': {
                 'type':'dir',
                 'contents': {
