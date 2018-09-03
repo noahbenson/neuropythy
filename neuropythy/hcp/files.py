@@ -74,17 +74,24 @@ def find_subject_path(sid):
     '''
     # if it's a full/relative path already, use it:
     sub = str(sid)
+    sdirs = _subjects_dirs
+    if _auto_download_options is not None and 'subjects_path' in _auto_download_options:
+        sdirs = list(sdirs) + [_auto_download_options['subjects_path']]
     if os.path.isdir(sub): return os.path.abspath(sub)
-    pth = next((os.path.abspath(p)
-                for sd in _subjects_dirs for p in [os.path.join(sd, sub)]
+    pth = next((os.path.abspath(p) for sd in sdirs
+                for p in [os.path.join(sd, sub)]
                 if os.path.isdir(p)),
                None)
     if pth is not None: return pth
     # see if we can create them
-    if _auto_download_options is None or not _auto_downloadable(sid): return None
+    if _auto_download_options is None or not _auto_download_options['structure'] or \
+       not _auto_downloadable(sid):
+        return None
+    # first see if the subject existst there
     pth = os.path.join(_auto_download_options['subjects_path'], sub)
     if os.path.isdir(pth): return pth
-    try: os.makedirs(pth, 0o755)
+    try:
+        os.makedirs(pth, 0o755)
     except: return None
     return pth
 
@@ -179,7 +186,9 @@ def detect_credentials():
 def _auto_download_file(filename, data):
     sid = data['id']
     if os.path.isfile(filename): return filename
-    if _auto_download_options is None or not _auto_downloadable(sid): return None
+    if _auto_download_options is None or not _auto_download_options['structure'] \
+       or not _auto_downloadable(sid):
+        return None
     fs = _auto_download_options['s3fs']
     db = _auto_download_options['database']
     rl = _auto_download_options['release']
@@ -190,10 +199,12 @@ def _auto_download_file(filename, data):
     if not fs.exists(hcp_sdir):
         raise ValueError('Subject %d not found in release' % sid)
     hcp_flnm = '/'.join([hcp_sdir, relpath])
+    # make sure it exists
+    if not fs.exists(hcp_flnm): return None
     # download it...
     basedir = os.path.split(filename)[0]
     if not os.path.isdir(basedir): os.makedirs(basedir, 0o755)
-    #print 'Downloading file %s ...' % filename
+    #print('Downloading file %s ...' % filename)
     fs.get(hcp_flnm, filename)
     return filename
 # Used to load immutable-like mgh objects
@@ -221,6 +232,8 @@ def _data_load(filename, data):
 def _load(filename, data):
     # firs check about auto-downloading
     if not os.path.isfile(filename): _auto_download_file(filename, data)
+    # file may not exist...
+    if not os.path.isfile(filename): return None
     if 'load' in data and data['load'] is not None:
         res = data['load'](filename, data)
     else:
@@ -267,13 +280,39 @@ def _load_fsLR_atlasroi(filename, data):
         dat = [{'id':data['id'], 'type':'property', 'name':'atlas', 'hemi':(h + data['hemi'][2:])}
                for h in ('lh','rh')]
     # loading an atlas file; this is easier
-    rois = tuple([_load(f, d) for (f,d) in zip(fnm, dat)])
+    rois = tuple([_load(f, d).astype('bool') for (f,d) in zip(fnm, dat)])
     # add these to the cache
     if atl != 'native': _load_fsLR_atlasroi.atlases[atl] = rois
     return rois
 _load_fsLR_atlasroi.atlases = {}
+def _load_fsLR_atlasroi_for_size(size, sid=100610):
+    '''
+    Loads the appropriate atlas for the given size of data; size should be the number of stored
+    vertices and sub-corticel voxels stored in the cifti file.
+    '''
+    from .core import subject
+    # it doesn't matter what subject we request, so just use any one
+    fls = _load_fsLR_atlasroi_for_size.sizes
+    if size not in fls: raise ValueError('unknown fs_LR atlas size: %s' % size)
+    (n,fls) = _load_fsLR_atlasroi_for_size.sizes[size]
+    fl = os.path.join(subject(sid).path, 'MNINonLinear', *fls)
+    dat = {'id':sid, 'cifti':True, 'hemi':('lh_LR%dk_MSMAll' % n ,'rh_LR%dk_MSMAll' % n)}
+    return _load_fsLR_atlasroi(fl, dat)
+_load_fsLR_atlasroi_for_size.sizes = {
+    # two sizes for each atlas: one for when the cifti file includes subcortical voxels and one for
+    # when it includes only the surface vertices
+    91282:  (32,  ['fsaverage_LR32k', '{0[id]}.curvature_MSMAll.32k_fs_LR.dscalar.nii']),
+    59412:  (32,  ['fsaverage_LR32k', '{0[id]}.curvature_MSMAll.32k_fs_LR.dscalar.nii']),
+    
+    170494: (59,  ['fsaverage_LR59k', '{0[id]}.MyelinMap_BC_1.6mm_MSMAll.59k_fs_LR.dscalar.nii']),
+    108441: (59,  ['fsaverage_LR59k', '{0[id]}.MyelinMap_BC_1.6mm_MSMAll.59k_fs_LR.dscalar.nii']),
+
+    # not sure what the bigger size is for this...
+    #???: (164, ['{0[id]}.curvature_MSMAll.164k_fs_LR.dscalar.nii'],
+    298261: (164, ['{0[id]}.curvature_MSMAll.164k_fs_LR.dscalar.nii'])}
 def _load_fsmorph(filename, data):
     return nyio.load(filename, 'freesurfer_morph')
+        
 
 # The description of the entire subject directory that we care about:
 subject_directory_structure = {
@@ -1333,14 +1372,14 @@ subject_directory_structure = {
                         'type':'property',
                         'name':'areal_distortion',
                         'hemi':('lh_LR59k_MSMAll', 'rh_LR59k_MSMAll')},
-                    #'{0[id]}.MyelinMap_BC_1.6mm_MSMAll.59k_fs_LR.dscalar.nii': {
-                    #    'type':'property',
-                    #    'name':'myelin_bc',
-                    #    'hemi':('lh_LR59k_MSMAll', 'rh_LR59k_MSMAll')},
-                    #'{0[id]}.SmoothedMyelinMap_BC_1.6mm_MSMAll.59k_fs_LR.dscalar.nii': {
-                    #    'type':'property',
-                    #    'name':'myelin_smooth_bc',
-                    #    'hemi':('lh_LR59k_MSMAll', 'rh_LR59k_MSMAll')},
+                    '{0[id]}.MyelinMap_BC_1.6mm_MSMAll.59k_fs_LR.dscalar.nii': {
+                        'type':'property',
+                        'name':'myelin_bc',
+                        'hemi':('lh_LR59k_MSMAll', 'rh_LR59k_MSMAll')},
+                    '{0[id]}.SmoothedMyelinMap_BC_1.6mm_MSMAll.59k_fs_LR.dscalar.nii': {
+                        'type':'property',
+                        'name':'myelin_smooth_bc',
+                        'hemi':('lh_LR59k_MSMAll', 'rh_LR59k_MSMAll')},
                     '{0[id]}.curvature_1.6mm_MSMAll.59k_fs_LR.dscalar.nii': {
                         'type':'property',
                         'name':'curvature',
@@ -1350,10 +1389,10 @@ subject_directory_structure = {
                         'type':'property',
                         'name':'convexity',
                         'hemi':('lh_LR59k_MSMAll', 'rh_LR59k_MSMAll')},
-                    #'{0[id]}.corrThickness_1.6mm_MSMAll.59k_fs_LR.dscalar.nii': {
-                    #    'type':'property',
-                    #    'name':'thickness',
-                    #    'hemi':('lh_LR59k_MSMAll', 'rh_LR59k_MSMAll')},
+                    '{0[id]}.corrThickness_1.6mm_MSMAll.59k_fs_LR.dscalar.nii': {
+                        'type':'property',
+                        'name':'thickness',
+                        'hemi':('lh_LR59k_MSMAll', 'rh_LR59k_MSMAll')},
                     '{0[id]}.thickness_1.6mm_MSMAll.59k_fs_LR.dscalar.nii': {
                         'type':'property',
                         'name':'thickness_uncorrected',
@@ -1796,12 +1835,20 @@ def download(sid, credentials=None, subjects_path=None, overwrite=False, release
         pulled.append(loc_flnm)
     return pulled
 
+_retinotopy_path = None
+_retinotopy_file = {32:'prfresults.mat', 59:'prfresults59k.mat'}
+_retinotopy_url  = {32:'https://osf.io/yus6t/download', 59:None}
+retinotopy_prefix = 'prf'
+lowres_retinotopy_prefix = 'lowres-prf'
+inferred_retinotopy_prefix = 'inf-prf'
+lowres_inferred_retinotopy_prefix = 'inf-lowres-prf'
+
 # If _auto_download_options is None, then no auto-downloading is enabled; if it is a map of
 # options (even an empty one) then auto-downloading is enabled using the given options
 _auto_download_options = None
 def auto_download(status,
                   credentials=None, subjects_path=None, overwrite=False, release='HCP_1200',
-                  database='hcp-openaccess'):
+                  database='hcp-openaccess', retinotopy_path=None, retinotopy_cache=True):
     '''
     auto_download(True) enables automatic downloading of HCP subject data when the subject ID
       is requested. The optional arguments are identical to those required for the function
@@ -1813,38 +1860,57 @@ def auto_download(status,
     the environment variables HCP_AUTO_DATABASE and HCP_AUTO_RELEASE, and the variable
     HCP_AUTO_PATH can be used to override the default subjects path.
     '''
-    global _auto_download_options
-    if status:
-        if s3fs is None:
-            raise RuntimeError('s3fs was not successfully loaded, so downloads may not occur; check'
-                               ' your Python configuration to make sure that s3fs is installed. See'
-                               ' http://s3fs.readthedocs.io/en/latest/install.html for details.')
-        if credentials is None:
-            (s3fs_key, s3fs_secret) = detect_credentials()
-        else:
-            (s3fs_key, s3fs_secret) = to_credentials(credentials)
-        if subjects_path is None:
-            subjects_path = next((sd for sd in _subjects_dirs if os.path.isdir(sd)), None)
-            if subjects_path is None: raise ValueError('No subjects path given or found')
-        else: subjects_path = os.path.expanduser(subjects_path)
-        fs = s3fs.S3FileSystem(key=s3fs_key, secret=s3fs_secret)
-        hcpbase = '/'.join([database, release])
-        if not fs.exists(hcpbase):
-            raise ValueError('database/release (%s/%s) not found' % (database, release))
-        sids = set([])
-        for f in fs.ls(hcpbase):
-            f = os.path.split(f)[-1]
-            if len(f) == 6 and f[0] != '0':
-                try: sids.add(int(f))
-                except: pass
-        _auto_download_options = dict(
-            subjects_path=subjects_path,
-            overwrite=overwrite,
-            release=release,
-            database=database,
-            subject_ids=frozenset(sids),
-            s3fs=fs)
-    else:
+    global _auto_download_options, _retinotopy_path
+    status = (['structure','retinotopy'] if status is True       else
+              []                         if status is False      else
+              [status]                   if pimms.is_str(status) else
+              status)
+    _auto_download_options = {'structure':False, 'retinotopy':False}
+    for s in status:
+        if s.lower() == 'structure':
+            if s3fs is None:
+                raise RuntimeError(
+                    's3fs was not successfully loaded, so downloads may not occur; check'
+                    ' your Python configuration to make sure that s3fs is installed. See'
+                    ' http://s3fs.readthedocs.io/en/latest/install.html for details.')
+            if credentials is None:
+                (s3fs_key, s3fs_secret) = detect_credentials()
+            else:
+                (s3fs_key, s3fs_secret) = to_credentials(credentials)
+            if subjects_path is None:
+                subjects_path = next((sd for sd in _subjects_dirs if os.path.isdir(sd)), None)
+                if subjects_path is None: raise ValueError('No subjects path given or found')
+            else: subjects_path = os.path.expanduser(subjects_path)
+            fs = s3fs.S3FileSystem(key=s3fs_key, secret=s3fs_secret)
+            hcpbase = '/'.join([database, release])
+            if not fs.exists(hcpbase):
+                raise ValueError('database/release (%s/%s) not found' % (database, release))
+            sids = set([])
+            for f in fs.ls(hcpbase):
+                f = os.path.split(f)[-1]
+                if len(f) == 6 and f[0] != '0':
+                    try: sids.add(int(f))
+                    except: pass
+            _auto_download_options['structure'] = True
+            _auto_download_options['subjects_path'] = subjects_path
+            _auto_download_options['overwrite'] = overwrite
+            _auto_download_options['release'] = release
+            _auto_download_options['database'] = database
+            _auto_download_options['subject_ids'] = frozenset(sids)
+            _auto_download_options['s3fs'] = fs
+        elif s.lower() == 'retinotopy':
+            if retinotopy_path is None:
+                dirs = _subjects_dirs
+                if subjects_path is not None: dirs = [subjects_path] + list(dirs)
+                if _retinotopy_path is not None: dirs = [_retinotopy_path] + list(dirs)
+                retinotopy_path = next((sd for sd in dirs if os.path.isdir(sd)), None)
+            if retinotopy_path is None: raise ValueError('No retinotopy path given or found')
+            else: retinotopy_path = os.path.expanduser(retinotopy_path)
+            _auto_download_options['retinotopy'] = True
+            _auto_download_options['retinotopy_path'] = retinotopy_path
+            _auto_download_options['retinotopy_cache'] = retinotopy_cache
+        else: raise ValueError('unrecognized auto_download argument: %s' % s)
+    if all(v is False for v in six.itervalues(_auto_download_options)):
         _auto_download_options = None
 # See if the environment lets auto-downloading start out on
 if 'HCP_AUTO_DOWNLOAD' in os.environ and \
@@ -1857,9 +1923,153 @@ if 'HCP_AUTO_DOWNLOAD' in os.environ and \
     except: pass
 def _auto_downloadable(sid):
     if _auto_download_options is None: return False
-    sid = to_subject_id(sid)
-    return sid in _auto_download_options['subject_ids']
-
+    elif sid == 'retinotopy': return _auto_download_options['retinotopy']
+    elif not _auto_download_options['structure']: return False
+    else: return to_subject_id(sid) in _auto_download_options['subject_ids']
+# these expect value % (hemi, alignment, surfacename)
+_retinotopy_cache_tr = {
+    'native': {
+        (retinotopy_prefix + '_polar_angle')                  : '%s.%s_angle.native59k.mgz',
+        (retinotopy_prefix + '_eccentricity')                 : '%s.%s_eccen.native59k.mgz',
+        (retinotopy_prefix + '_radius')                       : '%s.%s_prfsz.native59k.mgz',
+        (retinotopy_prefix + '_variance_explained')           : '%s.%s_vexpl.native59k.mgz',
+        (lowres_retinotopy_prefix + '_polar_angle')           : '%s.%s_angle.native32k.mgz',
+        (lowres_retinotopy_prefix + '_eccentricity')          : '%s.%s_eccen.native32k.mgz',
+        (lowres_retinotopy_prefix + '_radius')                : '%s.%s_prfsz.native32k.mgz',
+        (lowres_retinotopy_prefix + '_variance_explained')    : '%s.%s_vexpl.native32k.mgz',
+        (inferred_retinotopy_prefix + '_polar_angle')         : '%s.inf-%s_angle.native59k.mgz',
+        (inferred_retinotopy_prefix + '_eccentricity')        : '%s.inf-%s_eccen.native59k.mgz',
+        (inferred_retinotopy_prefix + '_radius')              : '%s.inf-%s_sigma.native59k.mgz',
+        (inferred_retinotopy_prefix + '_visual_area')         : '%s.inf-%s_varea.native59k.mgz',
+        (lowres_inferred_retinotopy_prefix + '_polar_angle')  : '%s.inf-%s_angle.native32k.mgz',
+        (lowres_inferred_retinotopy_prefix + '_eccentricity') : '%s.inf-%s_eccen.native32k.mgz',
+        (lowres_inferred_retinotopy_prefix + '_radius')       : '%s.inf-%s_sigma.native32k.mgz',
+        (lowres_inferred_retinotopy_prefix + '_visual_area')  : '%s.inf-%s_varea.native32k.mgz'},
+    'LR32k': {
+        (lowres_retinotopy_prefix + '_polar_angle')           : '%s.%s_angle.32k.mgz',
+        (lowres_retinotopy_prefix + '_eccentricity')          : '%s.%s_eccen.32k.mgz',
+        (lowres_retinotopy_prefix + '_radius')                : '%s.%s_prfsz.32k.mgz',
+        (lowres_retinotopy_prefix + '_variance_explained')    : '%s.%s_vexpl.32k.mgz'},
+    'LR59k': {
+        (retinotopy_prefix + '_polar_angle')                  : '%s.%s_angle.59k.mgz',
+        (retinotopy_prefix + '_eccentricity')                 : '%s.%s_eccen.59k.mgz',
+        (retinotopy_prefix + '_radius')                       : '%s.%s_prfsz.59k.mgz',
+        (retinotopy_prefix + '_variance_explained')           : '%s.%s_vexpl.59k.mgz'}}
+_retinotopy_cache_surf_tr = {
+    'native59k': '%s_native_%s',
+    'native32k': '%s_native_%s',
+    '59k': '%s_LR59k_%s',
+    '32k': '%s_LR32k_%s'}
+def load_retinotopy_cache(sdir, sid, alignment='MSMAll'):
+    '''
+    Returns the subject's retinotopy cache as a lazy map, or None if no cache exists. The hemi keys
+    in the returned map will spell out the cortex name (e.g., lh_native_MSMAll or rh_LR32k_MSMAll).
+    '''
+    fs = {h:{(k,kk):os.path.join(sdir, 'retinotopy', v % (h, alignment))
+             for (kk,vv) in six.iteritems(_retinotopy_cache_tr)
+             for (k,v)   in six.iteritems(vv)}
+          for h in ('lh','rh')}
+    files = {}
+    for h in ['lh','rh']:
+        for ((k,kk),v) in six.iteritems(fs[h]):
+            if not os.path.isfile(v): continue
+            hh = _retinotopy_cache_surf_tr[v.split('.')[-2]] % (h, alignment)
+            if hh not in files: files[hh] = {}
+            files[hh][k] = v
+    if len(files) == 0: return files
+    def _loader(fls, h, k): return lambda:nyio.load(fls[h][k])
+    return {h:pimms.lazy_map({k:_loader(files, h, k) for k in six.iterkeys(v)})
+            for (h,v) in six.iteritems(files)}
+def save_retinotopy_cache(sdir, sid, hemi, props, alignment='MSMAll', overwrite=False):
+    '''
+    Saves the subject's retinotopy cache from the given properties. The first argument is the
+    subject's directory (not the subjects' directory).
+    '''
+    h = hemi[:2]
+    htype = hemi.split('_')[1]
+    if _auto_download_options is None \
+       or 'retinotopy_cache' not in _auto_download_options \
+       or not _auto_download_options['retinotopy_cache']:
+        return
+    files = {k:os.path.join(sdir, 'retinotopy', v % (h, alignment))
+             for (k,v) in six.iteritems(_retinotopy_cache_tr[htype])}
+    for (p,fl) in six.iteritems(files):
+        if p not in props or (not overwrite and os.path.exists(fl)): continue
+        p = np.asarray(props[p])
+        if np.issubdtype(p.dtype, np.floating): p = np.asarray(p, np.float32)
+        dr = os.path.split(os.path.abspath(fl))[0]
+        if not os.path.isdir(dr): os.makedirs(dr, 0o755)
+        nyio.save(fl, p)
+def _find_retinotopy_path(size=59):
+    dirs = _subjects_dirs
+    if _auto_download_options is not None \
+       and 'retinotopy' in _auto_download_options and _auto_download_options['retinotopy'] \
+       and 'retinotopy_path' in _auto_download_options \
+       and _auto_download_options['retinotopy_path'] is not None \
+       and _retinotopy_url[size] is not None:
+        pth = os.path.join(_auto_download_options['retinotopy_path'], _retinotopy_file[size])
+        if os.path.isfile(pth): return pth
+        # okay, try to download it!
+        import shutil, urllib
+        with urllib.request.urlopen(_retinotopy_url[size]) as response:
+            with open(pth, 'wb') as fl:
+                shutil.copyfileobj(response, fl)
+        return pth
+    if _retinotopy_path is not None: dirs = [_retinotopy_path] + list(_subjects_dirs)
+    d = next((sd for sd in dirs if os.path.isfile(os.path.join(sd, _retinotopy_file[size]))), None)
+    return d if d is None else os.path.join(d, _retinotopy_file[size])
+def _retinotopy_open(fn, size=59):
+    pth = _find_retinotopy_path(size=size)
+    if pth is not None:
+        import h5py
+        with h5py.File(pth, 'r') as f: return fn(f)
+    return None
+def _retinotopy_submap(size=59):
+    if _retinotopy_submap.cache is None: _retinotopy_submap.cache = {}
+    if size not in _retinotopy_submap.cache:
+        tmp = _retinotopy_open(
+            lambda f: np.squeeze(np.array(f['subjectids'], dtype=np.int)),
+            size=size)
+        if tmp is None: return None
+        tmp = pyr.pmap({sid:k for (k,sid) in enumerate(tmp)})
+        _retinotopy_submap.cache[size] = tmp
+    return _retinotopy_submap.cache[size]
+_retinotopy_submap.cache = None
+def _retinotopy_dset(name, size=59):
+    name = name.lower()
+    if name in ['full', 'type1', '1', 'all']:  name = 0
+    elif name in ['half1', 'split1', 'type1']: name = 1
+    elif name in ['half2', 'split2', 'type3']: name = 2
+    else: raise ValueError('name must be "full", "half1", or "half2"')
+    if _retinotopy_dset.cache[size][name] is None:
+        arr = _retinotopy_open(lambda f: f['allresults'][name], size=size)
+        if arr is None: return None
+        arr = np.array(arr)
+        arr.setflags(write=False)
+        _retinotopy_dset.cache[size][name] = arr
+    return _retinotopy_dset.cache[size][name]
+_retinotopy_dset.cache = {32:[None,None,None], 59:[None,None,None]}
+def _cifti_to_hemis(data, sid=100610):
+    (la, ra) = _load_fsLR_atlasroi_for_size(data.shape[0])
+    (ln, rn) = [aa.shape[0]     for aa in (la, ra)]
+    (li, ri) = [np.where(aa)[0] for aa in (la, ra)]
+    (lu, ru) = [len(ai)         for ai in (li, ri)]
+    lsl = slice(0,  lu)
+    rsl = slice(lu, lu + ru)
+    (ldat, rdat) = [np.zeros((len(aa),) + data.shape[1:], dtype=data.dtype) for aa in (la,ra)]
+    for (dat,sl,ii) in zip([ldat,rdat],[lsl,rsl],[li,ri]): dat[ii] = data[sl]
+    return (ldat, rdat)
+def _retinotopy_data(name, sid, size=59):
+    smap = _retinotopy_submap(size=size)
+    if smap is None or sid not in smap: return None
+    arr = _retinotopy_dset(name, size=size)
+    dat = arr[smap[sid]]
+    return pyr.m(
+        prf_polar_angle        = _cifti_to_hemis(np.mod(90 - dat[0] + 180, 360) - 180, sid),
+        prf_eccentricity       = _cifti_to_hemis(dat[1], sid),
+        prf_radius             = _cifti_to_hemis(dat[5], sid),
+        prf_variance_explained = _cifti_to_hemis(dat[4]/100.0, sid))
+    
 def subject_filemap(sid, subject_path=None):
     '''
     subject_filemap(sid) yields a persistent lazy map structure that loads the relevant files as
@@ -1881,7 +2091,8 @@ def subject_filemap(sid, subject_path=None):
         sid  = int(sdir.split(os.sep)[-1])
     else: raise ValueError('Cannot understand HCP subject ID %s' % sid)
     if sdir is None:
-        if _auto_download_options is not None and _auto_downloadable(sid):
+        if _auto_download_options is not None and _auto_download_options['structure'] \
+           and _auto_downloadable(sid):
             # we didn't find it, but we have a place to put it
             sdir = _auto_download_options['subjects_path']
             sdir = os.path.join(sdir, str(sid))
@@ -1906,18 +2117,8 @@ def subject_filemap(sid, subject_path=None):
             dat = dats[flnm]
             if 'cifti' in dat and dat['cifti']:
                 # we need to handle the cifti files by splitting them up according to atlases
-                (la, ra) = _load_fsLR_atlasroi(flnm, dat)
-                (ln, rn) = [aa.shape[0]     for aa in (la, ra)]
-                (li, ri) = [np.where(aa)[0] for aa in (la, ra)]
-                (lu, ru) = [len(ai)         for ai in (li, ri)]
-                if dat['hemi'][0:2] == 'lh': (ii,jj,nn) = (slice(0,  lu),      li, ln)
-                else:                        (ii,jj,nn) = (slice(lu, lu + ru), ri, rn)
-                cu = lu + ru # number of slots in a cifti file
-                tmp = np.asarray(obj)
-                if tmp.shape[0] < cu: tmp = tmp.T
-                if tmp.shape[0] < cu: raise ValueError('no matching size in cifti file')
-                obj = np.zeros((nn,) + tmp.shape[1:], dtype=tmp.dtype)
-                obj[jj] = tmp[ii]
+                (ldat,rdat) = _cifti_to_hemis(np.asarray(obj), sid)
+                obj = ldat if dat['hemi'][0:2] == 'lh' else rdat
                 obj.setflags(write=False)
             return obj
         return _f
@@ -1931,4 +2132,28 @@ def subject_filemap(sid, subject_path=None):
     # and the images
     imgs = pimms.lazy_map({k: _lookup_fl(os.path.join(sdir, v.format(ff)))
                            for (k,v) in six.iteritems(subject_structure['images'])})
+    # and retinotopy if appropriate
+    for size in [32, 59]:
+        retsubs = _retinotopy_submap(size=size)
+        if retsubs is not None and sid in retsubs:
+            def _make_loader(sz):
+                rp = retinotopy_prefix if sz == 59 else lowres_retinotopy_prefix
+                ldr = pimms.lazy_map({0:lambda:_retinotopy_data('full', sid, size=sz)})
+                return pyr.pmap(
+                    {('lh_LR%dk_MSMAll' % sz):pimms.lazy_map(
+                        {(rp+'_polar_angle'):lambda:ldr[0]['prf_polar_angle'][0],
+                         (rp+'_eccentricity'):lambda:ldr[0]['prf_eccentricity'][0],
+                         (rp+'_radius'):lambda:ldr[0]['prf_radius'][0],
+                         (rp+'_variance_explained'):lambda:ldr[0]['prf_variance_explained'][0]}),
+                    ('rh_LR%dk_MSMAll' % sz):pimms.lazy_map(
+                        {(rp+'_polar_angle'):lambda:ldr[0]['prf_polar_angle'][1],
+                         (rp+'_eccentricity'):lambda:ldr[0]['prf_eccentricity'][1],
+                         (rp+'_radius'):lambda:ldr[0]['prf_radius'][1],
+                         (rp+'_variance_explained'):lambda:ldr[0]['prf_variance_explained'][1]})})
+            ret = _make_loader(size)
+            # merge into the hemis
+            for h in six.iterkeys(ret):
+                hdat = hems[h]
+                prop = pimms.merge(hdat['properties'], ret[h])
+                hems = hems.set(h, hdat.set('properties', prop))
     return pyr.pmap({'images': imgs, 'hemis': hems})

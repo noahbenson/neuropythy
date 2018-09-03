@@ -10,14 +10,17 @@ import nibabel.freesurfer.mghformat as fsmgh
 import pyrsistent                   as pyr
 import os, warnings, six, pimms
 
-from ..     import geometry         as geo
-from ..     import mri              as mri
-from ..     import io               as nyio
+from ..        import geometry      as geo
+from ..        import mri           as mri
+from ..        import io            as nyio
+from ..        import vision        as nyvis
 
-from ..util import library_path
-from .files import (subject_paths, clear_subject_paths, add_subject_path, find_subject_path,
-                    to_subject_id, to_credentials, load_credentials, detect_credentials,
-                    subject_filemap)
+from ..util    import (library_path, curry)
+from .files    import (subject_paths, clear_subject_paths, add_subject_path, find_subject_path,
+                       to_subject_id, to_credentials, load_credentials, detect_credentials,
+                       subject_filemap, retinotopy_prefix, lowres_retinotopy_prefix,
+                       inferred_retinotopy_prefix, lowres_inferred_retinotopy_prefix,
+                       load_retinotopy_cache, save_retinotopy_cache)
 
 # An hcp.Subject is much like an mri.Subject, but its dependency structure all comes from the
 # path rather than data provided to the constructor:
@@ -41,6 +44,88 @@ class Subject(mri.Subject):
         self.meta_data = meta_data
         # these are the only actually required data for the constructor; the rest is values
 
+    @staticmethod
+    def _hmap_has_retinotopy(hmaps, size):
+        # by looking at hmaps, check if both hemispheres have retinotopy data
+        props = [('%s_%s' % (retinotopy_prefix, s))
+                 for s in ['polar_angle', 'eccentricity', 'radius', 'variance_explained']]
+        hsuf = '_LR%dk_MSMAll' % size
+        return all(p in hmaps[h + hsuf]['properties'] for p in props for h in ('lh','rh'))
+    @staticmethod
+    def _cortex_setup_native_retinotopy(subdir, sid, hemmap, hmaps, align='MSMAll'):
+        # Here, hemmap is the map that will be cortex.hemis and hmaps is filemap['hemis'].
+        size = next((s for s in [59,32] if Subject._hmap_has_retinotopy(hmaps, s)), None)
+        # okay, size is the best we can do from the database files, but let's see if we have any
+        # cache files; only use the 32k cache file if we can't load the 59k database file
+        nsuf = '_native_%s' % align
+        rp = retinotopy_prefix + '_'
+        props = [('%s%s' % (rp, s))
+                 for s in ['polar_angle', 'eccentricity', 'radius', 'variance_explained']]
+        cache = load_retinotopy_cache(subdir, sid, alignment=align)
+        # merge cache in now
+        for (hname,hcache) in six.iteritems(cache):
+            if hname not in hemmap: continue
+            hemmap = hemmap.set(hname,
+                                curry(lambda hm,hn,hc:hm[hn].with_prop(hc), hemmap, hname, hcache))
+        hfrompat = '%%s_LR%%dk_%s' % align
+        # now make a filter that adds the properties when the hemi is loaded
+        def check_hemi_retinotopy(hname):
+            h = hname[:2]
+            def lazy_hemi_fixer():
+                tohem = hemmap[hname] # where we interpolate to; also the hem to fix
+                # we only interpolate onto native hemispheres:
+                if hname.split('_')[1] != 'native': return tohem
+                # we want to make a lazy loader of the whole retinotopy dataset here
+                def get_interpolated_retinotopy():
+                    if get_interpolated_retinotopy.val is not None:
+                        return get_interpolated_retinotopy.val
+                    m = {}
+                    # we interpolate both prf and lowres-prf
+                    for (rp,res) in zip([retinotopy_prefix, lowres_retinotopy_prefix], [59,32]):
+                        rp = rp + '_'
+                        # first, if we have the retinotopy from cache, we can skip this...
+                        if all(k in tohem.properties for k in props): continue
+                        fromhem = hemmap[hfrompat % (h,res)] # where we interpolate from
+                        if fromhem is None: continue
+                        fromdat = {k:fromhem.prop(k)
+                                   for k in six.iterkeys(fromhem.properties)
+                                   if k.startswith(rp)}
+                        # if the data isn't in the from hemi, we can't interpolate
+                        if len(fromdat) == 0: continue
+                        # convert to x/y for interpolation (avoid circular angle mean issues)
+                        try: (x,y) = nyvis.as_retinotopy(fromdat, 'geographical', prefix=rp)
+                        except: continue
+                        del fromdat[rp + 'polar_angle']
+                        del fromdat[rp + 'eccentricity']
+                        fromdat['x'] = x
+                        fromdat['y'] = y
+                        todat = fromhem.interpolate(tohem, fromdat, method='linear')
+                        # back to visual coords
+                        (a,e) = nyvis.as_retinotopy(todat, 'visual')
+                        todat = todat.remove('x').remove('y')
+                        # save results in our tracking variable, m
+                        for (k,v) in six.iteritems(todat):                       m[k]      = v
+                        for (k,v) in zip(['polar_angle','eccentricity'], [a,e]): m[rp + k] = v
+                    m = pyr.pmap(m)
+                    # we can save the cache...
+                    get_interpolated_retinotopy.val = m
+                    if len(m) > 0: save_retinotopy_cache(subdir, sid, hname, m, alignment=align)
+                    return m
+                get_interpolated_retinotopy.val = None
+                # figure out what properties we'll get from this
+                props = []
+                for (rp,res) in zip([retinotopy_prefix, lowres_retinotopy_prefix], [59,32]):
+                    fromh = hemmap[hfrompat % (h,res)] # where we interpolate from
+                    if fromh is None: props = []
+                    else: props = props + [k for k in six.iterkeys(fromh.properties)
+                                           if k.startswith(rp) and k not in tohem.properties]
+                if len(props) == 0: return tohem
+                m = pimms.lazy_map({p:curry(lambda k:get_interpolated_retinotopy()[k], p)
+                                    for p in props})
+                return tohem.with_prop(m)
+            return lazy_hemi_fixer
+        # now update the hemmap
+        return pimms.lazy_map({h:check_hemi_retinotopy(h) for h in six.iterkeys(hemmap)})
     @staticmethod
     def _cortex_from_hemimap(sid, hname, hmap):
         chirality = hname[0:2]
@@ -80,7 +165,7 @@ class Subject(mri.Subject):
         '''
         return subject_filemap(path)
     @pimms.value
-    def hemis(subject_id, filemap, default_alignment):
+    def hemis(path, subject_id, filemap, default_alignment):
         '''
         sub.hemis is a persistent map of hemispheres/cortex objects for the given HCP subject sub.
         HCP subjects have many hemispheres of the name <chirality>_<topology>_<alignment> where
@@ -91,8 +176,17 @@ class Subject(mri.Subject):
         '''
         sid = subject_id
         hmaps = filemap['hemis']
-        def _ctx_loader(k): return lambda:Subject._cortex_from_hemimap(sid, k, hmaps[k])
+        def _ctx_loader(k):
+            def _f():
+                try: return Subject._cortex_from_hemimap(sid, k, hmaps[k])
+                except: return None
+            return _f
         hemmap0 = pimms.lazy_map({k:_ctx_loader(k) for k in six.iterkeys(hmaps)})
+        # one special thing: we can auto-load retinotopy from another hemisphere and interpolate it
+        # onto the native hemisphere; set that up if possible (note that retinotopy is always
+        # aligned to MSMAll):
+        hemmap0 = Subject._cortex_setup_native_retinotopy(path, sid, hemmap0, hmaps, 'MSMAll')
+        # now setup the aliases
         def _ctx_lookup(k): return lambda:hemmap0[k]
         hemmap = {}
         da = '_' + default_alignment

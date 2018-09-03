@@ -3,13 +3,11 @@
 # This file defines the Humman Connectome Project (HCP)  tools that are available as part of
 # neuropythy.
 
-#from .core import (Subject, subject,
-#                   auto_download, download,
-#                   to_subject_id, to_credentials, detect_credentials, load_credentials,
-#                   find_subject_path, subject_paths, add_subject_path, clear_subject_paths)
 from .files import (subject_paths, clear_subject_paths, add_subject_path, find_subject_path,
                     to_subject_id, to_credentials, load_credentials, detect_credentials,
-                    subject_filemap, download, auto_download)
+                    subject_filemap, download, auto_download, retinotopy_prefix,
+                    lowres_retinotopy_prefix, inferred_retinotopy_prefix,
+                    lowres_inferred_retinotopy_prefix)
 from .core import (Subject, subject)
 
 subject_ids = tuple(
