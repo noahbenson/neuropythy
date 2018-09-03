@@ -46,7 +46,6 @@ class RetinotopyModel(object):
         '''
         if vai is None: return None
         if not pimms.is_map(vai): return pyr.pmap({nm:(ii+1) for (ii,nm) in enumerate(vai)})
-        if pimms.is_lazy_map(vai): return vai
         elif pimms.is_pmap(vai): return vai
         else: return pyr.pmap(vai)
     @pimms.value
@@ -138,7 +137,7 @@ class SchiraModel(RetinotopyModel):
         center = params['center']
         if pimms.is_number(center) and np.isclose(center, 0):
             params = params.set('center', (0.0, 0.0))
-        return params
+        return pimms.persist(params, depth=None)
 
     @pimms.value
     def _java_object(parameters):
@@ -416,7 +415,7 @@ class RegisteredRetinotopyModel(RetinotopyModel):
         '''
         if not isinstance(mdl, RetinotopyModel):
             raise ValueError('given parameter model must be a RetinotopyModel instance')
-        return mdl.persist()
+        return pimms.persist(mdl)
     @pimms.param
     def map_projection(mp):
         '''
@@ -424,7 +423,7 @@ class RegisteredRetinotopyModel(RetinotopyModel):
         '''
         if not isinstance(mp, geo.MapProjection):
             raise ValueError('given parameter map_projection must be a MapProjection instance')
-        return mp.persist()
+        return pimms.persist(mp)
 
     def save(self, f):
         '''
@@ -596,4 +595,3 @@ def load_fmm_model(filename, radius=np.pi/3.0, sphere_radius=100.0):
                           radius=radius,
                           sphere_radius=sphere_radius,
                           chirality=hemi))
-
