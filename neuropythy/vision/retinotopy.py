@@ -77,9 +77,9 @@ _retinotopy_names = {
     'visual_area':  set(['visual_area', 'visual_roi', 'visual_region', 'visual_label']),
     'weight':       set(['weight', 'variance_explained'])}
 
-def retinotopy_data(hemi, retino_type):
+def basic_retinotopy_data(hemi, retino_type):
     '''
-    retinotopy_data(hemi, t) yields a numpy array of data for the given cortex object hemi
+    basic_retinotopy_data(hemi, t) yields a numpy array of data for the given cortex object hemi
     and retinotopy type t; it does this by looking at the properties in hemi and picking out any
     combination that is commonly used to denote empirical retinotopy data. These common names are
     stored in _predicted_retintopy_names, in order of preference, which may be modified.
@@ -116,7 +116,7 @@ def extract_retinotopy_argument(obj, retino_type, arg, default='any'):
     elif arg is not None:          raise ValueError('cannot interpret retinotopy arg: %s' % arg)
     elif default == 'predicted':   values = predicted_retinotopy_data(obj, retino_type)
     elif default == 'empirical':   values = empirical_retinotopy_data(obj, retino_type)
-    elif default == 'any':         values = retinotopy_data(obj, retino_type)
+    elif default == 'any':         values = basic_retinotopy_data(obj, retino_type)
     else:                          raise ValueError('bad default retinotopy: %s' % default)
     if values is None:
         raise RuntimeError('No %s retinotopy data found given argument: %s' % (retino_type, arg))
@@ -159,11 +159,11 @@ _default_eccentricity_units = {
     'ecc':          'deg',
     'radius':       'rad'}
 _default_x_units = {
-    'x':            'rad',
+    'x':            'deg',
     'longitude':    'deg',
     'lon':          'deg'}
 _default_y_units = {
-    'y':            'rad',
+    'y':            'deg',
     'latitude':     'deg',
     'lat':          'deg'}
 _default_z_units = {
@@ -223,7 +223,7 @@ def as_retinotopy(data, output_style='visual', units=Ellipsis, prefix=None, suff
                         fields:             ['angle' (radians), 'eccentricity' (degrees)]
       * 'cartesian':    axes:               x/y correspond to RHM/UVM
                         positive-direction: left/up
-                        fields:             ('x' (radians), 'y' (radians))
+                        fields:             ('x' (degrees), 'y' (degrees))
       * 'geographical': axes:               x/y correspond to RHM/UVM
                         positive-direction: left/up
                         fields:             ('longitude' (degrees), 'latitude' (degrees))
@@ -255,7 +255,7 @@ def as_retinotopy(data, output_style='visual', units=Ellipsis, prefix=None, suff
     if isinstance(data, list):
         data = np.asarray(data)
     if pimms.is_nparray(data):
-        if pimms.is_vector(data, 'complex'):
+        if pimms.is_vector(data, np.complexfloating):
             data = {'complex': data}
         else:
             if data.shape[0] != 2: data = data.T
@@ -581,6 +581,21 @@ def retinotopy_model(name='benson17', hemi=None,
     retinotopy_model.cache[tup] = mdl
     return mdl
 retinotopy_model.cache = {}
+
+def occipital_flatmap(cortex, radius=None):
+    '''
+    occipital_flatmap(cortex) yields a flattened mesh of the occipital cortex of the given cortex
+      object.
+      
+    Note that if the cortex is not registrered to fsaverage, this will fail.
+
+    The option radius may be given to specify the fraction of the cortical sphere (in radians) to
+    include in the map.
+    '''
+    mdl = retinotopy_model('benson17', hemi=cortex.chirality)
+    mp = mdl.map_projection
+    if radius is not None: mp = mp.copy(radius=radius)
+    return mp(cortex)
 
 # Tools for retinotopy registration:
 def _retinotopy_vectors_to_float(ang, ecc, wgt, weight_min=0):
@@ -1459,21 +1474,35 @@ def predict_retinotopy(sub, template='benson17', registration='fsaverage'):
                for fnm in [os.path.join(spath, '%s.%s_%s' % (h, template, k))]
                for dat in [fsio.read_morph_data(fnm)]}
             for h in hemis}
-        
+
     # Okay, we just need to interpolate over to this subject
     tmpl = retino_tmpls[template]
     if not all(s in tmpl for s in hemis):
         raise ValueError('could not find matching template')
     if registration == 'fsaverage_sym':
         sym = nyfs.subject('fsaverage_sym')
-        subj_hems = (sub.lh, sub.hemis['rhx'])
-        tmpl_hems = (sym.lh, sym.lh)
+        if isinstance(sub, mri.Subject):
+            subj_hems = (sub.lh, sub.hemis['rhx'])
+            tmpl_hems = (sym.lh, sym.lh)
+            chrs_hems = ('lh','rh')
+        else:
+            subj_hems = (sub,)
+            tmpl_hems = (sym.lh,)
+            chrs_hems = (sub.chirality,)
     else:
         fsa = nyfs.subject('fsaverage')
-        subj_hems = (sub.lh, sub.rh)
-        tmpl_hems = (fsa.lh, fsa.rh)
-    return tuple([th.interpolate(sh, tmpl[h if registration == 'fsaverage' else 'sym'])
-                  for (sh,th,h) in zip(subj_hems, tmpl_hems, ['lh', 'rh'])])
+        if isinstance(sub, mri.Subject):
+            subj_hems = (sub.lh, sub.rh)
+            tmpl_hems = (fsa.lh, fsa.rh)
+            chrs_hems = ('lh','rh')
+        else:
+            subj_hems = (sub,)
+            tmpl_hems = ((fsa.lh if sub.chirality == 'lh' else fsa.rh),)
+            chrs_hems = (sub.chirality,)
+
+    tpl = tuple([th.interpolate(sh, tmpl[h if registration == 'fsaverage' else 'sym'])
+                for (sh,th,h) in zip(subj_hems, tmpl_hems, chrs_hems)])
+    return tpl[0] if len(tpl) == 1 else tpl
 
 def clean_retinotopy(obj, retinotopy='empirical', output_style='visual', weight=Ellipsis,
                      equality_sigma=0.15, equality_scale=10.0,
