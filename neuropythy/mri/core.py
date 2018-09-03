@@ -13,7 +13,7 @@ import pyrsistent          as pyr
 import collections         as colls
 import os, sys, types, six, itertools, pimms
 
-from ..util import (ObjectWithMetaData, to_affine, is_image, is_address, address_data)
+from ..util import (ObjectWithMetaData, to_affine, is_image, is_address, address_data, curry)
 
 if six.PY2: (_tuple_type, _list_type) = (types.TupleType, types.ListType)
 else:       (_tuple_type, _list_type) = (tuple, list)
@@ -634,10 +634,8 @@ class Cortex(geo.Topology):
         cortex.surface_coordinates is a mapping of the surface coordinates of the given cortex; this
         must include the surfaces 'white' and 'pial'.
         '''
-        if pimms.is_lazy_map(surfs) or pimms.is_pmap(surfs):
-            return surfs
-        elif pimms.is_map(surfs):
-            return pyr.pmap(surfs)
+        if pimms.is_map(surfs):
+            return pimms.persist(surfs)
         else:
             raise ValueError('surface_coordinates must be a mapping object')
     @pimms.value
