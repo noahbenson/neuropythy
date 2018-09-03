@@ -80,8 +80,8 @@ class VertexSet(ObjectWithMetaData):
         pre-processed input version of the value obj.properties.
         '''
         if props is None: return None
-        if pimms.is_itable(props): return props
-        elif pimms.is_map(props): return pimms.itable(props)
+        if pimms.is_itable(props): return pimms.persist(props)
+        elif pimms.is_map(props): return pimms.itable(props).persist()
         else: raise ValueError('provided properties data must be a mapping')
     @pimms.value
     def vertex_count(labels):
@@ -158,6 +158,8 @@ class VertexSet(ObjectWithMetaData):
           before application.
         '''
         pp = pimms.merge(self._properties if self._properties else {}, *(args + (kwargs,)))
+        if pp is self._properties: return self
+        pp = pimms.ITable(pp, n=self.vertex_count)
         return self if pp is self._properties else self.copy(_properties=pp)
     def wout_prop(self, *args):
         '''
@@ -529,12 +531,12 @@ class Tesselation(VertexSet):
           given tesselation object; the matrix is (3 x m) where m is the number of triangles, and
           the cells are valid indices into the rows of the coordinates matrix.
         '''
-        tris = pimms.imm_array(np.asarray(tris, dtype=np.int))
+        tris = np.asarray(tris, dtype=np.int)
         if tris.shape[0] != 3:
             tris = tris.T
             if tris.shape[0] != 3:
                 raise ValueError('faces must be a (3 x m) or (m x 3) matrix')
-        return tris
+        return pimms.imm_array(tris)
 
     # The immutable values:
     @pimms.value
@@ -825,12 +827,12 @@ class Mesh(VertexSet):
         mesh.coordinates is a read-only numpy array of size (d x n) where d is the number of
           dimensions and n is the number of vertices in the mesh.
         '''
-        crds = pimms.imm_array(crds)
+        crds = np.asarray(crds)
         if crds.shape[0] != 2 and crds.shape[0] != 3:
             crds = crds.T
             if crds.shape[0] != 2 and crds.shape[0] != 3:
                 raise ValueError('coordinates must be a (d x n) or (n x d) array where d is 2 or 3')
-        return crds
+        return pimms.imm_array(crds)
     @pimms.param
     def tess(tris):
         '''
@@ -864,9 +866,9 @@ class Mesh(VertexSet):
         tp = {} if tess.properties is None else tess.properties
         # note that tess.properties always already has labels and indices included
         if _properties is tess.properties:
-            return pimms.itable(pp, {'coordinates': coordinates.T})
+            return pimms.itable(pp, {'coordinates': coordinates.T}).persist()
         else:
-            return pimms.itable(tp, pp, {'coordinates': coordinates.T})
+            return pimms.itable(tp, pp, {'coordinates': coordinates.T}).persist()
     @pimms.value
     def edge_coordinates(tess, coordinates):
         '''
@@ -1247,25 +1249,19 @@ class Mesh(VertexSet):
         (m,n) = interp.shape # n: no. of vertices in mesh; m: no. points being interpolated
         # We apply weights first, because they are fairly straightforward:
         if weights is not None:
-            wmtx = sps.lil_matrix((n,n))
             weights = np.array(weights)
             weights[np.logical_not(np.isfinite(weights))] = 0
             weights[weights < 0] = 0
-            wmtx.setdiag(weights)
-            interp = interp.dot(wmtx.tocsc())
+            interp = interp.dot(sps.diags(weights))
         # we make a mask with 1 extra element, always out of the mask, as a way to flag vertices
         # that shouldn't appear in the mask for some other reason
         if mask is None or (pimms.is_str(mask) and mask.lower() == 'all'):
             mask = np.ones(n + 1, dtype=np.bool)
             mask[n] = 0
         else:
-            mask_mtx = sps.lil_matrix((n,n))
-            diag = np.zeros(n + 1, dtype=np.bool)
-            diag[mask] = 1
-            mask = diag
-            mask_mtx.setdiag(diag[:-1])
-            interp = interp.dot(mask_mtx.tocsc())
+            interp = interp.dot(sps.diags(np.asarray(mask, dtype=np.float)))
             interp.eliminate_zeros()
+            mask = np.concatenate([mask, [False]])
         # we may need to rescale the rows now:
         (closest, rowdivs) = np.transpose(
             [(r.indices[np.argsort(r.data)[-1]], 1/ss) if np.isfinite(ss) and ss > 0 else (n,0)
@@ -1274,9 +1270,7 @@ class Mesh(VertexSet):
         closest = np.asarray(closest, dtype=np.int)
         if not np.array_equal(rowdivs, np.ones(len(rowdivs))):
             # rescale the rows
-            rescale_mtx = sps.lil_matrix((m,m))
-            rescale_mtx.setdiag(rowdivs)
-            interp = rescale_mtx.tocsc().dot(interp)
+            interp = sps.diags(rowdivs).dot(interp)
         # any row with no interpolation weights or that is nearest to a vertex not in the mesh
         # needs to be given a nan value upon interpolation
         bad_pts = np.logical_not(mask[closest])
@@ -1296,11 +1290,10 @@ class Mesh(VertexSet):
         if coords.shape[0] == self.coordinates.shape[0]: coords = coords.T
         n = self.coordinates.shape[1]
         m = coords.shape[0]
-        mtx = sps.lil_matrix((m, n), dtype=np.int)
         nv = self.nearest_vertex(coords, n_jobs=n_jobs)
-        for (ii,u) in enumerate(nv):
-            mtx[ii,u] = 1
-        return mtx.tocsr()
+        return sps.csr_matrix(
+            (np.ones(len(nv)), (range(len(nv)), nv)),
+            shape=(m,n))
     def linear_interpolation(self, coords, n_jobs=1):
         '''
         mesh.linear_interpolation(x) yields an interpolation matrix for the given coordinate or 
@@ -1835,7 +1828,7 @@ class MapProjection(ObjectWithMetaData):
         if m is None: return None
         if not isinstance(m, Mesh):
             raise ValueError('projection mesh must be a Mesh object')
-        return m
+        return pimms.persist(m)
     @pimms.param
     def center(c):
         '''
@@ -2158,7 +2151,7 @@ class Topology(VertexSet):
         '''
         if not isinstance(t, Tesselation):
             t = Tesselation(tess)
-        return t.persist()
+        return pimms.persist(t)
     @pimms.param
     def chirality(ch):
         '''
@@ -2176,7 +2169,7 @@ class Topology(VertexSet):
         topo._registrations is the list of registration coordinates provided to the given topology.
         See also topo.registrations.
         '''
-        return regs if pimms.is_lazy_map(regs) or pimms.is_pmap(regs) else pyr.pmap(regs)
+        return regs if pimms.is_pmap(regs) else pyr.pmap(regs)
     @pimms.value
     def registrations(_registrations, tess, properties):
         '''
@@ -2218,7 +2211,9 @@ class Topology(VertexSet):
         pp = {} if _properties is None else _properties
         tp = {} if tess.properties is None else tess.properties
         # note that tess.properties always already has labels and indices included
-        return pimms.itable(pimms.merge(pp, tp) if _properties is not tess.properties else pp)
+        itbl = pimms.ITable(pimms.merge(tp, pp) if _properties is not tess.properties else pp,
+                            n=tess.vertex_count)
+        return itbl.persist()
     @pimms.value
     def repr(chirality, tess):
         '''
@@ -2286,13 +2281,12 @@ class Topology(VertexSet):
             raise RuntimeError('Topologies do not share a matching registration!')
         res = None
         for reg_name in reg_names:
-            try:
+            if True:#try:
                 res = self.registrations[reg_name].interpolate(
                     topo.registrations[reg_name], data,
                     mask=mask, method=method, n_jobs=n_jobs);
                 break
-            except:
-                pass
+            #except: pass
         if res is None:
             raise ValueError('All shared topologies raised errors during interpolation!')
         return res
@@ -2394,7 +2388,7 @@ def load_gifti(filename, to='auto'):
             cor = cor.data
             tri = tri.data
             # possible that these were given in the wrong order:
-            if pimms.is_matrix(tri, 'inexact') and pimms.is_matrix(cor, 'int'):
+            if pimms.is_matrix(tri, np.inexact) and pimms.is_matrix(cor, np.signedinteger):
                 (cor,tri) = (tri,cor)
             # okay, try making it:
             try: return Mesh(tri, cor)
@@ -2402,13 +2396,13 @@ def load_gifti(filename, to='auto'):
         # is it a coord or topo?
         if len(dat.darrays) == 1:
             cor = dat.darrays[0].data
-            if pimms.is_matrix(cor, 'inexact'): return cor
+            if pimms.is_matrix(cor, np.inexact): return cor
             if pimms.is_matrix(cor, 'int'):     return Tesselation(cor)
         # We don't know what it is:
         return dat
     elif to in ['coords', 'coordinates', 'xyz']:
         cor = dat.darrays[0].data
-        if pimms.is_matrix(cor, 'inexact'): return cor
+        if pimms.is_matrix(cor, np.inexact): return cor
         else: raise ValueError('give gifti file did not contain coordinates')
     elif to in ['tess', 'tesselation', 'triangles', 'tri', 'triangulation']:
         cor = dat.darrays[0].data
@@ -2420,7 +2414,7 @@ def load_gifti(filename, to='auto'):
         cor = cor.data
         tri = tri.data
         # possible that these were given in the wrong order:
-        if pimms.is_matrix(tri, 'inexact') and pimms.is_matrix(cor, 'int'):
+        if pimms.is_matrix(tri, np.inexact) and pimms.is_matrix(cor, 'int'):
             (cor,tri) = (tri,cor)
         # okay, try making it:
         return Mesh(tri, cor)
