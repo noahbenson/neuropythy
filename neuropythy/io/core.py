@@ -8,6 +8,8 @@ import pyrsistent                   as pyr
 import nibabel                      as nib
 import os, six, pimms
 
+from ..util import ObjectWithMetaData
+
 # The list of import-types we understand
 importers = pyr.m()
 '''
@@ -74,7 +76,9 @@ def load(filename, format=None, **kwargs):
     if format not in importers:
         raise ValueError('Format \'%s\' not recognized by neuropythy' % format)
     (f,_,_) = importers[format]
-    return f(filename, **kwargs)
+    obj = f(filename, **kwargs)
+    if isinstance(obj, ObjectWithMetaData): return obj.with_meta(source_filename=filename)
+    else: return obj
 def importer(name, extensions=None, sniff=None):
     '''
     @importer(name) is a decorator that declares that the following function is an file loading
