@@ -14,6 +14,16 @@ from   functools                    import reduce
 if six.PY2: (_tuple_type, _list_type) = (types.TupleType, types.ListType)
 else:       (_tuple_type, _list_type) = (tuple, list)
 
+def curry(f, *args0, **kwargs0):
+    '''
+    curry(f, ...) yields a function equivalent to f with all following arguments and keyword
+      arguments passed. This is much like the partial function, but yields a function instead of
+      a partial object and thus is suitable for use with pimms lazy maps.
+    '''
+    def curried_f(*args, **kwargs):
+        return f(*(args0 + args), **pimms.merge(kwargs0, kwargs))
+    return curried_f
+
 @pimms.immutable
 class CommandLineParser(object):
     '''
