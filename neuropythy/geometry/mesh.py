@@ -1404,8 +1404,8 @@ class Mesh(VertexSet):
           * method (default: 'automatic') specifies what method to use for interpolation. The only
             currently supported methods are 'automatic', 'linear', or 'nearest'. The 'nearest'
             method does not  actually perform a nearest-neighbor interpolation but rather assigns to
-            a destination vertex the value of the source vertex whose veronoi-like polygon contains
-            the destination vertex; note that the term 'veronoi-like' is used here because it uses
+            a destination vertex the value of the source vertex whose voronoi-like polygon contains
+            the destination vertex; note that the term 'voronoi-like' is used here because it uses
             the Voronoi diagram that corresponds to the triangle mesh and not the true delaunay
             triangulation. The 'linear' method uses linear interpolation; though if the given data
             is non-numerical, then nearest interpolation is used instead. The 'automatic' method
@@ -2264,8 +2264,8 @@ class Topology(VertexSet):
           * method (default: 'automatic') specifies what method to use for interpolation. The only
             currently supported methods are 'automatic', 'linear', or 'nearest'. The 'nearest'
             method does not  actually perform a nearest-neighbor interpolation but rather assigns to
-            a destination vertex the value of the source vertex whose veronoi-like polygon contains
-            the destination vertex; note that the term 'veronoi-like' is used here because it uses
+            a destination vertex the value of the source vertex whose voronoi-like polygon contains
+            the destination vertex; note that the term 'voronoi-like' is used here because it uses
             the Voronoi diagram that corresponds to the triangle mesh and not the true delaunay
             triangulation. The 'linear' method uses linear interpolation; though if the given data
             is non-numerical, then nearest interpolation is used instead. The 'automatic' method
