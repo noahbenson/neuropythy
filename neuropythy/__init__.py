@@ -52,6 +52,7 @@ def reload_neuropythy():
             sys.modules[mdl] = reload(sys.modules[mdl])
     return reload(sys.modules['neuropythy'])
 
+from   .util       import config
 from   .io         import (load, save, to_nifti)
 from   .mri        import (Cortex, Subject)
 from   .vision     import (retinotopy_data, empirical_retinotopy_data, predicted_retinotopy_data,
@@ -72,7 +73,7 @@ try:
 except: pass
 
 # Version information...
-__version__ = '0.6.3'
+__version__ = '0.6.4'
 
 
 
