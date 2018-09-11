@@ -42,6 +42,10 @@ class ConfigMeta(type):
         return cls._getitem(cls,name)
     def __setitem__(cls,name,val):
         return cls._setitem(cls,name,val)
+    def __len__(cls):
+        return cls._len(cls)
+    def __iter__(cls):
+        return cls._iter(cls)
         
 @six.add_metaclass(ConfigMeta)
 class config(object):
@@ -111,21 +115,43 @@ class config(object):
     _vals = {}
     @staticmethod
     def _getitem(self, name):
+        print(name)
+        if 'freesurfer_subject_paths' in config._vals:
+            print(' ??? ', config._vals['freesurfer_subject_paths'])
         if name not in config._vars: raise KeyError(name)
         if name not in config._vals:
-            (rcname, envname, fltfn, val) = config._vars[name]
+            (rcname, envname, fltfn, dval) = config._vars[name]
+            val = dval
             rcdat = config.rc()
             # see if it's in the rc-file first, then the environment
-            if rcname  in rcdat:      val = rcdat[rcname]
-            if envname in os.environ: val = json.loads(os.environ[envname])
+            if rcname  in rcdat: val = rcdat[rcname]
+            if envname in os.environ:
+                val = os.environ[envname]
+                try: val = json.loads(val)
+                except: pass # it's a string if it can't be json'ed
             # if there's a filter, run it
-            if fltfn is not None: val = fltfn(val)
-            self._vals[name] = val
+            if fltfn is not None:
+                val = fltfn(val)
+                try: True
+                except: val = dval # failure--reset to default
+            config._vals[name] = val
         return config._vals[name]
     @staticmethod
     def _setitem(self, name, val):
         if name not in config._vars:
             raise ValueError('Configurable neuropythy key "%s" not declared' % name)
-        (rcname, envname, fltfn, val) = config._vars[name]
+        (rcname, envname, fltfn, dval) = config._vars[name]
         self._vals[name] = fltfn(val)
-
+    @staticmethod
+    def _iter(self): return six.iterkeys(self._vars)
+    @staticmethod
+    def _len(self): return len(self._vars)
+    @staticmethod
+    def keys(): return config._vars.keys()
+    @staticmethod
+    def values(): return map(lambda k:config[k], config.keys())
+    @staticmethod
+    def items(): return map(lambda k:(k,config[k]), config.keys())
+    @staticmethod
+    def todict(): return {k:config[k] for k in config.keys()}
+    

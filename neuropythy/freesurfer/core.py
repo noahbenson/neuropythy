@@ -15,11 +15,19 @@ from .. import mri      as mri
 from .. import io       as nyio
 #import ..io as nyio
 
-from ..util import library_path
+from ..util import (config, library_path)
 
 ####################################################################################################
 # Subject Directory and where to find Subjects
-_subjects_dirs = pyr.v()
+def to_subject_paths(paths):
+    '''
+    to_subject_paths(paths) accepts either a string that is a :-separated list of directories or a
+     list of directories and yields a list of all the existing directories.
+    '''
+    if paths is None: return []
+    if pimms.is_str(paths): return [p for p in paths.split(':') if os.path.isdir(p)]
+    else: return [p for p in paths if os.path.isdir(p)]
+config.declare('freesurfer_subject_paths', environ_name='SUBJECTS_DIR', filter=to_subject_paths)
 
 def subject_paths():
     '''
@@ -30,15 +38,15 @@ def subject_paths():
     If you must edit these paths, it is recommended to use add_subject_path, and clear_subject_paths
     functions.
     '''
-    return _subjects_dirs
+    return config['freesurfer_subject_paths']
 
 def clear_subject_paths(subpaths):
     '''
     clear_subject_paths() resets the freesurfer subject paths to be empty and yields the previous
       list of subject paths.
     '''
-    sd = _subjects_dirs
-    _subjects_dirs = pyr.v()
+    sd = config['freesurfer_subject_paths']
+    config['freesurfer_subject_paths'] = []
     return sd
 
 def add_subject_path(path, index=0):
@@ -54,33 +62,33 @@ def add_subject_path(path, index=0):
     only if all paths were successfully inserted.
     See also subject_paths.
     '''
-    global _subjects_dirs
     paths = [p for p in path.split(':') if len(p) > 0]
     if len(paths) > 1:
         tests = [add_subject_path(p, index=index) for p in reversed(paths)]
         return all(t for t in tests)
     else:
+        fsp = config['freesurfer_subject_paths']
+        fsp0 = fsp.copy()
         if not os.path.isdir(path): return False
-        if path in _subjects_dirs:   return True
+        if path in fsp: return True
         try:
             if index is None or index is Ellipsis:
-                _subjects_dirs = _subjects_dirs.append(path)
+                sd = fsp + [path]
             else:
-                sd = _subjects_dirs.tolist()
+                sd = fsp.copy()
                 sd.insert(index, path)
-                _subjects_dirs = pyr.pvector(sd)
+            config['freesurfer_subject_paths'] = sd
             return True
         except:
             return False
 
-# Try a few common subjects pahts spots
-add_subject_path('/Applications/freesurfer/subjects')
-add_subject_path('/opt/freesurfer/subjects')
-# add the SUBJECTS_DIR environment variable...
-if 'SUBJECTS_DIR' in os.environ:
-    add_subject_path(os.environ['SUBJECTS_DIR'])
+if config['freesurfer_subject_paths'] is None:
+    # If the subjects path wasn't provided, try a few common subject paths
+    add_subject_path('/Applications/freesurfer/subjects')
+    add_subject_path('/opt/freesurfer/subjects')
+# Regardless, make sure we check the FreeSurfer home
 if 'FREESURFER_HOME' in os.environ:
-    add_subject_path(os.path.join(os.environ['FREESURFER_HOME'], 'subjects'))
+    add_subject_path(os.path.join(os.environ['FREESURFER_HOME'], 'subjects'), None)
 
 def is_freesurfer_subject_path(path):
     '''
@@ -92,18 +100,33 @@ def is_freesurfer_subject_path(path):
     if not os.path.isdir(path): return False
     else: return all(os.path.isdir(os.path.join(path, d)) for d in ['mri', 'surf', 'label'])
 
-def find_subject_path(sub):
+def find_subject_path(sub, check_path=True):
     '''
     find_subject_path(sub) yields the full path of a Freesurfer subject with the name given by the
       string sub, if such a subject can be found in the Freesurfer search paths. See also
       add_subject_path.
+
     If no subject is found, then None is returned.
+
+    The optional argument check_path (default: True) may be set to False to indicate that sanity
+    checks regarding the state of the file-system should be skipped. If check_path is set to True,
+    then a directory will only be returned if it is a directory on the file-system and it contains
+    at least the subdirectories mri/, label/, and surf/. If check_path is set to False, then
+    find_subject_path will first search for any directory that satisfies the above requirements,
+    and, failing that, will search for any directory matching sub that at least exists. If this also
+    fails, then sub itself is returned (i.e., sub is presumed to be a valid path).
     '''
+    sdirs = config['freesurfer_subject_paths']
     # if it's a full/relative path already, use it:
     if is_freesurfer_subject_path(sub): return sub
-    return next((p for sd in _subjects_dirs for p in [os.path.join(sd, sub)]
+    path = next((p for sd in sdirs for p in [os.path.join(sd, sub)]
                  if is_freesurfer_subject_path(p)),
                 None)
+    if path is not None or check_path: return path
+    if os.path.isdir(sub): return sub
+    return next((p for sd in sdirs for p in [os.path.join(sd, sub)]
+                 if os.path.isdir(p)),
+                sub)
 
 # Used to load immutable-like mgh objects
 def _load_imm_mgh(flnm):
@@ -119,8 +142,8 @@ class Subject(mri.Subject):
     A neuropythy.freesurfer.Subject is an instance of neuropythy.mri.Subject that depends only on
     the path of the subject represented; all other data are automatically derived from this.
     '''
-    def __init__(self, path, meta_data=None):
-        if not is_freesurfer_subject_path(path):
+    def __init__(self, path, meta_data=None, check_path=True):
+        if check_path and not is_freesurfer_subject_path(path):
             raise ValueError('given path does not appear to hold a freesurfer subject')
         # get the name...
         path = os.path.abspath(path)
@@ -338,24 +361,48 @@ class Subject(mri.Subject):
         return pimms.imm_array(mgh_images['ribbon'].header.get_affine())
 
 @nyio.importer('freesurfer_subject', sniff=is_freesurfer_subject_path)
-def subject(name):
+def subject(name, meta_data=None, check_path=True):
     '''
-    subject(name) yields a freesurfer Subject object for the subject with the given name.
-    Subjects are cached and not reloaded.
+    subject(name) yields a freesurfer Subject object for the subject with the given name. Subjects
+      are cached and not reloaded, so multiple calls to subject(name) will yield the same immutable
+      subject object..
+
     Note that subects returned by freesurfer_subject() are always persistent Immutable objects; this
     means that you must create a transient version of the subject to modify it via the member
     function sub.transient(). Better, you can make copies of the objects with desired modifications
-    using the copy method.
+    using the copy method--see the pimms library documentation regarding immutable classes and
+    objects.
+
+    The following options are accepted:
+      * meta_data (default: None) may optionally be a map that contains meta-data to be passed along
+        to the subject object (note that this meta-data will not be cached).
+      * check_path (default: True) may optionally be set to False to ignore the requirement that a
+        directory contain at least the mri/, label/, and surf/ directories to be considered a valid
+        FreeSurfer subject directory. Subject objects returned using this argument are not cached.
+        Additionally, check_path may be set to None instead of False, indicating that no checks or
+        search should be performed; the string name should be trusted to be an exact relative or
+        absolute path to a valid FreeSurfer subejct.
     '''
-    subpath = find_subject_path(name)
-    if subpath is None: raise ValueError('Could not locate subject with name \'%s\'' % name)
-    fpath = '/' + os.path.relpath(subpath, '/')
-    if fpath in subject._cache:
-        return subject._cache[fpath]
+    if check_path is None:
+        sub = Subject(name, check_path=False)
+        if isinstance(sub, Subject): sub.persist()
     else:
-        sub = Subject(subpath).persist()
-        if isinstance(sub, Subject): subject._cache[fpath] = sub
-        return sub
+        subpath = find_subject_path(name, check_path=check_path)
+        if subpath is None:
+            raise ValueError('Could not locate subject with name \'%s\'' % name)
+        elif check_path:
+            fpath = '/' + os.path.relpath(subpath, '/')
+            if fpath in subject._cache:
+                sub = subject._cache[fpath]
+            else:
+                sub = Subject(subpath)
+                if isinstance(sub, Subject): subject._cache[fpath] = sub.persist()
+        else:
+            sub = Subject(subpath, check_path=False)
+            if isinstance(sub, Subject): sub.persist()
+    return (None                     if sub is None           else
+            sub.with_meta(meta_data) if meta_data is not None else
+            sub)
 subject._cache = {}
 
 ####################################################################################################

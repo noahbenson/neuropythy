@@ -5,7 +5,7 @@
 
 import os, six, pimms, pyrsistent as pyr, nibabel as nib, numpy as np
 from .. import io as nyio
-from ..util import is_image
+from ..util import (config, is_image)
 
 # this isn't required, but if we can load it we will use it for auto-downloading subject data
 try:    import s3fs
@@ -14,7 +14,17 @@ except: s3fs = None
 ####################################################################################################
 # Subject Directory and where to find Subjects
 
-_subjects_dirs = pyr.v()
+   
+def to_subject_paths(paths):
+    '''
+    to_subject_paths(paths) accepts either a string that is a :-separated list of directories or a
+      list of directories and yields a list of all the existing directories.
+    '''
+    if paths is None: return []
+    if pimms.is_str(paths): return [p for p in paths.split(':') if os.path.isdir(p)]
+    else: return [p for p in paths if os.path.isdir(p)]
+
+config.declare('hcp_subject_paths', environ_name='HCP_SUBJECTS_DIR', filter=to_subject_paths)
 
 def subject_paths():
     '''
@@ -25,14 +35,14 @@ def subject_paths():
     If you must edit these paths, it is recommended to use add_subject_path, and clear_subject_paths
     functions.
     '''
-    return _subjects_dirs
+    return config['hcp_subject_paths']
 def clear_subject_paths(subpaths):
     '''
     clear_subject_paths() resets the HCP subject paths to be empty and yields the previous
       list of subject paths.
     '''
-    sd = _subjects_dirs
-    _subjects_dirs = pyr.v()
+    sd = config['hcp_subject_paths']
+    config['hcp_subject_paths'] = []
     return sd
 def add_subject_path(path, index=None):
     '''
@@ -46,25 +56,26 @@ def add_subject_path(path, index=None):
     yields True. If the string contains a : and multiple paths, then True is yielded only if all
     paths were successfully inserted.  See also subject_paths.
     '''
-    global _subjects_dirs
     paths = [p for p in path.split(':') if len(p) > 0]
     if len(paths) > 1:
         tests = [add_subject_path(p, index=index) for p in reversed(paths)]
         return all(t for t in tests)
     else:
+        spaths = config['hcp_subject_paths']
         path = os.path.expanduser(path)
         if not os.path.isdir(path): return False
-        if path in _subjects_dirs:  return True
+        if path in spaths: return True
         try:
             if index is None or index is Ellipsis:
-                _subjects_dirs = _subjects_dirs.append(path)
+                sd = spaths + [path]
             else:
-                sd = _subjects_dirs.tolist()
+                sd = spaths.copy()
                 sd.insert(index, path)
-                _subjects_dirs = pyr.pvector(sd)
+            config['hcp_subject_paths'] = sd
             return True
         except:
             return False
+
 def find_subject_path(sid):
     '''
     find_subject_path(sub) yields the full path of a HCP subject with the name given by the string
@@ -74,7 +85,7 @@ def find_subject_path(sid):
     '''
     # if it's a full/relative path already, use it:
     sub = str(sid)
-    sdirs = _subjects_dirs
+    sdirs = config['hcp_subject_paths']
     if _auto_download_options is not None and 'subjects_path' in _auto_download_options:
         sdirs = list(sdirs) + [_auto_download_options['subjects_path']]
     if os.path.isdir(sub): return os.path.abspath(sub)
@@ -95,15 +106,14 @@ def find_subject_path(sid):
     except: return None
     return pth
 
-# add the SUBJECTS_DIR environment variable...
-for varname in ['HCP_SUBJECTS_DIR', 'HCPSUBJS_DIR']:
-    if varname in os.environ:
-        add_subject_path(os.environ[varname])
-for varname in ['HCP_ROOT', 'HCP_DIR']:
-    if varname in os.environ:
-        dirname = os.path.join(os.environ[varname], 'subjects')
-        if os.path.isdir(dirname):
-            add_subject_path(dirname)
+if config['hcp_subject_paths'] is None:
+    # if a path wasn't found, there are a couple environment variables we want to look at...
+    if 'HCPSUBJS_DIR' in os.environ: add_subject_path(os.environ['HCPSUBJS_DIR'])
+    for varname in ['HCP_ROOT', 'HCP_DIR']:
+        if varname in os.environ:
+            dirname = os.path.join(os.environ[varname], 'subjects')
+            if os.path.isdir(dirname):
+                add_subject_path(dirname)
 
 ####################################################################################################
 # Utilities
@@ -151,18 +161,28 @@ def to_credentials(arg):
     elif pimms.is_vector(arg) and len(arg) == 2 and all(pimms.is_str(x) for x in arg):
         return tuple(arg)
     else:
-        raise ValueError('given argument cannot be coerced to credentials')
+        raise ValueError('given argument cannot be coerced to credentials: %s' % arg)
+
+config.declare('hcp_credentials', environ_name='HCP_CREDENTIALS', filter=to_credentials)
+
 def detect_credentials():
     '''
-    detect_credentials() attempts to locate Amazon AWS Bucket credentials from a number of sources:
-      - first, if the environment contains the variable HCP_CREDENTIALS, containing a string with
-        the format "<key>:<secret>" this is used;
+    detect_credentials() attempts to locate Amazon S3 Bucket credentials from a number of sources:
+      - first, if the Neuropythy configuration variable "hcp_credentials" is set in via either the
+        npythyrc file or the HCP_CREDENTIALS environment variable, then it is coerced into
+        credentials;
       - next, if the environment contains the variables HCP_KEY and HCP_SECRET, these are used;
       - next, if the files ~/.hcp-credentials or ~/.hcp-passwd or ~/.passwd-hcp are found, their
         contents are used, in that order.
       - next, all of the above are rechecked with the strings HCP/hcp replaced with S3FS/s3fs;
       - finally, if no credentials were detected, an error is raised.
+
+    Credentials may be supplied in a number of ways; in the case of a single environment variable,
+    HCP_CREDENTIALS or in the case of the "hcp_credentials" variable in the npythyrc file, the
+    variable should either contain a string "<key>:<secret>" or the name of a file containing such
+    a string. Alternately, either may encode a JSON object [key, secret].
     '''
+    if config['hcp_credentials'] is not None: return config['hcp_credentials']
     for tag in ['hcp', 's3fs']:
         utag = tag.upper()
         if (utag + '_CREDENTIALS') in os.environ:
@@ -1807,7 +1827,8 @@ def download(sid, credentials=None, subjects_path=None, overwrite=False, release
     else:
         (s3fs_key, s3fs_secret) = to_credentials(credentials)
     if subjects_path is None:
-        subjects_path = next((sd for sd in _subjects_dirs if os.path.isdir(sd)), None)
+        sdirs = config['hcp_subject_paths']
+        subjects_path = next((sd for sd in sdirs if os.path.isdir(sd)), None)
         if subjects_path is None: raise ValueError('No subjects path given or found')
     else: subjects_path = os.path.expanduser(subjects_path)
     # Make sure we can connect to the bucket first...
@@ -1878,7 +1899,8 @@ def auto_download(status,
             else:
                 (s3fs_key, s3fs_secret) = to_credentials(credentials)
             if subjects_path is None:
-                subjects_path = next((sd for sd in _subjects_dirs if os.path.isdir(sd)), None)
+                sdirs = config['hcp_subject_paths']
+                subjects_path = next((sd for sd in sdirs if os.path.isdir(sd)), None)
                 if subjects_path is None: raise ValueError('No subjects path given or found')
             else: subjects_path = os.path.expanduser(subjects_path)
             fs = s3fs.S3FileSystem(key=s3fs_key, secret=s3fs_secret)
@@ -1900,7 +1922,7 @@ def auto_download(status,
             _auto_download_options['s3fs'] = fs
         elif s.lower() == 'retinotopy':
             if retinotopy_path is None:
-                dirs = _subjects_dirs
+                dirs = config['hcp_subject_paths']
                 if subjects_path is not None: dirs = [subjects_path] + list(dirs)
                 if _retinotopy_path is not None: dirs = [_retinotopy_path] + list(dirs)
                 retinotopy_path = next((sd for sd in dirs if os.path.isdir(sd)), None)
@@ -1912,13 +1934,31 @@ def auto_download(status,
         else: raise ValueError('unrecognized auto_download argument: %s' % s)
     if all(v is False for v in six.itervalues(_auto_download_options)):
         _auto_download_options = None
-# See if the environment lets auto-downloading start out on
-if 'HCP_AUTO_DOWNLOAD' in os.environ and \
-   os.environ['HCP_AUTO_DOWNLOAD'].lower() in ('on', 'yes', 'true', '1'):
+# See if the config/environment lets auto-downloading start in the "on" state
+def to_auto_download_state(arg):
+    '''
+    to_auto_download_state(arg) attempts to coerce the given argument into a valid auto-downloading
+      instruction. Essentially, if arg is "on", "yes", "true", "1", True, or 1, then True is
+      returned; if arg is "structure" then "structure" is returned; otherwise False is returned.
+    '''
+    if pimms.is_str(arg):
+        arg = arg.lower().strip()
+        if arg in ('on', 'yes', 'true', '1'): return True
+        elif arg in ('struct', 'structure', 'structural'): return 'structure'
+        elif arg in ('retinotopy', 'retino', 'ret'): return 'retinotopy'
+        else: return False
+    return arg in (True, 1)
+
+config.declare('hcp_auto_release',  environ_name='HCP_AUTO_RELEASE')
+config.declare('hcp_auto_database', environ_name='HCP_AUTO_DATABASE')
+config.declare('hcp_auto_path',     environ_name='HCP_AUTO_PATH')
+config.declare('hcp_auto_download', environ_name='HCP_AUTO_DOWNLOAD',
+               filter=to_auto_download_state, default_value=False)
+if config['hcp_auto_download'] is not False:
     args = {}
-    if 'HCP_AUTO_RELEASE'  in os.environ: args['release']  = os.environ['HCP_AUTO_RELEASE']
-    if 'HCP_AUTO_DATABASE' in os.environ: args['database'] = os.environ['HCP_AUTO_DATABASE']
-    if 'HCP_AUTO_PATH'     in os.environ: args['subjects_path'] = os.environ['HCP_AUTO_PATH']
+    if config['hcp_auto_release']:  args['release']       = config['hcp_auto_release']
+    if config['hcp_auto_database']: args['database']      = config['hcp_auto_database']
+    if config['hcp_auto_path']:     args['subjects_path'] = config['hcp_auto_path']
     try: auto_download(True, **args)
     except: pass
 def _auto_downloadable(sid):
@@ -2001,7 +2041,7 @@ def save_retinotopy_cache(sdir, sid, hemi, props, alignment='MSMAll', overwrite=
         if not os.path.isdir(dr): os.makedirs(dr, 0o755)
         nyio.save(fl, p)
 def _find_retinotopy_path(size=59):
-    dirs = _subjects_dirs
+    dirs = config['hcp_subject_paths']
     if _auto_download_options is not None \
        and 'retinotopy' in _auto_download_options and _auto_download_options['retinotopy'] \
        and 'retinotopy_path' in _auto_download_options \
@@ -2015,7 +2055,7 @@ def _find_retinotopy_path(size=59):
             with open(pth, 'wb') as fl:
                 shutil.copyfileobj(response, fl)
         return pth
-    if _retinotopy_path is not None: dirs = [_retinotopy_path] + list(_subjects_dirs)
+    if _retinotopy_path is not None: dirs = [_retinotopy_path] + config['hcp_subject_paths']
     d = next((sd for sd in dirs if os.path.isfile(os.path.join(sd, _retinotopy_file[size]))), None)
     return d if d is None else os.path.join(d, _retinotopy_file[size])
 def _retinotopy_open(fn, size=59):

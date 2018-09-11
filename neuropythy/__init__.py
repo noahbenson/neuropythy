@@ -3,7 +3,8 @@
 
 '''Tools for analyzing and registering cortical meshes.'''
 
-submodules = ('neuropythy.util.core',
+submodules = ('neuropythy.util.conf',
+              'neuropythy.util.core',
               'neuropythy.util',
               'neuropythy.java',
               'neuropythy.io.core',
