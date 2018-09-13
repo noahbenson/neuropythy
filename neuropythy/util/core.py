@@ -277,7 +277,22 @@ def to_affine(aff, dims=None):
         arg = (dims, dims,dims+1, dims+1,dims+1)
         raise ValueError('%dD affine matrix must be %dx%d or %dx%d' % args)
     return aff
-        
+
+class AutoDict(dict):
+    '''
+    AutoDict is a handy kind of dictionary that automatically fills vivifies itself when a miss
+    occurs. By default, the new value returned on miss is an AutoDict, but this may be changed by
+    setting the object's on_miss() function to be something like lambda:[] (to return an empty
+    list).
+    '''
+    def __init__(self, *args, **kwargs):
+        dict.__init__(self, *args, **kwargs)
+        self.on_miss = lambda:type(self)()
+    def __missing__(self, key):
+        value = self.on_miss()
+        self[key] = value
+        return value
+
 def simplex_summation_matrix(simplices, weight=None, inverse=False):
     '''
     simplex_summation_matrix(mtx) yields a scipy sparse array matrix that, when dotted with a
