@@ -309,7 +309,7 @@ def to_nifti(obj, like=None, header=None, affine=None, extensions=Ellipsis, vers
     # First go from like to explicit versions of affine and header:
     if like is not None:
         if isinstance(like, nib.analyze.AnalyzeHeader) or \
-           isinstance(nib.freesurfer.mghformat.MGHHeader):
+           isinstance(like, nib.freesurfer.mghformat.MGHHeader):
             if header is None: header = like
         elif isinstance(like, nib.analyze.SpatialImage):
             if header is None: header = like.header

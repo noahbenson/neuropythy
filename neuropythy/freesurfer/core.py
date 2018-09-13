@@ -25,8 +25,9 @@ def to_subject_paths(paths):
      list of directories and yields a list of all the existing directories.
     '''
     if paths is None: return []
-    if pimms.is_str(paths): return [p for p in paths.split(':') if os.path.isdir(p)]
-    else: return [p for p in paths if os.path.isdir(p)]
+    if pimms.is_str(paths): paths = paths.split(':')
+    paths = [os.path.expanduser(p) for p in paths]
+    return [p for p in paths if os.path.isdir(p)]
 config.declare('freesurfer_subject_paths', environ_name='SUBJECTS_DIR', filter=to_subject_paths)
 
 def subject_paths():
@@ -151,6 +152,8 @@ class Subject(mri.Subject):
         self.name = name
         self.path = path
         self.meta_data = meta_data
+        self.hemis = Subject.load_hemis(name, path)
+        self.images = Subject.load_images(name, path)
         # these are the only actually required data for the constructor; the rest is values
 
     # This [private] function and this variable set up automatic properties from the FS directory
@@ -276,13 +279,13 @@ class Subject(mri.Subject):
         regs = pimms.lazy_map(regs)
         # great; now we can actually create the cortex object itself
         return mri.Cortex(chirality, tess, surfs, regs).persist()
-    
-    @pimms.value
-    def hemis(name, path):
+
+    @staticmethod
+    def load_hemis(name, path):
         '''
-        sub.hemis is a persistent map of hemisphere names ('lh', 'rh', possibly others) for the
-        given freesurfer subject sub. Other hemispheres may include lhx and rhx (mirror-inverted
-        hemisphere objects).
+        Subject.load_hemis(name, path) yields a persistent map of hemisphere names ('lh', 'rh',
+          possibly others) for the given freesurfer subject sub. Other hemispheres may include lhx
+          and rhx (mirror-inverted hemisphere objects).
         '''
         surf_path = os.path.join(path, 'surf')
         # basically, we want to create a lh and rh hemisphere object with automatically-loaded
@@ -297,11 +300,12 @@ class Subject(mri.Subject):
                 ctcs[xh] = Subject._cortex_from_path(name, h, xh, xpath, surf_path)
         # that's all!
         return pimms.lazy_map(ctcs)
-    @pimms.value
-    def mgh_images(path):
+    @staticmethod
+    def load_mgh_images(name, path):
         '''
-        sub.mgh_images is a persistent map of MRImages, represented as MGHImage objects, tracked by
-        the given FreeSurfer subject sub.
+        Subject.load_mgh_images(name, path) yields a persistent map of the MGHImage objects for all
+          the valid mgz files in the relevant subject's FreeSurfer mri/ directory (where the subject
+          directory is given by path).
         '''
         # These are just given their basic filenames; nothing fancy here
         path = os.path.join(path, 'mri')
@@ -317,15 +321,17 @@ class Subject(mri.Subject):
                 return _load_imm_mgh(fname)
             return _loader
         return pimms.lazy_map({os.path.split(flnm)[-1][:-4]: _make_loader(flnm) for flnm in fls})
-    @pimms.value
-    def images(mgh_images):
+    @staticmethod
+    def load_images(name, path):
         '''
-        sub.images is a persistent map of MRImages tracked by the given subject sub; in freesurfer
-        subjects these are renamed and converted from their typical freesurfer filenames (such as
-        'ribbon') to forms that conform to the neuropythy naming conventions (such as 'gray_mask').
-        To access data by their original names, use the sub.mgh_image map.
+        Subject.load_images(name, path) yields a persistent map of MRImages tracked by the given
+          subject sub; in freesurfer subjects these are renamed and converted from their typical
+          freesurfer filenames (such as 'ribbon') to forms that conform to the neuropythy naming
+          conventions (such as 'gray_mask'). To access data by their original names, use the
+          Subject.load_mgh_images() function.
         '''
         ims = {}
+        mgh_images = Subject.load_mgh_images(name, path)
         def _make_imm_mask(arr, val, eq=True):
             arr = (arr == val) if eq else (arr != val)
             arr.setflags(write=False)
@@ -347,6 +353,13 @@ class Subject(mri.Subject):
                 tr = Subject._auto_retino_names[k]
                 ims[tr] = _make_accessor(k)
         return pimms.lazy_map(ims)
+    @pimms.value
+    def mgh_images(name, path):
+        '''
+        sub.mgh_images is a persistent map of MRImages, represented as MGHImage objects, tracked by
+        the given FreeSurfer subject sub.
+        '''
+        return Subject.load_mgh_images(name, path)
     @pimms.value
     def voxel_to_vertex_matrix(mgh_images):
         '''
@@ -383,6 +396,7 @@ def subject(name, meta_data=None, check_path=True):
         search should be performed; the string name should be trusted to be an exact relative or
         absolute path to a valid FreeSurfer subejct.
     '''
+    name = os.path.expanduser(name)
     if check_path is None:
         sub = Subject(name, check_path=False)
         if isinstance(sub, Subject): sub.persist()

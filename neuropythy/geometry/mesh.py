@@ -14,7 +14,7 @@ import nibabel                      as nib
 import nibabel.freesurfer.mghformat as fsmgh
 import pyrsistent                   as pyr
 import collections                  as colls
-import sys, six, types, pimms
+import sys, six, types, logging, pimms
 
 from .util  import (triangle_area, triangle_address, alignment_matrix_3D, rotation_matrix_3D,
                     cartesian_to_barycentric_3D, cartesian_to_barycentric_2D,
@@ -1292,8 +1292,9 @@ class Mesh(VertexSet):
         m = coords.shape[0]
         nv = self.nearest_vertex(coords, n_jobs=n_jobs)
         return sps.csr_matrix(
-            (np.ones(len(nv)), (range(len(nv)), nv)),
-            shape=(m,n))
+            (np.ones(len(nv), dtype=np.int), (range(len(nv)), nv)),
+            shape=(m,n),
+            dtype=np.int)
     def linear_interpolation(self, coords, n_jobs=1):
         '''
         mesh.linear_interpolation(x) yields an interpolation matrix for the given coordinate or 
@@ -1414,6 +1415,7 @@ class Mesh(VertexSet):
           * n_jobs (default: 1) is passed along to the cKDTree.query method, so may be set to an
             integer to specify how many processors to use, or may be -1 to specify all processors.
         '''
+        n = self.vertex_count
         if isinstance(x, Mesh): x = x.coordinates
         if method is None: method = 'auto'
         method = method.lower()
@@ -1447,11 +1449,15 @@ class Mesh(VertexSet):
             elif pimms.is_map(data):
                 return pyr.pmap({k:_apply_interp(data[k]) for k in six.iterkeys(data)})
             elif pimms.is_matrix(data):
-                data = np.asarray(data)
-                if data.shape[0] == n:
-                    return np.asarray([_apply_interp(interp, np.asarray(row)) for row in data.T]).T
+                # careful... the rows could have a tuple of rows of different types...
+                if len(data) == n:
+                    # in this case we assume that all cells are the same type
+                    data = np.asarray(data)
+                    return np.asarray([_apply_interp(np.asarray(row)) for row in data.T]).T
+                elif pimms.is_nparray(data):
+                    return np.asarray([_apply_interp(row) for row in data])
                 else:
-                    return np.asarray([_apply_interp(interp, row) for row in data])
+                    return tuple([_apply_interp(row) for row in data])
             elif pimms.is_vector(data, np.number) and len(data) == self.tess.vertex_count:
                 return _apply_interp(data)
             elif pimms.is_vector(data):

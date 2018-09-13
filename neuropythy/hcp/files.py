@@ -3,7 +3,7 @@
 # Stored data regarding the organization of the files in HCP subjects.
 # by Noah C. Benson
 
-import os, six, pimms, pyrsistent as pyr, nibabel as nib, numpy as np
+import os, six, logging, pimms, pyrsistent as pyr, nibabel as nib, numpy as np
 from .. import io as nyio
 from ..util import (config, is_image)
 
@@ -21,8 +21,9 @@ def to_subject_paths(paths):
       list of directories and yields a list of all the existing directories.
     '''
     if paths is None: return []
-    if pimms.is_str(paths): return [p for p in paths.split(':') if os.path.isdir(p)]
-    else: return [p for p in paths if os.path.isdir(p)]
+    if pimms.is_str(paths): paths = paths.split(':')
+    paths = [os.path.expanduser(p) for p in paths]
+    return [p for p in paths if os.path.isdir(p)]
 
 config.declare('hcp_subject_paths', environ_name='HCP_SUBJECTS_DIR', filter=to_subject_paths)
 
@@ -224,7 +225,7 @@ def _auto_download_file(filename, data):
     # download it...
     basedir = os.path.split(filename)[0]
     if not os.path.isdir(basedir): os.makedirs(basedir, 0o755)
-    #print('Downloading file %s ...' % filename)
+    logging.info('neuropythy: Fetching HCP file "%s"', filename)
     fs.get(hcp_flnm, filename)
     return filename
 # Used to load immutable-like mgh objects
@@ -238,6 +239,7 @@ def _data_load(filename, data):
         res = np.squeeze(res)
     elif data['type'] in ('surface', 'registration'):
         res = nyio.load(filename)
+        print(filename, res)
     elif data['type'] == 'property':
         if filename.endswith('.gii') or filename.endswith('.gii.gz'):
             res = nyio.load(filename).darrays[0].data
@@ -685,15 +687,17 @@ subject_directory_structure = {
                  'name':'fs_LR',
                  'hemi':'lh_LR164k_MSMAll',
                  'load':_load_atlas_sphere}),
-            '{0[id]}.L.flat.164k_fs_LR.surf.gii': (
-                {'type':'surface',
-                 'name':'flat',
-                 'hemi':'lh_LR164k_MSMSulc',
-                 'load':_load_atlas_sphere},
-                {'type':'surface',
-                 'name':'flat',
-                 'hemi':'lh_LR164k_MSMAll',
-                 'load':_load_atlas_sphere}),
+            # disabled until I decide how they should be handled (their tesselations not like the
+            # spheres, so they don't really belong in the same hemisphere)
+            #'{0[id]}.L.flat.164k_fs_LR.surf.gii': (
+            #    {'type':'surface',
+            #     'name':'flat',
+            #     'hemi':'lh_LR164k_MSMSulc',
+            #     'load':_load_atlas_sphere},
+            #    {'type':'surface',
+            #     'name':'flat',
+            #     'hemi':'lh_LR164k_MSMAll',
+            #     'load':_load_atlas_sphere}),
             '{0[id]}.R.ArealDistortion_FS.164k_fs_LR.shape.gii': {
                 'type':'property',
                 'name':'areal_distortion_FS',
@@ -824,15 +828,15 @@ subject_directory_structure = {
                  'name':'fs_LR',
                  'hemi':'rh_LR164k_MSMAll',
                  'load':_load_atlas_sphere}),
-            '{0[id]}.R.flat.164k_fs_LR.surf.gii': (
-                {'type':'surface',
-                 'name':'flat',
-                 'hemi':'rh_LR164k_MSMSulc',
-                 'load':_load_atlas_sphere},
-                {'type':'surface',
-                 'name':'flat',
-                 'hemi':'rh_LR164k_MSMAll',
-                 'load':_load_atlas_sphere}),
+            #'{0[id]}.R.flat.164k_fs_LR.surf.gii': (
+            #    {'type':'surface',
+            #     'name':'flat',
+            #     'hemi':'rh_LR164k_MSMSulc',
+            #     'load':_load_atlas_sphere},
+            #    {'type':'surface',
+            #     'name':'flat',
+            #     'hemi':'rh_LR164k_MSMAll',
+            #     'load':_load_atlas_sphere}),
             '{0[id]}.ArealDistortion_MSMAll.164k_fs_LR.dscalar.nii': {
                 'type':'property',
                 'name':'areal_distortion',
@@ -1240,13 +1244,13 @@ subject_directory_structure = {
                         'type':'surface',
                         'name':'very_inflated',
                         'hemi':'lh_LR59k_MSMAll'},
-                    '{0[id]}.L.flat.59k_fs_LR.surf.gii': (
-                        {'type':'surface',
-                         'name':'flat',
-                         'hemi':'lh_LR59k_MSMSulc'},
-                        {'type':'surface',
-                         'name':'flat',
-                         'hemi':'lh_LR59k_MSMAll'}),
+                    #'{0[id]}.L.flat.59k_fs_LR.surf.gii': (
+                    #    {'type':'surface',
+                    #     'name':'flat',
+                    #     'hemi':'lh_LR59k_MSMSulc'},
+                    #    {'type':'surface',
+                    #     'name':'flat',
+                    #     'hemi':'lh_LR59k_MSMAll'}),
                     '{0[id]}.L.sphere.59k_fs_LR.surf.gii': (
                         {'type':'registration',
                          'name':'fs_LR',
@@ -1370,15 +1374,15 @@ subject_directory_structure = {
                         'type':'surface',
                         'name':'very_inflated',
                         'hemi':'rh_LR59k_MSMAll'},
-                    '{0[id]}.R.flat.59k_fs_LR.surf.gii': (
-                        {'type':'surface',
-                         'name':'flat',
-                         'hemi':'rh_LR59k_MSMSulc',
-                         'load':_load_atlas_sphere},
-                        {'type':'surface',
-                         'name':'flat',
-                         'hemi':'rh_LR59k_MSMAll',
-                         'load':_load_atlas_sphere}),
+                    #'{0[id]}.R.flat.59k_fs_LR.surf.gii': (
+                    #    {'type':'surface',
+                    #     'name':'flat',
+                    #     'hemi':'rh_LR59k_MSMSulc',
+                    #     'load':_load_atlas_sphere},
+                    #    {'type':'surface',
+                    #     'name':'flat',
+                    #     'hemi':'rh_LR59k_MSMAll',
+                    #     'load':_load_atlas_sphere}),
                     '{0[id]}.R.sphere.59k_fs_LR.surf.gii': (
                         {'type':'registration',
                          'name':'fs_LR',
@@ -1536,13 +1540,13 @@ subject_directory_structure = {
                         'type':'surface',
                         'name':'very_inflated',
                         'hemi':'lh_LR32k_MSMAll'},
-                    '{0[id]}.L.flat.32k_fs_LR.surf.gii': (
-                        {'type':'surface',
-                         'name':'flat',
-                         'hemi':'lh_LR32k_MSMSulc'},
-                        {'type':'surface',
-                         'name':'flat',
-                         'hemi':'lh_LR32k_MSMAll'}),
+                    #'{0[id]}.L.flat.32k_fs_LR.surf.gii': (
+                    #    {'type':'surface',
+                    #     'name':'flat',
+                    #     'hemi':'lh_LR32k_MSMSulc'},
+                    #    {'type':'surface',
+                    #     'name':'flat',
+                    #     'hemi':'lh_LR32k_MSMAll'}),
                     '{0[id]}.L.sphere.32k_fs_LR.surf.gii': (
                         {'type':'registration',
                          'name':'fs_LR',
@@ -1666,15 +1670,15 @@ subject_directory_structure = {
                         'type':'surface',
                         'name':'very_inflated',
                         'hemi':'rh_LR32k_MSMAll'},
-                    '{0[id]}.R.flat.32k_fs_LR.surf.gii': (
-                        {'type':'surface',
-                         'name':'flat',
-                         'hemi':'rh_LR32k_MSMSulc',
-                         'load':_load_atlas_sphere},
-                        {'type':'surface',
-                         'name':'flat',
-                         'hemi':'rh_LR32k_MSMAll',
-                         'load':_load_atlas_sphere}),
+                    #'{0[id]}.R.flat.32k_fs_LR.surf.gii': (
+                    #    {'type':'surface',
+                    #     'name':'flat',
+                    #     'hemi':'rh_LR32k_MSMSulc',
+                    #     'load':_load_atlas_sphere},
+                    #    {'type':'surface',
+                    #     'name':'flat',
+                    #     'hemi':'rh_LR32k_MSMAll',
+                    #     'load':_load_atlas_sphere}),
                     '{0[id]}.R.sphere.32k_fs_LR.surf.gii': (
                         {'type':'registration',
                          'name':'fs_LR',
@@ -2051,6 +2055,7 @@ def _find_retinotopy_path(size=59):
         if os.path.isfile(pth): return pth
         # okay, try to download it!
         import shutil, urllib
+        logging.info('neuropythy: Fetchinging HCP retinotopy database "%s"', pth)
         with urllib.request.urlopen(_retinotopy_url[size]) as response:
             with open(pth, 'wb') as fl:
                 shutil.copyfileobj(response, fl)

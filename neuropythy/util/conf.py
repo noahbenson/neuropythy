@@ -115,9 +115,6 @@ class config(object):
     _vals = {}
     @staticmethod
     def _getitem(self, name):
-        print(name)
-        if 'freesurfer_subject_paths' in config._vals:
-            print(' ??? ', config._vals['freesurfer_subject_paths'])
         if name not in config._vars: raise KeyError(name)
         if name not in config._vals:
             (rcname, envname, fltfn, dval) = config._vars[name]
@@ -141,7 +138,7 @@ class config(object):
         if name not in config._vars:
             raise ValueError('Configurable neuropythy key "%s" not declared' % name)
         (rcname, envname, fltfn, dval) = config._vars[name]
-        self._vals[name] = fltfn(val)
+        self._vals[name] = val if fltfn is None else fltfn(val)
     @staticmethod
     def _iter(self): return six.iterkeys(self._vars)
     @staticmethod
