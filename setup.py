@@ -56,7 +56,9 @@ setup(
               'neuropythy.registration',
               'neuropythy.vision',
               'neuropythy.graphics',
-              'neuropythy.commands'],
+              'neuropythy.datasets',
+              'neuropythy.commands',
+              'neuropythy.test'],
     include_package_data=True,
     package_data={
         '': ['LICENSE.txt',
@@ -84,7 +86,7 @@ setup(
                       'nibabel>=2.0',
                       'pyrsistent>=0.11',
                       'pint>=0.7',
-                      'pimms>=0.2.11',
+                      'pimms>=0.2.12',
                       #'python-igraph>=0.7.1',
                       'py4j>=0.10'],
     extras_require={

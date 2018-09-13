@@ -27,6 +27,9 @@ submodules = ('neuropythy.util.conf',
               'neuropythy.vision',
               'neuropythy.graphics.core',
               'neuropythy.graphics',
+              'neuropythy.datasets.core',
+              'neuropythy.datasets.benson_winawer_2018',
+              'neuropythy.datasets',
               'neuropythy.commands.surface_to_ribbon',
               'neuropythy.commands.benson14_retinotopy',
               'neuropythy.commands.register_retinotopy',
@@ -64,6 +67,7 @@ from   .geometry   import (VertexSet, Mesh, Tesselation, Topology,
                            to_mesh, to_tess, to_property, to_mask)
 from   .freesurfer import (subject as freesurfer_subject, to_mgh)
 from   .hcp        import (subject as hcp_subject)
+from   .datasets   import data
 from . import freesurfer
 from . import hcp
 
@@ -74,7 +78,7 @@ try:
 except: pass
 
 # Version information...
-__version__ = '0.6.4'
+__version__ = '0.6.5'
 
 
 
