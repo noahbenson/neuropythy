@@ -36,6 +36,13 @@ class Dataset(ObjectWithMetaData):
         self.name = name
         self.create_directories = create_directories
         self.create_mode = create_mode
+    def __repr__(self): return self.repr
+    @pimms.value
+    def repr(name):
+        '''
+        dataset.repr is the representation string used for the given dataset.
+        '''
+        return ("Dataset('%s')" % name) if pimms.is_str(name) else ("Dataset%s" % (name,))
     @staticmethod
     def to_name(nm):
         '''

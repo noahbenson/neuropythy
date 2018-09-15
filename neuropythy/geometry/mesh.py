@@ -80,7 +80,7 @@ class VertexSet(ObjectWithMetaData):
         pre-processed input version of the value obj.properties.
         '''
         if props is None: return None
-        if pimms.is_itable(props): return pimms.persist(props)
+        if pimms.is_itable(props): return props.persist()
         elif pimms.is_map(props): return pimms.itable(props).persist()
         else: raise ValueError('provided properties data must be a mapping')
     @pimms.value
@@ -168,12 +168,7 @@ class VertexSet(ObjectWithMetaData):
           column names.
         '''
         pp = self._properties
-        for a in args:
-            if pimms.is_vector(a):
-                for u in a:
-                    pp = pp.discard(u)
-            else:
-                pp = pp.discard(a)
+        for a in args: pp = pp.discard(a)
         return self if pp is self._properties else self.copy(_properties=pp)
     def property(self, prop,
                  dtype=Ellipsis,
@@ -430,7 +425,8 @@ def to_property(obj, prop=None,
     # no matter what, trim out the infinite values (even if inf was in the data range)
     outliers = np.union1d(outliers, mask[np.where(np.isinf(prop[mask]))[0]])
     # Okay, mark everything in the prop:
-    where_nan = np.asarray(where_nan, dtype=np.int)
+    unmask = np.setdiff1d(all_vertices, mask)
+    where_nan = np.asarray(np.union1d(where_nan,unmask), dtype=np.int)
     outliers = np.asarray(outliers, dtype=np.int)
     if len(where_nan) + len(outliers) > 0:
         prop = np.array(prop)
@@ -1002,6 +998,20 @@ class Mesh(VertexSet):
     # Normal Methods
     def __repr__(self):
         return self.repr
+
+    # this is tricky: because mesh inherits properties from its tess, we have to also update the
+    # tess when we do this
+    def wout_prop(self, *args):
+        '''
+        obj.wout_property(...) yields a duplicate of the given object with the given properties
+          removed from it. The properties may be specified as a sequence of column names or lists of
+          column names.
+        '''
+        new_tess = self.tess.wout_prop(*args)
+        new_mesh = self if self.tess is new_tess else self.copy(tess=new_tess)
+        pp = new_mesh._properties
+        for a in args: pp = pp.discard(a)
+        return new_mesh if pp is new_mesh._properties else new_mesh.copy(_properties=pp)
 
     def submesh(self, vertices, tag=None, tag_tess=Ellipsis):
         '''

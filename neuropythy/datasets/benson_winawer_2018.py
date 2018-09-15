@@ -88,8 +88,8 @@ class BensonWinawer2018Dataset(Dataset):
     #=>        <50278184 rows>)
 
     dset.v123_table[100]
-    #=> {'inf_x': 4.0969896, 'label': 100, 'radius': 2.096148, 'eccentricity': 3.3061967,
-    #=>  'inf_radius': 1.5482311, 'hemi': 'lh', 'x': 0.032615896, 'subject': 'S1208', 'y': -3.306036,
+    #=> {'inf_x':      4.0969896, 'label': 100, 'radius': 2.096148,    'eccentricity': 3.3061967,
+    #=>  'inf_radius': 1.5482311, 'hemi': 'lh', 'x': 0.032615896, 'subject': 'S1208', 'y': -3.30603,
     #=>  'inf_y': -2.0219889, 'inf_eccentricity': 4.5687814, 'midgray_surface_area': 1.072214,
     #=>  'inf_polar_angle': 116.267746, 'polar_angle': 179.43477, 'inf_visual_area': 3,
     #=>  'pial_surface_area': 1.3856983, 'dataset_id': 10, 'dataset_name': 'prf10',
@@ -296,8 +296,10 @@ class BensonWinawer2018Dataset(Dataset):
                     iecc = hemi.prop('inf-' + dskey + '_eccentricity')
                     ilbl = hemi.prop('inf-' + dskey + '_visual_area')
                     # process both of these (get x/y basically)
-                    (x, y)  = as_retinotopy({'polar_angle':ang,  'eccentricity':ecc},  'geographical')
-                    (ix,iy) = as_retinotopy({'polar_angle':iang, 'eccentricity':iecc}, 'geographical')
+                    (x, y)  = as_retinotopy({'polar_angle':ang,  'eccentricity':ecc},
+                                            'geographical')
+                    (ix,iy) = as_retinotopy({'polar_angle':iang, 'eccentricity':iecc},
+                                            'geographical')
                     # find the relevant vertices
                     ii = np.where((iecc < 12) & np.sum([ilbl == k for k in (1,2,3)], axis=0))[0]
                     # now add the relevant properties...
@@ -325,5 +327,5 @@ class BensonWinawer2018Dataset(Dataset):
     
 # we wrap this in a lambda so that it gets loaded when requested (in case the config changes between
 # when this gets run and when the dataset gets requested)
-add_dataset('benson_winawer_2018', lambda:BensonWinawer2018Dataset())
+add_dataset('benson_winawer_2018', lambda:BensonWinawer2018Dataset().persist())
 
