@@ -239,7 +239,6 @@ def _data_load(filename, data):
         res = np.squeeze(res)
     elif data['type'] in ('surface', 'registration'):
         res = nyio.load(filename)
-        print(filename, res)
     elif data['type'] == 'property':
         if filename.endswith('.gii') or filename.endswith('.gii.gz'):
             res = nyio.load(filename).darrays[0].data
