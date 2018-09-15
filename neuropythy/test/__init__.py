@@ -54,9 +54,28 @@ class TestNeuropythy(unittest.TestCase):
                                         weight='prf_variance_explained',
                                         weight_min=0.1,
                                         clipped=0,
-                                        null=0)
-        self.assertGreater(np.corrcoef(v1_ecc[v1_ecc>0], v1_rad[v1_rad>0])[0,0], 0.5)
+                                        null=np.nan)
+        wh = np.isfinite(v1_ecc) & np.isfinite(v1_rad)
+        self.assertGreater(np.corrcoef(v1_ecc[wh], v1_rad[wh])[0,0], 0.5)
 
+    def test_cmag(self):
+        '''
+        test_cmag() ensures that the neuropythy.vision cortical magnification function is working.
+        '''
+        import neuropythy.vision as vis
+        logging.info('neuropythy: Testing areal cortical magnification...')
+        dset = ny.data['benson_winawer_2018']
+        sub = dset.subjects[np.random.choice(dset.subjects.keys(), 1)[0]]
+        hem = [sub.lh, sub.rh][np.random.randint(2)]
+        cm = vis.areal_cmag(hem.midgray_surface, 'prf_',
+                            mask=('inf-prf_visual_area', 1),
+                            weight='prf_variance_explained')
+        # cmag should get smaller in general
+        ths = np.arange(0, 2*np.pi, np.pi/3)
+        es = [0.5, 1, 2, 4]
+        x = np.diff([np.mean(cm(e*np.cos(ths), e*np.sin(ths))) for e in es])
+        self.assertTrue((x < 0).all())
+    
     def test_interpolation(self):
         '''
         test_interpolation() performs a variety of high-level tests involving interpolation using
@@ -70,7 +89,6 @@ class TestNeuropythy(unittest.TestCase):
         self.assertTrue(os.path.isdir(dset.cache_directory))
         # pick 1 of the subjects at random
         subs = [dset.subjects['S12%02d' % (s+1)] for s in choose(range(len(dset.subjects)), 1)]
-        subs = [] #NOTE
         fsa = ny.freesurfer_subject('fsaverage')
         def check_dtypes(a,b):
             for tt in [np.integer, np.floating, np.bool_, np.complexfloating]:
