@@ -1,6 +1,6 @@
 language: python
 sudo: required
-dist: precise
+dist: trusty
 
 python: 
   - 2.7
