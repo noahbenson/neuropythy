@@ -25,8 +25,7 @@ class TestNeuropythy(unittest.TestCase):
         import neuropythy.geometry as geo
         logging.info('neuropythy: Testing meshes and properties...')
         # get a random subject's mesh
-        subs = ny.data['benson_winawer_2018'].subjects.discard('fsaverage')
-        sub  = subs[np.random.choice(subs.keys(), 1)[0]]
+        sub  = ny.data['benson_winawer_2018'].subjects['S1204']
         hem  = sub.hemis[('lh','rh')[np.random.randint(2)]]
         msh  = hem.white_surface
         # few simple things
@@ -88,7 +87,8 @@ class TestNeuropythy(unittest.TestCase):
         dset = ny.data['benson_winawer_2018']
         self.assertTrue(os.path.isdir(dset.cache_directory))
         # pick 1 of the subjects at random
-        subs = [dset.subjects['S12%02d' % (s+1)] for s in choose(range(8), 1)]
+        allsubs = [dset.subjects['S12%02d' % (s+1)] for s in range(8)]
+        subs = choose(allsubs, 1)
         fsa = ny.freesurfer_subject('fsaverage')
         def check_dtypes(a,b):
             for tt in [np.integer, np.floating, np.bool_, np.complexfloating]:
@@ -117,8 +117,8 @@ class TestNeuropythy(unittest.TestCase):
             # some simple ideas: if we interpolate the properties from one subject to another and
             # then interpolate back, we should get approximately, if not exactly, the same thing
             # for this pick a couple random properties:
-            ps = choose(list(sub.lh.properties.keys()), 2)
-            intersub = choose(subs, 1)[0]
+            ps = ['prf_variance_explained', 'inf-prf10_visual_area']
+            intersub = choose(allsubs, 1)[0]
             logging.info('neuropythy:  - Testing properties %s via subject %s', ps, intersub.name)
             logging.info('neuropythy:    - Testing LH interpolation')
             vs = calc_interp(sub.lh, intersub.lh, ps)

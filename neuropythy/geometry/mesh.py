@@ -1335,7 +1335,7 @@ class Mesh(VertexSet):
         tot = a_area + b_area + c_area
         for (x,ii,f,aa,ba,ca,tt) in zip(coords, contained_idcs, tris.T, a_area,b_area,c_area,tot):
             if np.isclose(tt, 0):
-                (aa,ba,ca) = np.sqrt(np.sum((coords[:,f].T - x)**2, axis=1))
+                (aa,ba,ca) = np.sqrt(np.sum((coords[f] - x)**2, axis=1))
                 # check if we can do line interpolation
                 (zab,zbc,zca) = np.isclose((aa,ba,ca), (ba,ca,aa))
                 (aa,ba,ca) = (1.0,   1.0,      1.0) if zab and zbc and zca else \
