@@ -2053,9 +2053,10 @@ def _find_retinotopy_path(size=59):
         pth = os.path.join(_auto_download_options['retinotopy_path'], _retinotopy_file[size])
         if os.path.isfile(pth): return pth
         # okay, try to download it!
-        import shutil, urllib
+        import shutil
+        from urllib.request import urlopen
         logging.info('neuropythy: Fetchinging HCP retinotopy database "%s"', pth)
-        with urllib.request.urlopen(_retinotopy_url[size]) as response:
+        with urlopen(_retinotopy_url[size]) as response:
             with open(pth, 'wb') as fl:
                 shutil.copyfileobj(response, fl)
         return pth
