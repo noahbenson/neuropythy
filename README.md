@@ -1,3 +1,6 @@
+[![TravisCI](https://travis-ci.org/noahbenson/neuropythy.svg?branch=master)](https://travis-ci.org/noahbenson/neuropythy.svg?branch=master)
+[![PyPI version](https://badge.fury.io/py/neuropythy.svg)](https://badge.fury.io/py/neuropythy)
+
 # neuropythy #######################################################################################
 A neuroscience library for Python, intended to complement the existing nibabel library.
 
