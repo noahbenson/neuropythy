@@ -3,9 +3,11 @@
 # The dataset from Benson and Winawer (2018); DOI: https://doi.org/10.1101/325597
 # by Noah C. Benson
 
-import os, six, shutil, urllib, tarfile, logging, warnings, pimms
+import os, six, shutil, tarfile, logging, warnings, pimms
 import numpy as np
 import pyrsistent as pyr
+
+from urllib.request import urlopen
 
 if six.PY3: from functools import reduce
 
@@ -161,7 +163,7 @@ class BensonWinawer2018Dataset(Dataset):
             # download the url...
             tgz_file = os.path.join(path, dirname + '.tar.gz')
             logging.info('            Fetching "%s"', tgz_file)
-            with urllib.request.urlopen(durl) as response:
+            with urlopen(durl) as response:
                 with open(tgz_file, 'wb') as fl:
                     shutil.copyfileobj(response, fl)
             if not tarfile.is_tarfile(tgz_file):
