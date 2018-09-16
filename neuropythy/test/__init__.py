@@ -65,7 +65,7 @@ class TestNeuropythy(unittest.TestCase):
         import neuropythy.vision as vis
         logging.info('neuropythy: Testing areal cortical magnification...')
         dset = ny.data['benson_winawer_2018']
-        sub = dset.subjects[np.random.choice(dset.subjects.discard('fsaverage').keys(), 1)[0]]
+        sub = dset.subjects['S1202']
         hem = [sub.lh, sub.rh][np.random.randint(2)]
         cm = vis.areal_cmag(hem.midgray_surface, 'prf_',
                             mask=('inf-prf_visual_area', 1),
