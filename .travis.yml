@@ -1,0 +1,13 @@
+language: python
+sudo: false
+
+python: 
+  - 2.7
+  - 3.6
+
+install:
+- travis_retry pip install -r requirements-dev.txt
+- travis_retry pip install -e .
+
+script:
+- python -m unittest neuropythy.test
