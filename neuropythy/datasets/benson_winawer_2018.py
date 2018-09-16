@@ -206,6 +206,17 @@ class BensonWinawer2018Dataset(Dataset):
             'analyses', '{0[sub]}', ('{0[hemi]}.benson14_' + pname_file + '.mgz'))
          for (pname, pname_file) in six.iteritems({'polar_angle':'angle', 'eccentricity':'eccen',
                                                    'radius':'sigma', 'visual_area':'varea'})})
+    fsaverage_properties = pimms.merge(
+        # retinotopy data
+        {('prf_%s' % pname): os.path.join(
+            'retinotopy', '{0[sub]}', '{0[hemi]}_' + pname_file + '.mgz')
+         for (pname,pname_file) in six.iteritems({'polar_angle':'angle', 'eccentricity':'eccen',
+                                                  'radius':'prfsz', 'variance_explained':'vexpl'})},
+        # analyses data
+        {('prior_%s' % pname): os.path.join(
+            'analyses', '{0[sub]}', '{0[hemi]}.anatomical-prior_' + pname_file + '.mgz')
+         for (pname,pname_file) in six.iteritems({'polar_angle':'angle', 'eccentricity':'eccen',
+                                                  'radius':'sigma', 'visual_area':'varea'})})
     subject_registrations = pyr.pmap(
         {('%s_retinotopy' % dset): os.path.join(
             'analyses', '{0[sub]}',
@@ -213,6 +224,8 @@ class BensonWinawer2018Dataset(Dataset):
              ('.%02d.retinotopy_steps=02500_scale=20.0_clip=12_prior=retinotopy.sphere.reg' %
                  dsmeta['id'])))
          for (dset, dsmeta) in six.iteritems(prf_meta_data)})
+    fsaverage_registrations = pyr.pmap(
+        {'retinotopy': os.path.join('analyses', '{0[sub]}', '{0[hemi]}.retinotopy.sphere.reg')})
 
     @staticmethod
     def load_subject(cache_directory, sid):
@@ -226,21 +239,28 @@ class BensonWinawer2018Dataset(Dataset):
         sub = freesurfer_subject(os.path.join(cache_directory, 'freesurfer_subjects', sid))
         # okay, we need functions that will lazily extract a hemisphere then load the retinotopy,
         # analyses, and atlas data onto it (also lazily)
+        def _load_ints(flnm): return np.asarray(nyio.load(flnm), dtype=np.int)
         def update_hemi(subname, hemis, hname):
             # get the original hemisphere...
             hemi = hemis[hname]
             stup = {'sub':subname, 'hemi':hname}
             pdat = {}
+            sprops = (BensonWinawer2018Dataset.fsaverage_properties if subname == 'fsaverage' else
+                      BensonWinawer2018Dataset.subject_properties)
             # okay, now we want to load a bunch of data; start with properties
-            for (propname, filename) in six.iteritems(BensonWinawer2018Dataset.subject_properties):
+            for (propname, filename) in six.iteritems(sprops):
                 filename = os.path.join(cache_directory, filename.format(stup))
                 if not os.path.isfile(filename): continue
-                pdat[propname] = curry(nyio.load, filename)
+                pdat[propname] = curry(
+                    _load_ints if propname.endswith('visual_area') else nyio.load,
+                    filename)
             # we can add this already...
             hemi = hemi.with_prop(pimms.lazy_map(pdat))
             # next, we want to grab the registrations...
             rdat = {}
-            for (rname, filename) in six.iteritems(BensonWinawer2018Dataset.subject_registrations):
+            sregs = (BensonWinawer2018Dataset.fsaverage_registrations if subname == 'fsaverage' else
+                     BensonWinawer2018Dataset.subject_registrations)
+            for (rname, filename) in six.iteritems(sregs):
                 filename = os.path.join(cache_directory, filename.format(stup))
                 if not os.path.isfile(filename): continue
                 rdat[rname] = curry(nyio.load, filename, 'freesurfer_geometry')
@@ -262,8 +282,11 @@ class BensonWinawer2018Dataset(Dataset):
         BensonWinawer2018Dataset.download(cache_directory, create_directories=create_directories,
                                           mode=create_mode, overwrite=False)
         # okay, next we want to setup the subjects
-        return pimms.lazy_map({s:curry(BensonWinawer2018Dataset.load_subject, cache_directory, s)
-                               for s in [('S12%02d' % s) for s in range(1,9)]})
+        dat = {s:curry(BensonWinawer2018Dataset.load_subject, cache_directory, s)
+               for s in [('S12%02d' % s) for s in range(1,9)]}
+        dat['fsaverage'] = curry(BensonWinawer2018Dataset.load_subject,
+                                 cache_directory, 'fsaverage')
+        return pimms.lazy_map(dat)
     @pimms.value
     def v123_table(cache_directory, subjects):
         '''
