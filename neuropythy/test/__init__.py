@@ -25,7 +25,7 @@ class TestNeuropythy(unittest.TestCase):
         import neuropythy.geometry as geo
         logging.info('neuropythy: Testing meshes and properties...')
         # get a random subject's mesh
-        subs = ny.data['benson_winawer_2018'].subjects
+        subs = ny.data['benson_winawer_2018'].subjects.discard('fsaverage')
         sub  = subs[np.random.choice(subs.keys(), 1)[0]]
         hem  = sub.hemis[('lh','rh')[np.random.randint(2)]]
         msh  = hem.white_surface
@@ -65,7 +65,7 @@ class TestNeuropythy(unittest.TestCase):
         import neuropythy.vision as vis
         logging.info('neuropythy: Testing areal cortical magnification...')
         dset = ny.data['benson_winawer_2018']
-        sub = dset.subjects[np.random.choice(dset.subjects.keys(), 1)[0]]
+        sub = dset.subjects[np.random.choice(dset.subjects.discard('fsaverage').keys(), 1)[0]]
         hem = [sub.lh, sub.rh][np.random.randint(2)]
         cm = vis.areal_cmag(hem.midgray_surface, 'prf_',
                             mask=('inf-prf_visual_area', 1),
@@ -88,7 +88,7 @@ class TestNeuropythy(unittest.TestCase):
         dset = ny.data['benson_winawer_2018']
         self.assertTrue(os.path.isdir(dset.cache_directory))
         # pick 1 of the subjects at random
-        subs = [dset.subjects['S12%02d' % (s+1)] for s in choose(range(len(dset.subjects)), 1)]
+        subs = [dset.subjects['S12%02d' % (s+1)] for s in choose(range(8), 1)]
         fsa = ny.freesurfer_subject('fsaverage')
         def check_dtypes(a,b):
             for tt in [np.integer, np.floating, np.bool_, np.complexfloating]:
