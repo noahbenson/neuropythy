@@ -90,5 +90,5 @@ setup(
                       #'python-igraph>=0.7.1',
                       'py4j>=0.10'],
     extras_require={
-        'HCP': ['s3fs>=0.1.5', 'urllib>=1.21.1', 'h5py>=2.8.0'],
+        'HCP': ['s3fs>=0.1.5', 'h5py>=2.8.0'],
         'graphics2D': ['matplotlib>=1.5.3']})
