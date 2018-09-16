@@ -396,12 +396,17 @@ def subject(name, meta_data=None, check_path=True):
         search should be performed; the string name should be trusted to be an exact relative or
         absolute path to a valid FreeSurfer subejct.
     '''
-    name = os.path.expanduser(name)
+    name = os.path.expanduser(os.path.expandvars(name))
     if check_path is None:
         sub = Subject(name, check_path=False)
         if isinstance(sub, Subject): sub.persist()
     else:
         subpath = find_subject_path(name, check_path=check_path)
+        if subpath is None and name == 'fsaverage':
+            # we can use the benson and winawer 2018 dataset
+            import neuropythy as ny
+            try: return ny.data['benson_winawer_2018'].subjects['fsaverage']
+            except: pass # error message below is more accurate...
         if subpath is None:
             raise ValueError('Could not locate subject with name \'%s\'' % name)
         elif check_path:
