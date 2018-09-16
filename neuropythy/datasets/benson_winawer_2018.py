@@ -22,80 +22,89 @@ config.declare('benson_winawer_2018_path')
 @pimms.immutable
 class BensonWinawer2018Dataset(Dataset):
     '''
-    neuropythy.data['benson_winawer_2018'] is a Dataset containing the publicly provided data from
-    the following publication:
+    neuropythy.data['benson_winawer_2018'] is a Dataset containing the publicly provided data
+    from the following publication:
 
-    Benson NC, Winawer J (2018) Bayesian analysis of retinotopic maps. BioRxiv. DOI:10.1101/325597
+    Benson NC, Winawer J (2018) Bayesian analysis of retinotopic maps. BioRxiv.
+      DOI:10.1101/325597
 
-    These data include 8 FreeSurfer subjects each with a set of measured and inferred retinotopic
-    maps. These data are provided as follows:
+    These data include 8 FreeSurfer subjects each with a set of measured and inferred
+    retinotopic maps. These data are provided as follows:
     
     dset = neuropythy.data['benson_winawer_2018']
     sorted(dset.subjects.keys())
-    #=> ['S1201', 'S1202', 'S1203', 'S1204', 'S1205', 'S1206', 'S1207', 'S1208']
+    #=> ['S1201', 'S1202', 'S1203', 'S1204', 'S1205', 'S1206', 'S1207', 'S1208', 'fsaverage']
 
     dset.subjects['S1202']
-    #=> Subject(<S1202>, <'/Users/nben/.cache/benson_winawer_2018/freesurfer_subjects/S1202'>)
+    #=> Subject(<S1202>,
+    #=>         <'/Users/nben/.cache/benson_winawer_2018/freesurfer_subjects/S1202'>)
 
     dset.subjects['S1202'].lh
     #=> Cortex(<LH>, <301348 faces>, <150676 vertices>)
 
     sorted(dset.subjects['S1201'].lh.properties.keys())
-    #=> ['convexity', 'curvature', 'index', 'inf-prf00_eccentricity', 'inf-prf00_polar_angle',
-    #=>  'inf-prf_radius', 'inf-prf_visual_area', 'label', 'midgray_surface_area',
-    #=>  'pial_surface_area', 'prf00_eccentricity', 'prf00_polar_angle', 'prf00_radius',
-    #=>  'prf00_variance_explained', 'prf01_eccentricity', 'prf01_polar_angle', 'prf01_radius',
-    #=>  'prf01_variance_explained', 'prf02_eccentricity', 'prf02_polar_angle', 'prf02_radius',
-    #=>  'prf02_variance_explained', 'prf03_eccentricity', 'prf03_polar_angle', 'prf03_radius',
-    #=>  'prf03_variance_explained', 'prf04_eccentricity', 'prf04_polar_angle', 'prf04_radius',
-    #=>  'prf04_variance_explained', 'prf05_eccentricity', 'prf05_polar_angle', 'prf05_radius',
-    #=>  'prf05_variance_explained', 'prf06_eccentricity', 'prf06_polar_angle', 'prf06_radius',
-    #=>  'prf06_variance_explained', 'prf07_eccentricity', 'prf07_polar_angle', 'prf07_radius',
-    #=>  'prf07_variance_explained', 'prf08_eccentricity', 'prf08_polar_angle', 'prf08_radius',
-    #=>  'prf08_variance_explained', 'prf09_eccentricity', 'prf09_polar_angle', 'prf09_radius',
-    #=>  'prf09_variance_explained', 'prf10_eccentricity', 'prf10_polar_angle', 'prf10_radius',
-    #=>  'prf10_variance_explained', 'prf11_eccentricity', 'prf11_polar_angle', 'prf11_radius',
-    #=>  'prf11_variance_explained', 'prf12_eccentricity', 'prf12_polar_angle', 'prf12_radius',
-    #=>  'prf12_variance_explained', 'prf13_eccentricity', 'prf13_polar_angle', 'prf13_radius',
-    #=>  'prf13_variance_explained', 'prf14_eccentricity', 'prf14_polar_angle', 'prf14_radius',
-    #=>  'prf14_variance_explained', 'prf15_eccentricity', 'prf15_polar_angle', 'prf15_radius',
-    #=>  'prf15_variance_explained', 'prf16_eccentricity', 'prf16_polar_angle', 'prf16_radius',
-    #=>  'prf16_variance_explained', 'prf17_eccentricity', 'prf17_polar_angle', 'prf17_radius',
-    #=>  'prf17_variance_explained', 'prf18_eccentricity', 'prf18_polar_angle', 'prf18_radius',
-    #=>  'prf18_variance_explained', 'prf19_eccentricity', 'prf19_polar_angle', 'prf19_radius',
-    #=>  'prf19_variance_explained', 'prf20_eccentricity', 'prf20_polar_angle', 'prf20_radius',
-    #=>  'prf20_variance_explained', 'prf21_eccentricity', 'prf21_polar_angle', 'prf21_radius',
-    #=>  'prf21_variance_explained', 'prf_eccentricity', 'prf_polar_angle', 'prf_radius',
-    #=>  'prf_variance_explained', 'prior-prf_eccentricity', 'prior-prf_polar_angle',
-    #=>  'prior-prf_radius', 'prior-prf_visual_area', 'thickness', 'volume', 'white_surface_area',
-    #=>  'wide-prf_eccentricity', 'wide-prf_polar_angle', 'wide-prf_radius',
-    #=>  'wide-prf_variance_explained']
-
+    #=> ['convexity', 'curvature', 'index', 'inf-prf00_eccentricity',
+    #=>  'inf-prf00_polar_angle', 'inf-prf_radius', 'inf-prf_visual_area', 'label',
+    #=>  'midgray_surface_area', 'pial_surface_area', 'prf00_eccentricity',
+    #=>  'prf00_polar_angle', 'prf00_radius', 'prf00_variance_explained',
+    #=>  'prf01_eccentricity', 'prf01_polar_angle', 'prf01_radius', 
+    #=>  'prf01_variance_explained', 'prf02_eccentricity', 'prf02_polar_angle',
+    #=>  'prf02_radius', 'prf02_variance_explained', 'prf03_eccentricity',
+    #=>  'prf03_polar_angle', 'prf03_radius', 'prf03_variance_explained',
+    #=>  'prf04_eccentricity', 'prf04_polar_angle', 'prf04_radius',
+    #=>  'prf04_variance_explained', 'prf05_eccentricity', 'prf05_polar_angle',
+    #=>  'prf05_radius', 'prf05_variance_explained', 'prf06_eccentricity',
+    #=>  'prf06_polar_angle', 'prf06_radius', 'prf06_variance_explained',
+    #=>  'prf07_eccentricity', 'prf07_polar_angle', 'prf07_radius',
+    #=>  'prf07_variance_explained', 'prf08_eccentricity', 'prf08_polar_angle',
+    #=>  'prf08_radius', 'prf08_variance_explained', 'prf09_eccentricity',
+    #=>  'prf09_polar_angle', 'prf09_radius', 'prf09_variance_explained',
+    #=>  'prf10_eccentricity', 'prf10_polar_angle', 'prf10_radius',
+    #=>  'prf10_variance_explained', 'prf11_eccentricity', 'prf11_polar_angle',
+    #=>  'prf11_radius', 'prf11_variance_explained', 'prf12_eccentricity',
+    #=>  'prf12_polar_angle', 'prf12_radius', 'prf12_variance_explained',
+    #=>  'prf13_eccentricity', 'prf13_polar_angle', 'prf13_radius',
+    #=>  'prf13_variance_explained', 'prf14_eccentricity', 'prf14_polar_angle',
+    #=>  'prf14_radius', 'prf14_variance_explained', 'prf15_eccentricity',
+    #=>  'prf15_polar_angle', 'prf15_radius', 'prf15_variance_explained',
+    #=>  'prf16_eccentricity', 'prf16_polar_angle', 'prf16_radius',
+    #=>  'prf16_variance_explained', 'prf17_eccentricity', 'prf17_polar_angle',
+    #=>  'prf17_radius', 'prf17_variance_explained', 'prf18_eccentricity',
+    #=>  'prf18_polar_angle', 'prf18_radius', 'prf18_variance_explained',
+    #=>  'prf19_eccentricity', 'prf19_polar_angle', 'prf19_radius',
+    #=>  'prf19_variance_explained', 'prf20_eccentricity', 'prf20_polar_angle',
+    #=>  'prf20_radius', 'prf20_variance_explained', 'prf21_eccentricity',
+    #=>  'prf21_polar_angle', 'prf21_radius', 'prf21_variance_explained', 'prf_eccentricity',
+    #=>  'prf_polar_angle', 'prf_radius', 'prf_variance_explained', 'prior-prf_eccentricity',
+    #=>  'prior-prf_polar_angle', 'prior-prf_radius', 'prior-prf_visual_area', 'thickness',
+    #=>  'volume', 'white_surface_area', 'wide-prf_eccentricity', 'wide-prf_polar_angle',
+    #=>  'wide-prf_radius', 'wide-prf_variance_explained']
     dset.meta_data
-    #=> ['prf', 'prf00', 'prf01', 'prf02', 'prf03', 'prf04', 'prf05', 'prf06', 'prf07', 'prf08',
-    #=>  'prf09', 'prf10', 'prf11', 'prf12', 'prf13', 'prf14', 'prf15', 'prf16', 'prf17', 'prf18',
-    #=>  'prf19', 'prf20', 'prf21']
+    #=> ['prf', 'prf00', 'prf01', 'prf02', 'prf03', 'prf04', 'prf05', 'prf06', 'prf07',
+    #=>  'prf08', 'prf09', 'prf10', 'prf11', 'prf12', 'prf13', 'prf14', 'prf15', 'prf16',
+    #=>  'prf17', 'prf18', 'prf19', 'prf20', 'prf21']
 
     dset.meta_data['prf04']
     #=> {'scan_seconds': 576, 'name': 'training14', 'id': 14, 'scans': 3}
 
-    # Note that the following lines will take awhile to calculate/load from cache due to the size
-    # of the data; additionally, the generated cache file is ~1GB.
+    # Note that the following lines will take awhile to calculate/load from cache due to the
+    # size of the data; additionally, the generated cache file is ~1GB.
 
     dset.v123_table
-    #=> itable(('inf_x', 'label', 'radius', 'eccentricity', 'inf_radius', 'hemi', 'x', 'subject',
-    #=>         'y', 'inf_y', 'inf_eccentricity', 'midgray_surface_area', 'inf_polar_angle',
-    #=>         'polar_angle', 'inf_visual_area', 'pial_surface_area', 'dataset_id', 'dataset_name',
-    #=>         'variance_explained', 'white_surface_area'),
+    #=> itable(('inf_x', 'label', 'radius', 'eccentricity', 'inf_radius', 'hemi', 'x',
+    #=>         'subject', 'y', 'inf_y', 'inf_eccentricity', 'midgray_surface_area',
+    #=>         'inf_polar_angle', 'polar_angle', 'inf_visual_area', 'pial_surface_area',
+    #=>         'dataset_id', 'dataset_name', 'variance_explained', 'white_surface_area'),
     #=>        <50278184 rows>)
 
-    dset.v123_table[100]
-    #=> {'inf_x':      4.0969896, 'label': 100, 'radius': 2.096148,    'eccentricity': 3.3061967,
-    #=>  'inf_radius': 1.5482311, 'hemi': 'lh', 'x': 0.032615896, 'subject': 'S1208', 'y': -3.30603,
-    #=>  'inf_y': -2.0219889, 'inf_eccentricity': 4.5687814, 'midgray_surface_area': 1.072214,
-    #=>  'inf_polar_angle': 116.267746, 'polar_angle': 179.43477, 'inf_visual_area': 3,
-    #=>  'pial_surface_area': 1.3856983, 'dataset_id': 10, 'dataset_name': 'prf10',
-    #=>  'variance_explained': 0.054989286, 'white_surface_area': 0.75872976}
+    dset.v123_table[100] # (caching all rows is somewhat slow the first time you do this)
+    #=> {'inf_x': 4.0969896, 'label': 100, 'radius': 2.096148, 'eccentricity': 3.3061967,
+    #=>  'inf_radius': 1.5482311, 'hemi': 'lh', 'x': 0.032615896, 'subject': 'S1208', 
+    #=>  'y': -3.30603, 'inf_y': -2.0219889, 'inf_eccentricity': 4.5687814,
+    #=>  'midgray_surface_area': 1.072214, 'inf_polar_angle': 116.267746,
+    #=>  'polar_angle': 179.43477, 'inf_visual_area': 3, 'pial_surface_area': 1.3856983,
+    #=>  'dataset_id': 10, 'dataset_name': 'prf10', 'variance_explained': 0.054989286,
+    #=>  'white_surface_area': 0.75872976}
     '''
     dataset_urls = {'analyses':              'https://osf.io/cpfa8/download',
                     'retinotopy':            'https://osf.io/m4k8q/download',
@@ -162,14 +171,19 @@ class BensonWinawer2018Dataset(Dataset):
         for (dirname, durl) in six.iteritems(dataset_urls):
             # download the url...
             tgz_file = os.path.join(path, dirname + '.tar.gz')
-            logging.info('            Fetching "%s"', tgz_file)
-            with urllib.request.urlopen(durl) as response:
+            logging.info('neuropythy: Fetching "%s"', tgz_file)
+            if six.PY2:
+                response = urllib.request.urlopen(durl)
                 with open(tgz_file, 'wb') as fl:
                     shutil.copyfileobj(response, fl)
+            else:
+                with urllib.request.urlopen(durl) as response:
+                    with open(tgz_file, 'wb') as fl:
+                        shutil.copyfileobj(response, fl)
             if not tarfile.is_tarfile(tgz_file):
                 raise ValueError('Error when downloading %s: not a tar file' % tgz_file)
             # now unzip it...
-            logging.info('            Extracting to "%s"', tgz_file)
+            logging.info('neuropythy: Extracting to "%s"', tgz_file)
             with tarfile.open(tgz_file, 'r:gz') as tar:
                 tar.extractall(path)
                 tar.close()
