@@ -55,7 +55,7 @@ repository root.
    requested. Doing this requires the s3fs library.
  * **[h5py &ge; 2.8.0](https://github.com/h5py/h5py)**. The h5py file is used to import the HCP 
    retinotopy data if it is found or configured for automatic-downloading (see below).
- * **[Matplotlib &ge; 1.5.3](http://matplitlib.org/)**. A few functions for plotting cortical maps
+ * **[matplotlib &ge; 1.5.3](http://matplitlib.org/)**. A few functions for plotting cortical maps
    are defined in the neuropythy.graphics package. These are not defined if matplotlib is not
    imported successfully. The primary interface to this functionality is the
    neuropythy.graphics.cortex_plot as well as some helper functions and colormaps.
