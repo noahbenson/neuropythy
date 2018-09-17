@@ -138,7 +138,24 @@ which are approximately 1 GB; it may appear as if neuropythy has frozen during t
 probably just due to the download. Generally speaking, if your internet connection is relatively
 fast, you should not notice significant delays from downloading the HCP strucutral data otherwise.
 
-For more information about using the HCP module of neuropythy, see [this page](https://noahbenson.github.io/HCP-and-Neuropythy/).
+For more information about using the HCP module of neuropythy, see
+[this page](https://noahbenson.github.io/HCP-and-Neuropythy/).
+
+Additional notes:
+* Currently, only `'lowres-prf_*'` properties are available via neuropythy. The `'lowres-'` refers
+  to the fact that the pRF models were solved on the HCP fs_LR32k mesh rather than the
+  higher-resolution 59k mesh. Higher resolution solutions being available in the near future in a
+  new release of neuropythy and will be named `'prf_*'`, e.g., `'prf_polar_angle'`.
+* Low resolution and higher resolution pRF solutions are very similar; there is no need to be
+  concerned that the low-resolution pRF solutions are broadly missing the mark with respect to
+  the retinotopic maps of subjects.
+* If you enable pythons `logging` module to print info-level messages, then neuropythy will inform
+  you whenever it is about to download a large file; it does not print messages for the smaller
+  files that typically take only a few seconds to download. To configure this, use:
+  ```python
+  import logging
+  logging.getLogger().setLevel(logging.INFO)
+  ```
 
 ## Builtin Datasets ################################################################################
 
