@@ -140,7 +140,7 @@ def load_credentials(flnm):
       file must contain <key>:<secret> on a single line. If the file does not contain valid
       credentials, then an exception is raised. Yields (key, secret).
     '''
-    with open(flnm, 'r') as fl:
+    with open(os.path.expanduser(os.path.expandvars(flnm)), 'r') as fl:
         dat = fl.read(1024 * 8)
     dat = dat.strip().split(':')
     if len(dat) != 2: raise ValueError('File %s does not appear to be a credentials file' % flnm)
@@ -1962,8 +1962,8 @@ if config['hcp_auto_download'] is not False:
     if config['hcp_auto_release']:  args['release']       = config['hcp_auto_release']
     if config['hcp_auto_database']: args['database']      = config['hcp_auto_database']
     if config['hcp_auto_path']:     args['subjects_path'] = config['hcp_auto_path']
-    try: auto_download(True, **args)
-    except: pass
+    auto_download(True, **args)
+    #except: pass
 def _auto_downloadable(sid):
     if _auto_download_options is None: return False
     elif sid == 'retinotopy': return _auto_download_options['retinotopy']
