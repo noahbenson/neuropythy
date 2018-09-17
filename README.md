@@ -46,6 +46,15 @@ and they must be found on your PYTHONPATH in order to use neuropythy.
 
 ### Optional Dependencies
 
+All optional dependencies are included in the `requirements-dev.txt` file in the neuropythy
+repository root. 
+
+ * **[s3fs &ge; 0.1.5](https://github.com/dask/s3fs)**. The HCP dataset can be accessed
+   automatically using neuropythy's hcp_subject() function. If configured correctly (see below),
+   neuropythy will silently download the relevant HCP data from its Amazon S3 bucket as it is
+   requested. Doing this requires the s3fs library.
+ * **[h5py &ge; 2.8.0](https://github.com/h5py/h5py)**. The h5py file is used to import the HCP 
+   retinotopy data if it is found or configured for automatic-downloading (see below).
  * **[Matplotlib &ge; 1.5.3](http://matplitlib.org/)**. A few functions for plotting cortical maps
    are defined in the neuropythy.graphics package. These are not defined if matplotlib is not
    imported successfully. The primary interface to this functionality is the
@@ -66,6 +75,96 @@ and they must be found on your PYTHONPATH in order to use neuropythy.
 Neuropythy has been used extensively with Python 2.7; recently some effort has been made to make it
 compatible with Python 3. In theory it should work with Python 3; however, relatively little testing
 has been done.
+
+## Configuration ###################################################################################
+
+Neuropythy is most useful when it knows where to find your FreeSurfer subject data or where you want
+it to store datasets or Human Connectome Project files. These configuration items can be set in a
+number of ways:
+* On startup, neuropythy looks for a file `~/.npythyrc` (though this file name may be changed by
+  setting the `NPYTHYRC` environment variable). The contents of this file should be a JSON
+  dictionary with configurable variables (such as `"freesurfer_subject_paths"`) as the keys. An
+  example configuration file:
+  ```json
+  {"freesurfer_subject_paths": "/Volumes/server/Freesurfer_subjects",
+   "data_cache_root":          "~/Temp/npythy_cache",
+   "hcp_subject_paths":        "/Volumes/server/Projects/HCP/subjects",
+   "hcp_auto_download":        true,
+   "hcp_credentials":          "~/.hcp-passwd"}
+  ```
+* Each config variable in the `NPYTHYRC` file may be overrided using an associated environment
+  variable. Usually the environment variable names are either the config variables in uppercase or
+  `NPYTHY_` + the variable in uppercase: `NPYTHY_DATA_CACHE_ROOT`, `HCP_CREDENTIALS`,
+  `HCP_AUTO_DOWNLOAD`. The `SUBJECTS_DIR` environment is used for the FreeSurfer subject paths, and
+  the `HCP_SUBJECTS_DIR` variable is used for the HCP subject paths (both may be :-separated lists
+  of directories).
+* The config items may be retrieved and set directly using `neuropythy.config`. Values that are set
+  in this way override the `NPYTHYRC` file and all environment variables. For example:
+  ```python
+  import neuropythy as ny
+  ny.config['data_cache_root']
+  #=> '/Users/nben/Temp/npythy_cache'
+  ny.config['data_cache_root'] = '~/Documents/npythy_data'
+  ny.config['data_cache_root']
+  #=> '/Users/nben/Documents/npythy_data'
+  ```
+
+## Human Connectome Project Integration ############################################################
+
+The neuropythy library is capable of automatically integrating with the Human Connectome Project's
+Amazon S3 bucket. Neuropythy will present you with nested data structures representing individual
+HCP subjects and will silently download the relevant structure files as they are requested. To
+configure this behavior, follow these steps:
+* Make a directory somewhere to store the HCP subjects that are downloaded. The subjects won't be
+  downloaded all at once, but it will drastically speed up future loading of subjects if you cache
+  them on your local filesystem.
+* **Sign up for an HCP account.** You can do this at the [HCP's database
+  page](https://db.humanconnectome.org/).
+* Once you have an account, log into the database; near the top of the initial splash page is a cell
+  titles "WU-Minn HCP Data - 1200 Subjects" and inside this cell is a button for activating Amazon
+  S3 Access. When you activate this feature, you will be given an amazon "Key" and "Secret".
+* Copy and paste your key and secret into a file `~/.hcp-passwd` such that the contents are your key
+  followed by a colon followed by your secret, e.g., `mys3key:mys3secret`.
+* You should then make sure that the configuration variable `"hcp_credentials"` is set to
+  `"~/.hcp-passwd"` in your `~/.npythyrc` file (see Configuration, above). Additionally, set the
+  `"hcp_auto_download"` value is set to `true`, and set the `"hcp_auto_path"` variable to the
+  directory in which you plan to store the HCP subject data.
+  
+Note that the above steps will additionally enable auto-downloading of the retinotopic mapping
+database; if you are only interested in the structural data, you can set the `"hcp_auto_download"`
+variable to `"structure"`. If you do enable auto-downloading of the retinotopic maps, then the first
+time you examine an HCP subject, neuropythy will have to download the retinotopy database files,
+which are approximately 1 GB; it may appear as if neuropythy has frozen during this time, but it is
+probably just due to the download. Generally speaking, if your internet connection is relatively
+fast, you should not notice significant delays from downloading the HCP strucutral data otherwise.
+
+For more information about using the HCP module of neuropythy, see [this page](https://noahbenson.github.io/HCP-and-Neuropythy/).
+
+## Builtin Datasets ################################################################################
+
+Neuropythy now comes with support for builtin datasets. These datasets are downloaded when they are
+first requested, and are only re-downloaded if necessary; note that if you have configured
+neuropythy's `"data_cache_root"` configuration variable (see Configuration, above), then the data
+will be downloaded to a temporary directory that is deleted when Python exits.
+
+Currently, there is only one builtin dataset (not including the Human Connectome Project dataset,
+above), and that is the dataset from [Benson and Winawer (2018)](https://doi.org/10.1101/325597). To
+access this dataset:
+
+```python
+import neuropythy as ny
+subs = ny.data['benson_winawer_2018'].subjects
+sorted(subs.keys())
+#=> ['S1201', 'S1202', 'S1203', 'S1204', 'S1205', 'S1206', 'S1207', 'S1208', 'fsaverage']
+subs['S1201']
+#=> Subject(<S1201>,
+#=>         <'/Users/nben/Temp/npythy_cache/benson_winawer_2018/freesurfer_subjects/S1201'>)
+subs['S1201'].lh.prop('prf_polar_angle')
+#=> array([118.811386, 118.80122 , 120.842255, ..., -14.08387 , -62.615746, -32.82376],
+#=>       dtype=float32)
+```
+
+See also `help(ny.data['benson_winawer_2018'])` or `print(ny.data['benson_winawer_2018'].__doc__)`.
 
 ## Commands ########################################################################################
 
