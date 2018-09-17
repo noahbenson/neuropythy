@@ -35,7 +35,7 @@ python setup.py install
 
 The neuropythy library depends on a few other libraries, all freely available:
  * [numpy](http://numpy.scipy.org/) &ge; 1.5.0
- * [scipy](http://www.scipy.org/) &ge; 0.0.0
+ * [scipy](http://www.scipy.org/) &ge; 0.9.0
  * [nibabel](https://github.com/nipy/nibabel) &ge; 2.0
  * [pyrsistent](https://github.com/tobgu/pyrsistent) &ge; 0.11.0
  * [pimms](https://github.com/noahbenson/pimms) &ge; 0.2.8
