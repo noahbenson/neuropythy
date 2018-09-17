@@ -1,5 +1,5 @@
-numpy >= 1.2.0
-scipy >= 0.7.0
+numpy >= 1.5.0
+scipy >= 0.9.0
 nibabel >= 1.2.0
 pyrsistent >= 0.11.0
 pint >= 0.7.0
