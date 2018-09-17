@@ -34,9 +34,9 @@ python setup.py install
 ## Dependencies ####################################################################################
 
 The neuropythy library depends on a few other libraries, all freely available:
- * [numpy](http://numpy.scipy.org/) &ge; 1.2
- * [scipy](http://www.scipy.org/) &ge; 0.7.0
- * [nibabel](https://github.com/nipy/nibabel) &ge; 1.2
+ * [numpy](http://numpy.scipy.org/) &ge; 1.5.0
+ * [scipy](http://www.scipy.org/) &ge; 0.0.0
+ * [nibabel](https://github.com/nipy/nibabel) &ge; 2.0
  * [pyrsistent](https://github.com/tobgu/pyrsistent) &ge; 0.11.0
  * [pimms](https://github.com/noahbenson/pimms) &ge; 0.2.8
  * [py4j](https://www.py4j.org/) &ge; 0.10
@@ -223,9 +223,17 @@ docker run nben/neuropythy -ti --rm -v /data/subjects:/subjects \
            benson14_retinotopy bert
 ```
 
+## Citing ##########################################################################################
+
+To cite Neuropythy, please reference the following:
+* Benson NC, Winawer J (**2018**) Bayesian Analysis of Retinotopic Maps. *bioRxiv*
+  doi:[10.1101/325597](https://doi.org/10.1101/325597). 
+
 
 ## References ######################################################################################
 
+ * Benson NC, Winawer J (**2018**) Bayesian Analysis of Retinotopic Maps. *bioRxiv*
+   doi:[10.1101/325597](https://doi.org/10.1101/325597). 
  * Benson NC, Butt OH, Brainard DH, Aguirre GK (**2014**) Correction of distortion in flattened
    representations of the cortical surface allows prediction of V1-V3 functional organization from
    anatomy. *PLoS Comput. Biol.* **10**(3):e1003538.
@@ -235,7 +243,6 @@ docker run nben/neuropythy -ti --rm -v /data/subjects:/subjects \
    organization of striate cortex is well predicted by surface topology. *Curr. Biol.*
    **22**(21):2081-5. doi:[10.1016/j.cub.2012.09.014](https://dx.doi.org/10.1016/j.cub.2012.09.014).
    PMC:[3494819](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3494819/).
-
 
 ## License #########################################################################################
 
