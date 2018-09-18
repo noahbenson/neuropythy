@@ -58,7 +58,11 @@ repository root.
  * **[matplotlib &ge; 1.5.3](http://matplitlib.org/)**. A few functions for plotting cortical maps
    are defined in the neuropythy.graphics package. These are not defined if matplotlib is not
    imported successfully. The primary interface to this functionality is the
-   neuropythy.graphics.cortex_plot as well as some helper functions and colormaps.
+   `neuropythy.cortex_plot` as well as some helper functions and colormaps.
+ * **[ipyvolume &ge; 0.5.1](https://github.com/maartenbreddels/ipyvolume)**. If you wish to make 3D
+   graphics plots, you will need to install and use the `ipyvolume` library. The neuropythy function
+   `neuropythy.cortex_plot` will handle most of the details, assuming you have `ipyvolume`
+   installed.
  * **[Java &ge; 1.8](http://www.oracle.com/technetwork/java/javase/downloads/index.html)**.
    The registration algorithm employed by the register_retinotopy command is performed by
    a Java library embedded in the neuropythy Python library. This library is the

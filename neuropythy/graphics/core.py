@@ -10,7 +10,7 @@ import scipy.spatial       as spspace
 import neuropythy.geometry as geo
 import neuropythy.mri      as mri
 import neuropythy.io       as nyio
-import os, sys, six, itertools, atexit, shutil, tempfile, pimms
+import os, sys, six, itertools, atexit, shutil, tempfile, warnings, pimms
 
 from ..util            import (times, zdivide, plus, minus)
 from ..vision          import (visual_area_names, visual_area_numbers)
@@ -946,6 +946,9 @@ try:
         f.camera.up = tuple(up)
         f.camera.fov = fov
         f.camera.lookAt(tuple(mid))
+        warnings.warn('neuropythy: NOTE: due to a bug in ipyvolume, camera views cannot currently' +
+                      ' be set by neuropythy; however, if you click the reset (home) button in' +
+                      ' the upper-left corner of the figure, the requested view will be fixed.')
         return f
 except: pass
 
