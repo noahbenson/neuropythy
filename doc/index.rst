@@ -10,6 +10,7 @@ Documentation for `neuropythy <https://github.com/noahbenson/neuropythy>`_
    :maxdepth: 2
    :caption: Contents:
 
+.. automodule:: neuropythy
 
 
 Indices and tables
