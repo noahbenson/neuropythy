@@ -255,7 +255,12 @@ class BensonWinawer2018Dataset(Dataset):
         sub = freesurfer_subject(os.path.join(cache_directory, 'freesurfer_subjects', sid))
         # okay, we need functions that will lazily extract a hemisphere then load the retinotopy,
         # analyses, and atlas data onto it (also lazily)
-        def _load_ints(flnm): return np.asarray(nyio.load(flnm), dtype=np.int)
+        def _load_ints(flnm):  return np.asarray(nyio.load(flnm), dtype=np.int)
+        def _load_angle(flnm):
+            dat = nyio.load(flnm)
+            (d,n) = os.path.split(flnm)
+            d = os.path.split(d)[0]
+            return -dat if d.endswith('analyses') and n.startswith('rh') else dat
         def update_hemi(subname, hemis, hname):
             # get the original hemisphere...
             hemi = hemis[hname]
@@ -268,7 +273,9 @@ class BensonWinawer2018Dataset(Dataset):
                 filename = os.path.join(cache_directory, filename.format(stup))
                 if not os.path.isfile(filename): continue
                 pdat[propname] = curry(
-                    _load_ints if propname.endswith('visual_area') else nyio.load,
+                    (_load_ints  if propname.endswith('visual_area') else
+                     _load_angle if propname.endswith('polar_angle') else
+                     nyio.load),
                     filename)
             # we can add this already...
             hemi = hemi.with_prop(pimms.lazy_map(pdat))
