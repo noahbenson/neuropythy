@@ -1499,7 +1499,6 @@ def predict_retinotopy(sub, template='benson17', registration='fsaverage'):
             subj_hems = (sub,)
             tmpl_hems = ((fsa.lh if sub.chirality == 'lh' else fsa.rh),)
             chrs_hems = (sub.chirality,)
-
     tpl = tuple([th.interpolate(sh, tmpl[h if registration == 'fsaverage' else 'sym'])
                 for (sh,th,h) in zip(subj_hems, tmpl_hems, chrs_hems)])
     return tpl[0] if len(tpl) == 1 else tpl
