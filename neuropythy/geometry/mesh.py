@@ -2292,17 +2292,18 @@ class Topology(VertexSet):
         '''
         if not isinstance(topo, Topology):
             raise ValueError('Topologies can only be interpolated with other topologies')
-        reg_names = [k for k in topo.registrations.iterkeys() if k in self.registrations]
+        reg_names = [k for k in topo.registrations.iterkeys() if k in self.registrations
+                     if k != 'native']
         if not reg_names:
             raise RuntimeError('Topologies do not share a matching registration!')
         res = None
         for reg_name in reg_names:
-            if True:#try:
+            try:
                 res = self.registrations[reg_name].interpolate(
                     topo.registrations[reg_name], data,
                     mask=mask, method=method, n_jobs=n_jobs);
                 break
-            #except: pass
+            except: pass
         if res is None:
             raise ValueError('All shared topologies raised errors during interpolation!')
         return res
