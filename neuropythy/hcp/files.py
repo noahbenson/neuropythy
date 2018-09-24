@@ -2057,9 +2057,9 @@ def _find_retinotopy_path(size=59):
         from six.moves import urllib
         logging.info('neuropythy: Fetchinging HCP retinotopy database "%s"', pth)
         if six.PY2:
-                response = urllib.request.urlopen(_retinotopy_url[size])
-                with open(pth, 'wb') as fl:
-                    shutil.copyfileobj(response, fl)
+            response = urllib.request.urlopen(_retinotopy_url[size])
+            with open(pth, 'wb') as fl:
+                shutil.copyfileobj(response, fl)
         else:
             with urllib.request.urlopen(_retinotopy_url[size]) as response:
                 with open(pth, 'wb') as fl:
