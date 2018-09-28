@@ -2265,7 +2265,9 @@ class Topology(VertexSet):
             if self.registrations[name] is coords:
                 return self
         return self.copy(_registrations=self.registrations.set(name, coords))
-    def interpolate(self, topo, data, mask=None, weights=None, method='automatic', n_jobs=1):
+    def interpolate(self, topo, data,
+                    registration=None, mask=None, weights=None,
+                    method='automatic', n_jobs=1):
         '''
         topology.interpolate(topo, data) yields a numpy array of the data interpolated from the
           given array, data, which must contain the same number of elements as there are vertices
@@ -2287,25 +2289,37 @@ class Topology(VertexSet):
             is non-numerical, then nearest interpolation is used instead. The 'automatic' method
             uses linear interpolation for any floating-point data and nearest interpolation for any
             integral or non-numeric data.
+          * registration (default: None) specifies the registration to use. If None, interpolate
+            will search for a shared registration aside from 'native'. If available, if will use the
+            fsaverage, followed by the fs_LR.
           * n_jobs (default: 1) is passed along to the cKDTree.query method, so may be set to an
             integer to specify how many processors to use, or may be -1 to specify all processors.
         '''
         if not isinstance(topo, Topology):
             raise ValueError('Topologies can only be interpolated with other topologies')
-        reg_names = [k for k in topo.registrations.iterkeys() if k in self.registrations
-                     if k != 'native']
+        if registration is None:
+            reg_names = [k for k in topo.registrations.iterkeys() if k in self.registrations
+                         if k != 'native']
+            # we want to apply some bit of ordering... fsaverage should be first if available, or
+            # fs_LR for HCP subjects...
+            if 'fs_LR' in reg_names:
+                reg_names = ['fs_LR'] + [rn for rn in reg_names if rn != 'fs_LR']
+            if 'fsaverage' in reg_names:
+                reg_names = ['fsaverage'] + [rn for rn in reg_names if rn != 'fsaverage']
+        else: reg_names = [registration]
         if not reg_names:
             raise RuntimeError('Topologies do not share a matching registration!')
         res = None
+        errs = []
         for reg_name in reg_names:
             try:
                 res = self.registrations[reg_name].interpolate(
                     topo.registrations[reg_name], data,
                     mask=mask, method=method, n_jobs=n_jobs);
                 break
-            except: pass
+            except Exception as e: errs.append(e)
         if res is None:
-            raise ValueError('All shared topologies raised errors during interpolation!')
+            raise ValueError('All shared topologies raised errors during interpolation!', errs)
         return res
     def projection(self,
                    center=None, center_right=None, radius=None, method='equirectangular',
