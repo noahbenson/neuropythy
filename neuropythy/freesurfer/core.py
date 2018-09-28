@@ -69,14 +69,13 @@ def add_subject_path(path, index=0):
         return all(t for t in tests)
     else:
         fsp = config['freesurfer_subject_paths']
-        fsp0 = fsp.copy()
         if not os.path.isdir(path): return False
         if path in fsp: return True
         try:
             if index is None or index is Ellipsis:
                 sd = fsp + [path]
             else:
-                sd = fsp.copy()
+                sd = fsp + []
                 sd.insert(index, path)
             config['freesurfer_subject_paths'] = sd
             return True

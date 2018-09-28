@@ -70,7 +70,7 @@ def add_subject_path(path, index=None):
             if index is None or index is Ellipsis:
                 sd = spaths + [path]
             else:
-                sd = spaths.copy()
+                sd = spaths + []
                 sd.insert(index, path)
             config['hcp_subject_paths'] = sd
             return True
