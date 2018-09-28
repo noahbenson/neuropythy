@@ -518,3 +518,176 @@ def library_path():
     library_path() yields the path of the neuropythy library.
     '''
     return os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'lib'))
+
+@pimms.immutable
+class CurveSpline(ObjectWithMetaData):
+    '''
+    CurveSpline is an immutable class for tracking curve objects produced using scipy.interpolate's
+    spl* functions. Removes a lot of the confusion around these functions and manages data/function
+    calls for the curves. CurveSpline is a pimms immutable class, but should generally be created
+    via the curve_spline() function.
+    '''
+    def __init__(self, x, y=None,
+                 order=3, weights=None, smoothing=None, periodic=False,
+                 distances=None, min=None, max=None,
+                 meta_data=None):
+        ObjectWithMetaData.__init__(self, meta_data=meta_data)
+        x = np.asarray(x)
+        if y is not None: x = np.asarray([x,y])
+        self.coordinates = x
+        self.order = order
+        self.weights = weights
+        self.smoothing = smoothing
+        self.periodic = periodic
+        self.distances = distances
+        self.min = min
+        self.max = max
+    @pimms.param
+    def coordinates(x):
+        'curve.coordinates is the seed coordinate matrix for the given curve.'
+        x = np.asarray(x)
+        assert(len(x.shape) == 2)
+        if x.shape[0] != 2: x = x.T
+        assert(x.shape[0] == 2)
+        return pimms.imm_array(x)
+    @pimms.param
+    def order(o):
+        'curve.degree is the degree of the interpolating splines for the given curv.'
+        assert(pimms.is_int(o) and o >= 0)
+        return o
+    @pimms.param
+    def smoothing(s):
+        'curve.smoothing is the amount of smoothing passed to splrep for the given curve.'
+        if s is None: return None
+        assert(pimms.is_number(s) and s >= 0)
+        return s
+    @pimms.param
+    def weights(w):
+        'curve.weights are the weights passed to splrep for a given curve.'
+        if w is None: return None
+        w = pimms.imm_array(w)
+        assert(pimms.is_vector(w, 'number'))
+        return w
+    @pimms.param
+    def periodic(p):
+        'curve.periodic is True if the given curve is a periodic curve and False otherwise.'
+        assert(p is True or p is False)
+        return p
+    @pimms.param
+    def distances(ds):
+        'curve.distances is the specified curve-distances between points in the given curve.'
+        if ds is None: return None
+        ds = pimms.imm_array(ds)
+        assert(pimms.is_vector(ds, 'number'))
+        assert((ds > 0).all())
+        return ds
+    @pimms.require
+    def check_distances(distances, coordinates):
+        if distances is not None and len(distances) != coordinates.shape[1] - 1:
+            raise ValueError('Distances must be diffs of coordinates')
+        return True
+    @pimms.param
+    def max(m): return m
+    @pimms.param
+    def min(m): return m
+    @pimms.value
+    def t(distances, min, max, coordinates):
+        n = coordinates.shape[1]
+        if min is None: min = 0
+        if distances is None: distances = np.ones(n - 1)
+        if max is None: max = np.sum(distances)
+        t = np.cumsum(np.pad(distances, (1,0), 'constant'))
+        t.setflags(write=False)
+        return t
+    @pimms.value
+    def splrep(coordinates, t, order, weights, smoothing, periodic):
+        from scipy import interpolate
+        (x,y) = coordinates
+        xtck = interpolate.splrep(t, x, k=order, s=smoothing,
+                                  w=weights, per=periodic)
+        ytck = interpolate.splrep(t, y, k=order, s=smoothing,
+                                  w=weights, per=periodic)
+        return tuple([tuple([pimms.imm_array(u) for u in tck])
+                      for tck in (xtck,ytck)])
+    def __repr__(self):
+        return 'CurveSpline(<%d points>, order=%d, %f <= t <= %f)' % (
+            self.coordinates.shape[1],
+            self.order, self.t[0], self.t[-1])
+    def __call__(self, t, derivative=0):
+        from scipy import interpolate
+        xint = interpolate.splev(t, self.splrep[0], der=derivative)
+        yint = interpolate.splev(t, self.splrep[1], der=derivative)
+        return np.asarray([xint,yint])
+    def curve_length(self, start=None, end=None, precision=0.01):
+        '''
+        Calculates the length of the curve by dividing the curve up
+        into pieces of parameterized-length <precision>.
+        '''
+        if start is None: start = self.t[0]
+        if end is None: end = self.t[-1]
+        from scipy import interpolate
+        t = np.linspace(start, end, int(np.ceil((end-start)/precision)))
+        dt = t[1] - t[0]
+        dx = interpolate.splev(t, self.splrep[0], der=1)
+        dy = interpolate.splev(t, self.splrep[1], der=1)
+        return np.sum(np.sqrt(dx**2 + dy**2)) * dt
+    def linspace(self, n=100, derivative=0):
+        '''
+        curv.linspace(n) yields n evenly-spaced points along the curve.
+        '''
+        ts = np.linspace(self.t[0], self.t[-1], n)
+        return self(ts, derivative=derivative)
+    def even_out(self, precision=0.001):
+        '''
+        Yields an equivalent curve but where the parametric value t
+        is equivalent to x/y distance (up to the given precision).
+        '''
+        dists = [self.curve_length(s, e, precision=precision)
+                 for (s,e) in zip(self.t[:-1], self.t[1:])]
+        return CurveSpline(self.coordinates,
+                           order=self.order,
+                           weights=self.weights,
+                           smoothing=self.smoothing,
+                           periodic=self.periodic,
+                           distances=dists,
+                           meta_data=self.meta_data)
+def curve_spline(x, y=None, weights=None, order=3,
+                 smoothing=None, periodic=False, meta_data=None):
+    '''
+    curve_spline(coords) yields a bicubic spline function through
+      the points in the given coordinate matrix.
+    curve_spline(x, y) uses the coordinate matrix [x,y].
+
+    The function returned by curve_spline() is f(t), defined on the
+    interval from 0 to n-1 where n is the number of points in the
+    coordinate matrix provided.
+    
+    The following options are accepted:
+      * weights (None) the weights to use in smoothing.
+      * smoothing (None) the amount to smooth the points.
+      * order (3) the order of the polynomial used in the splines.
+      * periodic (False) whether the points are periodic or not.
+      * meta_data (None) an optional map of meta-data to give the
+        spline representation.
+    '''
+    return CurveSpline(x,y, 
+                       weights=weights, order=order,
+                       smoothing=smoothing, periodic=periodic,
+                       meta_data=meta_data)
+def curve_intersection(c1, c2, grid=16):
+    '''
+    curve_intersect(c1, c2) yields the parametric distances (t1, t2)
+      such that c1(t1) == c2(t2).
+      
+    The optional parameter grid may specify the number of grid-points
+    to use in the initial search for a start-point (default: 20).
+    '''
+    from scipy.optimize import minimize
+    (ts1,ts2) = [np.linspace(c.t[0], c.t[-1], grid) for c in (c1,c2)]
+    (pts1,pts2) = [c(ts) for (c,ts) in zip([c1,c2],[ts1,ts2])]
+    ds = np.sqrt([np.sum((pts2.T - pp)**2, axis=1) for pp in pts1.T])
+    (ii,jj) = np.unravel_index(np.argmin(ds), ds.shape)
+    (t01,t02) = (ts1[ii], ts2[jj])
+    def f(t): return np.sum((c1(t[0]) - c2(t[1]))**2)
+    (t1,t2) = minimize(f, (t01, t02)).x
+    return np.mean([c1(t1),c2(t2)], axis=0)
