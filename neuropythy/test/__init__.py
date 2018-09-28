@@ -88,7 +88,7 @@ class TestNeuropythy(unittest.TestCase):
         self.assertTrue(os.path.isdir(dset.cache_directory))
         # pick 1 of the subjects at random
         allsubs = [dset.subjects['S12%02d' % (s+1)] for s in range(8)]
-        subs = allsubs[4] #choose(allsubs, 1)
+        subs = [allsubs[4]] #choose(allsubs, 1)
         fsa = ny.freesurfer_subject('fsaverage')
         def check_dtypes(a,b):
             for tt in [np.integer, np.floating, np.bool_, np.complexfloating]:
