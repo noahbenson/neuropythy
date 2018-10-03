@@ -690,4 +690,4 @@ def curve_intersection(c1, c2, grid=16):
     (t01,t02) = (ts1[ii], ts2[jj])
     def f(t): return np.sum((c1(t[0]) - c2(t[1]))**2)
     (t1,t2) = minimize(f, (t01, t02)).x
-    return np.mean([c1(t1),c2(t2)], axis=0)
+    return (t1,t2)
