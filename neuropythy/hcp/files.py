@@ -1958,12 +1958,14 @@ config.declare('hcp_auto_path',     environ_name='HCP_AUTO_PATH')
 config.declare('hcp_auto_download', environ_name='HCP_AUTO_DOWNLOAD',
                filter=to_auto_download_state, default_value=False)
 if config['hcp_auto_download'] is not False:
-    args = {}
-    if config['hcp_auto_release']:  args['release']       = config['hcp_auto_release']
-    if config['hcp_auto_database']: args['database']      = config['hcp_auto_database']
-    if config['hcp_auto_path']:     args['subjects_path'] = config['hcp_auto_path']
-    auto_download(True, **args)
-    #except: pass
+    try:
+        args = {}
+        if config['hcp_auto_release']:  args['release']       = config['hcp_auto_release']
+        if config['hcp_auto_database']: args['database']      = config['hcp_auto_database']
+        if config['hcp_auto_path']:     args['subjects_path'] = config['hcp_auto_path']
+        auto_download(True, **args)
+    except:
+        logging.warn('Could not initialize HCP auto-downloading from configuration data.')
 def _auto_downloadable(sid):
     if _auto_download_options is None: return False
     elif sid == 'retinotopy': return _auto_download_options['retinotopy']
