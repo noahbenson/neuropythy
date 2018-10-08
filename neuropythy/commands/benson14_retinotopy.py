@@ -13,7 +13,6 @@ import nibabel.freesurfer.mghformat as     fsmgh
 import os, sys, six, pimms
 
 from   ..freesurfer                 import (subject, add_subject_path)
-from   ..util                       import CommandLineParser
 from   ..vision                     import (predict_retinotopy, retinotopy_model, clean_retinotopy)
 from   ..                           import io as nyio
 
@@ -101,7 +100,8 @@ _benson14_parser_instructions = [
     ('o', 'surf-format',            'surf_format',       'curv'),
     ('v', 'vol-format',             'vol_format',        'mgz'),
     ('R', 'reg',                    'registration',      'fsaverage')]
-_benson14_parser = CommandLineParser(_benson14_parser_instructions)
+_benson14_parser = pimms.argv_parser(_benson14_parser_instructions)
+
 def main(*args):
     '''
     benson14_retinotopy.main(args...) runs the benson14_retinotopy command; see 
@@ -195,4 +195,4 @@ def main(*args):
                     note('    - Not overwriting existing file: %s' % flnm)
         note('   Subject %s finished!' % sub.name)
     return 0
-            
+

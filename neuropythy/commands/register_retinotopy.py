@@ -14,7 +14,6 @@ import pyrsistent                   as     pyr
 import os, sys, six, pimms
 
 from ..freesurfer                   import (subject, add_subject_path)
-from ..util                         import CommandLineParser
 from ..vision                       import (register_retinotopy, retinotopy_model, clean_retinotopy,
                                             empirical_retinotopy_data)
 
@@ -240,7 +239,7 @@ _retinotopy_parser_instructions = [
     ['I', 'max-input-eccen',        'max_in_eccen',      '90'],
     ['J', 'min-input-eccen',        'min_in_eccen',      '0'],
     ['d', 'subjects-dir',           'subjects_dir',      None]]
-_retinotopy_parser = CommandLineParser(_retinotopy_parser_instructions)
+_retinotopy_parser = pimms.argv_parser(_retinotopy_parser_instructions)
 
 def _guess_surf_file(fl):
     # MGH/MGZ files

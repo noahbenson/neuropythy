@@ -13,7 +13,6 @@ import nibabel.freesurfer.mghformat as     fsmgh
 import os, sys, pimms
 
 from ..freesurfer                   import (subject, add_subject_path, find_subject_path)
-from ..util                         import CommandLineParser
 from ..io                           import save
 
 info = \
@@ -72,7 +71,7 @@ _surface_to_ribbon_parser_instructions = [
     ['m', 'method',       'method',       'auto'],
     ['t', 'type',         'dtype',        None],
     ['d', 'subjects-dir', 'subjects_dir', None]]
-_surface_to_ribbon_parser = CommandLineParser(_surface_to_ribbon_parser_instructions)
+_surface_to_ribbon_parser = pimms.argv_parser(_surface_to_ribbon_parser_instructions)
 
 def read_surf_file(flnm):
   if flnm.endswith(".mgh") or flnm.endswith(".mgz"):
