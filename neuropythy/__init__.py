@@ -33,6 +33,7 @@ submodules = ('neuropythy.util.conf',
               'neuropythy.commands.surface_to_ribbon',
               'neuropythy.commands.benson14_retinotopy',
               'neuropythy.commands.register_retinotopy',
+              'neuropythy.commands.atlas',
               'neuropythy.commands')
 '''neuropythy.submodules is a tuple of all the sub-modules of neuropythy in a loadable order.'''
 
@@ -78,7 +79,7 @@ try:
 except: pass
 
 # Version information...
-__version__ = '0.7.2'
+__version__ = '0.8.0'
 
 
 
