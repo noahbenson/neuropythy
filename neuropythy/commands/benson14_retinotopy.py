@@ -73,7 +73,7 @@ info = \
       replaced, should it already exist.
     * --template=|-t
       Specifies the specific template that should be applied. By default this is
-      'Benson17', the 2017 version of the template originally described in the paper
+      'Benson14', the 2017 version of the template originally described in the paper
       by Benson et al. (2014). The option 'benson14' is also accepted. If the 
     * --reg=|-R<fsaverage|fsaverage_sym>
       Specifies the registration to look for the template in. This is, by default,
@@ -96,7 +96,7 @@ _benson14_parser_instructions = [
     ('l', 'label-tag',              'label_tag',         'benson14_varea'),
     ('s', 'sigma-tag',              'sigma_tag',         'benson14_sigma'),
     ('d', 'subjects-dir',           'subjects_dir',      None),
-    ('t', 'template',               'template',          'benson17'),
+    ('t', 'template',               'template',          'benson14'),
     ('o', 'surf-format',            'surf_format',       'curv'),
     ('v', 'vol-format',             'vol_format',        'mgz'),
     ('R', 'reg',                    'registration',      'fsaverage')]
@@ -108,7 +108,7 @@ def main(*args):
     benson14_retinotopy.info for more information.
     '''
     # Parse the arguments...
-    (args, opts) = _benson14_parser(args)
+    (args, opts) = _benson14_parser(*args)
     # help?
     if opts['help']:
         print(info, file=sys.stdout)

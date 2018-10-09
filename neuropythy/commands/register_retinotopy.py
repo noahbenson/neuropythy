@@ -224,7 +224,7 @@ _retinotopy_parser_instructions = [
     ['G', 'radius-weight',          'radius_weight',     '1.0'],
     ['i', 'max-steps',              'max_steps',         '2500'],
     ['D', 'max-step-size',          'max_step_size',     '0.02'],
-    ['p', 'prior',                  'prior',             'retinotopy_benson17'],
+    ['p', 'prior',                  'prior',             'benson17'],
 
     ['f', 'surf-format',            'surface_format',    'curv'],
     ['F', 'vol-format',             'volume_format',     'mgz'],
@@ -477,7 +477,7 @@ def save_surface_files(note, error, registrations, subject,
     # make an exporter for properties:
     if surface_format in ['curv', 'morph', 'auto', 'automatic']:
         def export(flnm, p):
-            with open(flnm, 'w') as fl: fsio.write_morph_data(fl, p)
+            fsio.write_morph_data(flnm, p)
             return flnm
     elif surface_format in ['mgh', 'mgz']:
         def export(flnm, p):
