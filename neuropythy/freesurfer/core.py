@@ -202,6 +202,7 @@ class Subject(mri.Subject):
                                             'curv':      'curvature'},
                                            _auto_retino_names]
                                  for (k,a) in six.iteritems(d)})
+    _registration_aliases = {'benson14_retinotopy.v4_0': 'benson17'}
     @staticmethod
     def _cortex_from_path(subid, chirality, name, surf_path, data_path, data_prefix=Ellipsis):
         '''
@@ -268,12 +269,14 @@ class Subject(mri.Subject):
         # see if our subject id has special neuropythy datafiles...
         surf_paths = [surf_path]
         extra_path = os.path.join(library_path(), 'data', subid, 'surf')
+        regals = Subject._registration_aliases
         if os.path.isdir(extra_path): surf_paths.insert(0, extra_path)
         for surf_path in surf_paths:
             for flnm in os.listdir(surf_path):
                 if flnm.startswith(chirality + '.') and flnm.endswith('.sphere.reg'):
                     mid = flnm[(len(chirality)+1):-11]
                     if mid == '': mid = 'fsaverage'
+                    elif mid in regals: mid = regals[mid]
                     regs[mid] = _make_surf_loader(os.path.join(surf_path, flnm))
         regs = pimms.lazy_map(regs)
         # great; now we can actually create the cortex object itself
