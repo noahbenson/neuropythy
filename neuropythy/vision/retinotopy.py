@@ -13,6 +13,7 @@ import os, sys, gzip, six, types, pimms
 from .. import geometry       as geo
 from .. import freesurfer     as nyfs
 from .. import mri            as mri
+from .. import io             as nyio
 from ..util               import (zinv, library_path)
 from ..registration       import (mesh_register, java_potential_term)
 from ..java               import (to_java_doubles, to_java_ints)
@@ -1434,46 +1435,45 @@ def register_retinotopy(hemi,
     return m if yield_imap else m['predicted_mesh']
 
 # Tools for registration-free retinotopy prediction:
-_retinotopy_templates = pyr.m(fsaverage={}, fsaverage_sym={})
-def predict_retinotopy(sub, template='benson17', registration='fsaverage'):
+def predict_retinotopy(sub, template='benson14', registration='fsaverage'):
     '''
-    predict_retinotopy(subject) yields a pair of dictionaries each with three keys: polar_angle,
-    eccentricity, and v123roi; each of these keys maps to a numpy array with one entry per vertex.
-    The first element of the yielded pair is the left hemisphere map and the second is the right
-    hemisphere map. The values are obtained by resampling the Benson et al. 2014 anatomically
-    defined template of retinotopy to the given subject.
-    Note that the subject must have been registered to the fsaverage_sym subject prior to calling
-    this function; this requires using the surfreg command (after the xhemireg command for the RH).
-    Additionally, you must have the fsaverage_sym template files in your fsaverage_syn/surf
-    directory; these files are sym.template_angle.mgz, sym.template_eccen.mgz, and 
-    sym.template_areas.mgz.
+    predict_retinotopy(subject) yields a pair of dictionaries each with four keys: angle, eccen,
+      sigma, and varea. Each of these keys maps to a numpy array with one entry per vertex.  The
+      first element of the yielded pair is the left hemisphere map and the second is the right
+      hemisphere map. The values are obtained by resampling the Benson et al. 2014 anatomically
+      defined template of retinotopy to the given subject.
+
+    The following optional arguments may be given:
+      * template (default: 'benson14') specifies the template to use.
+      * registration (default: 'fsaverage') specifies the subject registration to use; generally can
+        only be 'fsaverage' or 'fsaverage_sym'.
     '''
-    global _retinotopy_templates
     template = template.lower()
-    retino_tmpls = _retinotopy_templates[registration]
+    retino_tmpls = predict_retinotopy.retinotopy_templates[registration]
     hemis = ['lh','rh'] if registration == 'fsaverage' else ['sym']
     if template not in retino_tmpls:
         libdir = os.path.join(library_path(), 'data')
-        search_paths = nyfs.subject_paths() + [libdir]
-        filenames = ['%s.%s_%s' % (hname,template,fnm)
+        search_paths = [libdir]
+        # just hard-baked-in for now.
+        suff = 'v4_0' if registration == 'fsaverage' else 'v3_0'
+        filenames = {(hname, fnm): ('%s.%s_%s.%s.mgz' % (hname,template,fnm,suff))
                      for fnm in ['angle','eccen','varea','sigma']
-                     for hname in hemis]
+                     for hname in hemis}
         # find an appropriate directory
         tmpl_path = next((os.path.join(path0, registration)
                           for path0 in search_paths
                           if all(os.path.isfile(os.path.join(path0, registration, 'surf', s))
-                                 for s in filenames)),
+                                 for s in six.itervalues(filenames))),
                          None)
         if tmpl_path is None:
             raise ValueError('No subject found with appropriate surf/*.%s_* files!' % template)
         tmpl_sub = nyfs.subject(registration)
         spath = os.path.join(tmpl_path, 'surf')
-        retino_tmpls[template] = {
-            h:{k: pimms.imm_array(np.asarray(dat, dtype=np.int) if k == 'varea' else dat)
-               for k in ['angle', 'eccen', 'varea', 'sigma']
-               for fnm in [os.path.join(spath, '%s.%s_%s' % (h, template, k))]
-               for dat in [fsio.read_morph_data(fnm)]}
-            for h in hemis}
+        retino_tmpls[template] = pimms.persist(
+            {h:{k: pimms.imm_array(dat)
+                for k in ['angle', 'eccen', 'varea', 'sigma']
+                for dat in [nyio.load(os.path.join(tmpl_path, 'surf', filenames[(h,k)]))]}
+             for h in hemis})
 
     # Okay, we just need to interpolate over to this subject
     tmpl = retino_tmpls[template]
@@ -1502,6 +1502,7 @@ def predict_retinotopy(sub, template='benson17', registration='fsaverage'):
     tpl = tuple([th.interpolate(sh, tmpl[h if registration == 'fsaverage' else 'sym'])
                 for (sh,th,h) in zip(subj_hems, tmpl_hems, chrs_hems)])
     return tpl[0] if len(tpl) == 1 else tpl
+predict_retinotopy.retinotopy_templates = pyr.m(fsaverage={}, fsaverage_sym={})
 
 def clean_retinotopy(obj, retinotopy='empirical', output_style='visual', weight=Ellipsis,
                      equality_sigma=0.15, equality_scale=10.0,
