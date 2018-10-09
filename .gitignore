@@ -19,8 +19,8 @@ dist
 push.sh
 
 # These are necessary for the docker, but too big to store on github
-docker/contents/required_subjects.tar.gz
-docker/contents/required_subjects
+docker/required_subjects.tar.gz
+docker/required_subjects
 
 # sphinx
 .build
