@@ -1,0 +1,4 @@
+{"freesurfer_subject_paths": "/data/freesurfer_subjects",
+ "data_cache_root":          "/data/cache",
+ "hcp_subject_paths":        "/data/HCP/subjects",
+ "hcp_auto_download":        true}
