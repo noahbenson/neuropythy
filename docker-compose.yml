@@ -1,0 +1,17 @@
+version: '3'
+services:
+   neuropythy:
+      container_name: neuropythy
+      build: .
+      ports:
+         - "8888:8888"
+      environment:
+         - HCP_AUTO_RELEASE="$HCP_AUTO_RELEASE"
+         - HCP_AUTO_DATABASE="$HCP_AUTO_DATABASE"
+         - HCP_CREDENTIALS="$HCP_CREDENTIALS"
+         - HCP_AUTO_PATH="/hcp_subjects"
+         - HCP_SUBJECTS_DIR="/hcp_subjects"
+         - SUBJECTS_DIR="/subjects:/freesurfer_subjects"
+      volumes:
+         - "$SUBJECTS_DIR:/freesurfer_subjects"
+         - "$HCP_SUBJECTS_DIR:/hcp_subjects"

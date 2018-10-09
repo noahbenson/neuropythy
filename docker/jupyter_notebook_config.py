@@ -243,7 +243,7 @@ c.NotebookApp.iopub_data_rate_limit = 500000000
 #c.NotebookApp.nbserver_extensions = {}
 
 ## The directory to use for notebooks and kernels.
-c.NotebookApp.notebook_dir = 'data'
+#c.NotebookApp.notebook_dir = 'data'
 
 ## Whether to open in a browser after starting. The specific browser used is
 #  platform dependent and determined by the python standard library `webbrowser`
