@@ -9,7 +9,7 @@ elif [ "$1" = "LICENSE" ] || [ "$1" == "license" ]
 then exec cat /LICENSE.txt
 elif [ "$1" = "bash" ]
 then exec /bin/bash
-elif [ "$1" = "notebook" ]
+elif [ "$1" = "notebook" ] || [ -z "$1" ]
 then exec /usr/local/bin/start-notebook.sh
 fi
 
