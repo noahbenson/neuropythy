@@ -122,7 +122,8 @@ def find_subject_path(sub, check_path=True):
     path = next((p for sd in sdirs for p in [os.path.join(sd, sub)]
                  if is_freesurfer_subject_path(p)),
                 None)
-    if path is not None or check_path: return path
+    if path is not None: return path
+    if check_path: return None
     if os.path.isdir(sub): return sub
     return next((p for sd in sdirs for p in [os.path.join(sd, sub)]
                  if os.path.isdir(p)),
