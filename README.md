@@ -43,7 +43,7 @@ The neuropythy library depends on a few other libraries, all freely available:
  * [scipy](http://www.scipy.org/) &ge; 0.9.0
  * [nibabel](https://github.com/nipy/nibabel) &ge; 2.0
  * [pyrsistent](https://github.com/tobgu/pyrsistent) &ge; 0.11.0
- * [pimms](https://github.com/noahbenson/pimms) &ge; 0.2.8
+ * [pimms](https://github.com/noahbenson/pimms) &ge; 0.3.0
  * [py4j](https://www.py4j.org/) &ge; 0.10
 
 These libaries should be installed automatically for you if you use pip or setuptools (see above),
@@ -245,9 +245,61 @@ can use Neuropythy as follows:
 ```bash
 # If your FreeSurfer subject's directory is /data/subjects and you want to
 # apply the Benson2014 template to a subject bert:
-docker run nben/neuropythy -ti --rm -v /data/subjects:/subjects \
-           benson14_retinotopy bert
+docker run -ti --rm -v /data/subjects:/subjects nben/neuropythy \
+           atlas --verbose bert
 ```
+
+The docker can now also be used to start a notebook server; you can either build this yourself
+(in which case any local changes to the neuropythy code will be included) using `docker-compose` or
+you may use the `nben/neuropythy` docker on docker-hub.
+
+### Using `docker-compose`
+
+To build the docker image locally:
+
+```bash
+git clone https://github.com/noahbenson/neuropythy
+cd neuropythy
+# This command will take some time to build the VM;
+docker-compose build
+# This will start the notebook server (and will build
+# the docker first if you haven't run the above
+# command). Note, however, that this command won't
+# rebuild the container if you have local changes.
+docker-compose up
+```
+
+The above instructions will create a notebook server running on port 8888; to change this, you can
+either edit the `docker-compose.yml` file or instead use `docker-compose run`:
+
+```bash
+docker-compose run -p 8080:8080 neuropythy notebook
+```
+
+Assuming that your FreeSurfer subjects directory and your HCP subject directory, if any, are set via
+the `SUBJECTS_DIR` and `HCP_SUBJECTS_DIR` environment variables, then these directories will be
+available inside the docker VM in `/freesurfer_subjects` and `/hcp_subjects`. Additionally, your
+`HCP_CREDENTIALS`, `HCP_AUTO_DOWNLOAD` and other environment variables will be forwarded to
+neuropythy.
+
+### Using `nben/neuropythy` from Docker Hub
+
+To run the notebook server using the prepared docker-image:
+
+```bash
+# fetch the docker:
+docker pull nben/neuropythy:latest
+# run the notebook server
+docker run -it \
+           -v "$SUBJECTS_DIR:/freesurfer_subjects" \
+           -v "$HCP_SUBJECTS_DIR:/hcp_subjects" \
+           -p 8888:8888 \
+       nben/neuropythy notebook
+```
+
+Note that the lines starting with `-v` can each be omitted if you don't want to mount your subject
+directories inside the docker and/or if you don't have HCP/FreeSurfer subjects.
+
 
 ## Citing ##########################################################################################
 
