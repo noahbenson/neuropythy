@@ -46,6 +46,8 @@ class ConfigMeta(type):
         return cls._len(cls)
     def __iter__(cls):
         return cls._iter(cls)
+    def __repr__(cls):
+        return 'config(' + repr({k:cls[k] for k in cls.keys()}) + ')'
         
 @six.add_metaclass(ConfigMeta)
 class config(object):
