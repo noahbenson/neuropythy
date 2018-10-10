@@ -203,6 +203,13 @@ be passed for further information about each command.
  * **surface_to_image**. This command projects data on the cortical surface into a volume the same
    orientation as the subject's mri/orig.mgz file. The algorithm used tends to be much cleaner than
    that used by FreeSurfer's mri_surf2vol.
+ * **atlas**. This command is similar to the (now deprecated)
+   [nben/occipital_atlas](https://hub.docker.com/r/nben/occipital_atlas) docker/command, which
+   applies both the Wang et al. (2015) and Benson et al. (2014) atlases to the cortical surface of
+   a subject. The `atlas` command is similar but uses a more updated version of the Benson-2014
+   atlas and is more flexible than `occipital_atlas` or the `benson14_retinotopy` command (below).
+   Old versions (1.0, 2.0, 2.1, 2.5, 3.0) of the Benson-2014 atlas may be applied to a subject using
+   this command as well.
  * **benson14_retinotopy**. This command applies the anatomically-defined template of retinotopy
    described by Benson *et al.* (2014; see **References** below) to a subject. Note that the
    template applied is not actually the template shown in the paper but is a similar updated
@@ -231,8 +238,8 @@ be passed for further information about each command.
 If neuropythy is installed on your machine, then you can execute a command like so:
 
 ```bash
-> python -m neuropythy.__main__ surface_to_image --help
-> python -m neuropythy.__main__ benson14_retinotopy bert
+> python -m neuropythy surface_to_image --help
+> python -m neuropythy atlas --verbose bert
 ```
 
 
