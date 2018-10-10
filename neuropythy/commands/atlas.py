@@ -299,7 +299,7 @@ def calc_filemap(atlas_properties, subject, atlas_version_tags, worklog,
         if not os.path.isdir(output_path):
             if not create_directory:
                 raise ValueError('No such path and create_direcotry is False: %s' % output_path)
-            os.makeidirs(output_path, 0o755)
+            os.makedirs(output_path, 0o755)
         filenames = []
         worklog('Extracting Files...')
         wl = worklog.indent()
@@ -378,6 +378,7 @@ def main(*argv):
         return 1
     try: imap['export_all_fn']()
     except Exception as e:
-        sys.stderr.write('\nERROR:\n' + str(e))
+        sys.stderr.write('\nERROR:\n' + str(e) + '\n')
+        sys.stderr.flush()
         sys.exit(2)
     return 0
