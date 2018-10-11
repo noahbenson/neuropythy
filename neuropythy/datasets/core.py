@@ -6,17 +6,12 @@
 import os, six, shutil, tempfile, atexit, pimms
 import numpy as np
 
-from ..util import (config, ObjectWithMetaData)
+from ..util import (config, to_credentials, ObjectWithMetaData)
 from ..freesurfer import subject as freesurfer_subject
 
 # We declare a configuration variable, data_cache_root -- where to put the data that is downloaded.
 # If this is None / unset, then we'll use a temporary directory and auto-delete it on exit.
-def _check_cache_root(path):
-    if path is None: return None
-    path = os.path.expanduser(os.path.expandvars(path))
-    if not os.path.isdir(path): return None
-    return os.path.abspath(path)
-config.declare('data_cache_root', filter=_check_cache_root)
+config.declare_dir('data_cache_root')
 
 @pimms.immutable
 class Dataset(ObjectWithMetaData):
@@ -128,7 +123,7 @@ def add_dataset(dset, fn=None):
     add_dataset(name, fn) adds a dataset with the given name; fn must be a function of zero
       arguments that yields the dataset.
 
-    add_dataset() always yeilds None or raises an error.
+    add_dataset always yeilds None or raises an error.
     '''
     global data
     if fn is None:
