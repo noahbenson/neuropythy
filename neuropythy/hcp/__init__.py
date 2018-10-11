@@ -4,8 +4,7 @@
 # neuropythy.
 
 from .files import (subject_paths, clear_subject_paths, add_subject_path, find_subject_path,
-                    to_subject_id, to_credentials, load_credentials, detect_credentials,
-                    subject_filemap, download, auto_download, retinotopy_prefix,
+                    to_subject_id, subject_filemap, download, auto_download, retinotopy_prefix,
                     lowres_retinotopy_prefix, inferred_retinotopy_prefix,
                     lowres_inferred_retinotopy_prefix)
 from .core import (Subject, subject)

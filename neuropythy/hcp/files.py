@@ -5,7 +5,7 @@
 
 import os, six, logging, pimms, pyrsistent as pyr, nibabel as nib, numpy as np
 from .. import io as nyio
-from ..util import (config, is_image)
+from ..util import (config, is_image, to_credentials)
 
 # this isn't required, but if we can load it we will use it for auto-downloading subject data
 try:    import s3fs
@@ -116,6 +116,7 @@ if config['hcp_subject_paths'] is None:
             if os.path.isdir(dirname):
                 add_subject_path(dirname)
 
+
 ####################################################################################################
 # Utilities
 
@@ -134,69 +135,16 @@ def to_subject_id(s):
     if s > 999999 or s < 100000:
         raise ValueError('subject ids must be 6-digit integers whose first digit is > 0')
     return s
-def load_credentials(flnm):
-    '''
-    load_credentials(filename) loads the HCP Amazon Bucket credentials stored in the given file. The
-      file must contain <key>:<secret> on a single line. If the file does not contain valid
-      credentials, then an exception is raised. Yields (key, secret).
-    '''
-    with open(os.path.expanduser(os.path.expandvars(flnm)), 'r') as fl:
-        dat = fl.read(1024 * 8)
-    dat = dat.strip().split(':')
-    if len(dat) != 2: raise ValueError('File %s does not appear to be a credentials file' % flnm)
-    return tuple(dat)
-def to_credentials(arg):
-    '''
-    to_credentials(arg) converts arg into a pair (key, secret) if arg can be coerced into such a
-      pair and otherwise raises an error.
-    
-    Possible inputs include:
-      * A tuple (key, secret)
-      * A mapping with the keys 'key' and 'secret'
-      * The name of a file that can load credentials via the load_credentials() function
-    '''
-    if pimms.is_str(arg):
-        try:    return load_credentials(arg)
-        except: return tuple(arg.strip().split(':'))
-    elif pimms.is_map(arg) and 'key' in arg and 'secret' in arg: return (arg['key'], arg['secret'])
-    elif pimms.is_vector(arg) and len(arg) == 2 and all(pimms.is_str(x) for x in arg):
-        return tuple(arg)
-    else:
-        raise ValueError('given argument cannot be coerced to credentials: %s' % arg)
 
-config.declare('hcp_credentials', environ_name='HCP_CREDENTIALS', filter=to_credentials)
+config.declare_credentials('hcp_credentials',
+                           environ_name='HCP_CREDENTIALS',
+                           extra_environ=[('HCP_KEY', 'HCP_SECRET'),
+                                          'S3FS_CREDENTIALS',
+                                          ('S3FS_KEY', 'S3FS_SECRET')],
+                           filenames=['~/.hcp-passwd', '~/.passwd-hcp',
+                                      '~/.s3fs-passwd', '~/.passwd-s3fs'],
+                           aws_profile_name=['HCP', 'hcp', 'S3FS', 's3fs'])
 
-def detect_credentials():
-    '''
-    detect_credentials() attempts to locate Amazon S3 Bucket credentials from a number of sources:
-      - first, if the Neuropythy configuration variable "hcp_credentials" is set in via either the
-        npythyrc file or the HCP_CREDENTIALS environment variable, then it is coerced into
-        credentials;
-      - next, if the environment contains the variables HCP_KEY and HCP_SECRET, these are used;
-      - next, if the files ~/.hcp-credentials or ~/.hcp-passwd or ~/.passwd-hcp are found, their
-        contents are used, in that order.
-      - next, all of the above are rechecked with the strings HCP/hcp replaced with S3FS/s3fs;
-      - finally, if no credentials were detected, an error is raised.
-
-    Credentials may be supplied in a number of ways; in the case of a single environment variable,
-    HCP_CREDENTIALS or in the case of the "hcp_credentials" variable in the npythyrc file, the
-    variable should either contain a string "<key>:<secret>" or the name of a file containing such
-    a string. Alternately, either may encode a JSON object [key, secret].
-    '''
-    if config['hcp_credentials'] is not None: return config['hcp_credentials']
-    for tag in ['hcp', 's3fs']:
-        utag = tag.upper()
-        if (utag + '_CREDENTIALS') in os.environ:
-            return to_credentials(os.environ[utag + '_CREDENTIALS'])
-        if all((utag + s) in os.environ for s in ['_KEY', '_SECRET']):
-            return (os.environ[utag + '_KEY'], os.environ[utag + '_SECRET'])
-        for pth in ['%s-credentials', '%s-passwd', 'passwd-%s']:
-            pth = os.path.expanduser('~/.' + (pth % tag))
-            if os.path.isfile(pth):
-                try: return load_credentials(pth)
-                except: pass
-    # no match!
-    raise ValueError('No valid credentials for the HCP were detected')
 
 ####################################################################################################
 # Subject Data Structure
@@ -1812,8 +1760,8 @@ def download(sid, credentials=None, subjects_path=None, overwrite=False, release
       * credentials (default: None) may be used to specify the Amazon AWS Bucket credentials, which
         can be generated from the HCP db (https://db.humanconnectome.org/). If this argument can be
         coerced to a credentials tuple via the to_credentials function, that result will be used. If
-        None, then the function will try to detect credentials via the detect_credentials function
-        and will use those. If none of these work, an error is raised.
+        None, then the function will try to use the hcp_credentials configuration item in
+        neuropythy.config; otherwise an error is raised.
       * subjects_path (default: None) specifies where the subject should be placed. If None, then
         the first directory in the subjects paths list is used. If there is not one of these then
         an error is raised.
@@ -1825,10 +1773,9 @@ def download(sid, credentials=None, subjects_path=None, overwrite=False, release
         raise RuntimeError('s3fs was not successfully loaded, so downloads may not occur; check '
                            'your Python configuration to make sure that s3fs is installed. See '
                            'http://s3fs.readthedocs.io/en/latest/install.html for details.')
-    if credentials is None:
-        (s3fs_key, s3fs_secret) = detect_credentials()
-    else:
-        (s3fs_key, s3fs_secret) = to_credentials(credentials)
+    if credentials is None: credentials = config['hcp_credentials']
+    if credentials is None: raise ValueError('No hcp_credentials specified or found')
+    (s3fs_key, s3fs_secret) = to_credentials(credentials)
     if subjects_path is None:
         sdirs = config['hcp_subject_paths']
         subjects_path = next((sd for sd in sdirs if os.path.isdir(sd)), None)
@@ -1897,10 +1844,9 @@ def auto_download(status,
                     's3fs was not successfully loaded, so downloads may not occur; check'
                     ' your Python configuration to make sure that s3fs is installed. See'
                     ' http://s3fs.readthedocs.io/en/latest/install.html for details.')
-            if credentials is None:
-                (s3fs_key, s3fs_secret) = detect_credentials()
-            else:
-                (s3fs_key, s3fs_secret) = to_credentials(credentials)
+            if credentials is None: credentials = config['hcp_credentials']
+            if credentials is None: raise ValueError('No HCP credentials detected or found')
+            (s3fs_key, s3fs_secret) = to_credentials(credentials)
             if subjects_path is None:
                 sdirs = config['hcp_subject_paths']
                 subjects_path = next((sd for sd in sdirs if os.path.isdir(sd)), None)

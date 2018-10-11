@@ -7,6 +7,6 @@ from .core import (ObjectWithMetaData, to_affine, simplex_summation_matrix,
                    zinv, zdiv, times, divide, zdivide, plus, minus,
                    library_path, address_data, is_address, AutoDict,
                    curve_spline, curve_intersection, CurveSpline)
-from .conf import config
+from .conf import (config, to_credentials, detect_credentials, load_credentials)
 
 
