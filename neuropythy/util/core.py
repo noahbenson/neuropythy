@@ -366,7 +366,7 @@ class CurveSpline(ObjectWithMetaData):
     '''
     def __init__(self, x, y=None,
                  order=3, weights=None, smoothing=None, periodic=False,
-                 distances=None, min=None, max=None,
+                 distances=None,
                  meta_data=None):
         ObjectWithMetaData.__init__(self, meta_data=meta_data)
         x = np.asarray(x)
@@ -377,8 +377,6 @@ class CurveSpline(ObjectWithMetaData):
         self.smoothing = smoothing
         self.periodic = periodic
         self.distances = distances
-        self.min = min
-        self.max = max
     @pimms.param
     def coordinates(x):
         'curve.coordinates is the seed coordinate matrix for the given curve.'
@@ -423,16 +421,10 @@ class CurveSpline(ObjectWithMetaData):
         if distances is not None and len(distances) != coordinates.shape[1] - 1:
             raise ValueError('Distances must be diffs of coordinates')
         return True
-    @pimms.param
-    def max(m): return m
-    @pimms.param
-    def min(m): return m
     @pimms.value
-    def t(distances, min, max, coordinates):
+    def t(distances,coordinates):
         n = coordinates.shape[1]
-        if min is None: min = 0
         if distances is None: distances = np.ones(n - 1)
-        if max is None: max = np.sum(distances)
         t = np.cumsum(np.pad(distances, (1,0), 'constant'))
         t.setflags(write=False)
         return t
@@ -463,11 +455,18 @@ class CurveSpline(ObjectWithMetaData):
         if start is None: start = self.t[0]
         if end is None: end = self.t[-1]
         from scipy import interpolate
-        t = np.linspace(start, end, int(np.ceil((end-start)/precision)))
-        dt = t[1] - t[0]
-        dx = interpolate.splev(t, self.splrep[0], der=1)
-        dy = interpolate.splev(t, self.splrep[1], der=1)
-        return np.sum(np.sqrt(dx**2 + dy**2)) * dt
+        if self.order == 1:
+            # we just want to add up along the steps...
+            ii = [ii for (ii,t) in enumerate(self.t) if start < t and t < end]
+            ts = np.concatenate([[start], self.t[ii], [end]])
+            xy = np.vstack([[self(start)], self.coordinates[:,ii].T, [self(end)]])
+            return np.sum(np.sqrt(np.sum((xy[1:] - xy[:-1])**2, axis=1)))
+        else:
+            t = np.linspace(start, end, int(np.ceil((end-start)/precision)))
+            dt = t[1] - t[0]
+            dx = interpolate.splev(t, self.splrep[0], der=1)
+            dy = interpolate.splev(t, self.splrep[1], der=1)
+            return np.sum(np.sqrt(dx**2 + dy**2)) * dt
     def linspace(self, n=100, derivative=0):
         '''
         curv.linspace(n) yields n evenly-spaced points along the curve.
@@ -488,6 +487,39 @@ class CurveSpline(ObjectWithMetaData):
                            periodic=self.periodic,
                            distances=dists,
                            meta_data=self.meta_data)
+    def reverse(self):
+        '''
+        curve.reverse() yields the inverted spline-curve equivalent to curve.
+        '''
+        return CurveSpline(
+            np.flip(self.coordinates, axis=1),
+            distances=(None if self.distances is None else np.flip(self.distances)),
+            order=self.order, weights=self.weights, smoothing=self.smoothing,
+            periodic=self.periodic, meta_data=self.meta_data)
+    def subcurve(self, t0, t1):
+        '''
+        curve.subcurve(t0, t1) yields a curve-spline object that is equivalent to the given
+          curve but that extends from curve(t0) to curve(t1) only.
+        '''
+        # if t1 is less than t0, then we want to actually do this in reverse...
+        if t1 == t0: raise ValueError('Cannot take subcurve of a point')
+        if t1 < t0:
+            tt = self.curve_length()
+            return self.reverse().subcurve(tt - t0, tt - t1)
+        idx = [ii for (ii,t) in enumerate(self.t) if t0 < t and t < t1]
+        pt0 = self(t0)
+        pt1 = self(t1)
+        coords = np.vstack([[pt0], self.coordinates.T[idx], [pt1]])
+        ts = np.concatenate([[t0], self.t[idx], [t1]])
+        dists  = None if self.distances is None else np.diff(ts)
+        return CurveSpline(
+            coords.T,
+            order=self.order,
+            smoothing=self.smoothing,
+            periodic=False,
+            distances=dists,
+            meta_data=self.meta_data)
+
 def curve_spline(x, y=None, weights=None, order=3,
                  smoothing=None, periodic=False, meta_data=None):
     '''
