@@ -1060,7 +1060,7 @@ class Mesh(VertexSet):
         '''
         pt = np.asarray(pt)
         tri_no = np.asarray(tri_no)
-        if len(tri_no) == 0:
+        if len(tri_no.shape) == 0:
             tri = self.coordinates[:, self.tess.indexed_faces[:, tri_no]]
         else:
             tri = np.transpose([self.coordinates[:,t] for t in self.tess.indexed_faces[:,tri_no]],
