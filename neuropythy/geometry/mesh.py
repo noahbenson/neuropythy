@@ -1061,11 +1061,14 @@ class Mesh(VertexSet):
         pt = np.asarray(pt)
         tri_no = np.asarray(tri_no)
         if len(tri_no.shape) == 0:
-            tri = self.coordinates[:, self.tess.indexed_faces[:, tri_no]]
+            tri_no = [tri_no]
+            tri = np.transpose([self.coordinates[:,t] for t in self.tess.indexed_faces[:,tri_no]],
+                               (2,0,1))
+            return point_in_triangle(tri, pt)[0]
         else:
             tri = np.transpose([self.coordinates[:,t] for t in self.tess.indexed_faces[:,tri_no]],
                                (2,0,1))
-        return point_in_triangle(tri, pt)
+            return point_in_triangle(tri, pt)
 
     def _find_triangle_search(self, x, k=24, searched=set([])):
         # This gets called when a container triangle isn't found; the idea is that k should
