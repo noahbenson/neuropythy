@@ -17,6 +17,7 @@ from .. import io             as nyio
 from ..util               import (zinv, library_path)
 from ..registration       import (mesh_register, java_potential_term)
 from ..java               import (to_java_doubles, to_java_ints)
+from functools            import reduce
 
 from .models import (RetinotopyModel, SchiraModel, RetinotopyMeshModel, RegisteredRetinotopyModel,
                      load_fmm_model, visual_area_names, visual_area_numbers)
@@ -437,12 +438,54 @@ def predict_pRF_radius(eccentricity, visual_area='V1', source='Wandell2015'):
     The default source is 'Wandell2015'.
     '''
     visual_area = visual_area.lower()
-    source = source.lower()
-    if source not in pRF_data:
-        raise ValueError('Given source (%s) not found in pRF-size database' % source)
-    dat = pRF_data[source]
-    dat = dat[visual_area]
+    if pimms.is_str(source):
+        source = source.lower()
+        if source not in pRF_data:
+            raise ValueError('Given source (%s) not found in pRF-size database' % source)
+        dat = pRF_data[source]
+        dat = dat[visual_area]
+    else:
+        dat = {'m':source[0], 'b':source[1]}
     return dat['m']*eccentricity + dat['b']
+
+def fit_pRF_radius(ctx, retinotopy=Ellipsis, mask=None, weight=Ellipsis, slope_only=False):
+    '''
+    fit_pRF_radius(ctx) fits a line, m*eccen + b, to the pRF radius and yields the tuple (m, b).
+
+    The following options may be given:
+      * retinotopy (default: Ellipsis) specifies the prefix for the retinotopy (passed to
+        retinotopy_data() to find the retinotopic dataset).
+      * mask (default: None) specifies the mask over which to perform the calculation. This is
+        passed to the to_mask() function. In the case that mask is a set or frozenset, then it is
+        treated as a conjunction (intersection) of masks.
+      * weight (default: None) specifies that a weight should be used; if this is True or Ellipsis,
+        will use the variance_explained if it is part of the retinotopy dataset; if this is False or
+        None, uses no weight; otherwise, this must be a weight property or property name.
+      * slope_only (default: False) may be set to True to instead fit radius = m*eccen and return
+        only m.
+    '''
+    rdat = retinotopy_data(ctx, retinotopy)
+    if 'radius' not in rdat: raise ValueError('No pRF radius found in dataset %s' % retinotopy)
+    rad = rdat['radius']
+    (ang,ecc) = as_retinotopy(rdat, 'visual')
+    if isinstance(mask, (set, frozenset)):
+        mask = reduce(np.intersect1d, [ctx.mask(m, indices=True) for m in mask])
+    else: mask = ctx.mask(mask, indices=True)
+    # get a weight if provided:
+    if weight in [False, None]: wgt = np.ones(rad.shape)
+    elif weight in [True, Ellipsis]:
+        if 'variance_explained' in rdat: wgt = rdat['variance_explained']
+        else: wgt = np.ones(rad.shape)
+    else: wgt = ctx.property(weight)
+    # get the relevant eccen and radius values
+    (ecc,rad,wgt) = [x[mask] for x in (ecc,rad,wgt)]
+    # fit a line...
+    if slope_only:
+        ecc = np.reshape(ecc * wgt, (len(ecc), 1))
+        rad = np.reshape(rad * wgt, (len(rad), 1))
+        return np.linalg.lstsq(ecc, rad)[0]
+    else:
+        return tuple(np.polyfit(ecc, rad, 1, w=wgt))
 
 def _retinotopic_field_sign_triangles(m, retinotopy):
     t = m.tess if isinstance(m, geo.Mesh) or isinstance(m, geo.Topology) else m
