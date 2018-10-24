@@ -493,7 +493,7 @@ class CurveSpline(ObjectWithMetaData):
         '''
         return CurveSpline(
             np.flip(self.coordinates, axis=1),
-            distances=(None if self.distances is None else np.flip(self.distances)),
+            distances=(None if self.distances is None else np.flip(self.distances, axis=0)),
             order=self.order, weights=self.weights, smoothing=self.smoothing,
             periodic=self.periodic, meta_data=self.meta_data)
     def subcurve(self, t0, t1):
