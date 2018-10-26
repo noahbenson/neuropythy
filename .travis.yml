@@ -11,4 +11,4 @@ install:
 - travis_retry pip install -e .
 
 script:
-- python -m unittest neuropythy.test
+- travis_wait python -m unittest neuropythy.test
