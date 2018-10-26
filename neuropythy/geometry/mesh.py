@@ -245,6 +245,8 @@ def to_mask(obj, m, indices=False):
        * a tuple (property, (val1, val2...)), which specifies that the property must be any of
          the values in (val1, val2...) for a vertex to be included
        * None, indicating that all labels should be returned
+       * a dict/mapping with one item whose key is either 'and', or 'or' and whose value is a list,
+         each of whose elements matches one of the above.
     
     Note that the optional argument indices (default: False) may be set to true to yield the
     vertex indices instead of the vertex labels. If obj is not a VertexSet object, then this
@@ -270,6 +272,16 @@ def to_mask(obj, m, indices=False):
             m = np.logical_and(m[1] < p, p <= m[2])
     elif pimms.is_str(m):
         m = np.asarray(obj[m], dtype=np.bool)
+    elif pimms.is_map(m):
+        if len(m) != 1: raise ValueError('Dicts used as masks must contain 1 item')
+        (k,v) = next(six.iteritems(m))
+        if not hasattr(v, '__iter__'): raise ValueError('Value of dict-mask must be an iterator')
+        if not pimms.is_str(k): raise ValueError('Key of dict-mask must be "or", or "and"')
+        v = [to_mask(obj, u, indices=indices) for u in v]
+        if   k in ('and', 'intersect', 'intersection', '^', '&', '&&'):
+            return reduce(np.intersect1d, v)
+        elif k in ('or',  'union', 'v', '|' '||'):
+            return reduce(np.union1d, v)
     # at this point, m should be a boolean array or a list of indices
     return idcs[m] if indices else lbls[m]
 def to_property(obj, prop=None,
