@@ -528,7 +528,7 @@ class Subject(ObjectWithMetaData):
         # Figure out the dtype
         if dtype is None:
             # check the input...
-            if all(d is None or not pimms.is_vector(d, 'inexact') for d in data):
+            if all(d is None or not pimms.is_vector(d, np.inexact) for d in data):
                 dtype = np.int32
             else: dtype = np.float32
         shape = self.image_dimensions if shape is None else shape
