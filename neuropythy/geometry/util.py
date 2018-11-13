@@ -562,8 +562,10 @@ def tetrahedral_barycentric_coordinates(tetra, pt):
     d2 = det_4x3(tetra[0], tetra[1], pt,       tetra[3])
     d3 = det_4x3(tetra[0], tetra[1], tetra[2], pt)
     s_ = np.sign(d_)
-    z_ = (np.isclose(d_, 0) | np.any([s_ != si for si in np.sign([d0,d1,d2,d3])], axis=0))
-    d_inv = np.logical_not(z_) / (d_ + z_)
+    z_ = np.logical_or(np.any([s_ * si == -1 for si in np.sign([d0,d1,d2,d3])], axis=0),
+                       np.isclose(d_,0))
+    x_ = np.logical_not(z_)
+    d_inv = x_ / (x_ * d_ + z_)
     return np.asarray([d_inv * dq for dq in (d0,d1,d2,d3)])
 
 def point_in_tetrahedron(tetra, pt):
