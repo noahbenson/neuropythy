@@ -843,6 +843,7 @@ class Cortex(geo.Topology):
 ####################################################################################################
 # These functions deal with cortex_to_image and image_to_cortex interpolation:
 def _vertex_to_voxel_linear_interpolation(hemi, gray_indices, image_shape, voxel_to_vertex_matrix):
+    if gray_indices is None: raise ValueError('gray indices cannot be None')
     n      = len(gray_indices[0])
     vcount = hemi.vertex_count
     # convert voxels to vertex-space

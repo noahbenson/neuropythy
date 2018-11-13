@@ -213,8 +213,8 @@ class Subject(mri.Subject):
             return type(rib)(arr, rib.affine, rib.header)
         imgs['lh_gray_mask']  = lambda:_make_mask(3)
         imgs['lh_white_mask'] = lambda:_make_mask(2)
-        imgs['lh_gray_mask']  = lambda:_make_mask(42)
-        imgs['lh_white_mask'] = lambda:_make_mask(41)
+        imgs['rh_gray_mask']  = lambda:_make_mask(42)
+        imgs['rh_white_mask'] = lambda:_make_mask(41)
         imgs['brain_mask']    = lambda:_make_mask(0, False)
         return pimms.lazy_map(imgs)
     @pimms.value
