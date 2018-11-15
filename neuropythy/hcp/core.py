@@ -271,6 +271,32 @@ def subject(sid, subjects_path=None, meta_data=None, default_alignment='MSMAll')
     if isinstance(sub, Subject): subject._cache[fdir] = sub
     return sub
 subject._cache = {}
+def forget_subject(sid):
+    '''
+    forget_subject(sid) causes neuropythy's hcp module to forget about cached data for the subject
+      with subject id sid. The sid may be any sid that can be passed to the subject() function.
+    
+    This function is useful for batch-processing of subjects in a memory-limited environment; e.g.,
+    if you run out of memory while processing hcp subjects it is possibly because neuropythy is
+    caching all of their data instead of freeing it.
+    '''
+    sub = subject(sid)
+    if sub.path in subject._cache:
+        del subject._cache[sub.path]
+    else:
+        for (k,v) in six.iteritems(subject._cache):
+            if v is sub:
+                del subject._cache[k]
+                break
+    return None
+def forget_all():
+    '''
+    forget_all() causes neuropythy's hcp module to forget all cached subjects. See also
+    forget_subject.
+    '''
+    subject._cache = {}
+    return None
+    
 
     
     

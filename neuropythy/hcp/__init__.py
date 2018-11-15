@@ -7,7 +7,7 @@ from .files import (subject_paths, clear_subject_paths, add_subject_path, find_s
                     to_subject_id, subject_filemap, download, auto_download, retinotopy_prefix,
                     lowres_retinotopy_prefix, inferred_retinotopy_prefix,
                     lowres_inferred_retinotopy_prefix)
-from .core import (Subject, subject)
+from .core import (Subject, subject, forget_subject, forget_all)
 
 subject_ids = tuple(
     [100206, 100307, 100408, 100610, 101006, 101107, 101309, 101410, 101915, 102008, 102109, 102311,
