@@ -721,13 +721,24 @@ class Tesselation(VertexSet):
         return tuple([vertex_face_index[u] for u in labels])
     @staticmethod
     def _order_neighborhood(edges):
-        res = [edges[0][1]]
-        for i in range(len(edges)):
+        fres = [edges[0][1]]
+        bres = [edges[0][1]]
+        (fi,bi) = (0,0)
+        for _ in edges:
             for e in edges:
-                if e[0] == res[i]:
-                    res.append(e[1])
+                if e[0] == fres[fi]:
+                    fres.append(e[1])
+                    fi += 1
                     break
-        return tuple(res)
+        if fres[-1] == fres[0]:
+            fres = fres[:-1]
+        else:
+            for _ in range(len(edges) - fi):
+                for e in edges:
+                    if e[1] == bres[bi]:
+                        bres.append(e[0])
+                        bi += 1
+        return tuple(reversed(bres[1:])) + tuple(fres)
     @pimms.value
     def neighborhoods(labels, faces, vertex_faces):
         '''
