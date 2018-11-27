@@ -163,14 +163,14 @@ def main(*args):
             note('   - Exporting surfaces:')
             for (t,dat) in six.iteritems(lhdat):
                 flnm = os.path.join(sub.path, 'surf', 'lh.' + tr[t] + sext)
-                if ow or not os.path.exist(flnm):
+                if ow or not os.path.exists(flnm):
                     note('    - Exporting LH prediction file: %s' % flnm)
                     nyio.save(flnm, dat, format=sfmt)
                 else:
                     note('    - Not overwriting existing file: %s' % flnm)
             for (t,dat) in six.iteritems(rhdat):
                 flnm = os.path.join(sub.path, 'surf', 'rh.' + tr[t] + sext)
-                if ow or not os.path.exist(flnm):
+                if ow or not os.path.exists(flnm):
                     note('    - Exporting RH prediction file: %s' % flnm)
                     nyio.save(flnm, dat, format=sfmt)
                 else:
@@ -182,12 +182,12 @@ def main(*args):
             note('   - Exporting Volumes:')
             for t in lhdat.keys():
                 flnm = os.path.join(sub.path, 'mri', tr[t] + vext)
-                if ow or not os.path.exist(flnm):
+                if ow or not os.path.exists(flnm):
                     note('    - Preparing volume file: %s' % flnm)
-                    dtyp = (np.int32 if t == 'visual_area' else np.float32)
+                    dtyp = (np.int32 if t == 'varea' else np.float32)
                     vol = sub.cortex_to_image(
                         (lhdat[t], rhdat[t]),
-                        method=('nearest' if t == 'visual_area' else 'linear'),
+                        method=('nearest' if t == 'varea' else 'linear'),
                         dtype=dtyp)
                     note('    - Exporting volume file: %s' % flnm)
                     nyio.save(flnm, vol, like=sub)
