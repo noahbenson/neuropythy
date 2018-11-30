@@ -560,3 +560,19 @@ def curve_intersection(c1, c2, grid=16):
     def f(t): return np.sum((c1(t[0]) - c2(t[1]))**2)
     (t1,t2) = minimize(f, (t01, t02)).x
     return (t1,t2)
+
+class DataStruct(object):
+    '''
+    A DataStruct object is an immutable map-like object that accepts any number of kw-args on input
+    and assigns all of them as members which are then immutable.
+    '''
+    def __init__(self, **kw):    self.__dict__.update(kw)
+    def __setattr__(self, k, v): raise ValueError('DataStruct objects are immutable')
+    def __delattr__(self, k):    raise ValueError('DataStruct objects are immutable')
+def data_struct(*args, **kw):
+    '''
+    data_struct(args...) collapses all arguments (which must be maps) and keyword arguments
+      right-to-left into a single mapping and uses this mapping to create a DataStruct object.
+    '''
+    m = pimms.merge(*args, **kw)
+    return DataStruct(**m)

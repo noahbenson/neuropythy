@@ -6,7 +6,8 @@ from .core import (ObjectWithMetaData, to_affine, simplex_summation_matrix,
                    simplex_averaging_matrix, is_image, curry,
                    zinv, zdiv, times, divide, zdivide, plus, minus,
                    library_path, address_data, is_address, AutoDict,
-                   curve_spline, curve_intersection, CurveSpline)
+                   curve_spline, curve_intersection, CurveSpline,
+                   DataStruct, data_struct)
 from .conf import (config, to_credentials, detect_credentials, load_credentials)
 
 
