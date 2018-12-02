@@ -3,7 +3,7 @@
 # This file implements the command-line tools that are available as part of neuropythy as well as
 # a number of other random utilities.
 
-import types, inspect, pimms, os, six
+import types, inspect, atexit, shutil, tempfile, pimms, os, six
 import numpy                             as np
 import scipy.sparse                      as sps
 import pyrsistent                        as pyr
@@ -350,6 +350,32 @@ def zdivide(a, b):
         b = np.reshape(b, np.shape(b) + tuple(np.ones(len(a.shape) - len(b.shape), dtype=np.int)))
     return a * zinv(b)
 
+_default_rtol = inspect.getargspec(np.isclose)[3][0]
+_default_atol = inspect.getargspec(np.isclose)[3][1]
+def replace_close(x, xhat, rtol=_default_rtol, atol=_default_atol, copy=True):
+    '''
+    replace_close(x, xhat) yields x if x is not close to xhat and xhat otherwise. Closeness is
+      determined by numpy's isclose(), and the atol and rtol options are passed along.
+
+    The x and xhat arguments may be lists/arrays.
+
+    The optional argument copy may also be set to False to chop x in-place.
+    '''
+    x = np.array(x) if copy else np.asarray(x)
+    w = np.isclose(x, xhat, rtol=rtol, atol=atol)
+    x[w] = np.asarray(xhat)[w]
+    return x
+def chop(x, rtol=_default_rtol, atol=_default_atol, copy=True):
+    '''
+    chop(x) yields x if x is not close to round(x) and round(x) otherwise. Closeness is determined
+      by numpy's isclose(), and the atol and rtol options are passed along.
+
+    The x and xhat arguments may be lists/arrays.
+
+    The optional argument copy may also be set to False to chop x in-place.
+    '''
+    return replace_close(x, np.round(x), rtol=rtol, atol=atol, copy=copy)
+
 def library_path():
     '''
     library_path() yields the path of the neuropythy library.
@@ -576,3 +602,17 @@ def data_struct(*args, **kw):
     '''
     m = pimms.merge(*args, **kw)
     return DataStruct(**m)
+
+def tmpdir(prefix='npythy_tempdir_', delete=True):
+    '''
+    tmpdir() creates a temporary directory and yields its path. At python exit, the directory and
+      all of its contents are recursively deleted (so long as the the normal python exit process is
+      allowed to call the atexit handlers).
+    tmpdir(prefix) uses the given prefix in the tempfile.mkdtemp() call.
+    
+    The option delete may be set to False to specify that the tempdir should not be deleted on exit.
+    '''
+    path = tempfile.mkdtemp(prefix=prefix)
+    if not os.path.isdir(path): raise ValueError('Could not find or create temp directory')
+    if delete: atexit.register(shutil.rmtree, path)
+    return path

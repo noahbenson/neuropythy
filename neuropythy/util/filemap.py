@@ -3,10 +3,177 @@
 # Utility for presenting a directory with a particular format as a data structure.
 # By Noah C. Benson
 
-import os, warnings, six, tarfile, pimms
+import os, warnings, six, tarfile, atexit, shutil, pimms
 import numpy          as np
 import pyrsistent     as pyr
-from   .core      import (library_path, curry, ObjectWithMetaData, AutoDict, data_struct)
+from   posixpath  import join as urljoin
+from   six.moves  import urllib
+from   .core      import (library_path, curry, ObjectWithMetaData, AutoDict, data_struct, tmpdir)
+
+@pimms.immutable
+class PseudoDir(ObjectWithMetaData):
+    '''
+    The PseudoDir class represents either directories themselves, tarballs, or URLs as if they were
+    directories.
+    '''
+    _tarball_endings = tuple([('.tar' + s) for s in ('','.gz','.bz2','.lzma')])
+    def __init__(self, source_path, cache_path=None, delete=Ellipsis, meta_data=None):
+        ObjectWithMetaData.__init__(self, meta_data=meta_data)
+        self.source_path = source_path
+        self.cache_path = cache_path
+        self.delete = delete
+    @pimms.param
+    def source_path(sp):
+        '''
+        pseudo_dir.source_path is the source path of the the given pseudo-dir object.
+        '''
+        if sp is None: return os.path.join('/')
+        if not pimms.is_str(sp): raise ValueError('source_path must be a string/path')
+        try:
+            with urllib.request.urlopen(sp, 'r'): return sp
+        except:
+            return os.path.expanduser(os.path.expandvars(sp))
+    @pimms.param
+    def cache_path(cp):
+        '''
+        pseudo_dir.cache_path is the optionally provided cache path; this is the same as the
+        storage path unless this is None.
+        '''
+        if cp is None: return None
+        if not pimms.is_str(cp): raise ValueError('cache_path must be a string')
+        return os.path.expanduser(os.path.expandvars(cp))
+    @pimms.param
+    def delete(d):
+        '''
+        pseudo_dir.delete is True if the pseudo_dir self-deletes on Python exit and False otherwise;
+        if this is Ellipsis, then self-deletes only when the cache-directory is created by the
+        PseudoDir class and is a temporary directory (i.e., not explicitly provided).
+        '''
+        if d in (True, False, Ellipsis): return d
+        raise ValueError('delete must be True, False, or Ellipsis')
+    @staticmethod
+    def _is_url(url):
+        try: return bool(urllib.request.urlopen(url))
+        except: return False
+    @staticmethod
+    def _url_get(url, topath):
+        # ensure directory exists
+        os.makedirs(os.path.dirname(topath))
+        if six.PY2:
+            response = urllib.request.urlopen(url)
+            with open(topath, 'wb') as fl:
+                shutil.copyfileobj(response, fl)
+        else:
+            with urllib.request.urlopen(url) as response:
+                with open(topath, 'wb') as fl:
+                    shutil.copyfileobj(response, fl)
+        return topath
+    @staticmethod
+    def _url_exists(urlbase, cache_path, path):
+        cpath = urljoin(cache_path, path)
+        if os.path.exists(cpath): return True
+        else: return PseudoDir._is_url(os.path.hoin(urlbase, path))
+    @staticmethod
+    def _url_getpath(urlbase, cache_path, path):
+        cpath = urljoin(cache_path, path)
+        if os.path.exists(cpath): return cpath
+        url = os.path.join(urlbase, path)
+        return PsudoDir._url_get(url, cpath)
+    @staticmethod
+    def _tar_exists(tarpath, cache_path, path):
+        cpath = os.path.join(cache_path, path)
+        if os.path.exists(cpath): return True
+        with tarfile.open(tarpath, 'r') as tfl:
+            try: return bool(tfl.getmember(path))
+            except: return False
+    @staticmethod
+    def _tar_getpath(tarpath, cache_path, path):
+        cpath = os.path.join(cache_path, path)
+        if os.path.exists(cpath): return cpath
+        with tarfile.open(tarpath, 'r') as tfl: tfl.extract(path, cache_path)
+        return cpath
+    @pimms.value
+    def _path_data(source_path, cache_path, delete):
+        if os.path.isdir(source_path):
+            # just a normal directory... cache path is ignored, delete is ignored
+            return pyr.pmap({'repr':    source_path,
+                             'exists':  lambda pth: os.path.exists(os.path.join(source_path, pth)),
+                             'getpath': lambda pth: os.path.join(source_path, pth),
+                             'cache':   None,
+                             'join':    os.path.join})
+        # Since it's not a directory, we'll need a cache:
+        if cache_path is None: cache_path = tmpdir(delete=(True if delete is Ellipsis else delete))
+        # S3 not yet supported... #TODO
+        if source_path.lower().startswith('s3:'): raise ValueError('S3 URLs are not yet supported')
+        # Okay, it might be an Amazon S3 URL; it might be a different URL; it might be a tarball
+        if PseudoDir._is_url(source_path):
+            def exists_fn(pth):  return PseudoDir._url_exists(source_path,  cache_path, pth)
+            def getpath_fn(pth): return PseudoDir._url_getpath(source_path, cache_path, pth)
+            return pyr.pmap({'repr':    source_path,
+                             'exists':  exists_fn,
+                             'getpath': getpath_fn,
+                             'cache':   cache_path,
+                             'join':    urljoin})
+        # Check if it's a "<tarball>:path", like subject10.tar.gz:subject10/"
+        ss = next((q for s in PseudoDir._tarball_endings for q in [s+':'] if q in source_path),None)
+        if ss is not None:
+            spl = source_path.split(ss)
+            tb = spl[0] + ss[:-1]
+            ip = ss.join(spl[1:])
+            def exists_fn(p):  return PseudoDir._tar_exists(tb,  cache_path, os.path.join(ip, p))
+            def getpath_fn(p): return PseudoDir._tar_getpath(tb, cache_path, os.path.join(ip, p))
+            return pyr.pmap({'repr':source_path, 'exists': exists_fn,
+                             'getpath': getpath_fn, 'cache':cache_path, 'join': os.path.join})
+        # okay, maybe it's just a tarball by itself...
+        ss = next((q for q in PseudoDir._tarball_endings if source_path.endswith(q)), None)
+        if ss is not None:
+            def exists_fn(p):  return PseudoDir._tar_exists(source_path,  cache_path, p)
+            def getpath_fn(p): return PseudoDir._tar_getpath(source_path, cache_path, p)
+            return pyr.pmap({'repr':source_path, 'exists': exists_fn,
+                             'getpath': getpath_fn, 'cache':cache_path, 'join': os.path.join})
+        # ok, don't know what it is...
+        raise ValueError('Could not interpret source path: %s' % source_path)
+    @pimms.value
+    def actual_cache_path(_path_data):
+        '''
+        pdir.actual_cache_path is the cache path being used by the pseudo-dir pdir; this may differ
+          from the pdir.cache_path if the cache_path provided was None yet a temporary cache path
+          was needed.
+        '''
+        return _path_data['cache']
+    def __repr__(self):
+        p = self._path_data['repr']
+        return 'pseudo_dir(%s)' % p
+    def join(self, *args):
+        '''
+        pdir.join(args...) is equivalent to os.path.join(args...) but always appropriate for the
+          kind of path represented by the pseudo-dir pdir.
+        '''
+        join = self._path_data['join']
+        return join(*args)
+    def find(self, *args):
+        '''
+        pdir.find(paths...) is similar to to os.path.join(paths...) but it only yields the joined
+          relative path if it can be found inside pdir; otherwise None is yielded. Note that this
+          does not extract or download the path--it merely ensures that it exists.
+        '''
+        data = self._path_data
+        exfn = data['exists']
+        join = data['join']
+        path = join(*args)
+        return path if exfn(path) else None
+    def local_path(self, *args):
+        '''
+        pdir.local_path(paths...) is similar to os.path.join(pdir, paths...) except that it
+          additionally ensures that the path being requested is found in the pseudo-dir pdir then
+          ensures that this path can be found in a local directory by downloading or extracting it
+          if necessary. The local path is yielded.
+        '''
+        data = self._path_data
+        gtfn = data['getpath']
+        join = data['join']
+        path = join(*args)
+        return gtfn(path)
 
 @pimms.immutable
 class FileMap(ObjectWithMetaData):
@@ -23,25 +190,26 @@ class FileMap(ObjectWithMetaData):
         self.supplemental_paths = kw
         self.path_parameters = path_parameters
         self.load_function = load_function
+    _tarball_endings = tuple([('.tar' + s) for s in ('','.gz','.bz2','.lzma')])
     @staticmethod
     def valid_path(p):
         '''
         FileMap.valid_path(path) yields os.path.abspath(path) if path is either a directory or a
           tarball file; otherwise yields None.
         '''
-        return (os.path.abspath(p) if os.path.isdir(p)      else
-                None               if not os.path.exists(p) else
-                os.path.abspath(p) if p.endswith('.tar')    else
-                os.path.abspath(p) if p.endswith('.tar.gz') else
-                None)
+        if os.path.isdir(p): return os.path.abspath(p)
+        elif any(p.endswith('.tar' + s) for s in _tarball_endings): return os.path.abspath(p)
+        else: return None
     @pimms.param
     def load_function(lf):
         '''
-        filemap.load_function is the function used to load data by the filemap.
+        filemap.load_function is the function used to load data by the filemap. It must accept
+        exactly two arguments: filename and filedata. The file-data object is a merged map of both
+        the path_parameters, meta_data, and file instruction, left-to-right in that order.
         '''
         if lf is None:
             from ..io import load
-            return load
+            return lambda fl,ii: load(fl)
         else: return lf
     @pimms.param
     def path(p):
@@ -106,7 +274,7 @@ class FileMap(ObjectWithMetaData):
         data_files = {}
         hierarchies = hierarchy if hierarchy else []
         if len(hierarchies) > 0 and pimms.is_str(hierarchies[0]): hierarchies = [hierarchies]
-        known_filekeys = ('load','filt')
+        known_filekeys = ('load','filt','when','then','miss')
         hierarchies = list(hierarchies)
         def handle_file(inst):
             # If it's a tuple, we just do each of them
@@ -169,29 +337,75 @@ class FileMap(ObjectWithMetaData):
     def _parsed_instructions(instructions, data_hierarchy):
         return pimms.persist(FileMap.parse_instructions(instructions, data_hierarchy))
     @staticmethod
-    def _load_file(flnm, inst, loadfn):
-        loadfn = inst['load'] if 'load' in inst else loadfn
-        dat = loadfn(flnm)
-        return inst['filt'](dat) if 'filt' in inst else dat
+    def _load(pathgen, flnm, loadfn, *argmaps, **kwargs):
+        try:
+            fnm = pathgen(flnm)
+            args = pimms.merge(*argmaps, **kwargs)
+            loadfn = inst['load'] if 'load' in args else loadfn
+            filtfn = inst['filt'] if 'filt' in args else lambda x,y:x
+            dat = loadfn(fnm, args)
+            dat = filtfn(dat, args)
+        except: dat = None
+        # check for miss instructions if needed
+        if dat is None and 'miss' in args:
+            miss = args['miss']
+        elif pimms.is_str(miss) and miss.lower() in ('error','raise','exception'):
+            raise ValueError('File %s failed to load' % flnm)
+        elif miss is not None:
+            dat = miss(flnm, args)
+        return dat
     @staticmethod
-    def _deduce_filename(flnm, path, supplemental_paths, path_parameters):
-        p0 = path
-        if ':' in flnm:
-            s = flnm.split(':')[0].format(path_parameters)
-            if s in supplemental_paths: p0 = supplemental_paths[s]
-        flnm = os.path.join(p0, flnm)
-        return flnm.format(path_parameters)
+    def _path_to_pathgen(path):
+        path = os.path.expanduser(os.path.expandvars(path))
+        if any(path.endswith(s) for s in FileMap._tarball_endings):
+            tbnm = path
+            tbpx = []
+        else:
+            s = next((s for s in FileMap._tarball_endings if (s + ':') in path), None)
+            if s is None: return (path, lambda fnm: os.path.join(path, fnm))
+            ss = path.split(s)
+            tbnm = ss[0]
+            tbpx = [':'.join(ss[1:])]
+        tdir = tmpdir()
+        def _into_tdir(flnm):
+            tdir_flnm = os.path.join(*([tdir] + tbpx + [flnm]))
+            if not os.path.exist(tdir_flnm):
+                trbl_flnm = os.path.join(*(tbpx + [flnm]))
+                with tarfile.open(tbnm, 'r') as tfl: tfl.extract(trbl_flnm, tdir_flnm)
+            return tdir_flnm
+        return (tdir, _into_tdir)
+    @staticmethod
+    def _parse_path(flnm, path, spaths, path_parameters, inst):
+        flnm = flnm.format(**pimms.merge(path_parameters, inst))
+        p0 = None
+        for k in six.iterkeys(spaths):
+            if flnm.startswith(k + ':'):
+                (flnm, p0) = (flnm[(len(k)+1):], k)
+                break
+        return (p0, flnm)
     @pimms.value
-    def data_files(_parsed_instructions, path, supplemental_paths, path_parameters, load_function):
+    def data_files(path, supplemental_paths, path_parameters, load_function, meta_data,
+                   _parsed_instructions):
         '''
         filemap.data_files is a lazy map whose keys are filenames and whose values are the loaded
         files.
         '''
+        spaths = {s:_path_to_pathgen(p) for (s,p) in six.iteritems(supplemental_paths)}
+        spaths[None] = _path_to_pathgen(path)
         (data_files, data_tree) = _parsed_instructions
+        def load_via_pathgen(pathnm, flnm, inst):
+            (p, pg) = spaths[pathnm]
+            try:
+                return FileMap._load(pg, flnm, load_function, path_parameters, meta_data, inst)
+            except:
+                return None
         res = {}
         for (flnm, inst) in six.iteritems(data_files):
-            flnm = FileMap._deduce_filename(flnm, path, supplemental_paths, path_parameters)
-            res[flnm] = curry(FileMap._load_file, flnm, inst, load_function)
+            (pathnm, flnm) = FileMap._parse_path(flnm, path,
+                                                 supplemental_paths, path_parameters, inst)
+            res[fn] = curry(FileMap._load,
+                            spaths[pathnm], flnm, load_function,
+                            path_parameters, meta_data, inst)
         return pimms.lazy_map(res)
     @pimms.value
     def data_tree(_parsed_instructions, path, supplemental_paths, path_parameters, data_files):
@@ -213,7 +427,7 @@ class FileMap(ObjectWithMetaData):
                     if len(v) > 0 and '_relpath' in next(six.itervalues(v)):
                         (flnm,inst) = next(six.iteritems(v))
                         flnm = FileMap._deduce_filename(flnm, path, supplemental_paths,
-                                                        path_parameters)
+                                                        path_parameters, inst)
                         r[k] = curry(lambda flnm:data_files[flnm], flnm)
                         anylazy = True
                     else: r[k] = visit_data(v)
@@ -235,8 +449,8 @@ def file_map(path, instructions, **kw):
        filenames in the instructions.
      * data_hierarchy (default: None) may specify how the data should be nested; see the variable
        neuropythy.hcp.files.hcp_filemap_data_hierarchy.
-     * load_function (default: None) may specify the function that is used to load filenames; if None
-       then neuropythy.io.load is used.
+     * load_function (default: None) may specify the function that is used to load filenames; if
+       None then neuropythy.io.load is used.
      * meta_data (default: None) may be passed on to the FileMap object.
 
     Any additional keyword arguments given to the file_map function will be used as supplemental
