@@ -463,7 +463,7 @@ class FileMap(ObjectWithMetaData):
             if n > 0: cp = os.path.join(actual_cache_path, 'main')
             else:     cp = actual_cache_path
             os.makedirs(cp)
-        spaths[None] = pseudo_dir(path, delete=False, cache_path=cp))
+        spaths[None] = pseudo_dir(path, delete=False, cache_path=cp)
         return pyr.pmap(spaths)
     @pimms.value
     def data_files(pseudo_dirs, path_parameters, load_function, meta_data, _parsed_instructions):
