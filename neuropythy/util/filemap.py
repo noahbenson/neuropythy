@@ -3,12 +3,17 @@
 # Utility for presenting a directory with a particular format as a data structure.
 # By Noah C. Benson
 
-import os, warnings, six, tarfile, atexit, shutil, pimms
+import os, warnings, six, tarfile, atexit, shutil, posixpath, pimms
 import numpy          as np
 import pyrsistent     as pyr
-from   posixpath  import join as urljoin
+from   posixpath  import join as urljoin, split as urlsplit, normpath as urlnormpath
 from   six.moves  import urllib
 from   .core      import (library_path, curry, ObjectWithMetaData, AutoDict, data_struct, tmpdir)
+from   .conf      import to_credentials
+
+# Not required, but try to load it anyway:
+try:    import s3fs
+except: s3fs = None
 
 def is_url(url):
     '''
@@ -72,11 +77,13 @@ class PseudoDir(ObjectWithMetaData):
     The PseudoDir class represents either directories themselves, tarballs, or URLs as if they were
     directories.
     '''
-    def __init__(self, source_path, cache_path=None, delete=Ellipsis, meta_data=None):
+    def __init__(self, source_path, cache_path=None, delete=Ellipsis, credentials=None,
+                 meta_data=None):
         ObjectWithMetaData.__init__(self, meta_data=meta_data)
         self.source_path = source_path
         self.cache_path = cache_path
         self.delete = delete
+        self.credentials = credentials
     @pimms.param
     def source_path(sp):
         '''
@@ -84,7 +91,7 @@ class PseudoDir(ObjectWithMetaData):
         '''
         if sp is None: return os.path.join('/')
         if not pimms.is_str(sp): raise ValueError('source_path must be a string/path')
-        if is_url(sp) or is_s3path(sp): return sp
+        if is_url(sp) or is_s3_path(sp): return sp
         return os.path.expanduser(os.path.expandvars(sp))
     @pimms.param
     def cache_path(cp):
@@ -105,17 +112,46 @@ class PseudoDir(ObjectWithMetaData):
         if d not in (True, False, Ellipsis):
             raise ValueError('delete must be True, False, or Ellipsis')
         return d
+    @pimms.param
+    def credentials(c):
+        '''
+        pdir.credentials is a tuple (key, secret) for authentication with Amazon S3.
+        '''
+        if c is None: return None
+        else: return to_credentials(c)
+    @staticmethod
+    def _url_to_ospath(path):
+        #if os.sep == posixpath.sep: return path
+        path = urlnormpath(path)
+        ps = []
+        while path != '':
+            (path,fl) = posixpath.split(path)
+            ps.append(fl)
+        return os.path.join(*reversed(ps))
     @staticmethod
     def _url_exists(urlbase, cache_path, path):
-        cpath = urljoin(cache_path, path)
+        cpath = os.path.join(cache_path, PseudoDir._url_to_ospath(path))
         if os.path.exists(cpath): return True
-        else: return is_url(os.path.hoin(urlbase, path))
+        else: return is_url(urljoin(urlbase, path))
     @staticmethod
     def _url_getpath(urlbase, cache_path, path):
-        cpath = urljoin(cache_path, path)
+        cpath = os.path.join(cache_path, PseudoDir._url_to_ospath(path))
         if os.path.exists(cpath): return cpath
-        url = os.path.join(urlbase, path)
+        url = urljoin(urlbase, path)
         return url_download(url, cpath)
+    @staticmethod
+    def _s3_exists(fs, cache_path, path):
+        cpath = os.path.join(cache_path, PseudoDir._url_to_ospath(path))
+        if os.path.exists(cpath): return cpath
+        url = urljoin(urlbase, path)
+        return fs.exists(url)
+    @staticmethod
+    def _s3_getpath(fs, cache_path, path):
+        cpath = os.path.join(cache_path, PseudoDir._url_to_ospath(path))
+        if os.path.exists(cpath): return cpath
+        url = urljoin(urlbase, path)
+        fs.get(url, cpath)
+        return cpath
     @staticmethod
     def _tar_exists(tarpath, cache_path, path):
         cpath = os.path.join(cache_path, path)
@@ -130,46 +166,70 @@ class PseudoDir(ObjectWithMetaData):
         with tarfile.open(tarpath, 'r') as tfl: tfl.extract(path, cache_path)
         return cpath
     @pimms.value
-    def _path_data(source_path, cache_path, delete):
+    def _path_data(source_path, cache_path, delete, credentials):
+        need_cache = True
+        rpr = source_path
+        # Okay, it might be a directory, an Amazon S3 URL, a different URL, or a tarball
         if os.path.isdir(source_path):
-            # just a normal directory... cache path is ignored, delete is ignored
-            return pyr.pmap({'repr':    source_path,
-                             'exists':  lambda pth: os.path.exists(os.path.join(source_path, pth)),
-                             'getpath': lambda pth: os.path.join(source_path, pth),
-                             'cache':   None,
-                             'join':    os.path.join})
-        # Since it's not a directory, we'll need a cache:
-        if cache_path is None: cache_path = tmpdir(delete=(True if delete is Ellipsis else delete))
-        # S3 not yet supported... #TODO
-        if source_path.lower().startswith('s3:'): raise ValueError('S3 URLs are not yet supported')
-        # Okay, it might be an Amazon S3 URL; it might be a different URL; it might be a tarball
-        if PseudoDir._is_url(source_path):
+            def exists_fn(p):  return os.path.exists(os.path.join(source_path, p))
+            def getpath_fn(p): return os.path.join(source_path, p)
+            rpr = os.path.normpath(source_path)
+            join_fn = os.path.join
+            need_cache = False
+            pathmod = os.path
+        elif s3fs is not None and isinstance(source_path, s3fs.S3FileSystem):
+            def exists_fn(p):  return PseudoDir._s3_exists(source_path,  cache_path, p)
+            def getpath_fn(p): return PseudoDir._s3_getpath(source_path, cache_path, p)
+            pathmod = posixpath
+        elif isinstance(source_path, tuple):
+            (el0,pp) = (source_path[0], source_path[1:])
+            if s3fs is not None and isinstance(el0, s3fs.S3FileSystem):
+                rpr = 'S3:/' + urljoin(*pp)
+                def ujn(p): return urljoin(*(pp + (p,)))
+                def exists_fn(p):  return PseudoDir._s3_exists(el0,  cache_path, ujn(p))
+                def getpath_fn(p): return PseudoDir._s3_getpath(el0, cache_path, ujn(p))
+                pathmod = posixpath
+            elif isinstance(el0, PseudoDir):
+                pd = el0._path_data
+                # we can use this dir's cache directory
+                need_cache = False
+                if cache_path is None: cache_path = el0.cache_path
+                (pathmod,efn,gfn,rpr) = [pd[k] for k in ('pathmod','exists','getpath','repr')]
+                def exists_fn(p):  return efn(pathmod.join(*(pp + (p,))))
+                def getpath_fn(p): return gfn(pathmod.join(*(pp + (p,))))
+                rpr = pathmod.join(*((rpr,) + pp))
+        elif is_s3_path(source_path):
+            if s3fs is None: raise ValueError('s3fs module is not installed')
+            elif credentials is None: fs = s3fs.S3FileSystem(anon=True)
+            else: fs = s3fs.S3FileSystem(key=credentials[0], secret=credentials[1])
+            def exists_fn(p):  return PseudoDir._s3_exists(fs,  cache_path, p)
+            def getpath_fn(p): return PseudoDir._s3_getpath(fs, cache_path, p)
+            pathmod = posixpath
+        elif is_url(source_path):
             def exists_fn(pth):  return PseudoDir._url_exists(source_path,  cache_path, pth)
             def getpath_fn(pth): return PseudoDir._url_getpath(source_path, cache_path, pth)
-            return pyr.pmap({'repr':    source_path,
-                             'exists':  exists_fn,
-                             'getpath': getpath_fn,
-                             'cache':   cache_path,
-                             'join':    urljoin})
+            pathmod = posixpath
         # Check if it's a "<tarball>:path", like subject10.tar.gz:subject10/"
-        ss = next((q for s in PseudoDir._tarball_endings for q in [s+':'] if q in source_path),None)
-        if ss is not None:
-            spl = source_path.split(ss)
-            tb = spl[0] + ss[:-1]
-            ip = ss.join(spl[1:])
-            def exists_fn(p):  return PseudoDir._tar_exists(tb,  cache_path, os.path.join(ip, p))
-            def getpath_fn(p): return PseudoDir._tar_getpath(tb, cache_path, os.path.join(ip, p))
-            return pyr.pmap({'repr':source_path, 'exists': exists_fn,
-                             'getpath': getpath_fn, 'cache':cache_path, 'join': os.path.join})
-        # okay, maybe it's just a tarball by itself...
-        ss = next((q for q in PseudoDir._tarball_endings if source_path.endswith(q)), None)
-        if ss is not None:
-            def exists_fn(p):  return PseudoDir._tar_exists(source_path,  cache_path, p)
-            def getpath_fn(p): return PseudoDir._tar_getpath(source_path, cache_path, p)
-            return pyr.pmap({'repr':source_path, 'exists': exists_fn,
-                             'getpath': getpath_fn, 'cache':cache_path, 'join': os.path.join})
+        elif is_tarball_path(source_path):
+            (tb,ip) = split_tarball_path(source_path)
+            if ip is None:
+                # tarball by itself
+                def exists_fn(p):  return PseudoDir._tar_exists(source_path,  cache_path, p)
+                def getpath_fn(p): return PseudoDir._tar_getpath(source_path, cache_path, p)
+            else:
+                # tarball with internal path
+                def exists_fn(p):  return PseudoDir._tar_exists(tb,  cache_path, os.path.join(ip,p))
+                def getpath_fn(p): return PseudoDir._tar_getpath(tb, cache_path, os.path.join(ip,p))
+            pathmod = os.path
         # ok, don't know what it is...
-        raise ValueError('Could not interpret source path: %s' % source_path)
+        else: raise ValueError('Could not interpret source path: %s' % source_path)
+        cache_path = tmpdir(delete=(True if delete is Ellipsis else delete)) if need_cache else None
+        return pyr.pmap({'repr':    rpr,
+                         'exists':  exists_fn,
+                         'getpath': getpath_fn,
+                         'cache':   cache_path,
+                         'pathmod': pathmod})
+
     @pimms.value
     def actual_cache_path(_path_data):
         '''
@@ -180,13 +240,13 @@ class PseudoDir(ObjectWithMetaData):
         return _path_data['cache']
     def __repr__(self):
         p = self._path_data['repr']
-        return 'pseudo_dir(%s)' % p
+        return "pseudo_dir('%s')" % p
     def join(self, *args):
         '''
         pdir.join(args...) is equivalent to os.path.join(args...) but always appropriate for the
           kind of path represented by the pseudo-dir pdir.
         '''
-        join = self._path_data['join']
+        join = self._path_data['pathmod'].join
         return join(*args)
     def find(self, *args):
         '''
@@ -196,7 +256,7 @@ class PseudoDir(ObjectWithMetaData):
         '''
         data = self._path_data
         exfn = data['exists']
-        join = data['join']
+        join = data['pathmod'].join
         path = join(*args)
         return path if exfn(path) else None
     def local_path(self, *args):
@@ -208,10 +268,41 @@ class PseudoDir(ObjectWithMetaData):
         '''
         data = self._path_data
         gtfn = data['getpath']
-        join = data['join']
+        join = data['pathmod'].join
         path = join(*args)
         return gtfn(path)
+def pseudo_dir(source_path, cache_path=None, delete=Ellipsis, credentials=None, meta_data=None):
+    '''
+    pseudo_dir(source_path) yields a pseudo-directory object that represents files in the given
+      source path.
 
+    Pseudo-dir objects act as an interface for loading data from abstract sources. The given source
+    path may be either a directory, a (possibly zipped) tarball, or a URL. In all cases but the
+    local directory, the pseudo-dir object will quietly extract/download the requested files to an
+    cache directory as their paths are requested. This is managed through two methods:
+      * find(args...) joins the argument list as in os.path.join, then, if the resulting file is
+        found in the source_path, this (relative) path-name is returned; otherwise None is returned.
+      * local_path(args...) joins the argument list as in os.path.join, then, if the resulting file
+        is found in the source_path, it is extracted/downloaded to the local cache directory if
+        necessary, and this path (or the original path when no cache directory is used) is returned.
+
+    The following optional arguments may be given:
+      * cache_path (default: None) specifies the cache directory in which to put any extracted or
+        downloaded contents. If None, then a temporary directory is created and used. If the source
+        path is a local directory, then the cache path is not needed and is instead ignored. Note
+        that if the cache path is not deleted, it can be reused across sessions--the pseudo-dir will
+        always check for files in the cache path before extracting or downloading them.
+      * delete (default: Ellipsis) may be set to True or False to declare that the cache directory
+        should be deleted at system exit (assuming a normal Python system exit). If Ellipsis, then
+        the cache_path is deleted only if it is created by the pseudo-dir object--given cache paths
+        are never deleted.
+      * credentials (default: None) may be set to a valid set of Amazon S3 credentials for use if
+        the source path is an S3 path. The contents are passed through the to_credentials function.
+      * meta_data (default: None) specifies an optional map of meta-data for the pseudo-dir.
+    '''
+    return PseudoDir(source_path, cache_path=cache_path, delete=delete, credentials=credentials,
+                     meta_data=meta_data)
+    
 @pimms.immutable
 class FileMap(ObjectWithMetaData):
     '''
@@ -471,13 +562,12 @@ class FileMap(ObjectWithMetaData):
         filemap.data_files is a lazy map whose keys are filenames and whose values are the loaded
         files.
         '''
-        spaths = pseudo_dirs
         (data_files, data_tree) = _parsed_instructions
         res = {}
         for (flnm, inst) in six.iteritems(data_files):
             (pathnm, fn) = FileMap._parse_path(flnm, path, pseudo_dirs, path_parameters, inst)
             res[fn] = curry(FileMap._load,
-                            spaths[pathnm], flnm, load_function,
+                            pseudo_dirs[pathnm], flnm, load_function,
                             path_parameters, meta_data, inst)
         return pimms.lazy_map(res)
     @pimms.value
