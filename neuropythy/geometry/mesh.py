@@ -2438,24 +2438,28 @@ def load_gifti(filename, to='auto'):
     if to in ['raw', 'image', 'gifti', 'all', 'full']:
         return dat
     if to in ['auto', 'automatic']:
-        # is this is mesh gifti?
-        if len(dat.darrays) == 2 or len(dat.darrays) == 3:
-            if len(dat.darrays) == 2: (cor,    tri) = dat.darrays
-            else:                     (cor, _, tri) = dat.darrays
-            cor = cor.data
-            tri = tri.data
-            # possible that these were given in the wrong order:
-            if pimms.is_matrix(tri, np.inexact) and pimms.is_matrix(cor, np.signedinteger):
-                (cor,tri) = (tri,cor)
+        # is this a mesh gifti?
+        pset = dat.get_arrays_from_intent('pointset')
+        tris = dat.get_arrays_from_intent('triangle')
+        if len(pset) == 1 and len(tris) == 1:
+            (cor, tri) = (pset[0].data, tris[0].data)
             # okay, try making it:
             try: return Mesh(tri, cor)
             except: pass
-        # is it a coord or topo?
-        if len(dat.darrays) == 1:
-            cor = dat.darrays[0].data
-            if pimms.is_matrix(cor, np.inexact): return cor
-            if pimms.is_matrix(cor, 'int'):     return Tesselation(cor)
-        # We don't know what it is:
+        elif len(pset) == 1 and len(tris) == 0:
+            # just a pointset
+            return pset[0].data
+        elif len(tris) == 1 and len(pset) == 0:
+            # Just a topology...
+            return Tesselation(tris[0].data)
+        # Maybe it's a stat? If so, we want to return the data array...
+        # see the nifti1 header for these numbers, but stats are intent 2-24
+        stats = [v for k in range(2,25) for v in dat.get_arrays_from_intent(k)]
+        if len(stats) == 1: return np.squeeze(stats[0].data)
+        # most other possibilities are also basic arrays, so if there's only one of them, we can
+        # just yield that array
+        if len(dat.darrays) == 1: return np.squeeze(dat.darrays[0].data)
+        # We don't know what it is; return the whole thing:
         return dat
     elif to in ['coords', 'coordinates', 'xyz']:
         cor = dat.darrays[0].data
