@@ -10,7 +10,7 @@ import numpy.linalg        as npla
 from .. import geometry as geo
 from .. import mri      as mri
 
-from   neuropythy.util     import (zinv, zdiv, simplex_summation_matrix)
+from   neuropythy.util     import (zinv, simplex_summation_matrix)
 from   .retinotopy         import (extract_retinotopy_argument, retinotopy_data, as_retinotopy)
 
 def disk_projection_cmag(mesh, retinotopy='any', surface=None):
