@@ -259,6 +259,31 @@ def address_data(data, dims=None, surface=0.5, strict=True):
                 raise ValueError('address contains %d non-finite faces (%s)' % (len(w[0]),w))
     return (faces, coords)
 
+def numel(x):
+    '''
+    numel(x) yields the number of elements in x: the product of the shape of x.
+    '''
+    return int(np.prod(np.shape(x)))
+def rows(x):
+    '''
+    rows(x) yields the number of rows in x; if x is a scalar, this is still 1.
+    '''
+    s = np.shape(x)
+    return s[0] if len(s) > 0 else 1
+def check_sparsity(x, fraction=0.6):
+    '''
+    check_sparsity(x) yields either x or an array equivalent to x with a different sparsity based on
+      a heuristic: if x is a sparse array with more than 60% of its elements specified, it is made
+      dense; otherwise, it is left alone.
+
+    The optional argument fraction (default 0.6) specifies the fraction of elements that must be
+    specified in the array for it to be un-sparsified.
+    '''
+    if not sps.issparse(x): return x
+    n = numel(x)
+    if n == 0: return x
+    if len(x.data) / float(x) > 0.6: return x.toarray()
+    else: return x
 def unbroadcast(a, b):
     '''
     unbroadcast(a, b) yields a tuple (aa, bb) that is equivalent to (a, b) except that aa and bb
@@ -273,11 +298,12 @@ def unbroadcast(a, b):
         def fix(sp,nm):
             nm = np.asarray(nm)
             dnm = len(nm.shape)
-            dsp = len(sp.shape)
+            nnm = np.prod(nm.shape)
             # if we have (sparse matrix) * (high-dim array), unbroadcast the dense array
-            if   dnm >  dsp: return unbroadcast(sp.toarray(), nm)
-            elif dnm == dsp: return (sp, nm)
-            else:            return (sp, np.reshape(nm, (dsp[0], 1)))
+            if   dnm == 0: return (sp, np.reshape(nm, (1,   1)))
+            elif dnm == 1: return (sp, np.reshape(nm, (nnm, 1)))
+            elif dnm == 2: return (sp, nm)
+            else:          return unbroadcast(sp.toarray(), nm)
         return fix(a, b) if spa else tuple(reversed(fix(b, a)))
     # okay, no sparse matrices found:
     a = np.asarray(a)
@@ -287,6 +313,29 @@ def unbroadcast(a, b):
     if   da > db: return (a, np.reshape(b, b.shape + tuple(np.ones(da-db, dtype=np.int))))
     elif da < db: return (np.reshape(a, a.shape + tuple(np.ones(db-da, dtype=np.int))), b)
     else:         return (a, b)
+def cplus(*args):
+    '''
+    cplus(a, b...) returns the sum of all the values as a numpy array object. Like numpy's add
+      function or a+b syntax, plus will thread over the latest dimension possible.
+
+    Additionally, cplus works correctly with sparse arrays.
+    '''
+    n = len(args)
+    if   n == 0: return np.asarray(0)
+    elif n == 1: return np.asarray(args[0])
+    elif n >  2: return reduce(plus, args)
+    (a,b) = args
+    if sps.issparse(a):
+        if not sps.issparse(b):
+            b = np.asarray(b)
+            if len(b.shape) == 0: b = np.reshape(b, (1,1))
+    elif sps.issparse(b):
+        a = np.asarray(a)
+        if len(a.shape) == 0: a = np.reshape(a, (1,1))
+    else:
+        a = np.asarray(a)
+        b = np.asarray(b)
+    return a + b
 def plus(*args):
     '''
     plus(a, b...) returns the sum of all the values as a numpy array object. Unlike numpy's add
@@ -300,56 +349,27 @@ def plus(*args):
     elif n >  2: return reduce(plus, args)
     (a,b) = unbroadcast(*args)
     return a + b
-def cplus(*args):
+def cminus(a, b):
     '''
-    cplus(a, b...) returns the sum of all the values as a numpy array object. Like numpy's add
-      function or a+b syntax, plus will thread over the latest dimension possible.
-
-    Additionally, cplus works correctly with sparse arrays.
+    cminus(a, b) returns the difference a - b as a numpy array object. Like numpy's subtract
+      function or a - b syntax, minus will thread over the latest dimension possible.
     '''
-    n = len(args)
-    if   n == 0: return np.asarray(0)
-    elif n == 1: return np.asarray(args[0])
-    elif n >  2: return reduce(plus, args)
-    (a,b) = args
-    if np.issparse(a):
-        if not np.issparse(b):
-            b = np.asarray(b)
-            if len(b.shape) == 0: b = np.reshape(b, (1,1))
-    elif np.issparse(b):
-        a = np.asarray(a)
-        if len(a.shape) == 0: a = np.reshape(a, (1,1))
-    else:
-        a = np.asarray(a)
-        b = np.asarray(b)
-    return a + b
+    # adding/subtracting a constant to/from a sparse array is an error...
+    spa = sps.issparse(a)
+    spb = sps.issparse(b)
+    if not spa: a = np.asarray(a)
+    if not spb: b = np.asarray(b)
+    if   spa: b = np.reshape(b, (1,1)) if len(np.shape(b)) == 0 else b
+    elif spb: a = np.reshape(a, (1,1)) if len(np.shape(a)) == 0 else a
+    return a - b
 def minus(a, b):
     '''
     minus(a, b) returns the difference a - b as a numpy array object. Unlike numpy's subtract
-      function or a - b syntax, minus will thread over the earliest dimension possible; this if
+      function or a - b syntax, minus will thread over the earliest dimension possible; thus if
       a.shape is (4,2) and b.shape is 4, a - b is a equivalent to [ai-bi for (ai,bi) in zip(a,b)].
     '''
-    n = len(args)
-    if   n == 0: return np.asarray(0)
-    elif n == 1: return np.asarray(args[0])
-    elif n >  2: return reduce(plus, args)
-    (a,b) = unbroadcast(*args)
+    (a,b) = unbroadcast(a,b)
     return a - b
-def times(*args):
-    '''
-    times(a, b...) returns the product of all the values as a numpy array object. Unlike numpy's
-      multiply function or a*b syntax, times will thread over the earliest dimension possible; thus
-      if a.shape is (4,2) and b.shape is 4, times(a,b) is a equivalent to
-      [ai*bi for (ai,bi) in zip(a,b)].
-    '''
-    n = len(args)
-    if   n == 0: return np.asarray(0)
-    elif n == 1: return np.asarray(args[0])
-    elif n >  2: return reduce(plus, args)
-    (a,b) = unbroadcast(*args)
-    if   sps.issparse(a): return a.multiply(b)
-    elif sps.issparse(b): return b.multiply(a)
-    else:                 return a * b
 def ctimes(*args):
     '''
     ctimes(a, b...) returns the product of all the values as a numpy array object. Like numpy's
@@ -366,6 +386,21 @@ def ctimes(*args):
     if   sps.issparse(a): return a.multiply(b)
     elif sps.issparse(b): return b.multiply(a)
     else:                 return np.asarray(a) * b
+def times(*args):
+    '''
+    times(a, b...) returns the product of all the values as a numpy array object. Unlike numpy's
+      multiply function or a*b syntax, times will thread over the earliest dimension possible; thus
+      if a.shape is (4,2) and b.shape is 4, times(a,b) is a equivalent to
+      [ai*bi for (ai,bi) in zip(a,b)].
+    '''
+    n = len(args)
+    if   n == 0: return np.asarray(0)
+    elif n == 1: return np.asarray(args[0])
+    elif n >  2: return reduce(plus, args)
+    (a,b) = unbroadcast(*args)
+    if   sps.issparse(a): return a.multiply(b)
+    elif sps.issparse(b): return b.multiply(a)
+    else:                 return a * b
 def inv(x):
     '''
     inv(x) yields the inverse of x, 1/x.
@@ -402,6 +437,18 @@ def zinv(x, null=0):
         if null == 0: return r
         r[z] = null
         return r
+def cdivide(a, b):
+    '''
+    cdivide(a, b) returns the quotient a / b as a numpy array object. Like numpy's divide function
+      or a/b syntax, divide will thread over the latest dimension possible. Unlike numpy's divide,
+      cdivide works with sparse matrices.
+
+    Note that warnings/errors are raised by this function when divide-by-zero occurs, so it is
+    usually not useful to use cdivide() with sparse matrices--see czdivide instead.
+    '''
+    if   sps.issparse(a): return a.multiply(inv(b))
+    elif sps.issparse(b): return np.asarray(a) / b.toarray()
+    else:                 return np.asarray(a) / np.asarray(b)
 def divide(a, b):
     '''
     divide(a, b) returns the quotient a / b as a numpy array object. Unlike numpy's divide function
@@ -413,9 +460,33 @@ def divide(a, b):
     is usually not useful to use divide() with sparse matrices--see zdivide instead.
     '''
     (a,b) = unbroadcast(a,b)
-    if   sps.issparse(a): return a.multiply(inv(b))
-    elif sps.issparse(b): return a / b.toarray()
-    else:                 return a / b
+    return cdivide(a,b)
+def czdivide(a, b, null=0):
+    '''
+    czdivide(a, b) returns the quotient a / b as a numpy array object. Like numpy's divide function
+      or a/b syntax, czdivide will thread over the latest dimension possible. Unlike numpy's divide,
+      czdivide works with sparse matrices. Additionally, czdivide multiplies a by the zinv of b, so
+      divide-by-zero entries are replaced with 0 in the result.
+
+    The optional argument null (default: 0) may be given to specify that zeros in the arary b should
+    instead be replaced with the given value in the result. Note that if this value is not equal to
+    0, then any sparse array passed as argument b must be reified.
+
+    The czdivide function never raises an error due to divide-by-zero; if you desire this behavior,
+    use the cdivide function instead.
+    '''
+    if null == 0:         return a.multiply(zinv(b)) if sps.issparse(a) else a * zinv(b)
+    elif sps.issparse(b): b = b.toarray()
+    else:                 b = np.asarray(b)
+    z = np.isclose(b, 0)
+    q = np.logical_not(z)
+    zi = q / (b + z)
+    if sps.issparse(a):
+        r = a.multiply(zi).tocsr()
+    else:
+        r = np.asarray(a) * zi
+    r[np.ones(a.shape, dtype=np.bool)*z] = null
+    return r
 def zdivide(a, b, null=0):
     '''
     zdivide(a, b) returns the quotient a / b as a numpy array object. Unlike numpy's divide function
@@ -428,23 +499,13 @@ def zdivide(a, b, null=0):
 
     The zdivide function never raises an error due to divide-by-zero; if you desire this behavior,
     use the divide function instead.
+
+    Note that zdivide(a,b, null=z) is not quite equivalent to a*zinv(b, null=z) unless z is 0; if z
+    is not zero, then the same elements that are zet to z in zinv(b, null=z) are set to z in the
+    result of zdivide(a,b, null=z) rather than the equivalent element of a times z.
     '''
     (a,b) = unbroadcast(a,b)
-    b = zinv(b, null=null)
-    if   sps.issparse(a): return a.multiply(b)
-    elif sps.issparse(b): return b.multiply(a)
-    else:                 return a * b
-def power(a,b):
-    '''
-    power(a,b) is equivalent to a**b except that, like the neuropythy.util.times function, it
-      threads over the earliest dimension possible rather than the latest, as numpy's power function
-      and ** syntax do. The power() function also works with sparse arrays; though it must reify
-      them during the process.
-    '''
-    if sps.issparse(a): a = a.toarray()
-    if sps.issparse(b): b = b.toarray()
-    (a,b) = unbroadcast(a,b)
-    return a ** b
+    return czdivide(a,b, null=null)
 def cpower(a,b):
     '''
     cpower(a,b) is equivalent to a**b except that it also operates over sparse arrays; though it
@@ -453,7 +514,16 @@ def cpower(a,b):
     if sps.issparse(a): a = a.toarray()
     if sps.issparse(b): b = b.toarray()
     return a ** b
-
+def power(a,b):
+    '''
+    power(a,b) is equivalent to a**b except that, like the neuropythy.util.times function, it
+      threads over the earliest dimension possible rather than the latest, as numpy's power function
+      and ** syntax do. The power() function also works with sparse arrays; though it must reify
+      them during the process.
+    '''
+    (a,b) = unbroadcast(a,b)
+    return cpower(a,b)
+    
 _default_rtol = inspect.getargspec(np.isclose)[3][0]
 _default_atol = inspect.getargspec(np.isclose)[3][1]
 def replace_close(x, xhat, rtol=_default_rtol, atol=_default_atol, copy=True):

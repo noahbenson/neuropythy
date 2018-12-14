@@ -4,8 +4,9 @@
 
 from .core    import (ObjectWithMetaData, to_affine, simplex_summation_matrix,
                       simplex_averaging_matrix, is_image, curry,
-                      times, ctimes, inv, zinv, divide, zdivide, plus, cplus, minus,
-                      replace_close, chop,
+                      numel, rows, replace_close, chop,
+                      plus, cplus, minus, cminus, times, ctimes,
+                      inv, zinv, divide, cdivide, zdivide, czdivide, power, cpower,
                       library_path, address_data, is_address, AutoDict,
                       curve_spline, curve_intersection, CurveSpline,
                       DataStruct, data_struct, tmpdir)
