@@ -523,6 +523,68 @@ def power(a,b):
     '''
     (a,b) = unbroadcast(a,b)
     return cpower(a,b)
+def part(x, *args):
+    '''
+    part(x, ii, jj...) is equivalent to x[ii, jj...] if x is a sparse matrix or numpy array and is
+      equivalent to np.asarray(x)[ii][:, jj][...] if x is not. If only one argument is passed and
+      it is a tuple, then it is passed like x[ii] alone.
+
+    The part function is comparible with slices (though the must be entered using the slice(...)
+    rather than the : syntax) and Ellipsis.
+    '''
+    n = len(args)
+    sl = slice(None)
+    if sps.issparse(x):
+        if n == 1: return x[args[0]]
+        elif n > 2: raise ValueError('Too many indices for sparse matrix')
+        (ii,jj) = args
+        if   ii is Ellipsis: ii = sl
+        elif jj is Ellipsis: jj = sl
+        ni = pimms.is_number(ii)
+        nj = pimms.is_number(jj)
+        if   ni and nj: return x[ii,jj]
+        elif ni:        return x[ii,jj].toarray()[0]
+        elif nj:        return x[ii,jj].toarray()[:,0]
+        else:           return x[ii][:,jj]
+    else:
+        x = np.asarray(x)
+        if n == 1: return x[args[0]]
+        i0 = []
+        for (k,arg) in enumerate(args):
+            if arg is Ellipsis:
+                # special case...
+                #if Ellipsis in args[ii+1:]: raise ValueError('only one ellipsis allowed per part')
+                left = n - k - 1
+                i0 = [sl for _ in range(len(x.shape) - left)]
+            else:
+                x = x[tuple(i0 + [arg])]
+                if not pimms.is_number(arg): i0.append(sl)
+        return x
+def hstack(tup):
+    '''
+    hstack(x) is equivalent to numpy.hstack(x) or scipy.sparse.hstack(x) except that it works
+      correctly with both sparse and dense arrays (if any inputs are dense, it converts all inputs
+      to dense arrays).
+    '''
+    if all([sps.issparse(u) for u in tup]): return sps.hstack(tup, format=tup[0].format)
+    else: return np.hstack([u.toarray() if sps.issparse(u) else u for u in tup])
+def vstack(tup):
+    '''
+    vstack(x) is equivalent to numpy.vstack(x) or scipy.sparse.vstack(x) except that it works
+      correctly with both sparse and dense arrays (if any inputs are dense, it converts all inputs
+      to dense arrays).
+    '''
+    if all([sps.issparse(u) for u in tup]): return sps.vstack(tup, format=tup[0].format)
+    else: return np.vstack([u.toarray() if sps.issparse(u) else u for u in tup])
+def repmat(x, r, c):
+    '''
+    repmat(x, r, c) is equivalent to numpy.matlib.repmat(x, r, c) except that it works correctly for
+      sparse matrices.
+    '''
+    if sps.issparse(x):
+        row = sps.hstack([x for _ in range(c)])
+        return sps.vstack([row for _ in range(r)], format=x.format)
+    else: return np.matlib.repmat(x, r, c)
     
 _default_rtol = inspect.getargspec(np.isclose)[3][0]
 _default_atol = inspect.getargspec(np.isclose)[3][1]

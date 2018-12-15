@@ -5,6 +5,7 @@
 
 submodules = ('neuropythy.util.conf',
               'neuropythy.util.core',
+              'neuropythy.util.filemap',
               'neuropythy.util',
               'neuropythy.java',
               'neuropythy.io.core',
@@ -12,6 +13,8 @@ submodules = ('neuropythy.util.conf',
               'neuropythy.geometry.util',
               'neuropythy.geometry.mesh',
               'neuropythy.geometry',
+              'neuropythy.optimize.core',
+              'neuropythy.optimize',
               'neuropythy.mri.core',
               'neuropythy.mri',
               'neuropythy.freesurfer.core',
@@ -79,7 +82,7 @@ try:
 except: pass
 
 # Version information...
-__version__ = '0.8.7'
+__version__ = '0.8.8'
 
 
 
