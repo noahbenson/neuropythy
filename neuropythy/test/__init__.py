@@ -18,6 +18,33 @@ class TestNeuropythy(unittest.TestCase):
     The TestNeuropythy class defines all the tests for the neuropythy library.
     '''
 
+    def test_optimize(self):
+        '''
+        test_optimize tests the neuropythy.optimize package using the data in
+          neuropythy.test.optimize.
+        '''
+        from neuropythy.geometry import triangle_area
+        import neuropythy.optimize as opt
+        from . import optimize as opttest
+        mesh = opttest.mesh
+        logging.info('neuropythy: Testing optimization package...')
+        # check that this works in the first place...
+        def fareas(x, f):
+            x = np.asarray(x)
+            (a,b,c) = [np.transpose(x[ii]) for ii in np.transpose(f)]
+            return triangle_area(a, b, c)
+        dif = fareas(mesh['coords'], mesh['faces'])
+        sim = np.isclose(dif, opttest.mesh_face_areas, rtol=0.001)
+        self.assertTrue(sim.all())
+        # minimize the tiny mesh to have all triangle areas equal to 1
+        m = opttest.mesh
+        f = opt.sum((1.0 - opt.signed_face_areas(m['faces']))**2)
+        x = f.argmin(m['coords'])
+        # see if these are close to 1!
+        qqq = fareas(x, m['faces']) - 1
+        sim = np.isclose(qqq, 0, rtol=0, atol=0.0001)
+        self.assertTrue(sim.all())
+
     def test_mesh(self):
         '''
         test_mesh() ensures that many general mesh properties and methods are working.
@@ -126,6 +153,7 @@ class TestNeuropythy(unittest.TestCase):
             logging.info('neuropythy:    - Testing RH interpolation')
             vs = calc_interp(sub.rh, intersub.rh, ps)
             check_interp(sub.rh, ps, vs)
+
         
 if __name__ == '__main__':
     unittest.main()
