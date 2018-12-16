@@ -220,8 +220,7 @@ def triangle_area(a,b,c):
     (a,b,c) = [np.asarray(x) for x in (a,b,c)]
     sides = np.sqrt(np.sum([(p1 - p2)**2 for (p1,p2) in zip([b,c,a],[c,a,b])], axis=1))
     s = 0.5 * np.sum(sides, axis=0)
-    sides = s - sides
-    s = np.clip(s * s * np.prod(sides, axis=0), 0.0, None)
+    s = np.clip(s * np.prod(s - sides, axis=0), 0.0, None)
     return np.sqrt(s)
 
 def triangle_normal(a,b,c):
