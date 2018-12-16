@@ -846,7 +846,7 @@ def row_norms(ii, f=Ellipsis, squared=False):
         q = flattest(f.c)
         q = np.sum([q[i]**2 for i in ii.T], axis=0)
         return ConstantPotential(q if squared else np.sqrt(q))
-    F = reduce(lambda a,b: a + b, [part(..., col)**2 for col in ii.T])
+    F = reduce(lambda a,b: a + b, [part(Ellipsis, col)**2 for col in ii.T])
     F = compose(F, f)
     if not squared: F = sqrt(F)
     return F
@@ -866,7 +866,7 @@ def col_norms(ii, f=Ellipsis, squared=False):
         q = flattest(f.c)
         q = np.sum([q[i]**2 for i in ii], axis=0)
         return ConstantPotential(q if squared else np.sqrt(q))
-    F = reduce(lambda a,b: a + b, [part(..., col)**2 for col in ii])
+    F = reduce(lambda a,b: a + b, [part(Ellipsis, col)**2 for col in ii])
     F = compose(F, f)
     if not squared: F = sqrt(F)
     return F
@@ -998,7 +998,7 @@ def signed_face_areas(faces, axis=1):
         else:         tmp = np.reshape(np.arange(n), (-1,2))
         faces = np.reshape(tmp[faces.flat], (-1,3,2))
     faces = faces.flatten()
-    return compose(TriangleSignedArea2DPotential(), part(..., faces))
+    return compose(TriangleSignedArea2DPotential(), part(Ellipsis, faces))
 @pimms.immutable
 class TriangleArea2DPotential(PotentialFunction):
     '''
@@ -1058,4 +1058,4 @@ def face_areas(faces, input_len=None):
         else:         tmp = np.reshape(np.arange(n), (-1,2))
         faces = np.reshape(tmp[faces.flat], (-1,3,2))
     faces = faces.flatten()
-    return compose(TriangleArea2DPotential(), part(..., faces))
+    return compose(TriangleArea2DPotential(), part(Ellipsis, faces))
