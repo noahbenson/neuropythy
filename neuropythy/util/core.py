@@ -14,6 +14,10 @@ from   functools                    import reduce
 if six.PY2: (_tuple_type, _list_type) = (types.TupleType, types.ListType)
 else:       (_tuple_type, _list_type) = (tuple, list)
 
+# Used by functions that pass arguments on to the isclose and related functions
+default_rtol = inspect.getargspec(np.isclose)[3][0]
+default_atol = inspect.getargspec(np.isclose)[3][1]
+
 def curry(f, *args0, **kwargs0):
     '''
     curry(f, ...) yields a function equivalent to f with all following arguments and keyword
@@ -514,6 +518,11 @@ def cpower(a,b):
     if sps.issparse(a): a = a.toarray()
     if sps.issparse(b): b = b.toarray()
     return a ** b
+hpi    = np.pi / 2
+tau    = 2 * np.pi
+negpi  = -np.pi
+neghpi = -hpi
+negtau = -tau
 def power(a,b):
     '''
     power(a,b) is equivalent to a**b except that, like the neuropythy.util.times function, it
@@ -523,6 +532,246 @@ def power(a,b):
     '''
     (a,b) = unbroadcast(a,b)
     return cpower(a,b)
+def sine(x):
+    '''
+    sine(x) is equivalent to sin(x) except that it also works on sparse arrays.
+    '''
+    if sps.issparse(x):
+        x = x.copy()
+        x.data = np.sine(x.data)
+        return x
+    else: return np.sin(x)
+def cosine(x):
+    '''
+    cosine(x) is equivalent to cos(x) except that it also works on sparse arrays.
+    '''
+    # cos(0) = 1 so no point in keeping these sparse
+    if sps.issparse(x): x = x.toarray(x)
+    return np.cos(x)
+def tangent(x, null=(-np.inf, np.inf), rtol=default_rtol, atol=default_atol):
+    '''
+    tangent(x) is equivalent to tan(x) except that it also works on sparse arrays.
+
+    The optional argument null (default, (-numpy.inf, numpy.inf)) may be specified to indicate what
+    value(s) should be assigned when x == -pi/2 or -pi/2. If only one number is given, then it is
+    used for both values; otherwise the first value corresponds to -pi/2 and the second to pi/2.
+    A value of x is considered to be equal to one of these valids based on numpy.isclose. The
+    optional arguments rtol and atol are passed along to isclose. If null is None, then no
+    replacement is performed.
+    '''
+    if sps.issparse(x):
+        x = x.copy()
+        x.data = tangent(x.data, null=null, rtol=rtol, atol=atol)
+        return x
+    else: x = np.asarray(x)
+    if rtol is None: rtol = default_rtol
+    if atol is None: atol = default_atol
+    try:    (nln,nlp) = null
+    except: (nln,nlp) = (null,null)
+    x = np.mod(x + pi, tau) - pi
+    ii = None if nln is None else np.where(np.isclose(x, neghpi, rtol=rtol, atol=atol))
+    jj = None if nlp is None else np.where(np.isclose(x, hpi,    rtol=rtol, atol=atol))
+    x = np.tan(x)
+    if ii: x[ii] = nln
+    if jj: x[jj] = nlp
+    return x
+def cotangent(x, null=(-np.inf, np.inf), rtol=default_rtol, atol=default_atol):
+    '''
+    cotangent(x) is equivalent to cot(x) except that it also works on sparse arrays.
+
+    The optional argument null (default, (-numpy.inf, numpy.inf)) may be specified to indicate what
+    value(s) should be assigned when x == 0 or pi. If only one number is given, then it is used for
+    both values; otherwise the first value corresponds to 0 and the second to pi.  A value of x is
+    considered to be equal to one of these valids based on numpy.isclose. The optional arguments
+    rtol and atol are passed along to isclose. If null is None, then no replacement is performed.
+    '''
+    if sps.issparse(x): x = x.toarray()
+    else:               x = np.asarray(x)
+    if rtol is None: rtol = default_rtol
+    if atol is None: atol = default_atol
+    try:    (nln,nlp) = null
+    except: (nln,nlp) = (null,null)
+    x = np.mod(x + hpi, tau) - hpi
+    ii = None if nln is None else np.where(np.isclose(x, 0,  rtol=rtol, atol=atol))
+    jj = None if nlp is None else np.where(np.isclose(x, pi, rtol=rtol, atol=atol))
+    x = np.tan(x)
+    if ii: x[ii] = 1
+    if jj: x[jj] = 1
+    x = 1.0 / x
+    if ii: x[ii] = nln
+    if jj: x[jj] = nlp
+    return x
+def secant(x, null=(-np.inf, np.inf), rtol=default_rtol, atol=default_atol):
+    '''
+    secant(x) is equivalent to 1/sin(x) except that it also works on sparse arrays.
+
+    The optional argument null (default, (-numpy.inf, numpy.inf)) may be specified to indicate what
+    value(s) should be assigned when x == -pi/2 or -pi/2. If only one number is given, then it is
+    used for both values; otherwise the first value corresponds to -pi/2 and the second to pi/2.
+    A value of x is considered to be equal to one of these valids based on numpy.isclose. The
+    optional arguments rtol and atol are passed along to isclose. If null is None, then an error is
+    raised when -pi/2 or pi/2 is encountered.
+    '''
+    if sps.issparse(x): x = x.toarray()
+    else:               x = np.asarray(x)
+    if rtol is None: rtol = default_rtol
+    if atol is None: atol = default_atol
+    try:    (nln,nlp) = null
+    except: (nln,nlp) = (null,null)
+    x = np.mod(x + pi, tau) - pi
+    ii = None if nln is None else np.where(np.isclose(x, neghpi, rtol=rtol, atol=atol))
+    jj = None if nlp is None else np.where(np.isclose(x, hpi,    rtol=rtol, atol=atol))
+    x = np.cos(x)
+    if ii: x[ii] = 1.0
+    if jj: x[jj] = 1.0
+    x = 1.0/x
+    if ii: x[ii] = nln
+    if jj: x[jj] = nlp
+    return x
+def cosecant(x, null=(-np.inf, np.inf), rtol=default_rtol, atol=default_atol):
+    '''
+    cosecant(x) is equivalent to 1/sin(x) except that it also works on sparse arrays.
+
+    The optional argument null (default, (-numpy.inf, numpy.inf)) may be specified to indicate what
+    value(s) should be assigned when x == 0 or pi. If only one number is given, then it is used for
+    both values; otherwise the first value corresponds to 0 and the second to pi. A value x is
+    considered to be equal to one of these valids based on numpy.isclose. The optional arguments
+    rtol and atol are passed along to isclose. If null is None, then an error is raised when -pi/2
+    or pi/2 is encountered.
+    '''
+    if sps.issparse(x): x = x.toarray()
+    else:               x = np.asarray(x)
+    if rtol is None: rtol = default_rtol
+    if atol is None: atol = default_atol
+    try:    (nln,nlp) = null
+    except: (nln,nlp) = (null,null)
+    x = np.mod(x + hpi, tau) - hpi # center on pi/2 so that 0 and pi are easy to detect
+    ii = None if nln is None else np.where(np.isclose(x, 0,  rtol=rtol, atol=atol))
+    jj = None if nlp is None else np.where(np.isclose(x, pi, rtol=rtol, atol=atol))
+    x = np.sin(x)
+    if ii: x[ii] = 1.0
+    if jj: x[jj] = 1.0
+    x = 1.0/x
+    if ii: x[ii] = nln
+    if jj: x[jj] = nlp
+    return x
+def arcsine(x, null=(-np.inf, np.inf)):
+    '''
+    arcsine(x) is equivalent to asin(x) except that it also works on sparse arrays.
+
+    The optional argument null (default, (-numpy.inf, numpy.inf)) may be specified to indicate what
+    value(s) should be assigned when x < -1 or x > 1. If only one number is given, then it is used
+    for both values; otherwise the first value corresponds to <-1 and the second to >1.  If null is
+    None, then an error is raised when invalid values are encountered.
+    '''
+    if sps.issparse(x):
+        x = x.copy()
+        x.data = arcsine(x.data, null=null, rtol=rtol, atol=atol)
+        return x
+    else: x = np.asarray(x)
+    try:    (nln,nlp) = null
+    except: (nln,nlp) = (null,null)
+    ii = None if nln is None else np.where(x < -1)
+    jj = None if nlp is None else np.where(x > 1)
+    if ii: x[ii] = 0
+    if jj: x[jj] = 0
+    x = np.arcsin(x)
+    if ii: x[ii] = nln
+    if jj: x[jj] = nlp
+    return x
+def arccosine(x, null=(-np.inf, np.inf)):
+    '''
+    arccosine(x) is equivalent to acos(x) except that it also works on sparse arrays.
+
+    The optional argument null (default, (-numpy.inf, numpy.inf)) may be specified to indicate what
+    value(s) should be assigned when x < -1 or x > 1. If only one number is given, then it is used
+    for both values; otherwise the first value corresponds to <-1 and the second to >1.  If null is
+    None, then an error is raised when invalid values are encountered.
+    '''
+    if sps.issparse(x): x = x.toarray()
+    else:               x = np.asarray(x)
+    try:    (nln,nlp) = null
+    except: (nln,nlp) = (null,null)
+    ii = None if nln is None else np.where(x < -1)
+    jj = None if nlp is None else np.where(x > 1)
+    if ii: x[ii] = 0
+    if jj: x[jj] = 0
+    x = np.arccos(x)
+    if ii: x[ii] = nln
+    if jj: x[jj] = nlp
+    return x
+def arctangent(y, x=None, null=0, broadcast=False, rtol=default_rtol, atol=default_atol):
+    '''
+    arctangent(x) is equivalent to atan(x) except that it also works on sparse arrays.
+    arctangent(y,x) is equivalent to atan2(y,x) except that it also works on sparse arrays.
+
+    The optional argument null (default: 0) specifies the result found when y and x both equal 0. If
+    null is None, then an error is raised on this condition. Note that if null is not 0, then it is
+    more likely that sparse arrays will have to be reified. If null is set to None, then no attempt
+    is made to detect null values.
+
+    The optional argument broadcast (default: False) specifies whether numpy-like (True) or
+    Mathematica-like (False) broadcasting should be used. Broadcasting resolves ambiguous calls to
+    arctangent, such as artangent([a,b,c], [[d,e,f],[g,h,i],[j,k,l]]). If broadcasting is True, 
+    arctangent(y,x) behaves like numpy.arctan2(y,x), so [a,b,c] is interpreted like [[a,b,c],
+    [a,b,c], [a,b,c]]. If broadcasting is False, [a,b,c] is interpreted like [[a,a,a], [b,b,b],
+    [c,c,c]].
+    '''
+    if sps.issparse(y):
+        if x is None:
+            y = y.copy()
+            y.data = np.arctan(y.data)
+            return y
+        elif null is not None and null != 0:
+            # we need to reify anyway...
+            y = y.toarray()
+            if sps.issparse(x): x = x.toarray()
+        else:
+            # anywhere that y is zero must have an arctan of 0 or null (which is 0), so we only have
+            # to look at those values that are non-zero in y
+            (yr,yc,yv) = sps.find(y)
+            xv = np.asarray(x[rr,rc].flat)
+            res = y.copy()
+            res.data = arctangent(yv, xv, null=null)
+            res.eliminate_zeros()
+            return res
+    elif sps.issparse(x): x = x.toarray()
+    # we should start by broadcasting if need be...
+    if x is None: res = np.arctan(y)
+    else:
+        if not broadcast: (y,x) = unbroadcast(y,x)
+        res = np.arctan2(y, x)
+        # find the zeros, if need-be
+        if null is not None:
+            if rtol is None: rtol = default_rtol
+            if atol is None: atol = default_atol
+            # even if null is none, we do this because the rtol and atol may be more lenient than
+            # the tolerance used by arctan2.
+            z = np.isclose(y, 0, rtol=rtol, atol=atol) & np.isclose(x, 0, rtol=rtol, atol=atol)
+            res[z] = null
+    return res
+def flattest(x):
+    '''
+    flattest(x) yields a 1D numpy vector equivalent to a flattened version of x. Unline
+      np.asarray(x).flatten, flattest(x) works with sparse matrices. It does not, however, work with
+      ragged arrays.
+    '''
+    x = x.flat if sps.issparse(x) else np.asarray(x).flat
+    return np.array(x)
+def flatter(x, k=1):
+    '''
+    flatter(x) yields a numpy array equivalent to x but whose first dimension has been flattened.
+    flatter(x, k) yields a numpy array whose first k dimensions have been flattened; if k is
+      negative, the last k dimensions are flattened. If np.inf or -np.inf is passed, then this is
+      equivalent to flattest(x). Note that flatter(x) is equivalent to flatter(x,1).
+    flatter(x, 0) yields x.
+    '''
+    if k == 0: return x
+    x = x.toarray() if sps.issparse(x) else np.asarray(x)
+    if len(x.shape) - abs(k) < 2: return x.flatten()
+    k += np.sign(k)
+    if k > 0: return np.reshape(x, (-1,) + x.shape[k:])
+    else:     return np.reshape(x, x.shape[:k] + (-1,))
 def part(x, *args):
     '''
     part(x, ii, jj...) is equivalent to x[ii, jj...] if x is a sparse matrix or numpy array and is
@@ -586,9 +835,7 @@ def repmat(x, r, c):
         return sps.vstack([row for _ in range(r)], format=x.format)
     else: return np.matlib.repmat(x, r, c)
     
-_default_rtol = inspect.getargspec(np.isclose)[3][0]
-_default_atol = inspect.getargspec(np.isclose)[3][1]
-def replace_close(x, xhat, rtol=_default_rtol, atol=_default_atol, copy=True):
+def replace_close(x, xhat, rtol=default_rtol, atol=default_atol, copy=True):
     '''
     replace_close(x, xhat) yields x if x is not close to xhat and xhat otherwise. Closeness is
       determined by numpy's isclose(), and the atol and rtol options are passed along.
@@ -597,11 +844,13 @@ def replace_close(x, xhat, rtol=_default_rtol, atol=_default_atol, copy=True):
 
     The optional argument copy may also be set to False to chop x in-place.
     '''
+    if rtol is None: rtol = default_rtol
+    if atol is None: atol = default_atol
     x = np.array(x) if copy else np.asarray(x)
     w = np.isclose(x, xhat, rtol=rtol, atol=atol)
     x[w] = np.asarray(xhat)[w]
     return x
-def chop(x, rtol=_default_rtol, atol=_default_atol, copy=True):
+def chop(x, rtol=default_rtol, atol=default_atol, copy=True):
     '''
     chop(x) yields x if x is not close to round(x) and round(x) otherwise. Closeness is determined
       by numpy's isclose(), and the atol and rtol options are passed along.
