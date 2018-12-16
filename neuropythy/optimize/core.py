@@ -254,6 +254,12 @@ class PotentialIdentity(PotentialFunction):
         else:            into += sps.eye(numel(params))
         return into
 identity = PotentialIdentity()
+def is_identity_potential(f):
+    '''
+    is_identity_potential(f) yields True if f is a potential function that merely yields its
+      parameters (f(x) = x); otherwise yields False.
+    '''
+    return isinstance(f, PotentialIdentity)
 @pimms.immutable
 class PotentialLambda(PotentialFunction):
     '''
@@ -646,7 +652,7 @@ class CosPotential(PotentialFunction):
     def __init__(self): pass
     def value(self, x): return cosine(x)
     def jacobian(self, x, into=None):
-        x = flattest(x)[None]
+        x = flattest(x)
         z = sps.diags(-sine(x))
         if into is None: into =  z
         else:            into += z
@@ -659,7 +665,7 @@ class SinPotential(PotentialFunction):
     def __init__(self): pass
     def value(self, x): return sine(x)
     def jacobian(self, x, into=None):
-        x = flattest(x)[None]
+        x = flattest(x)
         z = sps.diags(cosine(x))
         if into is None: into =  z
         else:            into += z
@@ -672,7 +678,7 @@ class TanPotential(PotentialFunction):
     def __init__(self): pass
     def value(self, x): return tangent(x)
     def jacobian(self, x, into=None):
-        x = flattest(x)[None]
+        x = flattest(x)
         z = sps.diags(secant(x)**2)
         if into is None: into =  z
         else:            into += z
@@ -685,7 +691,7 @@ class SecPotential(PotentialFunction):
     def __init__(self): pass
     def value(self, x): return secant(x)
     def jacobian(self, x, into=None):
-        x = flattest(x)[None]
+        x = flattest(x)
         z = sps.diags(secant(x)*tangent(x))
         if into is None: into =  z
         else:            into += z
@@ -698,7 +704,7 @@ class CscPotential(PotentialFunction):
     def __init__(self): pass
     def value(self, x): return cosecant(x)
     def jacobian(self, x, into=None):
-        x = flattest(x)[None]
+        x = flattest(x)
         z = sps.diags(-cosecant(x)*cotangent(x))
         if into is None: into =  z
         else:            into += z
@@ -711,7 +717,7 @@ class CotPotential(PotentialFunction):
     def __init__(self): pass
     def value(self, x): return cotangent(x)
     def jacobian(self, x, into=None):
-        x = flattest(x)[None]
+        x = flattest(x)
         if into is None: into =  -cosecant(x)**2
         else:            into += -cosecant(x)**2
         return into
@@ -918,13 +924,14 @@ class PotentialPiecewise(PotentialFunction):
         n = len(params)
         ii = np.arange(n)
         res = np.zeros(n)
-        for ((mn,mx), f) in self.pices_with_default:
+        for ((mn,mx), f) in self.pieces_with_default:
             if len(ii) == 0: break
-            k = np.where((x >= mn) & (x <= mx))[0]
+            k = np.where((params >= mn) & (params <= mx))[0]
             if len(k) == 0: continue
             kk = ii[k]
-            res[kk] = f.value(params[kk])
+            res[kk] = f.value(params[k])
             ii = np.delete(ii, k)
+            params = np.delete(params, k)
         return res
     def jacobian(self, params, into=None):
         params = flattest(params)
@@ -933,18 +940,50 @@ class PotentialPiecewise(PotentialFunction):
         (rs,cs,zs) = ([],[],[])
         for ((mn,mx), f) in self.pieces_with_default:
             if len(ii) == 0: break
-            k = np.where((x >= mn) & (x <= mx))[0]
+            k = np.where((params >= mn) & (params <= mx))[0]
             if len(k) == 0: continue
             kk = ii[k]
-            j = f.jacobian(params[kk])
+            j = f.jacobian(params[k])
             if j.shape[0] == 1 and j.shape[1] > 1: j = repmat(j, j.shape[1], 1)
             for (us,ju) in zip([rs,cs,zs], sps.find(j)): us.append(ju)
             ii = np.delete(ii, k)
+            params = np.delete(params, k)
         (rs,cs,zs) = [np.concatenate(us) for us in (rs,cs,zs)]
-        dz = sps.csr_matrix((xs, (rs,cs)), shape=(n,n))
+        dz = sps.csr_matrix((zs, (rs,cs)), shape=(n,n))
         if into is None: into =  dz
         else:            into += dz
         return into
+def piecewise(dflt, *spec):
+    '''
+    piecewise(g, ((mn1, mx1), f1), ((mn2, mx2), f2), ...) yields a potential function f(x) that, for
+      each value x[i] in x, calculate y[i] = f1(x[i]) if mn1 <= x[i] <= mx1 else f2(x[i]) if mn2 <=
+      x[i] <= mx2 else ... else g(x[i]).
+
+    The ((mn,mx), f) may alternately be specified (mn,mx,f).
+    '''
+    return PotentialPiecewise(dflt, *spec)
+def cos_well(f=Ellipsis, width=np.pi, offset=0, scale=1):
+    '''
+    cos_well() yields a potential function g(x) that calculates 0.5*(1 - cos(x)) for -pi/2 <= x
+      <= pi/2 and is 1 outside of that range.
+    
+    The full formulat of the cosine well is, including optional arguments:
+      scale / 2 * (1 - cos((x - offset) / (width/pi)))
+
+    The following optional arguments may be given:
+      * width (default: pi) specifies that the frequency of the cos-curve should be pi/width; the
+        width is the distance between the points on the cos-curve with the value of 1.
+      * offset (default: 0) specifies the offset of the minimum value of the coine curve on the
+        x-axis.
+      * scale (default: 1) specifies the height of the cosine well.
+    '''
+    f = to_potential(f)
+    freq = np.pi/width
+    (xmn,xmx) = (offset - width/2, offset + width/2)
+    F = piecewise(scale, ((xmn,xmx), scale/2 * (1 - cos(freq * (identity - offset)))))
+    if   is_const_potential(f):    return const_potential(F.value(f.c))
+    elif is_identity_potential(f): return F
+    else:                          return compose(F, f)
 @pimms.immutable
 class TriangleSignedArea2DPotential(PotentialFunction):
     '''
