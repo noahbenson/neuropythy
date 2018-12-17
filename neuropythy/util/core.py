@@ -200,8 +200,7 @@ def is_address(data):
     is_address(addr) yields True if addr is a valid address dict for addressing positions on a mesh
       or in a cortical sheet and False otherwise.
     '''
-    return (isinstance(data, dict) and 'faces' in data and 'coordinates' in data)
-
+    return (pimms.is_map(data) and 'faces' in data and 'coordinates' in data)
 def address_data(data, dims=None, surface=0.5, strict=True):
     '''
     address_data(addr) yields the tuple (faces, coords) of the address data where both faces and
@@ -532,6 +531,26 @@ def power(a,b):
     '''
     (a,b) = unbroadcast(a,b)
     return cpower(a,b)
+def inner(a,b):
+    '''
+    inner(a,b) yields the dot product of a and b, doing so in a fashion that respects sparse
+      matrices when encountered. This does not error check for bad dimensionality.
+
+    If a or b are constants, then the result is just the a*b; if a and b are both vectors or both
+    matrices, then the inner product is dot(a,b); if a is a vector and b is a matrix, this is
+    equivalent to as if a were a matrix with 1 row; and if a is a matrix and b a vector, this is
+    equivalent to as if b were a matrix with 1 column.
+    '''
+    if   sps.issparse(a): return a.dot(b)
+    else: a = np.asarray(a)
+    if len(a.shape) == 0: return a*b
+    if sps.issparse(b):
+        if len(a.shape) == 1: return b.T.dot(a)
+        else:                 return b.T.dot(a.T)
+    else: b = np.asarray(b)
+    if len(b.shape) == 0: return a*b
+    if len(a.shape) == 1 and len(b.shape) == 2: return np.dot(b.T, a)
+    else: return np.dot(a,b)
 def sine(x):
     '''
     sine(x) is equivalent to sin(x) except that it also works on sparse arrays.
