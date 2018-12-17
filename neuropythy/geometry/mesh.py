@@ -14,12 +14,13 @@ import nibabel                      as nib
 import nibabel.freesurfer.mghformat as fsmgh
 import pyrsistent                   as pyr
 import collections                  as colls
-import sys, six, types, logging, pimms
+import sys, six, types, logging, warnings, pimms
 
 from .util  import (triangle_area, triangle_address, alignment_matrix_3D, rotation_matrix_3D,
                     cartesian_to_barycentric_3D, cartesian_to_barycentric_2D,
                     barycentric_to_cartesian, point_in_triangle)
-from ..util import (ObjectWithMetaData, to_affine, zinv, is_image, address_data)
+from ..util import (ObjectWithMetaData, to_affine, zinv, is_image, is_address, address_data, curry,
+                    curve_spline, CurveSpline)
 from ..io   import (load, importer)
 from functools import reduce
 
@@ -2364,7 +2365,271 @@ class Topology(VertexSet):
                              pre_affine=pre_affine, post_affine=post_affine)
         return proj(self, tag=tag)
 
+####################################################################################################
+# Curves, Loops, and Regions on the cortical surface
+@pimms.immutable
+class Path(ObjectWithMetaData):
+    '''
+    Path is a pimms immutable class that tracks curves or loops projected along a specific topology
+    or cortex. A single path is defined in terms of a source topology/cortex (or map or mesh) and a
+    set of ordered addresses within the given object. The addresses should include every point that
+    is both on the path and is either a mesh vertex or a point along a mesh edge.
 
+    To create a Path object, it is generally encourated that one use the path() function instead of
+    the Path() constructor.
+    '''
+    def __init__(self, surface, addrs, meta_data=None):
+        ObjectWithMetaData.__init__(self, meta_data)
+        self.surface   = surface
+        self.addresses = addrs
+    @pimms.param
+    def surface(s):
+        '''
+        path.surface is the surface mesh or topology on which the path is drawn.
+        '''
+        if isinstance(s, Topology) or isinstance(s, Mesh): return s.persist()
+        else: raise ValueError('path surface must be a topology or a mesh')
+    @pimms.param
+    def addresses(addrs):
+        '''
+        path.addresses is the address map of the points in the curve.
+        '''
+        if not is_address(addrs): raise ValueError('addresses must be a valid address structure')
+        return pimms.persist(addrs)
+    @staticmethod
+    def addresses_to_coordinates(surface, addresses):
+        '''
+        Path.addresses_to_coordinates(surface, addresses) yields the 3 x n coordinate matrix of the
+        points represented in addresses along the given surface.
+        '''
+        x = surface.unaddress(addresses)
+        x.setflags(write=False)
+        return x
+    @pimms.value
+    def closed(addresses):
+        '''
+        path.closed is True if, for the given path, the first and last points of the path are in the
+        same face; otherwise, it is False. Empty curves are considered open, but are given a value
+        of None. Note that a path of 1 point is considered closed, as is any path that lies entirely
+        inside of a triangle.
+
+        Paths that are closed 
+        '''
+        faces = address_data(addresses)[0]
+        if faces is None: return None
+        f0 = faces[:,0]
+        f1 = faces[:,1]
+        return any(np.array_equal(f0, np.roll(f1, k)) for k in range(3))
+    @pimms.value
+    def coordinates(surface, addresses):
+        '''
+        path.coordinates is, if path.surface is a mesh, a (3 x n) matrix of coordinates of the
+        points in the path along the surface of path.surface, such that the path exactly follows the
+        mesh. If path.surface is a topology, then this is a lazy-map of coordinate matrices with the
+        same keys as path.surface.surfaces.
+        '''
+        if isinstance(surface, Mesh): return addresses_to_coordinates(surface, addresses)
+        surfs = surface.surfaces
+        fn = lambda k: Path.addresses_to_coordinates(surfs[k], addresses)
+        return pimms.lazy_map({k:curry(fn, k) for k in six.iterkeys(surfs)})
+    @pimms.value
+    def length(coordinates, closed):
+        '''
+        path.length, if path.surface is a mesh, is the length of the given path along its mesh. If
+        path.surface is a topology, path.length is a lazy map whose keys are the surface names and
+        whose values are the lengths of the path along the respective surface.
+        '''
+        x = coordinates
+        if pimms.is_map(coordinates):
+            if closed: dfn = lambda k:np.sum(np.sqrt(np.sum((x[k] - np.roll(x[k], -1))**2, axis=0)))
+            else:      dfn = lambda k:np.sum(np.sqrt(np.sum((x[k][:,:-1] - x[k][:,1:])**2, axis=0)))
+            return pimms.lazy_map({k:curry(dfn,k) for k in six.iterkeys(coordinates)})
+        else:
+            if closed: return np.sum(np.sqrt(np.sum((x - np.roll(x, -1))**2, axis=0)))
+            else:      return np.sum(np.sqrt(np.sum((x[:,:-1] - x[:,1:])**2, axis=0)))
+    @pimms.value
+    def edge_weights(addresses, closed):
+        '''
+        path.edge_weights is a tuple of (u, v, wu, wv) where u and v are arrays such that each edge
+        in path.surface that that intersects the given path is given by one of the (u[i],v[i]), and
+        the relative distancea along the path is specified by the arrays of weights, wu and wv. If
+        the given path is closed, then for each edge, one weight will be > 0.5 and one weight will
+        be smaller; the relative position of 0.5 exactly specifies the relative distance along the
+        edge that the intersection occurs. If the given path is not closed, then wu[i] + wv[i] will
+        equal 0.5 instead of equalling 1.
+        '''
+        # walk along the address points...
+        (faces, coords) = address_data(addresses)
+        coords = np.vstack([coords, [1 - np.sum(coords, axis=0)]])
+        n = faces.shape[1]
+        (u,v,wu,wv) = ([],[],[],[])
+        for (ii,f,w) in zip(range(n), faces.T, coords.T):
+            zs = np.isclose(w,0)
+            nz = 3 - np.sum(zs)
+            #  nz == 0: inside the triangle--no crossings
+            if nz == 1: # exact crossing on a vertex
+                vtx = f[~zs][0]
+                for q in [u,v]:   q.append(vtx)
+                for q in [wu,wv]: q.append(0.5)
+            elif nz == 2: # crossing an edge
+                k = [0,1] if zs[2] else [1,2] if zs[0] else [2,0]
+                (uu,vv) = f[k]
+                for (q,qq) in zip([u,v],   f[k]): q.append(qq)
+                for (q,qq) in zip([wu,wv], w[k]): q.append(qq)
+            else: warnings.warn('address contained all-zero weights')
+        if not closed: (wu,wv) = [np.asarray(w) * 0.5 for w in (wu,wv)]
+        return tuple(map(pimms.imm_array, (u,v,wu,wv)))
+    @pimms.value
+    def label(surface, edge_weights, closed):
+        '''
+        path.label is either None if the given path is not a closed path or an array of values, one 
+        per vertex in path.surface (i.e., a surface property), between 0 and 1 that specifies which
+        vertices are inside the closed path and which are outside of it. The specific values will
+        always be 1 for any vertex inside the area, 0 for any vertex outside the area, and a number
+        between 0 and 1 for vertices that are adjacent to the boundary (i.e., the path intersects
+        the vertex or one of its adjacent edges). For a given edge (u,v) that intersects the path,
+        the label values of u and v (lu and lv) will be such that the exact position of the edge
+        intersection with the path, for vertex positions xu and xv, is given by:
+        (lu*xu + lv*xv) / (lu + lv)
+        As a simple course measure, the value of (path.label >= 0.5) is a boolean property that is
+        true for all the vertices inside the closed path.
+        The inside of a label is always determined by the side of the label that contains the fewest
+        vertices.
+        '''
+        # if not closed, this is None
+        if not closed: return None
+        # we only need the tesselation...
+        tess = surface.tess
+        # we know from addresses where the intersections are freom edge_weights
+        (u,v,wu,wv) = edge_weights
+        others = np.setdiff1d(tess.labels, np.union1d(u,v))
+        # we're going to minimize the values of the vertices based on a couple simple properties
+        from neuropythy.optimize import opt
+        X = opt.identity
+        # (1) the vertices in u and in v should imply centers as close-as-possible as those given in
+        #     edge_weights
+        f1 = opt.sum((X[u] - wu)**2) + opt.sum((X[v] - wv)**2)
+        # (2) the u + v values should add up to 1 or 0.5 depending whether the path is closed; we
+        #     give this extra weight to keep things valid
+        addval = 1 if close else 0.5
+        f2 = 4*opt.sum(((X[u] + X[v]) - addval)**2)
+        # (3) all vertices other than those in u and v should be as close as possible to 0 or 1
+        f3 = opt.piecewise(1, ((-0.5, 0.5), opt.sin(np.pi * X[others])**2))
+        # (4) all edges not in u or v should have similar values for both vertices
+        (allu,allv) = tess.edges
+        uv = np.union1d(u, v)
+        ie = np.where(~(np.isin(allu, uv) | np.isin(allv, uv)))[0]
+        f4 = opt.sum((X[allu[ie]] - X[allv[ie]])**2)
+        # we add these up and minimize
+        f = f1 + f2 + f3 + f4
+        w = f.argmin()
+        w = w.chop()
+        w[w < 0] = 0
+        w[w > 1] = 1
+        w.setflags(write=False)
+        return w
+@pimms.immutable
+class PathTrace(ObjectWithMetaData):
+    '''
+    PathTrace is a pimms immutable class that tracks curves or loops drawn on the cortical surface;
+    a path trace is distinct from a path in that a trace specifies a path on a particular map
+    projection without specifying the actual points along a topology. A path, on the other hand,
+    reifies a path trace by finding all the intersections of the lines of the trace with the the
+    edges of the native mesh of the topology.
+    
+    A path trace object stores a map projection and a set of points on the map projection that
+    specify the path.
+
+    To create a PathTrace object, it is generally encouraged that one use the path_trace function
+    rather than the PathTrace() constructor.
+    '''
+    def __init__(self, map_projection, pts, closed=False, meta_data=None):
+        ObjectWithMetaData.__init__(self, meta_data)
+        self.map_projection = map_projection
+        self.curve          = pts
+        self.closed         = closed
+    @pimms.option(None)
+    def map_projection(mp):
+        if not isinstance(mp, MapProjection):
+            raise ValueError('trace map_projection must be a MapProjection or None')
+        return mp.persist()
+    @pimms.param
+    def points(x):
+        '''
+        trace.points is a either the coordinate matrix of the traced points represented by the given
+        trace object or is the curve-spline object that represents the given path trace.
+        '''
+        if isinstance(x, CurveSpline): return x.persist()
+        x = np.asarray(x)
+        if not pimms.is_matrix(x, 'number'): return ValueError('trace points must be a matrix')
+        if x.shape[0] != 2: x = x.T
+        if x.shape[0] != 2: raise ValueError('trace points must be 2D')
+        if x.flags['WRITEABLE']: x = pimms.imm_array(x)
+        return x
+    @pimms.param
+    def closed(c):
+        '''
+        trace.closed is True if trace is a closed trace and False otherwise.
+        '''
+        return bool(c)
+    @pimms.value
+    def curve(points, closed):
+        '''
+        trace.curve is the curve-spline object that represents the given path-trace.
+        '''
+        if isinstance(points, CurveSpline):
+            if closed != bool(points.periodic): return points
+            else: return points.copy(periodic=closed)
+        # default order to use is 0 for a trace
+        return curve_spline(points[0], points[1], order=1, periodic=closed).persist()
+    def to_path(obj):
+        '''
+        trace.to_path(subj) yields a path reified on the given subject's cortical surface; the
+          returned value is a Path object.
+        trace.to_path(topo) yields a path reified on the given topology/cortex object topo.
+        trace.to_path(mesh) yields a path reified on the given spherical mesh.
+        '''
+        # make a flat-map of whatever we've been given...
+        if isinstance(obj, Mesh) and obj.coordinates.shape[0] == 2: fmap = obj
+        else: fmap = self.map_projection(obj) 
+        # we are doing this in 2D
+        fmap = self.map_projection(obj)
+        cids = fmap.container(self.poits)
+        pts = self.curve.coordinates.T
+        if self.closed: pts = np.concatenate([pts, [pts[0]]])
+        allpts = []
+        for ii in range(len(pts) - 1):
+            allpts.append([pts[ii]])
+            ipts = ny.geometry.segment_intersection_2D(
+                crv.coordinates[:,[ii,ii+1]].T,
+                fmap.edge_coordinates)
+            ipts = np.transpose(ipts)
+            allpts.append(ipts[np.isfinite(ipts[:,0])])
+        if not self.closed: allpts.append([pts[-1]])
+        allpts = np.concatenate(allpts)
+        idcs = []
+        ds = np.sqrt(np.sum((allpts[:-1] - allpts[1:])**2, axis=1))
+        for ii in range(len(allpts) - 1):
+            if np.isclose(ds[ii], 0): continue
+            idcs.append(ii)
+        allpts = allpts[idcs]
+        # okay, we have the points--address them and make a path
+        addrs = obj.address(allpts)
+        return Path(obj, addrs, closed=self.closed, meta_data={'source_trace': self})
+def trace(map_projection, pts, closed=False, meta_data=None):
+    '''
+    trace(proj, points) yields a path-trace object that represents the given path of points on the
+      given map projection proj.
+    
+    The following options may be given:
+      * closed (default: False) specifies whether the points form a closed loop. If they do form
+        such a loop, the points should be given in the same ordering (counter-clockwise or
+        clockwise) that mesh vertices are given in; usually counter-clockwise.
+      * meta_data (default: None) specifies an optional additional meta-data map to append to the
+        object.
+    '''
+    return Trace(map_projection, pts, closed=closed, meta_data=meta_data)
+        
 ####################################################################################################
 # Some Functions that deal with converting to/from the above classes
 
@@ -2427,7 +2692,7 @@ def load_gifti(filename, to='auto'):
     The optional argument to may be used to coerce the resulting data to a particular format; the
     following arguments are understood:
       * 'auto' currently returns the nibabel data structure.
-      * 'mesh' returns the data as a mesh, assuming that there are two darray elements stored in the,
+      * 'mesh' returns the data as a mesh, assuming that there are two darray elements stored in the
         gifti file, the first of which must be a coordinate matrix and a triangle topology.
       * 'coordinates' returns the data as a coordinate matrix.
       * 'tesselation' returns the data as a tesselation object.
@@ -2479,3 +2744,5 @@ def load_gifti(filename, to='auto'):
             (cor,tri) = (tri,cor)
         # okay, try making it:
         return Mesh(tri, cor)
+    else: raise ValueError('option "to" given to load_gift could not be understood')
+
