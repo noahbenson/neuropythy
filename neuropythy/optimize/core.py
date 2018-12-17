@@ -15,7 +15,7 @@ from   functools         import reduce
 from   ..                import geometry as geo
 from   ..                import mri      as mri
 from   ..util            import (numel, rows, part, hstack, vstack, repmat, flatter, flattest,
-                                 times, plus, minus, zdivide, zinv, power, ctimes, cpower,
+                                 times, plus, minus, zdivide, zinv, power, ctimes, cpower, inner,
                                  sine, cosine, tangent, cosecant, secant, cotangent)
 from   ..geometry        import (triangle_area)
 
@@ -64,34 +64,6 @@ def finto(x, ii, n, null=0):
     u = np.zeros(sh, dtype=x.dtype) if null == 0 else np.full(sh, null, dtype=x.dtype)
     u[ii] = x
     return u
-def fdot(a,b,s=None):
-    '''
-    fdot(a,b) yields the dot product of a and b, doing so in a fashion that respects sparse matrices
-      when encountered. This does not error check for bad dimensionality.
-    fdot(a,b,shape) yields the dot product of a and b, interpreting vectors as either rows or
-      columns in such a way that the shape of the resulting output is equal to shape. If this cannot
-      be done, an exception is raised. 
-    '''
-    if s is None:
-        if sps.issparse(a): return a.dot(b)
-        elif sps.issparse(b): return b.T.dot(a.T).T
-        else: return np.dot(a,b)
-    else:
-        a = a if sps.issparse(a) else np.squeeze(a)
-        b = b if sps.issparse(b) else np.squeeze(b)
-        sa = a.shape
-        sb = b.shape
-        (la,lb,ls) = [len(x) for x in (sa,sb,s)]
-        if la == 0 or lb == 0:   z = fdot(a,b,None)
-        elif la == 2 or lb == 2: z = fdot(a,b,None)
-        elif la != 1 or lb != 1: raise ValueError('dot only works with tensor rank <= 2')
-        elif ls == 0:            return np.dot(a,b)
-        elif ls == 2:            z = fdot(np.expand_dims(a,-1), np.expand_dims(a,0))
-        else: raise ValueError('dot: cannot turn %s * %s into %s' % (sa,sb,s))
-        if z.shape == s: return z
-        elif ls == 0 and z.shape == (1,1): return z[0,0]
-        elif ls == 1 and s[0] == numel(z): return (z.toarray() if sps.issparse(z) else z).reshape(s)
-        else: raise ValueError('dot: cannot turn %s * %s into %s' % (sa,sb,s))
 
 # Potential Functions ##############################################################################
 @six.add_metaclass(abc.ABCMeta)
@@ -351,8 +323,8 @@ class PotentialComposition(PotentialFunction):
         dzh = self.h.jacobian(params)
         zg  = self.g.value(zh)
         dzg = self.g.jacobian(zh)
-        if into is None: into =  fdot(dzg, dzh)
-        else:            into += fdot(dzg, dzh)
+        if into is None: into =  inner(dzg, dzh)
+        else:            into += inner(dzg, dzh)
         return into
 def compose(*args):
     '''
@@ -402,7 +374,7 @@ def part(f, ii):
       f(x[ii]).
     '''
     f = to_potential(f)
-    if is_const_potential(f): return ConstantPotential(f.c[ii])
+    if is_const_potential(f): return PotentialConstant(f.c[ii])
     else:                     return compose(PotentialPart(ii), to_potential(f))
 @pimms.immutable
 class PotentialPlusPotential(PotentialFunction):
@@ -535,11 +507,11 @@ class ConstantPowerPotential(PotentialFunction):
         return into
 def exp(x):
     x = to_potential(x)
-    if is_const_potential(x): return ConstantPotential(np.exp(x.c))
+    if is_const_potential(x): return PotentialConstant(np.exp(x.c))
     else:                     return ConstantPowerPotential(np.e, x)
 def exp2(x):
     x = to_potential(x)
-    if is_const_potential(x): return ConstantPotential(np.exp2(x.c))
+    if is_const_potential(x): return PotentialConstant(np.exp2(x.c))
     else:                     return ConstantPowerPotential(2.0, x)
 @pimms.immutable
 class PotentialPowerPotential(PotentialFunction):
@@ -571,7 +543,7 @@ def power(x,y):
     if xc and yc: return PotentialPowerPotential(x,   y)
     elif xc:      return ConstantPowerPotential( x.c, y)
     elif yc:      return PotentialPowerConstant( x,   y.c)
-    else:         return ConstantPotential(power(x.c, y.c))
+    else:         return PotentialConstant(power(x.c, y.c))
 def sqrt(x): return power(x, 0.5)
 def cbrt(x): return power(x, 1.0/3.0)
 @pimms.immutable
@@ -605,11 +577,11 @@ def log(x, base=None):
     x = to_potential(x)
     xc = is_const_potential(x)
     if base is None:
-        if xc: return ConstantPotential(np.log(x.c))
+        if xc: return PotentialConstant(np.log(x.c))
         else:  return PotentialLog(x)
     base = to_potential(base)
     bc = is_const_potential(base)
-    if xc and bc: return ConstantPotential(np.log(x.c, b.c))
+    if xc and bc: return PotentialConstant(np.log(x.c, b.c))
     else:         return PotentialLog(x, b)
 def log2(x):  return log(x, 2)
 def log10(x): return log(x, 10)
@@ -642,8 +614,65 @@ def sum(x, weights=None):
     sum(x, weights=w) uses the given weights to produce a weighted sum.
     '''
     x = to_potential(x)
-    if is_const_potential(x): return ConstantPotential(np.sum(x.c))
+    if is_const_potential(x): return PotentialConstant(np.sum(x.c))
     else:                     return PotentialSum(x, weights=weights)
+@pimms.immutable
+class DotPotential(PotentialFunction):
+    '''
+    DotPotential is a potential function that represents the dot product of two functions.
+    '''
+    def __init__(self, g, h, g_shape=None, h_shape=None):
+        self.g = g
+        self.h = h
+        self.g_shape = g_shape
+        self.h_shape = h_shape
+    @pimms.param
+    def g(g0): return to_potential(g0)
+    @pimms.param
+    def h(h0): return to_potential(h0)
+    @pimms.param
+    def g_shape(gs):
+        if gs is None: return None
+        gs = tuple(gs)
+        if   len(gs) < 2:  return None
+        #elif len(gs) == 2: return gs
+        else: raise ValueError('dot supports only scalars, vectors, and (soon) matrices')
+    @pimms.param
+    def h_shape(hs):
+        if hs is None: return None
+        hs = tuple(hs)
+        if   len(hs) < 2:  return None
+        #elif len(hs) == 2: return hs
+        else: raise ValueError('dot supports only scalars, vectors, and (soon) matrices')
+    def value(self, params):
+        g = self.g.value(params)
+        h = self.h.value(params)
+        g = np.reshape(g, self.g_shape) if self.g_shape else flattest(g)
+        h = np.reshape(h, self.h_shape) if self.h_shape else flattest(h)
+        return flattest(inner(g, h))
+    def jacobian(self, params, into=None):
+        g = self.g.value(params)
+        h = self.h.value(params)
+        g = np.reshape(g, self.g_shape) if self.g_shape else flattest(g)
+        h = np.reshape(h, self.h_shape) if self.h_shape else flattest(h)
+        dg = self.g.jacobian(params)
+        dh = self.h.jacobian(params)
+        gvec = self.g_shape is None
+        hvec = self.h_shape is None
+        if gvec == hvec:
+            if gvec: return np.sum(g*dh + h*dg)
+        # one or both are matrices
+        raise NotImplementedError('matrix x matrix dot products not yet supported')
+def dot(a, b, ashape=None, bshape=None):
+    '''
+    dot(a,b) yields a potential function that represents the dot product of a and b.
+
+    Currently only vector and scalars are allowed.
+    '''
+    a = to_potential(a)
+    b = to_potential(b)
+    if is_const_potential(a) and is_const_potential(b): return PotentialConstant(np.dot(a.c, b.c))
+    else: return DotPotential(a, b, g_shape=ashape, h_shape=bshape)
 @pimms.immutable
 class CosPotential(PotentialFunction):
     '''
@@ -723,32 +752,32 @@ class CotPotential(PotentialFunction):
         return into
 def cos(x):
     x = to_potential(x)
-    if is_const_potential(x): return ConstantPotential(cosine(x.c))
+    if is_const_potential(x): return PotentialConstant(cosine(x.c))
     elif x is identity:       return CosPotential()
     else:                     return compose(CosPotential(), x)
 def sin(x):
     x = to_potential(x)
-    if is_const_potential(x): return ConstantPotential(sine(x.c))
+    if is_const_potential(x): return PotentialConstant(sine(x.c))
     elif x is identity:       return SinPotential()
     else:                     return compose(SinPotential(), x)
 def tan(x):
     x = to_potential(x)
-    if is_const_potential(x): return ConstantPotential(tangent(x.c))
+    if is_const_potential(x): return PotentialConstant(tangent(x.c))
     elif x is identity:       return TanPotential()
     else:                     return compose(TanPotential(), x)
 def sec(x):
     x = to_potential(x)
-    if is_const_potential(x): return ConstantPotential(secant(x.c))
+    if is_const_potential(x): return PotentialConstant(secant(x.c))
     elif x is identity:       return SecPotential()
     else:                     return compose(SecPotential(), x)
 def csc(x):
     x = to_potential(x)
-    if is_const_potential(x): return ConstantPotential(cosecant(x.c))
+    if is_const_potential(x): return PotentialConstant(cosecant(x.c))
     elif x is identity:       return CscPotential()
     else:                     return compose(CscPotential(), x)
 def cot(x):
     x = to_potential(x)
-    if is_const_potential(x): return ConstantPotential(cotangent(x.c))
+    if is_const_potential(x): return PotentialConstant(cotangent(x.c))
     elif x is identity:       return CotPotential()
     else:                     return compose(CotPotential(), x)
 @pimms.immutable
@@ -822,17 +851,17 @@ class ArcTan2Potential(PotentialFunction):
         return into
 def asin(x):
     x = to_potential(x)
-    if is_const_potential(x): return ConstantPotential(arcsine(x.c))
+    if is_const_potential(x): return PotentialConstant(arcsine(x.c))
     elif x is identity:       return ArcSinPotential()
     else:                     return compose(ArcSinPotential(), x)
 def acos(x):
     x = to_potential(x)
-    if is_const_potential(x): return ConstantPotential(arccosine(x.c))
+    if is_const_potential(x): return PotentialConstant(arccosine(x.c))
     elif x is identity:       return ArcCosPotential()
     else:                     return compose(ArcCosPotential(), x)
 def atan(x):
     x = to_potential(x)
-    if is_const_potential(x): return ConstantPotential(arctangent(x.c))
+    if is_const_potential(x): return PotentialConstant(arctangent(x.c))
     elif x is identity:       return ArcTanPotential()
     else:                     return compose(ArcTanPotential(), x)
 def atan2(y,x): return ArcTan2Potential(y, x)
@@ -851,7 +880,7 @@ def row_norms(ii, f=Ellipsis, squared=False):
     if is_const_potential(f):
         q = flattest(f.c)
         q = np.sum([q[i]**2 for i in ii.T], axis=0)
-        return ConstantPotential(q if squared else np.sqrt(q))
+        return PotentialConstant(q if squared else np.sqrt(q))
     F = reduce(lambda a,b: a + b, [part(Ellipsis, col)**2 for col in ii.T])
     F = compose(F, f)
     if not squared: F = sqrt(F)
@@ -871,7 +900,7 @@ def col_norms(ii, f=Ellipsis, squared=False):
     if is_const_potential(f):
         q = flattest(f.c)
         q = np.sum([q[i]**2 for i in ii], axis=0)
-        return ConstantPotential(q if squared else np.sqrt(q))
+        return PotentialConstant(q if squared else np.sqrt(q))
     F = reduce(lambda a,b: a + b, [part(Ellipsis, col)**2 for col in ii])
     F = compose(F, f)
     if not squared: F = sqrt(F)
@@ -984,6 +1013,78 @@ def cos_well(f=Ellipsis, width=np.pi, offset=0, scale=1):
     if   is_const_potential(f):    return const_potential(F.value(f.c))
     elif is_identity_potential(f): return F
     else:                          return compose(F, f)
+def gaussian(f=Ellipsis, mu=0, sigma=1, scale=1, invert=False, normalize=False):
+    '''
+    gaussian() yields a potential function f(x) that calculates a Gaussian function over x; the
+      formula used is given below.
+    gaussian(g) yields a function h(x) such that, if f(x) is yielded by gaussian(), h(x) = f(g(x)).
+
+    The formula employed by the Gaussian function is as follows, with mu, sigma, and scale all being
+    parameters that one can provide via optional arguments:
+      scale * exp(0.5 * ((x - mu) / sigma)**2)
+    
+    The following optional arguments may be given:
+      * mu (default: 0) specifies the mean of the Gaussian.
+      * sigma (default: 1) specifies the standard deviation (sigma) parameger of the Gaussian.
+      * scale (default: 1) specifies the scale to use.
+      * invert (default: False) specifies whether the Gaussian should be inverted. If inverted, then
+        the formula, scale * exp(...), is replaced with scale * (1 - exp(...)).
+      * normalize (default: False) specifies whether the result should be multiplied by the inverse
+        of the area under the uninverted and unscaled curve; i.e., if normalize is True, the entire
+        result is multiplied by 1/sqrt(2*pi*sigma**2).
+    '''
+    f = to_potential(f)
+    F = exp(-0.5 * ((f - mu) / sigma)**2)
+    if invert: F = 1 - F
+    F = F * scale
+    if normalize: F = F / (np.sqrt(2.0*np.pi) * sigma)
+    return F
+@pimms.immutable
+class ErfPotential(PotentialFunction):
+    '''
+    ErfPotential is a potential function that represents the error function.
+    '''
+    coef = 2.0 / np.sqrt(np.pi)
+    def __init__(self): pass
+    def value(self, x): return np.erf(flattest(x))
+    def jacobian(self, x, into=None):
+        x = flattest(x)
+        z = ErfPotential.coef * np.exp(-x**2)
+        z = sps.diags(z)
+        if into is None: into =  z
+        else:            into += z
+        return into
+def erf(f=Ellipsis):
+    '''
+    erf(x) yields a potential function that calculates the error function over the input x. If x is
+      a constant, yields a constant potential function.
+    erf() is equivalent to erf(...), which is just the error function, calculated over its inputs.
+    '''
+    f = to_potential(f)
+    if is_const_potential(f): return const_potential(np.erf(f.c))
+    elif is_identity_potential(f): return ErfPotential()
+    else: return compose(ErfPotential(), f)
+def sigmoid(f=Ellipsis, mu=0, sigma=1, scale=1, invert=False, normalize=False):
+    '''
+    sigmoid() yields a potential function that is equivalent to the integral of gaussian(), i.e.,
+      the error function, but scaled to match gaussian().
+    sigmoid(f) is equivalent to compose(sigmoid(), f).
+
+    All options that are accepted by the gaussian() function are accepted by sigmoid() with the same
+    default values and are handled in an equivalent manner with the exception of the invert option;
+    when a sigmoid is inverted, the function approaches its maximum value at -inf and approaches 0
+    at inf.
+
+    Note that because sigmoid() explicitly matches gaussian(), the base formula used is as follows:
+      f(x) = scale * sigma * sqrt(pi/2) * erf((x - mu) / (sqrt(2) * sigma))
+      k*sig*Sqrt[Pi/2] Erf[(x - mu)/sig/Sqrt[2]]
+    '''
+    f = to_potential(f)
+    F = erf((f - mu) / (sigma * np.sqrt(2.0)))
+    if invert: F = 1 - F
+    F = np.sqrt(np.pi / 2) * scale * F
+    if normalize: F = F / (np.sqrt(2.0*np.pi) * sigma)
+    return F
 @pimms.immutable
 class TriangleSignedArea2DPotential(PotentialFunction):
     '''
