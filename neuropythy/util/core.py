@@ -546,7 +546,7 @@ def inner(a,b):
     if len(a.shape) == 0: return a*b
     if sps.issparse(b):
         if len(a.shape) == 1: return b.T.dot(a)
-        else:                 return b.T.dot(a.T)
+        else:                 return b.T.dot(a.T).T
     else: b = np.asarray(b)
     if len(b.shape) == 0: return a*b
     if len(a.shape) == 1 and len(b.shape) == 2: return np.dot(b.T, a)

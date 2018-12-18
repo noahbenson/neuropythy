@@ -133,7 +133,7 @@ class PotentialFunction(object):
           additional options are passed along to scipy.optimize.minimize.
         '''
         x0 = np.asarray(x0)
-        kwargs = pimms.merge({'jac':self.jac(), 'method':'BFGS'}, kwargs)
+        kwargs = pimms.merge({'jac':self.jac(), 'method':'CG'}, kwargs)
         res = spopt.minimize(self.fun(), x0.flatten(), **kwargs)
         res.x = np.reshape(res.x, x0.shape)
         return res
@@ -363,7 +363,7 @@ class PotentialPart(PotentialFunction):
         jm = self.jacobian_matrix
         if jm.shape[1] != len(params):
             jm = jm.copy()
-            jm.reshape((j.shape[0], len(params)))
+            jm.resize((jm.shape[0], len(params)))
         if into is None: into =  jm
         else:            into += jm
         return into
