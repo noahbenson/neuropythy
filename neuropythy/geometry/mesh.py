@@ -18,9 +18,10 @@ import sys, six, types, logging, warnings, pimms
 
 from .util  import (triangle_area, triangle_address, alignment_matrix_3D, rotation_matrix_3D,
                     cartesian_to_barycentric_3D, cartesian_to_barycentric_2D,
+                    segment_intersection_2D,
                     barycentric_to_cartesian, point_in_triangle)
 from ..util import (ObjectWithMetaData, to_affine, zinv, is_image, is_address, address_data, curry,
-                    curve_spline, CurveSpline)
+                    curve_spline, CurveSpline, chop, zdivide, flattest)
 from ..io   import (load, importer)
 from functools import reduce
 
@@ -2463,6 +2464,7 @@ class Path(ObjectWithMetaData):
         coords = np.vstack([coords, [1 - np.sum(coords, axis=0)]])
         n = faces.shape[1]
         (u,v,wu,wv) = ([],[],[],[])
+        (lastf, rev) = (faces[:,-1], False)
         for (ii,f,w) in zip(range(n), faces.T, coords.T):
             zs = np.isclose(w,0)
             nz = 3 - np.sum(zs)
@@ -2473,10 +2475,16 @@ class Path(ObjectWithMetaData):
                 for q in [wu,wv]: q.append(0.5)
             elif nz == 2: # crossing an edge
                 k = [0,1] if zs[2] else [1,2] if zs[0] else [2,0]
-                (uu,vv) = f[k]
+                # see if this is specified in cw or ccw relative to edge
+                rev = len(np.unique([lastf,f]))
+                if   rev == 5: k = list(reversed(k))
+                elif rev == 4:
+                    rev = len(np.unique(np.concatenate([lastf,f[k]])))
+                    if rev == 3: k = list(reversed(k))
                 for (q,qq) in zip([u,v],   f[k]): q.append(qq)
                 for (q,qq) in zip([wu,wv], w[k]): q.append(qq)
-            else: warnings.warn('address contained all-zero weights')
+            elif nz == 0: warnings.warn('address contained all-zero weights')
+            lastf = f
         if not closed: (wu,wv) = [np.asarray(w) * 0.5 for w in (wu,wv)]
         return tuple(map(pimms.imm_array, (u,v,wu,wv)))
     @pimms.value
@@ -2496,38 +2504,31 @@ class Path(ObjectWithMetaData):
         The inside of a label is always determined by the side of the label that contains the fewest
         vertices.
         '''
-        # if not closed, this is None
-        if not closed: return None
         # we only need the tesselation...
         tess = surface.tess
+        n = tess.vertex_count
         # we know from addresses where the intersections are freom edge_weights
         (u,v,wu,wv) = edge_weights
-        others = np.setdiff1d(tess.labels, np.union1d(u,v))
-        # we're going to minimize the values of the vertices based on a couple simple properties
-        from neuropythy.optimize import opt
-        X = opt.identity
-        # (1) the vertices in u and in v should imply centers as close-as-possible as those given in
-        #     edge_weights
-        f1 = opt.sum((X[u] - wu)**2) + opt.sum((X[v] - wv)**2)
-        # (2) the u + v values should add up to 1 or 0.5 depending whether the path is closed; we
-        #     give this extra weight to keep things valid
-        addval = 1 if close else 0.5
-        f2 = 4*opt.sum(((X[u] + X[v]) - addval)**2)
-        # (3) all vertices other than those in u and v should be as close as possible to 0 or 1
-        f3 = opt.piecewise(1, ((-0.5, 0.5), opt.sin(np.pi * X[others])**2))
-        # (4) all edges not in u or v should have similar values for both vertices
-        (allu,allv) = tess.edges
-        uv = np.union1d(u, v)
-        ie = np.where(~(np.isin(allu, uv) | np.isin(allv, uv)))[0]
-        f4 = opt.sum((X[allu[ie]] - X[allv[ie]])**2)
-        # we add these up and minimize
-        f = f1 + f2 + f3 + f4
-        w = f.argmin()
-        w = w.chop()
-        w[w < 0] = 0
-        w[w > 1] = 1
-        w.setflags(write=False)
-        return w
+        same  = np.union1d(u,v)
+        other = np.setdiff1d(tess.labels, same)
+        (q,wq) = [np.concatenate([a,b]) for (a,b) in [(u,v),(wu,wv)]]
+        m = len(q)
+        # for the labels, the u and v have repeats, so we want to average their values
+        mm  = sps.csr_matrix((np.ones(m), (q, np.arange(m))), shape=(n, m))
+        lbl = zdivide(mm.dot(wq), flattest(mm.sum(axis=1)))
+        q   = np.unique(q)
+        wq  = lbl[q]
+        # we crawl across vertices by edges until we find all of them
+        nei  = np.asarray(tess.neighborhoods)
+        unk  = np.full(tess.vertex_count, True, dtype=np.bool)
+        unk[q] = False
+        q = np.unique(v[v != u])
+        while len(q) > 0:
+            q = np.unique([k for neitup in nei[q] for k in neitup]) # get all their neighbors
+            q = q[unk[q]] # only not visited neighbors
+            lbl[q] = 1.0 # they are inside the region now
+            unk[q] = False # now we've visited them
+        return lbl
 @pimms.immutable
 class PathTrace(ObjectWithMetaData):
     '''
@@ -2546,7 +2547,7 @@ class PathTrace(ObjectWithMetaData):
     def __init__(self, map_projection, pts, closed=False, meta_data=None):
         ObjectWithMetaData.__init__(self, meta_data)
         self.map_projection = map_projection
-        self.curve          = pts
+        self.points         = pts
         self.closed         = closed
     @pimms.option(None)
     def map_projection(mp):
@@ -2582,7 +2583,7 @@ class PathTrace(ObjectWithMetaData):
             else: return points.copy(periodic=closed)
         # default order to use is 0 for a trace
         return curve_spline(points[0], points[1], order=1, periodic=closed).persist()
-    def to_path(obj):
+    def to_path(self, obj):
         '''
         trace.to_path(subj) yields a path reified on the given subject's cortical surface; the
           returned value is a Path object.
@@ -2594,18 +2595,22 @@ class PathTrace(ObjectWithMetaData):
         else: fmap = self.map_projection(obj) 
         # we are doing this in 2D
         fmap = self.map_projection(obj)
-        cids = fmap.container(self.poits)
-        pts = self.curve.coordinates.T
+        crv = self.curve
+        cids = fmap.container(crv.coordinates)
+        pts = crv.coordinates.T
         if self.closed: pts = np.concatenate([pts, [pts[0]]])
+        coords = pts.T
         allpts = []
         for ii in range(len(pts) - 1):
             allpts.append([pts[ii]])
-            ipts = ny.geometry.segment_intersection_2D(
-                crv.coordinates[:,[ii,ii+1]].T,
-                fmap.edge_coordinates)
+            seg = coords[:,[ii,ii+1]].T
+            ipts = segment_intersection_2D(seg, fmap.edge_coordinates)
             ipts = np.transpose(ipts)
-            allpts.append(ipts[np.isfinite(ipts[:,0])])
-        if not self.closed: allpts.append([pts[-1]])
+            ipts = ipts[np.isfinite(ipts[:,0])]
+            # sort these by distance along the vector...
+            dists = np.dot(ipts, seg[1] - seg[0])
+            allpts.append(ipts[np.argsort(dists)])
+        allpts.append([pts[-1]])
         allpts = np.concatenate(allpts)
         idcs = []
         ds = np.sqrt(np.sum((allpts[:-1] - allpts[1:])**2, axis=1))
@@ -2614,12 +2619,12 @@ class PathTrace(ObjectWithMetaData):
             idcs.append(ii)
         allpts = allpts[idcs]
         # okay, we have the points--address them and make a path
-        addrs = obj.address(allpts)
-        return Path(obj, addrs, closed=self.closed, meta_data={'source_trace': self})
-def trace(map_projection, pts, closed=False, meta_data=None):
+        addrs = fmap.address(allpts)
+        return Path(obj, addrs, meta_data={'source_trace': self})
+def path_trace(map_projection, pts, closed=False, meta_data=None):
     '''
-    trace(proj, points) yields a path-trace object that represents the given path of points on the
-      given map projection proj.
+    path_trace(proj, points) yields a path-trace object that represents the given path of points on
+      the given map projection proj.
     
     The following options may be given:
       * closed (default: False) specifies whether the points form a closed loop. If they do form
@@ -2628,7 +2633,7 @@ def trace(map_projection, pts, closed=False, meta_data=None):
       * meta_data (default: None) specifies an optional additional meta-data map to append to the
         object.
     '''
-    return Trace(map_projection, pts, closed=closed, meta_data=meta_data)
+    return PathTrace(map_projection, pts, closed=closed, meta_data=meta_data)
         
 ####################################################################################################
 # Some Functions that deal with converting to/from the above classes

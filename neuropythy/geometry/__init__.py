@@ -38,5 +38,5 @@ from .util import (
     tetrahedral_barycentric_coordinates,
     prism_barycentric_coordinates)
 from .mesh import (VertexSet, Tesselation, Mesh, Topology, MapProjection, Path, PathTrace,
-                   trace, to_tess, to_mesh, to_property, to_mask, tkr_vox2ras)
+                   path_trace, to_tess, to_mesh, to_property, to_mask, tkr_vox2ras)
 
