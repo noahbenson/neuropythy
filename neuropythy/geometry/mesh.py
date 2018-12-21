@@ -2407,27 +2407,25 @@ class Path(ObjectWithMetaData):
         x.setflags(write=False)
         return x
     @pimms.value
-    def closed(addresses):
+    def closed(addresses, surface):
         '''
-        path.closed is True if, for the given path, the first and last points of the path are in the
-        same face; otherwise, it is False. Empty curves are considered open, but are given a value
-        of None. Note that a path of 1 point is considered closed, as is any path that lies entirely
-        inside of a triangle.
-
-        Paths that are closed 
+        path.closed is True if, for the given path, the first and last points of the path are in
+        the same face; otherwise, it is False. Empty curves are considered open, but are given a
+        value of None. Note that a path of 1 point is considered closed, as is any path that lies
+        entirely inside of a triangle.
         '''
         faces = address_data(addresses)[0]
         if faces is None: return None
-        f0 = faces[:,0]
-        f1 = faces[:,1]
-        return any(np.array_equal(f0, np.roll(f1, k)) for k in range(3))
+        (f1,f2) = faces.T[[-1,0]]
+        ol = len(np.unique([f1,f2]))
+        return (ol == 3)
     @pimms.value
     def coordinates(surface, addresses):
         '''
         path.coordinates is, if path.surface is a mesh, a (3 x n) matrix of coordinates of the
-        points in the path along the surface of path.surface, such that the path exactly follows the
-        mesh. If path.surface is a topology, then this is a lazy-map of coordinate matrices with the
-        same keys as path.surface.surfaces.
+        points in the path along the surface of path.surface, such that the path exactly follows
+        the mesh. If path.surface is a topology, then this is a lazy-map of coordinate matrices
+        with the same keys as path.surface.surfaces.
         '''
         if isinstance(surface, Mesh): return addresses_to_coordinates(surface, addresses)
         surfs = surface.surfaces
@@ -2442,53 +2440,111 @@ class Path(ObjectWithMetaData):
         '''
         x = coordinates
         if pimms.is_map(coordinates):
-            if closed: dfn = lambda k:np.sum(np.sqrt(np.sum((x[k] - np.roll(x[k], -1))**2, axis=0)))
-            else:      dfn = lambda k:np.sum(np.sqrt(np.sum((x[k][:,:-1] - x[k][:,1:])**2, axis=0)))
+            if closed: dfn = lambda k:np.sum(np.sqrt(np.sum((x[k] - np.roll(x[k], -1))**2,axis=0)))
+            else:      dfn = lambda k:np.sum(np.sqrt(np.sum((x[k][:,:-1] - x[k][:,1:])**2,axis=0)))
             return pimms.lazy_map({k:curry(dfn,k) for k in six.iterkeys(coordinates)})
         else:
             if closed: return np.sum(np.sqrt(np.sum((x - np.roll(x, -1))**2, axis=0)))
             else:      return np.sum(np.sqrt(np.sum((x[:,:-1] - x[:,1:])**2, axis=0)))
     @pimms.value
-    def edge_weights(addresses, closed):
+    def edge_data(addresses, closed):
         '''
-        path.edge_weights is a tuple of (u, v, wu, wv) where u and v are arrays such that each edge
-        in path.surface that that intersects the given path is given by one of the (u[i],v[i]), and
+        path.edge_data is a tuple of (u, v, wu, wv, fs, ps) where u and v are arrays such that each
+        edge in path.surface that intersects the given path is given by one of the (u[i],v[i]), and
         the relative distancea along the path is specified by the arrays of weights, wu and wv. If
         the given path is closed, then for each edge, one weight will be > 0.5 and one weight will
         be smaller; the relative position of 0.5 exactly specifies the relative distance along the
         edge that the intersection occurs. If the given path is not closed, then wu[i] + wv[i] will
-        equal 0.5 instead of equalling 1.
+        equal 0.5 instead of equalling 1.  The final two tuple element, fs and ps, are also tuples
+        the same length as u and v. In fs[i], the face formed by the edges (u[i], v[i]) and
+        (u[i+1], v[i+1]) is given; in ps[i], a tuple of all path point indices (i.e., into the
+        path.addresses data arrays) in order that pass through fs[i] is given. If path is closed,
+        then the final element of ps and fs will wrap around to the beginning of the path;
+        otherwise both will be None. For any instance in which u[i] and v[i] are equal (i.e., the
+        path passes through a vertex), fs[i] will be None and ps[i] will be a tuple containing
+        only the vertex.
+
+        If the path is closed, the the u are always on the inside of the label while the v are
+        always on the outside.
         '''
         # walk along the address points...
         (faces, coords) = address_data(addresses)
         coords = np.vstack([coords, [1 - np.sum(coords, axis=0)]])
         n = faces.shape[1]
-        (u,v,wu,wv) = ([],[],[],[])
-        (lastf, rev) = (faces[:,-1], False)
+        (u,v,wu,wv,fs,ps) = ([],[],[],[], [], [])
+        pcur = []
+        lastf = faces[:, -1] if closed else None
         for (ii,f,w) in zip(range(n), faces.T, coords.T):
+            ff = Ellipsis
             zs = np.isclose(w,0)
-            nz = 3 - np.sum(zs)
-            #  nz == 0: inside the triangle--no crossings
-            if nz == 1: # exact crossing on a vertex
+            nz = np.sum(zs)
+            pcur.append(ii)
+            if nz == 0: # inside the triangle--no crossings
+                lastf = f
+                continue
+            elif nz == 2: # exact crossing on a vertex
                 vtx = f[~zs][0]
                 for q in [u,v]:   q.append(vtx)
                 for q in [wu,wv]: q.append(0.5)
-            elif nz == 2: # crossing an edge
+            elif nz == 1: # crossing an edge
                 k = [0,1] if zs[2] else [1,2] if zs[0] else [2,0]
                 # see if this is specified in cw or ccw relative to edge
-                rev = len(np.unique([lastf,f]))
-                if   rev == 5: k = list(reversed(k))
+                rev = 5 if lastf is None else len(np.unique([lastf, f])) # will be 3, 4, or 5
+                if   rev == 3: k = list(reversed(k))
                 elif rev == 4:
                     rev = len(np.unique(np.concatenate([lastf,f[k]])))
-                    if rev == 3: k = list(reversed(k))
+                    if rev == 4: k = list(reversed(k))
+                vtx = None if len(u) == 0 else np.setdiff1d(f[k], [u[-1],v[-1]])[0]
                 for (q,qq) in zip([u,v],   f[k]): q.append(qq)
                 for (q,qq) in zip([wu,wv], w[k]): q.append(qq)
-            elif nz == 0: warnings.warn('address contained all-zero weights')
+            else: raise ValueError('address contained all-zero weights')
+            if ff is Ellipsis: ff = None if lastf is None or vtx is None else (u[-2], v[-2], vtx)
+            fs.append(ff)
+            ps.append(tuple(pcur))
+            pcur = [ii]
             lastf = f
+        # okay, we need to fix the first/last elements and the fs/ps order: the fs and ps have been
+        # appended *after* the edge that closes the triangle rather than between the opening and
+        # closing edge. The first elements are also incomplete--in a closed loop they should be
+        # joined to the last elements; in an open loop they are discarded and the last element is
+        # set to None
+        if closed:
+            tmp = np.setdiff1d((u[0],v[0]), (u[-1],v[-1]))
+            # might be that we started/ended on a point
+            if len(tmp) == 0:
+                tmp = np.setdiff1d((u[-2],v[-2]), (u[-1],u[-2]))
+                fs[0] = (u[-1],v[-1],tmp[0])
+                ps[0] = tuple(pcur)
+            elif len(tmp) == 1:
+                fs[0] = (u[-1], v[-1], tmp[0])
+                ps[0] = tuple(pcur)[:-1] + ps[0]
+            else: raise ValueError('closed path does not start/end in same face')
+        else:
+            fs[0] = None
+            ps[0] = None
+        fs = np.roll(fs, -1, axis=0)
+        ps = np.roll(ps, -1, axis=0)
         if not closed: (wu,wv) = [np.asarray(w) * 0.5 for w in (wu,wv)]
-        return tuple(map(pimms.imm_array, (u,v,wu,wv)))
+        return tuple(map(pimms.imm_array, (u,v,wu,wv,fs,ps)))
     @pimms.value
-    def label(surface, edge_weights, closed):
+    def intersected_edges(edge_data):
+        '''
+        path.intersected_edges is a (2 x n) matrix of edges that are crossed by the given path in
+        order along the path; each column (u,v) of the returned matrix gives one edge, given in
+        counter-clockwise order relative to path (i.e., u is always inside a closed path or on the
+        left side of an open path).
+        '''
+        return pimms.imm_array([edge_data[0], edge_data[1]])
+    @pimms.value
+    def intersected_edge_indices(edge_data, surface):
+        '''
+        path.intersected_edge_indices is equivalent to to path.intersected_edges except that it
+        stores a list of edge indices instead of a matrix of edges.
+        '''
+        idx = surface.tess.index
+        return pimms.imm_array([idx[(u,v)] for (u,v) in zip(edge_data[0], edge_data[1])])
+    @pimms.value
+    def label(surface, edge_data, closed):
         '''
         path.label is either None if the given path is not a closed path or an array of values, one 
         per vertex in path.surface (i.e., a surface property), between 0 and 1 that specifies which
@@ -2501,14 +2557,14 @@ class Path(ObjectWithMetaData):
         (lu*xu + lv*xv) / (lu + lv)
         As a simple course measure, the value of (path.label >= 0.5) is a boolean property that is
         true for all the vertices inside the closed path.
-        The inside of a label is always determined by the side of the label that contains the fewest
-        vertices.
+        The inside of a label is always determined by the side of the label closed with respect to
+        the left side of a counter-clockwise path.
         '''
         # we only need the tesselation...
         tess = surface.tess
         n = tess.vertex_count
-        # we know from addresses where the intersections are freom edge_weights
-        (u,v,wu,wv) = edge_weights
+        # we know from addresses where the intersections are freom edge_data
+        (u,v,wu,wv) = edge_data[:4]
         same  = np.union1d(u,v)
         other = np.setdiff1d(tess.labels, same)
         (q,wq) = [np.concatenate([a,b]) for (a,b) in [(u,v),(wu,wv)]]
@@ -2522,13 +2578,281 @@ class Path(ObjectWithMetaData):
         nei  = np.asarray(tess.neighborhoods)
         unk  = np.full(tess.vertex_count, True, dtype=np.bool)
         unk[q] = False
-        q = np.unique(v[v != u])
+        q = np.unique(u[v != u])
         while len(q) > 0:
             q = np.unique([k for neitup in nei[q] for k in neitup]) # get all their neighbors
             q = q[unk[q]] # only not visited neighbors
             lbl[q] = 1.0 # they are inside the region now
             unk[q] = False # now we've visited them
         return lbl
+    @pimms.value
+    def minlabel(label):
+        '''
+        path.minlabel is equivalent to path.label if path.label contains fewer or equal to half of
+          the vertices vertices than its
+          complement and is equivalent to 1 - path.label if not.
+        '''
+        ls = np.sum(label[label != 0.5].astype('bool'))
+        return label if ls <= len(label) - ls else pimms.imm_array(1 - label)
+    @pimms.value
+    def maxlabel(minlabel):
+        '''
+        path.maxlabel is equivalent to path.label if path.label contains more vertices than its
+          complement and is equivalent to 1 - path.label if not.
+        '''
+        return pimms.imm_array(1 - minlabel)
+    @pimms.value
+    def contained_faces(surface, label):
+        '''
+        path.contained_faces is a matrix of faces in path.surface that are completely contained
+          by the given path; any face that intersects the path will not be included. Faces are
+          returned in a (3 x n) matrix of vertex labels.
+        '''
+        msk = np.where(label >= 0.5)[0]
+        fs = np.where(np.sum(np.isin(surface.tess.faces, msk), axis=0) == 3)[0]
+        return pimms.imm_array(surface.tess.faces[:,fs])
+    @pimms.value
+    def intersected_faces(edge_data, closed):
+        '''
+        path.intersected_faces is a matrix of faces in path.surface that intersect the given path.
+          Faces are returned in a (3 x n) matrix of vertex labels. Note that faces that intersect
+          the path at a single point are not included (i.e., the path must go through the face).
+
+        All faces in intersected_faces are listed such that path.intersected_edges is equal to the
+        first two rows of of intersected_faces, up to the last column; in other words, the faces
+        are given in order along/around the path, and each face is ordered in the same direction
+        (clockwise or counter-clockwise) as the path with respect to the path.surface outer normal,
+        starting with the two vertices whose edge is crossed.
+        '''
+        res = []
+        uv = np.transpose(edge_data[:2])
+        (u0,v0) = uv[-1] if closed else (np.nan,np.nan)
+        for (u,v) in uv:
+            res.append([u0,v0,np.setdiff1d((u,v), (u0,v0))[0]])
+        res = np.array(res[1:] if not np.isfinite(res[0][0]) else res)
+        res.setflags(write=False)
+        return res
+    class BorderTriangleSplitter(object):
+        '''
+        The Path.BorderTriangleSplitter class performs the splitting of border triangles in a path
+        into inner and outer triangles. It should not be used directly; rather Path objects use it
+        as a tool.
+        '''
+        # these coords are used to reify BC triangles while figuring them out...
+        A = pimms.imm_array([0.0,              0.0])
+        B = pimms.imm_array([1.0/np.sqrt(2.0), 0.0])
+        C = pimms.imm_array([0.0,              1.0/np.sqrt(2.0)])
+        def __init__(self, edge_data, addresses, closed):
+            self.edges  = edge_data[:2]
+            self.faces  = edge_data[4]
+            self.pieces = edge_data[5]
+            (fs, xs) = address_data(addresses)
+            xs = chop(np.vstack([xs, [1.0 - xs[0] - xs[1]]]))
+            self.bc_faces = fs.T
+            self.bc_coords = xs.T
+            self.closed = closed
+        @staticmethod
+        def angle_order(pts, x0, x1=(1,0)): # order of pts around x0 starting at x1
+            '''
+            Given a set of points in the (A,B,C) triangle, yield their indices in order of the
+            angle about point x0 starting with the point x1.
+            '''
+            pts = (np.asarray(pts) - x0).T
+            x1  = np.asarray(x1) - x0
+            rs  = np.sqrt(np.sum(pts**2, axis=0))
+            th0 = np.arctan2(x1[1], x1[0])
+            ths = np.mod(np.arctan2(pts[1], pts[0]) - th0, 2*np.pi)
+            kk  = np.argsort(ths)
+            return np.array([k for k in kk
+                             if not np.isclose(pts[:,k], 0).all()
+                             if not np.isclose(pts[:,k], x1).all()])
+        @staticmethod
+        def scan_face_points(pts):
+            '''
+            scan_face_points(points) splits a single face containing all the given points into
+            left- and right-side sets of faces and returns the barycentric coordinates for these.
+            The given points must be in path order. The points argument must be the barycentric
+            weights on vertices A and B of the triangle.
+            '''
+            # turn all into coords for the calculation
+            (A,B,C) = (Path.BorderTriangleSplitter.A,
+                       Path.BorderTriangleSplitter.B,
+                       Path.BorderTriangleSplitter.C)
+            pts = np.asarray([A*x + B*y + C*z for (x,y,z) in pts])
+            n = len(pts)
+            allpts = np.vstack([pts, (A,B,C)])
+            (rfs,lfs) = ([],[]) # left and right side triangles
+            cfs = rfs # we always start with the right side
+            # we walk across points then back sweeping triangles around as we go...
+            path  = np.concatenate([np.arange(n), np.flip(np.arange(n-1))])
+            plen  = len(path)
+            # figure out what side we enter on...
+            (u0,v0) = (0,1) if pts[0,1] == 0 else (2,0) if pts[0,0] == 0 else (1,2)
+            prev_p = v0 + n
+            skipto = None
+            for k in range(plen-1):
+                if skipto is not None and k != skipto: continue
+                else: skipto = None
+                (p,next_p) = path[[k,k+1]]
+                pt = allpts[p]
+                # order the points clockwise around this point
+                ii = Path.BorderTriangleSplitter.angle_order(allpts, pt, allpts[prev_p])
+                if p == n-1: # we've reached the edge/turnaround point, and i is the next
+                    cfs = lfs
+                    prev_p = ii[0]
+                    ii = ii[1:]
+                # we skip the first--it's the prev_pt
+                for i in ii:
+                    # for sure, this triad makes a triangle on whatever side we're on...
+                    cfs.append((p, prev_p, i))
+                    if i != next_p: prev_p = i
+                    if i == next_p: pass
+                    elif i < n: # another point in the path, but not the next
+                        if k+2 < plen and path[k+2] == i:
+                            cfs.append((p,i,next_p))
+                        elif k+3 < plen and path[k+3] == i:
+                            cfs.append((p,i,next_p))
+                            cfs.append((next_p,i,path[k+1]))
+                        else:
+                            warnings.warn('skipping concave segment of curve in single face')
+                        skipto = i
+                    else: continue # haven't found the next point yet--keep going
+                    break # all other conditions, we break
+            # we have lfs and rfs now, but they're in embedded triangle coords instead of
+            # barycentric coordinates...
+            res = []
+            for cfs in (lfs,rfs):
+                cfs = np.transpose([allpts[p] for p in np.transpose(cfs)], (0,2,1))
+                tri = np.array([[np.full(cfs.shape[2], x) for x in xx] for xx in (A,B,C)])
+                cfs = np.array([cartesian_to_barycentric_2D(tri, x) for x in cfs])
+                res.append(cfs)
+            return tuple(res)
+        def __call__(self):
+            '''
+            Scans the entire path to parcellate left and right border triangles, and yields the
+            tuple (lhs, rhs) of the left (inner) and right (outer) border triangles of the given
+            path. The lhs and rhs are 3-tuples (a,b,c) of the addresses of the three vertices of
+            each border triangle (in counter-clockwise ordering). These should not be expected to
+            be in a specific order; though they should be grouped by face.
+            '''
+            bcfs    = self.bc_faces
+            bcxs    = self.bc_coords
+            fs      = self.faces
+            (us,vs) = self.edges
+            ps      = self.pieces
+            ne      = us.shape[0]
+            nf      = fs.shape[0]
+            (lfs,rfs,lxs,rxs) = ([],[],[],[])
+            for (f,p) in zip(fs,ps):
+                if f is None:
+                    # last face -- we can just skip basically
+                    continue
+                # get the barycentric coords
+                bxs = np.array(bcxs[list(p)])
+                bfs = bcfs[list(p)]
+                # fix the barycentric coords if need be
+                for (ii,xx,ff) in zip(range(len(bxs)), bxs, bfs):
+                    if not np.array_equal(ff,f):
+                        bxs[ii] = [xx[ff == fi][0] if fi in ff else 0 for fi in f]
+                (lhs,rhs) = [xx.T for xx in Path.BorderTriangleSplitter.scan_face_points(bxs)]
+                # lhs and rhs are the barycentric coordinates...
+                frow = [f for _ in range(len(lhs) + len(rhs))]
+                for (xx,ff,hs) in zip([lxs,rxs],[lfs,rfs],[lhs,rhs]):
+                    xx.append(hs)
+                    ff.append([f for _ in range(len(hs))])
+            (lfs,rfs,lxs,rxs) = [np.vstack(xx).T for xx in (lfs,rfs,lxs,rxs)]
+            lfs = pimms.imm_array(lfs)
+            rfs = pimms.imm_array(rfs)
+            lxs = pimms.imm_array(lxs)
+            rxs = pimms.imm_array(rxs)
+            return tuple([tuple([pyr.m(coordinates=x, faces=fs) for x in xs])
+                          for (xs,fs) in [(lxs,lfs), (rxs,rfs)]])
+    @pimms.value
+    def all_border_triangle_addresses(edge_data, addresses, closed):
+        '''
+        path.all_border_triangle_addresses contains a nested tuple ((a,b,c), (d,e,f)); each of the
+        (a,b,c) and (d,e,f) tuples represent arrays of triangles--each of the a-f represent an
+        addresses-object of points in path.surface that form the triangles' corners. Together, all
+        the triangles in the two triangle arrays are congruent to the triangles in 
+        path.intersected_faces; however, the border_triangle_addresses have been split into sets of
+        smaller triangles that are exclusively on the inner side of the path border (triangles in 
+        (a,b,c)) and those exclusively on the outer side of the path border (triangles in (d,e,f)).
+        Among other things, this splitting of the triangles is required to calculate precise
+        surface area measurements of regions contained by closed paths.
+
+        In the case that path is not closed, the triangles in (a,b,c) are on the left side of the
+        path while those in (d,e,f) are on the right side, with respect to the direction of path.
+        '''
+        bts = Path.BorderTriangleSplitter(edge_data, addresses, closed)
+        return bts()
+    @pimms.value
+    def all_border_triangles(all_border_triangle_addresses, surface):
+        '''
+        path.all_border_triangles is tuple of two (3 x d x n) arrays--the first dimension of each
+        array corresponds to the triangle vertex, the second to the x/y/z coordinate of the vertex,
+        and the final dimension to the triangle id. The first gives the inner or left border
+        triangle coordinates while the second gives the right or the outer coordinates.
+
+        If path.surface is a topology, then border_triangles is instead a lazy-map of the border
+        triangle coordinates, one set for each surface in topo.
+        '''
+        if isinstance(surface, Topology):
+            conv1 = lambda s,xs:pimms.imm_array(surfaces[s].unaddress(xs).T)
+            conv2 = lambda s: tuple([conv1(s,xs) for xs in all_border_triangle_addresses])
+            return pimms.lazy_map({k:curry(conv2, k) for k in six.iterkeys(surface.surfaces)})
+        else: return tuple([pimms.imm_array(surface.unaddress(xs).T)
+                            for xs in all_border_triangle_addresses])
+    @pimms.value
+    def border_triangles(all_border_triangles):
+        '''
+        path.border_triangles contains the coordinates of the inner partial-face triangles
+        that lie on the boundary of the given path; if the path is not closed, these correspond to
+        the left parts of the intersected faces. For the border triangles that are outside or right
+        of the border use path.outer_border_triangles. See also all_border_triangles.
+        '''
+        if pimms.is_map(all_border_triangles):
+            return pimms.lazy_map({k:curry(lambda k:all_border_triangles[k][0], k)
+                                   for k in six.iterkeys(all_border_triangles)})
+        else: return all_border_triangles[0]
+    @pimms.value
+    def outer_border_triangles(all_border_triangles):
+        '''
+        path.outer_border_triangles contains the coordinates of the outer partial-face triangles
+        that lie on the boundary of the given path; if the path is not closed, these correspond to
+        the right parts of the intersected faces. See also border_triangles and
+        all_border_triangles.
+        '''
+        if pimms.is_map(all_border_triangles):
+            return pimms.lazy_map({k:curry(lambda k:all_border_triangles[k][1], k)
+                                   for k in six.iterkeys(all_border_triangles)})
+        else: return all_border_triangles[1]
+    @pimms.value
+    def surface_area(border_triangles, contained_faces, surface, closed):
+        '''
+        path.surface_area is the surface area of a closed path; if path is not closed, then this
+        is None.
+        
+        If path.surface is a topology rather than a mesh, then this is a lazy-map of surface names
+        whose values are the surface area for the given surface. If the path is not closed, this
+        remains None.
+        '''
+        if not closed: return None
+        def sarea(srf):
+            if pimms.is_str(srf): (srf,btris) = (surface.surfaces[srf],border_triangles[srf])
+            else: btris = border_triangles
+            cxs = np.asarray([srf.coordinates[:,f] for f in contained_faces])
+            return triangle_areas(*cxs) + triangle_areas(*btris)
+        if isinstance(surface, Topology):
+            return pimms.lazy_map({k:curry(sarea, k) for k in six.iterkeys(surface.surfaces)})
+        else: return sarea(surface)
+    def reverse(self, meta_data=None):
+        '''
+        path.reverse() yields a path that is equivalent to the given path but reversed (thus it is
+          considered to contain all the vertices not contained by path if path is closed).
+        '''
+        addrs = {k:np.fliplr(v) for (k,v) in six.iteritems(self.addresses)}
+        return Path(self.surface, addrs, meta_data=meta_data)
+
 @pimms.immutable
 class PathTrace(ObjectWithMetaData):
     '''
@@ -2612,10 +2936,10 @@ class PathTrace(ObjectWithMetaData):
             allpts.append(ipts[np.argsort(dists)])
         allpts.append([pts[-1]])
         allpts = np.concatenate(allpts)
-        idcs = []
-        ds = np.sqrt(np.sum((allpts[:-1] - allpts[1:])**2, axis=1))
-        for ii in range(len(allpts) - 1):
-            if np.isclose(ds[ii], 0): continue
+        idcs = [0]
+        for ii in range(1, len(allpts)):
+            d = np.sqrt(np.sum((allpts[idcs[-1]] - allpts[ii])**2))
+            if np.isclose(d, 0): continue
             idcs.append(ii)
         allpts = allpts[idcs]
         # okay, we have the points--address them and make a path
@@ -2634,6 +2958,15 @@ def path_trace(map_projection, pts, closed=False, meta_data=None):
         object.
     '''
     return PathTrace(map_projection, pts, closed=closed, meta_data=meta_data)
+def close_path(*args):
+    '''
+    close_path(path1, path2...) yields the path formed by joining the list of paths at their
+      intersection points in the order given. Note that the order in which each path is specified is
+      ultimately ignored by this function--the only order that matters is the order in which the
+      list of paths is given.
+    '''
+    #TODO
+    pass
         
 ####################################################################################################
 # Some Functions that deal with converting to/from the above classes
