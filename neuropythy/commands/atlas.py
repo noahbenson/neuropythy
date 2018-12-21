@@ -105,7 +105,7 @@ def calc_atlases(worklog, atlas_subject_id='fsaverage'):
             if m is None: continue
             fl = os.path.join(pth, fl)
             (h, atls, meas, vrsn) = [
-                m[ii] for ii in (atlas_hemi_ii, atlas_atls_ii, atlas_meas_ii, atlas_vrsn_ii)]
+                m.group(ii) for ii in (atlas_hemi_ii, atlas_atls_ii, atlas_meas_ii, atlas_vrsn_ii)]
             if vrsn is not None: vrsn = tuple([int(s) for s in vrsn.split('_')])
             atlases[atls][vrsn][h][meas] = curry(nyio.load, fl)
     # convert the possible atlas maps into persistent/lazy maps
