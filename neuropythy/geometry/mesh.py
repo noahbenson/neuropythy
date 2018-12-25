@@ -21,7 +21,7 @@ from .util  import (triangle_area, triangle_address, alignment_matrix_3D, rotati
                     segment_intersection_2D,
                     barycentric_to_cartesian, point_in_triangle)
 from ..util import (ObjectWithMetaData, to_affine, zinv, is_image, is_address, address_data, curry,
-                    curve_spline, CurveSpline, chop, zdivide, flattest)
+                    curve_spline, CurveSpline, chop, zdivide, flattest, inner)
 from ..io   import (load, importer)
 from functools import reduce
 
@@ -1095,25 +1095,27 @@ class Mesh(VertexSet):
                                (2,0,1))
             return point_in_triangle(tri, pt)
 
-    def _find_triangle_search(self, x, k=24, searched=set([])):
+    def _find_triangle_search(self, x, k=24, searched=set([]), n_jobs=-1):
         # This gets called when a container triangle isn't found; the idea is that k should
         # gradually increase until we find the container triangle; if k passes the max, then
         # we give up and assume no triangle is the container
         if k >= 288: return None
-        (d,near) = self.facee_hash.query(x, k=k)
+        try:    (d,near) = self.facee_hash.query(x, k=k, n_jobs=n_jobs)
+        except: (d,near) = self.facee_hash.query(x, k=k)
         near = [n for n in near if n not in searched]
         searched = searched.union(near)
         tri_no = next((kk for kk in near if self.is_point_in_face(kk, x)), None)
         return (tri_no if tri_no is not None
                 else self._find_triangle_search(x, k=(2*k), searched=searched))
     
-    def nearest_vertex(self, pt):
+    def nearest_vertex(self, pt, n_jobs=-1):
         '''
         mesh.nearest_vertex(pt) yields the id number of the nearest vertex in the given
         mesh to the given point pt. If pt is an (n x dims) matrix of points, an id is given
         for each column of pt.
         '''
-        (d,near) = self.vertex_hash.query(pt, k=1)
+        try:    (d,near) = self.vertex_hash.query(pt, k=1, n_jobs=n_jobs)
+        except: (d,near) = self.vertex_hash.query(pt, k=1)
         return near
 
     def point_in_plane(self, tri_no, pt):
@@ -1140,7 +1142,7 @@ class Mesh(VertexSet):
         d   = np.sum(n * (pt - tx0), axis=0)
         return (np.abs(d), pt - n*d)
     
-    def nearest_data(self, pt, k=2, n_jobs=1):
+    def nearest_data(self, pt, k=2, n_jobs=-1):
         '''
         mesh.nearest_data(pt) yields a tuple (k, d, x) of the matrix x containing the point(s)
         nearest the given point(s) pt that is/are in the mesh; a vector d if the distances between
@@ -1155,7 +1157,8 @@ class Mesh(VertexSet):
             r = self.nearest_data([pt], k=k, n_jobs=n_jobs)[0];
             return (r[0][0], r[1][0], r[2][0])
         pt = pt.T if pt.shape[0] == self.coordinates.shape[0] else pt
-        (d, near) = self.face_hash.query(pt, k=k)
+        try:    (d, near) = self.face_hash.query(pt, k=k, n_jobs=n_jobs)
+        except: (d, near) = self.face_hash.query(pt, k=k)
         ids = [tri_no if tri_no is not None else self._find_triangle_search(x, 2*k, set(near_i))
                for (x, near_i) in zip(pt, near)
                for tri_no in [next((k for k in near_i if self.is_point_in_face(k, x)), None)]]
@@ -1165,14 +1168,14 @@ class Mesh(VertexSet):
                 np.asarray([d[0] for d in pips]),
                 np.asarray([d[1] for d in pips]))
 
-    def nearest(self, pt, k=2, n_jobs=1):
+    def nearest(self, pt, k=2, n_jobs=-1):
         '''
         mesh.nearest(pt) yields the point in the given mesh nearest the given array of points pts.
         '''
-        dat = self.nearest_data(pt)
+        dat = self.nearest_data(pt, n_jobs=n_jobs)
         return dat[2]
 
-    def nearest_vertex(self, x, n_jobs=1):
+    def nearest_vertex(self, x, n_jobs=-1):
         '''
         mesh.nearest_vertex(x) yields the vertex index or indices of the vertex or vertices nearest
           to the coordinate or coordinates given in x.
@@ -1181,7 +1184,8 @@ class Mesh(VertexSet):
         if len(x.shape) == 1: return self.nearest_vertex([x], n_jobs=n_jobs)[0]
         if x.shape[0] == self.coordinates.shape[0]: x = x.T
         n = self.coordinates.shape[1]
-        (_, nei) = self.vertex_hash.query(x, k=1) #n_jobs fails? version problem?
+        try:    (_, nei) = self.vertex_hash.query(x, k=1, n_jobs=n_jobs)
+        except: (_, nei) = self.vertex_hash.query(x, k=1)
         return nei
 
     def distance(self, pt, k=2, n_jobs=1):
@@ -1192,7 +1196,7 @@ class Mesh(VertexSet):
         dat = self.nearest_data(pt)
         return dat[1]
 
-    def container(self, pt, k=2, n_jobs=1):
+    def container(self, pt, k=2, n_jobs=-1):
         '''
         mesh.container(pt) yields the id number of the nearest triangle in the given
         mesh to the given point pt. If pt is an (n x dims) matrix of points, an id is given
@@ -1217,7 +1221,8 @@ class Mesh(VertexSet):
                 res = np.full(len(sub_pts), None, dtype=np.object)
                 if k != cur_k and cur_k > max_k: return res
                 if near is None:
-                    near = self.face_hash.query(sub_pts, k=cur_k)[1]
+                    try:    near = self.face_hash.query(sub_pts, k=cur_k, n_jobs=n_jobs)[1]
+                    except: near = self.face_hash.query(sub_pts, k=cur_k)[1]
                 # we want to try the nearest then recurse on those that didn't match...
                 guesses = near[:, top_i]
                 in_tri_q = self.is_point_in_face(guesses, sub_pts)
@@ -1282,98 +1287,78 @@ class Mesh(VertexSet):
         # create your interpolation matrix here...
         return Mesh.rescale_interpolation(interp_matrix, mask_arg, weights_arg)
         '''
-        interp = interp.tocsr()
-        interp.eliminate_zeros()
+        if sps.issparse(interp): interp = interp.tocsr().copy()
+        if weights is None and mask is None: return interp
         (m,n) = interp.shape # n: no. of vertices in mesh; m: no. points being interpolated
-        # We apply weights first, because they are fairly straightforward:
-        if weights is not None:
-            weights = np.array(weights)
-            weights[np.logical_not(np.isfinite(weights))] = 0
-            weights[weights < 0] = 0
-            interp = interp.dot(sps.diags(weights))
-        # we make a mask with 1 extra element, always out of the mask, as a way to flag vertices
-        # that shouldn't appear in the mask for some other reason
-        if mask is None or (pimms.is_str(mask) and mask.lower() == 'all'):
-            mask = np.ones(n + 1, dtype=np.bool)
-            mask[n] = 0
-        else:
-            interp = interp.dot(sps.diags(np.asarray(mask, dtype=np.float)))
-            interp.eliminate_zeros()
-            mask = np.concatenate([mask, [False]])
-        # we may need to rescale the rows now:
-        (closest, rowdivs) = np.transpose(
-            [(r.indices[np.argsort(r.data)[-1]], 1/ss) if np.isfinite(ss) and ss > 0 else (n,0)
-             for r in interp
-             for ss in [r.data.sum()]])
-        closest = np.asarray(closest, dtype=np.int)
-        if not np.array_equal(rowdivs, np.ones(len(rowdivs))):
-            # rescale the rows
-            interp = sps.diags(rowdivs).dot(interp)
-        # any row with no interpolation weights or that is nearest to a vertex not in the mesh
-        # needs to be given a nan value upon interpolation
-        bad_pts = np.logical_not(mask[closest])
-        if bad_pts.sum() > 0:
-            interp = interp.tolil()
-            interp[bad_pts, 0] = np.nan
-            interp = interp.tocsr()
+        # setup the weights:
+        if weights is None:           weights = np.ones(n, dtype=np.float)
+        elif np.shape(weights) == (): weights = np.full(n, weights, dtype=np.float)
+        else:                         weights = np.array(weights, dtype=np.float)
+        # figure out the mask
+        if mask is not None:
+            mask = self.mask(mask, indices=True)
+            nmask = np.setdiff1d(np.arange(n), mask)
+            weights[nmask] = np.nan
+        # if the weights are nan, we only want that to apply if the heavist weight is nan; otherwise
+        # we interpolate with what's not nan
+        nansq = np.logical_not(np.isfinite(flattest(interp.sum(axis=1))))
+        interp.data[~np.isfinite(interp.data)] = 0
+        heaviest = flattest(interp.argmax(axis=1))
+        hvals = interp[(np.arange(m), heaviest)]
+        hnots = np.isclose(hvals, 0) | ~np.isfinite(weights[heaviest]) | nansq
+        whnan = np.where(hnots)[0]
+        # we can now eliminate the nan weights
+        weights[~np.isfinite(weights)] = 0
+        # and scale the interpolation matrix
+        interp *= sps.diag(weights)
+        # now, we may need to scale the rows
+        rsums = flattest(interp.sum(axis=1))
+        if not np.isclose(rsums, 1).all(): interp = sps.diag(zinv(rsums)).dot(interp)
+        # Then put the nans back where they're needed
+        if len(whnan) > 0: interp[(np.zeros(len(whnan), dtype=np.int), whnan)] = np.nan
+        interp.eliminate_zeros()
         return interp
-    def nearest_interpolation(self, coords, n_jobs=1):
+    def nearest_interpolation(self, coords, n_jobs=-1):
         '''
         mesh.nearest_interpolation(x) yields an interpolation matrix for the given coordinate or
           coordinate matrix x. An interpolation matrix is just a sparce array M such that for a
           column vector u with the same number of rows as there are vertices in mesh, M * u is the
           interpolated values of u at the coordinates in x.
         '''
-        coords = np.asarray(coords)
-        if coords.shape[0] == self.coordinates.shape[0]: coords = coords.T
-        n = self.coordinates.shape[1]
-        m = coords.shape[0]
-        nv = self.nearest_vertex(coords, n_jobs=n_jobs)
-        return sps.csr_matrix(
-            (np.ones(len(nv), dtype=np.int), (range(len(nv)), nv)),
-            shape=(m,n),
-            dtype=np.int)
-    def linear_interpolation(self, coords, n_jobs=1):
+        if is_address(coords):
+            (fs, xs) = address_data(coords, dims=2)
+            xs = np.vstack([xs, [1 - np.sum(xs, axis=0)]])
+            nv = fs[(np.argmax(xs, axis=0), np.arange(fs.shape[1]))]
+            nv = self.tess.index(nv)
+        else:
+            coords = np.asarray(coords)
+            if coords.shape[0] == self.coordinates.shape[0]: coords = coords.T
+            nv = self.nearest_vertex(coords, n_jobs=n_jobs)
+        n = self.vertex_count
+        m = len(nv)
+        return sps.csr_matrix((np.ones(m, dtype=np.int), (np.arange(m), nv)),
+                              shape=(m,n),
+                              dtype=np.int)
+    def linear_interpolation(self, coords, n_jobs=-1):
         '''
         mesh.linear_interpolation(x) yields an interpolation matrix for the given coordinate or 
           coordinate matrix x. An interpolation matrix is just a sparce array M such that for a
           column vector u with the same number of rows as there are vertices in mesh, M * u is the
           interpolated values of u at the coordinates in x.
+
+        The coordinate matrix x may alternately be an address-data map, in which case interpolation
+        is considerably faster.
         '''
-        coords = np.asarray(coords)
-        if coords.shape[0] == self.coordinates.shape[0]: coords = coords.T
-        n = self.coordinates.shape[1]
-        m = coords.shape[0]
-        mtx = sps.lil_matrix((m, n), dtype=np.float)
-        tris = self.tess.indexed_faces
-        # first, find the triangle containing each point...
-        containers = self.container(coords, n_jobs=n_jobs)
-        # which points are in a triangle at all...
-        contained_q = np.asarray([x is not None for x in containers], dtype=np.bool)
-        contained_idcs = np.where(contained_q)[0]
-        containers = containers[contained_idcs].astype(np.int)
-        # interpolate for these points
-        tris = tris[:,containers]
-        corners = np.transpose(self.face_coordinates[:,:,containers], (0,2,1))
-        coords = coords[contained_idcs]
-        # get the mini-triangles' areas
-        a_area = triangle_area(coords.T, corners[1].T, corners[2].T)
-        b_area = triangle_area(coords.T, corners[2].T, corners[0].T)
-        c_area = triangle_area(coords.T, corners[0].T, corners[1].T)
-        tot = a_area + b_area + c_area
-        for (x,ii,f,aa,ba,ca,tt) in zip(coords, contained_idcs, tris.T, a_area,b_area,c_area,tot):
-            if np.isclose(tt, 0):
-                (aa,ba,ca) = np.sqrt(np.sum((coords[f] - x)**2, axis=1))
-                # check if we can do line interpolation
-                (zab,zbc,zca) = np.isclose((aa,ba,ca), (ba,ca,aa))
-                (aa,ba,ca) = (1.0,   1.0,      1.0) if zab and zbc and zca else \
-                             (ca,     ca,    aa+ba) if zab                 else \
-                             (ba+ca,  aa,       aa) if zbc                 else \
-                             (ba,     aa+ca,    ba)
-                tt = aa + ba + ca
-            mtx[ii, f] = (aa/tt, ba/tt, ca/tt)
-        return mtx.tocsr()
-    def apply_interpolation(self, interp, data, mask=None, weights=None):
+        if is_address(coords):
+            (fs, xs) = address_data(coords, dims=2)
+            xs = np.vstack([xs, [1 - np.sum(xs, axis=0)]])
+            (n, m) = (xs.shape[1], self.vertex_count)
+            fs = self.tess.index(fs)
+            return sps.csr_matrix(
+                (xs.flatten(), (np.tile(np.arange(n), 3), fs.flatten())),
+                shape=(n, m))
+        else: return self.linear_interpolation(self.address(coords, n_jobs=n_jobs))
+    def apply_interpolation(self, interp, data):
         '''
         mesh.apply_interpolation(interp, data) yields the result of applying the given interpolation
           matrix (should be a scipy.sparse.csr_matrix), which can be obtained via
@@ -1381,16 +1366,15 @@ class Mesh(VertexSet):
           which should be matched to the coordinates used to create the interpolation matrix.
 
         The data argument may be a list/vector of size m (where m is the number of columns in the
-        matrix interp), a matrix of size (n x m) for any n, or a map whose values are lists of
+        matrix interp), a matrix of size (m x n) for any n, or a map whose values are lists of
         length m.
 
-        The following options may be provided:
-          * mask (default: None) specifies which elements should be in the mask.
-          * weights (default: None) additional weights that should be applied to the vertices in the
-            mesh during interpolation.
+        Note that apply_interpolation() does not scale the interpolation matrix, so you must do that
+        prior to passing it as an argument. It is generally recommended to use the interpolate()
+        function or to use this function with the interpolation_matrix() function.
         '''
         # we can start by applying the mask to the interpolation
-        interp = Mesh.scale_interpolation(interp, mask=mask, weights=weights)
+        if not sps.issparse(interp): interp = np.asarray(interp)
         (m,n) = interp.shape
         # if data is a map, we iterate over its columns:
         if pimms.is_str(data):
@@ -1398,38 +1382,72 @@ class Mesh(VertexSet):
                 interp,
                 self.properties if data.lower() == 'all' else self.properties[data])
         elif pimms.is_lazy_map(data):
-            def _make_lambda(kk): return lambda:self.apply_interpolation(interp, data[kk])
-            return pimms.lazy_map({k:_make_lambda(k) for k in six.iterkeys(data)})
+            return pimms.lazy_map({curry(lambda k:self.apply_interpolation(interp, data[k]), k)
+                                   for k in six.iterkeys(data)})
         elif pimms.is_map(data):
             return pyr.pmap({k:self.apply_interpolation(interp, data[k])
                              for k in six.iterkeys(data)})
         elif pimms.is_matrix(data):
             data = np.asarray(data)
-            if data.shape[0] == n:
-                return np.asarray([self.apply_interpolation(interp, row) for row in data.T]).T
-            else:
-                return np.asarray([self.apply_interpolation(interp, row) for row in data])
-        elif pimms.is_vector(data) and len(data) != n:
+            if data.shape[0] != n: data = data.T
+            if not pimms.is_matrix(data, 'number'):
+                return np.asarray([self.apply_interpolation(interp, d) for d in data.T])
+            else: return inner(interp, data.T).T
+        elif not pimms.is_vector(data):
+            raise ValueError('cannot interpret input data argument')
+        elif len(data) != n:
             return tuple([self.apply_interpolation(interp, d) for d in data])
-        # If we've made it here, we have a single vector to interpolate;
-        # we might have non-finite values in this array (additions to the mask), so let's check:
-        data = np.asarray(data)
-        # numeric arrays can be handled relatively easily:
-        if pimms.is_vector(data, np.number):
-            numer = np.isfinite(data)
-            if np.sum(numer) < n:
-                # just remove these elements from the mask
-                data = np.array(data)
-                data[np.logical_not(numer)] = 0
-                interp = Mesh.scale_interpolation(interp, mask=numer)
-            return interp.dot(data)
-        # not a numerical array; we just do nearest interpolation
-        return np.asarray(
-            [data[r.indices[np.argsort(r.data)[-1]]] if np.isfinite(ss) and ss > 0 else np.nan
-             for r in interp
-             for ss in [r.data.sum()]])
-
-    def interpolate(self, x, data, mask=None, weights=None, method='automatic', n_jobs=1):
+        elif pimms.is_vector(data, 'number'):
+            return inner(interp, data)
+        else:
+            maxs = flattest(interp.argmax(axis=1))
+            bads = (~np.isfinite(interp.sum(axis=1))) | np.isclose(0, interp[(np.arange(m),maxs)])
+            bads = np.where(bads)[0]
+            if len(bads) == 0: res = data[maxs]
+            else:
+                res = np.array(data[maxs], dtype=np.object)
+                res[bads] = np.nan
+            return res
+    def interpolation_matrix(self, x, mask=None, weights=None, method='linear', n_jobs=-1):
+        '''
+        mesh.interpolation_matrix(x) yields an interpolation matrix for the given point matrix x (x
+          ay also be an address-data map).
+        
+        The following options are accepted:
+          * mask (default: None) indicates that the given True/False or 0/1 valued list/array should
+            be used; any point whose nearest neighbor (see below) is in the given mask will, instead
+            of an interpolated value, be set to nan. The mask is interpreted by the mask() method.
+          * method (default: 'linear') specifies what method to use for interpolation. The only
+            currently supported methods are 'linear' and 'nearest'. Note that 'auto' cannot be used
+            with interpolation_matrix() as it can with interpolate() because the data being
+            interpolated is not given to interpolation_matrix() and thus cannot be used to deduce 
+            the interpolation type. The 'nearest' method does not actually perform a
+            nearest-neighbor interpolation but rather assigns to a destination vertex the value of
+            the source vertex whose voronoi-like polygon contains the destination vertex; note that
+            the term 'voronoi-like' is used here because it uses the Voronoi diagram that
+            corresponds to the triangle mesh and not the true delaunay triangulation. The 'linear'
+            method uses linear interpolation; though if the given data is non-numerical, then
+            nearest interpolation is used instead. The 'automatic' method uses linear interpolation
+            for any floating-point data and nearest interpolation for any integral or non-numeric
+            data.
+          * n_jobs (default: -1) is passed along to the cKDTree.query method, so may be set to an
+            integer to specify how many processors to use, or may be -1 to specify all processors.
+        '''
+        if pimms.is_str(method): method = method.lower()
+        if method in [None, Ellipsis, 'auto', 'automatic']:
+            raise ValueError('interpolation_matrix() does not support method "automatic"')
+        elif method in ['nn', 'nearest', 'near', 'nearest_neighbor', 'nearest-neighbor']:
+            return Mesh.scale_interpolation(
+                self.nearest_interpolation(x, n_jobs=n_jobs),
+                mask=mask,
+                weights=weights)
+        elif method in ['linear', 'lin', 'trilinear']:
+            return Mesh.scale_interpolation(
+                self.linear_interpolation(x, n_jobs=n_jobs),
+                mask=mask,
+                weights=weights)
+        else: raise ValueError('unknown interpolation method: %s' % method)
+    def interpolate(self, x, data, mask=None, weights=None, method='automatic', n_jobs=-1):
         '''
         mesh.interpolate(x, data) yields a numpy array of the data interpolated from the given
           array, data, which must contain the same number of elements as there are points in the
@@ -1439,109 +1457,113 @@ class Mesh(VertexSet):
         The following options are accepted:
           * mask (default: None) indicates that the given True/False or 0/1 valued list/array should
             be used; any point whose nearest neighbor (see below) is in the given mask will, instead
-            of an interpolated value, be set to the null value (see null option).
+            of an interpolated value, be set to nan. The mask is interpreted by the mask() method.
           * method (default: 'automatic') specifies what method to use for interpolation. The only
             currently supported methods are 'automatic', 'linear', or 'nearest'. The 'nearest'
-            method does not  actually perform a nearest-neighbor interpolation but rather assigns to
+            method does not actually perform a nearest-neighbor interpolation but rather assigns to
             a destination vertex the value of the source vertex whose voronoi-like polygon contains
             the destination vertex; note that the term 'voronoi-like' is used here because it uses
             the Voronoi diagram that corresponds to the triangle mesh and not the true delaunay
             triangulation. The 'linear' method uses linear interpolation; though if the given data
             is non-numerical, then nearest interpolation is used instead. The 'automatic' method
             uses linear interpolation for any floating-point data and nearest interpolation for any
-            integral or non-numeric data.
-          * n_jobs (default: 1) is passed along to the cKDTree.query method, so may be set to an
+            integral or non-numeric data. Note that nearest-neighbor interpolation is used for
+            non-numeric data arrays no matter what the method argument is.
+          * n_jobs (default: -1) is passed along to the cKDTree.query method, so may be set to an
             integer to specify how many processors to use, or may be -1 to specify all processors.
         '''
         n = self.vertex_count
         if isinstance(x, Mesh): x = x.coordinates
-        if method is None: method = 'auto'
-        method = method.lower()
-        if method == 'linear':
-            interp = self.linear_interpolation(x, n_jobs=n_jobs)
-        elif method == 'nearest':
-            return self.apply_interpolation(self.nearest_interpolation(x, n_jobs=n_jobs),
-                                            data, mask=mask, weights=weights)
-        elif method == 'auto' or method == 'automatic':
-            # unique challenge; we want to calculate the interpolation matrices but once:
-            interps = pimms.lazy_map(
-                {'nearest': lambda:Mesh.scale_interpolation(
-                    self.nearest_interpolation(x, n_jobs=n_jobs),
-                    mask=mask, weights=weights),
-                 'linear': lambda:Mesh.scale_interpolation(
-                    self.linear_interpolation(x, n_jobs=n_jobs),
-                    mask=mask, weights=weights)})
-            # we now need to look over data...
-            def _apply_interp(dat):
-                if pimms.is_str(dat):
-                    return _apply_interp(self.properties[dat])
-                elif pimms.is_vector(dat, np.inexact):
-                    return self.apply_interpolation(interps['linear'], dat)
-                else:
-                    return self.apply_interpolation(interps['nearest'], dat)
-            if pimms.is_str(data) and data.lower() == 'all':
-                data = self.properties
-            if pimms.is_lazy_map(data):
-                def _make_lambda(kk): return lambda:_apply_interp(data[kk])
-                return pimms.lazy_map({k:_make_lambda(k) for k in six.iterkeys(data)})
-            elif pimms.is_map(data):
-                return pyr.pmap({k:_apply_interp(data[k]) for k in six.iterkeys(data)})
-            elif pimms.is_matrix(data):
-                # careful... the rows could have a tuple of rows of different types...
-                if len(data) == n:
-                    # in this case we assume that all cells are the same type
-                    data = np.asarray(data)
-                    return np.asarray([_apply_interp(np.asarray(row)) for row in data.T]).T
-                elif pimms.is_nparray(data):
-                    return np.asarray([_apply_interp(row) for row in data])
-                else:
-                    return tuple([_apply_interp(row) for row in data])
-            elif pimms.is_vector(data, np.number) and len(data) == self.tess.vertex_count:
-                return _apply_interp(data)
-            elif pimms.is_vector(data):
-                return tuple([_apply_interp(d) for d in data])
+        # no matter what the input we want to calculate the interpolation matrices but once:
+        interps = pimms.lazy_map(
+            {'nearest': lambda:self.interpolation_matrix(x,
+                                                         n_jobs=n_jobs, method='nearest',
+                                                         mask=mask, weights=weights),
+             'linear':  lambda:self.interpolation_matrix(x,
+                                                         n_jobs=n_jobs, method='linear',
+                                                         mask=mask, weights=weights)})
+        if pimms.is_str(method): method = method.lower()
+        if method in [None, Ellipsis, 'auto', 'automatic']: method = None
+        elif method in ['lin', 'linear', 'trilinear']: method = 'linear'
+        elif method in ['nn', 'nearest', 'near', 'nearest-neighbor', 'nearest_neighbor']:
+            method = 'nearest'
+        else: raise ValueError('cannot interpret method: %s' % method)
+        # we now need to look over data...
+        def _apply_interp(dat):
+            if pimms.is_str(dat):
+                return _apply_interp(self.properties[dat])
+            elif pimms.is_array(dat, np.inexact, (1,2)) and method != 'nearest':
+                return self.apply_interpolation(interps['linear'], dat)
+            elif pimms.is_array(dat, 'int', (1,2)) and method == 'linear':
+                return self.apply_interpolation(interps['linear'], dat)
             else:
-                return _apply_interp(data)
+                return self.apply_interpolation(interps['nearest'], dat)
+        if pimms.is_str(data) and data.lower() == 'all':
+            data = self.properties
+        if pimms.is_lazy_map(data):
+            return pimms.lazy_map({k:curry(lambda k:_apply_interp(data[k]), k)
+                                   for k in six.iterkeys(data)})
+        elif pimms.is_map(data):
+            return pyr.pmap({k:_apply_interp(data[k]) for k in six.iterkeys(data)})
+        elif pimms.is_matrix(data):
+            # careful... the matrix could actually be a tuple of rows of different types...
+            # if it's a numpy array object, though, this won't be the case
+            if np.shape(data)[1] != n: data = np.transpose(data)
+            if pimms.is_nparray(data): return _apply_interp(data)
+            # we really don't want to apply to each row separately; instead, do a few big
+            # multiplications: one for inexacts, one for integers and everything else
+            data = [np.asarray(row) for row in data]
+            if len(np.unique([row.dtype for row in data])) == 1:
+                return _apply_interp(np.asarray(data))
+            else: return tuple([_apply_interp(row) for row in data])
+        elif pimms.is_vector(data, np.number) and len(data) == self.tess.vertex_count:
+            return _apply_interp(data)
+        elif pimms.is_vector(data):
+            return tuple([_apply_interp(d) for d in data])
         else:
-            raise ValueError('method argument must be linear, nearest, or automatic')
-        return self.apply_interpolation(interp, data, mask=mask, weights=weights)
-
-    def address(self, data):
+            return _apply_interp(data)
+    def address(self, data, n_jobs=-1):
         '''
         mesh.address(X) yields a dictionary containing the address or addresses of the point or
-        points given in the vector or coordinate matrix X. Addresses specify a single unique 
-        topological location on the mesh such that deformations of the mesh will address the same
-        points differently. To convert a point from one mesh to another isomorphic mesh, you can
-        address the point in the first mesh then unaddress it in the second mesh.
+          points given in the vector or coordinate matrix X. Addresses specify a single unique 
+          topological location on the mesh such that deformations of the mesh will address the same
+          points differently. To convert a point from one mesh to another isomorphic mesh, you can
+          address the point in the first mesh then unaddress it in the second mesh.
         '''
         # we have to have a topology and registration for this to work...
-        if isinstance(data, Mesh):
-            return self.address(data.coordinates)
+        if isinstance(data, Mesh): return self.address(data.coordinates)
         data = np.asarray(data)
         idxfs = self.tess.indexed_faces
+        coords = self.coordinates
+        dims = coords.shape[0]
         if len(data.shape) == 1:
-            face_id = self.container(data)
-            if face_id is None: return None
-            tx = self.coordinates[:, idxfs[:,face_id]].T
+            try:    face_id = self.container(data, n_jobs=n_jobs)
+            except: face_id = self.container(data)
+            if face_id is None:
+                return {'faces':np.array([-1,-1,-1]), 'coordinates':np.full(2,np.nan)}
+            tx = coords[:, idxfs[:,face_id]].T
             faces = self.tess.faces[:,face_id]
         else:
             data = data if data.shape[1] == 3 or data.shape[1] == 2 else data.T
-            face_id = np.asarray(self.container(data))
-            null = np.full((idxfs.shape[0], self.coordinates.shape[0]), np.nan)
-            tx = np.transpose([self.coordinates[:,idxfs[:,f]] if f is not None else null
-                               for f in face_id],
-                              (2,1,0))
-            faces = self.tess.faces
-            null = [-1, -1, -1]
-            faces = np.transpose([faces[:,f] if f is not None else null for f in face_id])
-        bc = cartesian_to_barycentric_3D(tx, data) if self.coordinates.shape[0] == 3 else \
+            n = data.shape[0]
+            try:    face_id = np.asarray(self.container(data), n_jobs=n_jobs)
+            except: face_id = np.asarray(self.container(data))
+            tx = np.full((3, dims, n), np.nan)
+            oks = np.where(np.logical_not(face_id == None))[0]
+            okfids = face_id[oks].astype('int')
+            tx[:,:,oks] = np.transpose(
+                np.reshape(coords[:,idxfs[:,okfids].flatten()], (dims, 3, oks.shape[0])),
+                (1,0,2))
+            faces = np.full((3, n), -1, dtype=np.int)
+            faces[:,oks] = self.tess.faces[:,okfids]
+        bc = cartesian_to_barycentric_3D(tx, data) if dims == 3 else \
              cartesian_to_barycentric_2D(tx, data)
         return {'faces': faces, 'coordinates': bc}
 
     def unaddress(self, data):
         '''
         mesh.unaddress(A) yields a coordinate matrix that is the result of unaddressing the given
-        address dictionary A in the given mesh. See also mesh.address.
+          address dictionary A in the given mesh. See also mesh.address.
         '''
         (faces, coords) = address_data(data, 2)
         faces = self.tess.index(faces)
@@ -1769,7 +1791,12 @@ class Mesh(VertexSet):
         result = np.full(len(prop), null, dtype=np.float)
         result[mask] = sm_prop
         return result
-
+def is_mesh(m):
+    '''
+    is_mesh(m) yields True if m is a Mesh object and False otherwise.
+    '''
+    return isinstance(m, Mesh)
+    
 @pimms.immutable
 class MapProjection(ObjectWithMetaData):
     '''
@@ -2340,12 +2367,12 @@ class Topology(VertexSet):
         res = None
         errs = []
         for reg_name in reg_names:
-            try:
+            if True:
                 res = self.registrations[reg_name].interpolate(
                     topo.registrations[reg_name], data,
                     mask=mask, method=method, n_jobs=n_jobs);
                 break
-            except Exception as e: errs.append(e)
+            #except Exception as e: errs.append(e)
         if res is None:
             raise ValueError('All shared topologies raised errors during interpolation!', errs)
         return res

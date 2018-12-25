@@ -264,7 +264,7 @@ def cartesian_to_barycentric_3D(tri, xy):
     xy = np.asarray(xy)
     tri = np.asarray(tri)
     if len(xy.shape) == 1:
-        return cartesian_to_barycentric_2D(np.transpose(np.asarray([tri]), (1,2,0)),
+        return cartesian_to_barycentric_3D(np.transpose(np.asarray([tri]), (1,2,0)),
                                            np.asarray([xy]).T)[:,0]
     xy = xy if xy.shape[0] == 3 else xy.T
     if tri.shape[0] == 3:
