@@ -956,10 +956,10 @@ def retinotopy_anchors(mesh, mdl,
         select = lambda idx,ancs: [a for a in ancs if a[0] is not None if npla.norm(X[idx] - a) < d]
     # Okay, apply the model:
     res = mdl.angle_to_cortex(polar_angle[idcs], eccentricity[idcs])
+    oks = np.isfinite(np.sum(np.reshape(res, (res.shape[0], -1)), axis=1))
     # Organize the data; trim out those not selected
     data = [[[i for _ in r], r, [ksidx[tuple(a)] for a in r]]
-            for (i,r0) in zip(idcs, res)
-            if r0[0] is not None
+            for (i,r0,ok) in zip(idcs, res, oks) if ok
             for ksidx in [{tuple(a):(k+1) for (k,a) in enumerate(r0)}]
             for r in [select(i, r0)]
             if len(r) > 0]

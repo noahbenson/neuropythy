@@ -40,6 +40,17 @@ def to_hemi_str(s):
     elif s in ('both',  'all', 'xh'): return 'lr'
     else: raise ValueError('Could not understand to_hemi_str argument: %s' % s)
 
+def is_tuple(arg):
+    '''
+    is_tuple(arg) yields True if arg is a tuple and False otherwise.
+    '''
+    return isinstance(arg, _tuple_type)
+def is_list(arg):
+    '''
+    is_list(arg) yields True if arg is a list and False otherwise.
+    '''
+    return isinstance(arg, _list_type)
+    
 def curry(f, *args0, **kwargs0):
     '''
     curry(f, ...) yields a function equivalent to f with all following arguments and keyword

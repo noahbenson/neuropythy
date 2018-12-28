@@ -12,4 +12,4 @@ for interacting with cortical data. The primary data include:
   * Subject, a class that tracks data connected to an individual subject.
 '''
 
-from .core import (Subject, Cortex, cortex_to_image_interpolation)
+from .core import (Subject, Cortex, is_subject, is_cortex, to_cortex, cortex_to_image_interpolation)

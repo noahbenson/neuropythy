@@ -37,9 +37,15 @@ from .util import (
     point_in_prism,
     tetrahedral_barycentric_coordinates,
     prism_barycentric_coordinates)
-from .mesh import (VertexSet, Tesselation, Mesh, Topology,
-                   MapProjection, projections_path, map_projections, map_projection,
+from .mesh import (VertexSet, Tesselation, Mesh, Topology, MapProjection, Path, PathTrace,
+                   mesh, is_mesh, is_flatmap,
+                   tess, is_tess,
+                   topo, is_topo,
+                   is_vset, is_path,
+                   map_projection, is_map_projection,
                    load_map_projection, load_projections_from_path,
-                   Path, PathTrace, path_trace,
-                   to_tess, to_mesh, to_property, to_mask, to_flatmap, tkr_vox2ras)
+                   projections_path, map_projections, 
+                   path_trace, is_path_trace,
+                   to_tess, to_mesh, to_property, to_mask, to_map_projection, to_flatmap,
+                   tkr_vox2ras)
 

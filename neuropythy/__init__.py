@@ -62,17 +62,20 @@ def reload_neuropythy():
 
 from   .util       import config
 from   .io         import (load, save, to_nifti)
-from   .mri        import (Cortex, Subject)
+from   .mri        import (is_subject, is_cortex, to_cortex)
 from   .vision     import (retinotopy_data, empirical_retinotopy_data, predicted_retinotopy_data,
                            register_retinotopy, retinotopy_anchors, retinotopy_model,
                            neighborhood_cortical_magnification, as_retinotopy, retinotopy_data,
                            retinotopy_comparison)
-from   .geometry   import (VertexSet, Mesh, Tesselation, Topology, MapProjection, Path, PathTrace,
-                           to_mesh, to_tess, to_property, to_mask, path_trace,
-                           map_projections, map_projection, to_flatmap)
+from   .geometry   import (mesh, tess, topo, map_projection, path_trace, 
+                           is_vset, is_mesh, is_tess, is_topo, is_flatmap,
+                           is_map_projection, is_path, is_path_trace,
+                           to_mesh, to_tess, to_property, to_mask, to_flatmap, to_map_projection,
+                           map_projections)
 from   .freesurfer import (subject as freesurfer_subject, to_mgh)
 from   .hcp        import (subject as hcp_subject)
 from   .datasets   import data
+from . import util
 from . import freesurfer
 from . import hcp
 

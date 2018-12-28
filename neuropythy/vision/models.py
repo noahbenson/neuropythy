@@ -369,9 +369,8 @@ class RetinotopyMeshModel(RetinotopyModel):
         # we step through each area in the forward model and return the appropriate values
         tx = self.transform
         res = np.transpose(
-            [msh.interpolate(coords, msh.prop('cortical_coordinates'), method='linear')
-             for area in sorted(self.visual_meshes.keys())
-             for msh in [self.visual_meshes[area]]],
+            [self.visual_meshes[area].interpolate(coords, 'cortical_coordinates', method='linear')
+             for area in sorted(self.visual_meshes.keys())],
             (1,0,2))
         if tx is not None:
             res = np.asarray(
@@ -472,36 +471,38 @@ class RegisteredRetinotopyModel(RetinotopyModel):
         any) is first applied.
         '''
         if len(args) == 1:
-            if isinstance(args[0], geo.Mesh):
-                if args[0].coordinates.shape[0] == 2:
-                    X = args[0].coordinates
-                    return self.model.cortex_to_angle(X[0], X[1])
+            # see if we can cast it to something; first a mesh...
+            try:    m = geo.to_mesh(args[0])
+            except: m = None
+            if m is not None:
+                if geo.is_flatmap(m):
+                    (x,y) = m.coordinates
+                    return self.model.cortex_to_angle(x, y)
                 else:
-                    m = self.map_projection(args[0])
+                    fm = self.map_projection(m)
                     res = np.zeros((3, args[0].vertex_count))
-                    c2a = np.asarray(self.cortex_to_angle(m.coordinates))
-                    res[:, m.labels] = c2a if len(c2a) == len(res) else c2a.T
+                    c2a = np.asarray(self.cortex_to_angle(fm.coordinates))
+                    res[:, fm.labels] = (c2a if len(c2a) == len(res) else c2a.T)
                     return res
-            elif isinstance(args[0], mri.Cortex):
-                m = self.map_projection(args[0])
-                res = np.zeros((3, args[0].vertex_count))
+            # next, try a cortex
+            try:    c = mri.to_cortex(args[0])
+            except: c = None
+            if c is not None:
+                m = self.map_projection(c)
+                res = np.zeros((3, c.vertex_count))
                 c2a = np.asarray(self.cortex_to_angle(m.coordinates))
-                res[:, m.labels] = c2a if len(c2a) == len(res) else c2a.T
+                res[:, m.labels] = (c2a if len(c2a) == len(res) else c2a.T)
                 return res
-            else:
-                X = np.asarray(args[0])
-                if len(X.shape) != 2:
-                    raise ValueError('given coordinate matrix must be rectangular')
-                X = X if X.shape[0] == 2 or X.shape[0] == 3 else X.T
-                if X.shape[0] == 2:
-                    return self.model.cortex_to_angle(X[0], X[1])
-                elif X.shape[0] == 3:
-                    Xp = self.map_projection(X)
-                    return self.model.cortex_to_angle(Xp[0], Xp[1])
-                else:
-                    raise ValueError('coordinate matrix must be 2 or 3 dimensional')
-        else:
-            return self.model.cortex_to_angle(*args)
+            # finally, assume a coordinate matrix
+            X = np.asarray(args[0])
+            if len(X.shape) != 2: raise ValueError('given coordinate matrix must be rectangular')
+            X = X if X.shape[0] == 2 or X.shape[0] == 3 else X.T
+            if X.shape[0] == 2: return self.model.cortex_to_angle(X[0], X[1])
+            elif X.shape[0] == 3:
+                (x,y) = self.map_projection(X)
+                return self.model.cortex_to_angle(x, y)
+            else: raise ValueError('coordinate matrix must be 2 or 3 dimensional')
+        else: return self.model.cortex_to_angle(*args)
     def angle_to_cortex(self, *args):
         '''
         The angle_to_cortex method of the RegisteredRetinotopyModel class is identical to that
@@ -509,7 +510,7 @@ class RegisteredRetinotopyModel(RetinotopyModel):
         which case the result is applied to the 'polar_angle' and 'eccentricity' properties.
         '''
         if len(args) == 1:
-            if isinstance(args[0], geo.Mesh) or isinstance(args[0], mri.Cortex):
+            if geo.is_vset(args[0]):
                 ang = vis.retinotopy_data(args[0], 'polar_angle')
                 ecc = vis.retinotopy_data(args[0], 'eccentricity')
                 return self.model.angle_to_cortex(ang, ecc)
@@ -518,8 +519,7 @@ class RegisteredRetinotopyModel(RetinotopyModel):
                 if tr.shape[1] == 2: tr = tr.T
                 elif tr.shape[0] != 2: raise ValueError('cannot interpret argument')
                 return self.model.angle_to_cortex(tr[0], tr[1])
-        else:
-            return self.model.angle_to_cortex(*args)
+        else: return self.model.angle_to_cortex(*args)
 
 @importer('flatmap_model', ('fmm', 'fmm.gz'))
 def load_fmm_model(filename, radius=np.pi/3.0, sphere_radius=100.0):

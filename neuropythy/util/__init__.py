@@ -5,7 +5,7 @@
 from .core     import (ObjectWithMetaData, to_hemi_str, to_affine, simplex_summation_matrix,
                        simplex_averaging_matrix, is_image, curry,
                        numel, rows, part, hstack, vstack, repmat, replace_close, chop,
-                       flatter, flattest,
+                       flatter, flattest, is_tuple, is_list,
                        plus, cplus, minus, cminus, times, ctimes,
                        inv, zinv, divide, cdivide, zdivide, czdivide, power, cpower, inner,
                        sine, cosine, tangent, cotangent, secant, cosecant,

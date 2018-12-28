@@ -22,12 +22,9 @@ from .util  import (triangle_area, triangle_address, alignment_matrix_3D, rotati
                     barycentric_to_cartesian, point_in_triangle)
 from ..util import (ObjectWithMetaData, to_affine, zinv, is_image, is_address, address_data, curry,
                     curve_spline, CurveSpline, chop, zdivide, flattest, inner, config, library_path,
-                    dirpath_to_list, to_hemi_str)
+                    dirpath_to_list, to_hemi_str, is_tuple, is_list)
 from ..io   import (load, importer)
 from functools import reduce
-
-if six.PY2: (_tuple_type, _list_type) = (types.TupleType, types.ListType)
-else:       (_tuple_type, _list_type) = (tuple, list)
 
 # This function creates the tkr matrix for a volume given the dims
 def tkr_vox2ras(img, zooms=None):
@@ -229,6 +226,12 @@ class VertexSet(ObjectWithMetaData):
         vertex indices instead of the vertex labels.
         '''
         return to_mask(self, m, indices=indices)
+def is_vset(v):
+    '''
+    is_vset(v) yields True if v is a VertexSet object and False otherwise. Note that topologies,
+      tesselations, and meshes are all vertex sets.
+    '''
+    return isinstance(v, VertexSet)
         
 def to_mask(obj, m, indices=False):
     '''
@@ -264,7 +267,7 @@ def to_mask(obj, m, indices=False):
         lbls = np.arange(0, obj.row_count, 1, dtype=np.int)
         idcs = lbls
     if m is None: return idcs if indices else lbls
-    if isinstance(m, tuple):
+    if is_tuple(m):
         if len(m) == 0: return np.asarray([], dtype=np.int)
         p = to_property(obj, m[0])
         if len(m) == 2 and hasattr(m[1], '__iter__'):
@@ -490,7 +493,7 @@ class TesselationIndex(object):
     def __repr__(self):
             return "TesselationIndex(<%d vertices>)" % len(self.vertex_index)
     def __getitem__(self, index):
-        if isinstance(index, tuple):
+        if is_tuple(index):
             if   len(index) == 3: return self.face_index.get(index, None)
             elif len(index) == 2: return self.edge_index.get(index, None)
             elif len(index) == 1: return self.vertex_index.get(index[0], None)
@@ -509,7 +512,7 @@ class TesselationIndex(object):
             return self.vertex_index[index]
     def __call__(self, index):
         vi = self.vertex_index
-        if isinstance(index, tuple):
+        if is_tuple(index):
             return tuple([vi[k] if k >= 0 else k for k in index])
         elif isinstance(index, colls.Set):
             return set([vi[k] if k >= 0 else k for k in index])
@@ -826,6 +829,16 @@ class Tesselation(VertexSet):
         The optional parameter tag is used identically as in tess.subtess().
         '''
         return self.subtess(self.map(fn), tag=tag)
+def is_tess(t):
+    '''
+    is_tess(t) yields True if t is a Tesselation object and False otherwise.
+    '''
+    return isinstance(t, Tesselation)
+def tess(faces, properties=None, meta_data=None):
+    '''
+    tess(faces) yields a Tesselation object from the given face matrix.
+    '''
+    return Tesselation(faces, properties=properties, meta_data=meta_data)
 
 @pimms.immutable
 class Mesh(VertexSet):
@@ -1327,17 +1340,19 @@ class Mesh(VertexSet):
           interpolated values of u at the coordinates in x.
         '''
         if is_address(coords):
-            (fs, xs) = address_data(coords, dims=2)
+            (fs, xs) = address_data(coords, dims=2, strict=False)
+            ii = np.where(np.isfinite(np.sum(xs, axis=0)))[0]
             xs = np.vstack([xs, [1 - np.sum(xs, axis=0)]])
             nv = fs[(np.argmax(xs, axis=0), np.arange(fs.shape[1]))]
-            nv = self.tess.index(nv)
+            nv = self.tess.index(nv[:,ii])
         else:
             coords = np.asarray(coords)
             if coords.shape[0] == self.coordinates.shape[0]: coords = coords.T
             nv = self.nearest_vertex(coords, n_jobs=n_jobs)
+            ii = np.arange(len(nv))
         n = self.vertex_count
-        m = len(nv)
-        return sps.csr_matrix((np.ones(m, dtype=np.int), (np.arange(m), nv)),
+        m = len(ii)
+        return sps.csr_matrix((np.ones(m, dtype=np.int), (np.arange(m)[ii], nv)),
                               shape=(m,n),
                               dtype=np.int)
     def linear_interpolation(self, coords, n_jobs=-1):
@@ -1351,12 +1366,13 @@ class Mesh(VertexSet):
         is considerably faster.
         '''
         if is_address(coords):
-            (fs, xs) = address_data(coords, dims=2)
+            (fs, xs) = address_data(coords, dims=2, strict=False)
             xs = np.vstack([xs, [1 - np.sum(xs, axis=0)]])
             (n, m) = (xs.shape[1], self.vertex_count)
-            fs = self.tess.index(fs)
+            ii = np.where(np.isfinite(np.sum(xs, axis=0)))[0]
+            fsi = self.tess.index(fs[:,ii])
             return sps.csr_matrix(
-                (xs.flatten(), (np.tile(np.arange(n), 3), fs.flatten())),
+                (xs[:,ii].flatten(), (np.tile(np.arange(n)[ii], 3), fsi.flatten())),
                 shape=(n, m))
         else: return self.linear_interpolation(self.address(coords, n_jobs=n_jobs))
     def apply_interpolation(self, interp, data):
@@ -1390,10 +1406,11 @@ class Mesh(VertexSet):
                              for k in six.iterkeys(data)})
         elif pimms.is_matrix(data):
             data = np.asarray(data)
-            if data.shape[0] != n: data = data.T
+            (data, tr) = (data.T, True) if data.shape[0] != n else (data, False)
             if not pimms.is_matrix(data, 'number'):
-                return np.asarray([self.apply_interpolation(interp, d) for d in data.T])
-            else: return inner(interp, data.T).T
+                data = np.asarray([self.apply_interpolation(interp, d) for d in data])
+            else: data = inner(interp, data)
+            return data.T if tr else data
         elif not pimms.is_vector(data):
             raise ValueError('cannot interpret input data argument')
         elif len(data) != n:
@@ -1541,7 +1558,7 @@ class Mesh(VertexSet):
             try:    face_id = self.container(data, n_jobs=n_jobs)
             except: face_id = self.container(data)
             if face_id is None:
-                return {'faces':np.array([-1,-1,-1]), 'coordinates':np.full(2,np.nan)}
+                return {'faces':np.array([0,0,0]), 'coordinates':np.full(2,np.nan)}
             tx = coords[:, idxfs[:,face_id]].T
             faces = self.tess.faces[:,face_id]
         else:
@@ -1555,7 +1572,7 @@ class Mesh(VertexSet):
             tx[:,:,oks] = np.transpose(
                 np.reshape(coords[:,idxfs[:,okfids].flatten()], (dims, 3, oks.shape[0])),
                 (1,0,2))
-            faces = np.full((3, n), -1, dtype=np.int)
+            faces = np.full((3, n), 0, dtype=np.int)
             faces[:,oks] = self.tess.faces[:,okfids]
         bc = cartesian_to_barycentric_3D(tx, data) if dims == 3 else \
              cartesian_to_barycentric_2D(tx, data)
@@ -1797,7 +1814,18 @@ def is_mesh(m):
     is_mesh(m) yields True if m is a Mesh object and False otherwise.
     '''
     return isinstance(m, Mesh)
-    
+def is_flatmap(m):
+    '''
+    is_flatmap(m) yields True if m is a Mesh object with 2 coordinate dimensions and False
+      otherwise.
+    '''
+    return isinstance(m, Mesh) and m.coordinates.shape[0] == 2
+def mesh(faces, coordinates, meta_data=None, properties=None):
+    '''
+    mesh(faces, coordinates) yields a mesh with the given face and coordinate matrices.
+    '''
+    return Mesh(faces, coordinates, meta_data=meta_data, properties=properties)
+
 @pimms.immutable
 class MapProjection(ObjectWithMetaData):
     '''
@@ -2032,13 +2060,9 @@ class MapProjection(ObjectWithMetaData):
         is valid only for LH or RH chiralities; None indicates that the projection does not care
         about chirality.
         '''
-        if ch is None: return None
-        if not pimms.is_str(ch):
-            raise ValueError('projection chirality must be either None or \'lh\' or \rh\'')
-        ch = ch.lower()
-        if ch not in ['lh', 'rh']:
-            raise ValueError('projection chirality must be either None or \'lh\' or \rh\'')
-        return ch
+        ch = to_hemi_str(ch)
+        if ch == 'lr': return None
+        else: return ch
     @pimms.param
     def sphere_radius(sr):
         '''
@@ -2124,7 +2148,7 @@ class MapProjection(ObjectWithMetaData):
         '''
         proj.repr is the representation string yielded by proj.__repr__().
         '''
-        ch = 'XH' if chirality is None else chirality.upper()
+        ch = 'LR' if chirality is None else chirality.upper()
         reg = 'native' if registration is None else registration
         return 'MapProjection(<%s>, <%s>)' % (ch, reg)
     
@@ -2320,7 +2344,7 @@ def load_projections_from_path(p):
     For example, the following match:
       lh.occipital_pole.mp.json    => map_projections['lh']['occipital_pole']
       rh.frontal.json.gz           => map_projections['rh']['frontal']
-      lh.motor.projection.json.gz  => map_projections['lh']['motor']
+      lr.motor.projection.json.gz  => map_projections['lr']['motor']
     '''
     p = dirpath_to_list(p)
     return pyr.pmap(
@@ -2330,12 +2354,12 @@ def load_projections_from_path(p):
              for pp    in p
              for fl    in os.listdir(pp)  if fl.endswith('.json') or fl.endswith('.json.gz')
              for parts in [fl.split('.')] if len(parts) > 2 and parts[0] == h})
-         for h in ('lh','rh')})
+         for h in ('lh','rh','lr')})
 # just the neuropythy lib-dir projections:
 try: npythy_map_projections = load_projections_from_path(projections_libdir)
 except:
     warnings.warn('Error raised while loading neuropythy libdir map projections')
-    npythy_map_projections = pyr.m(lh=pyr.m(), rh=pyr.m())
+    npythy_map_projections = pyr.m(lh=pyr.m(), rh=pyr.m(), lr=pyr.m())
 # all the map projections:
 map_projections = npythy_map_projections
 def check_projections_path(path):
@@ -2350,7 +2374,8 @@ def check_projections_path(path):
     tmp = load_projections_from_path(path)
     # okay, seems like it passed; go ahead and update
     global map_projections
-    map_projections = pimms.merge(npythy_map_projections, tmp)
+    map_projections = pyr.pmap({h: pimms.merge(npythy_map_projections[h], tmp[h])
+                                for h in six.iterkeys(npythy_map_projections)})
     return path
 config.declare('projections_path', filter=check_projections_path)
 def projections_path(path=Ellipsis):
@@ -2382,12 +2407,12 @@ def map_projection(name, arg,
                    pre_affine=None, post_affine=None, meta_data=None):
     '''
     map_projection(name, hemi) yields the map projection with the given name if it exists; hemi must
-      be either 'lh' or 'rh'.
+      be either 'lh', 'rh', or 'lr'/None.
     map_projection(name, topo) yields a map projection using the given topology object topo to
       determine the hemisphere and assigning to the resulting projection's 'mesh' parameter the
       appropriate registration from the given topology.
     map_projection(name, mesh) uses the given mesh; the mesh's meta-data must specify the hemisphere
-      for this to work.
+      for this to work--otherwise 'lr' is always used as the hemisphere.
 
     All options that can be passed to load_map_projection and MapProjection can be passed to
     map_projection:
@@ -2417,7 +2442,7 @@ def map_projection(name, arg,
     elif isinstance(arg, Mesh):
         if   'chirality' in arg.meta_data: hemi = to_hemi_str(arg.meta_data['chirality'])
         elif 'hemi'      in arg.meta_data: hemi = to_hemi_str(arg.meta_data['hemi'])
-        else: raise ValueError('Could not deduce hemisphere from mesh')
+        else:                              hemi = 'lr'
         topo = None
         mesh = arg
     else: raise ValueError('Could not understand map_projection argument: %s' % arg)
@@ -2433,36 +2458,50 @@ def map_projection(name, arg,
     if topo: mesh = mp.extract_mesh(topo)
     # okay, return the projection with the mesh attached
     return mp if mesh is None else mp.copy(mesh=mesh)
-def to_flatmap(name, obj, chirality=None,
-               center=None, center_right=None, radius=None, method='equirectangular',
-               registration='native', sphere_radius=None,
-               pre_affine=None, post_affine=None, meta_data=None):
+def is_map_projection(arg):
     '''
-    to_flatmap(name, topo) yields a flatmap of the given topology topo using the map projection with
-      the given name or path.
-    to_flatmap(name, mesh, h) yields a flatmap of the given mesh, which is of the given hemisphere;
-      if h is not given, then the hemisphere must be in the meta-data of the mesh.
-    to_flatmap(name, subj, h) uses the given hemisphere from the given subject.
+    is_map_projection(arg) yields True if arg is a map-projection object and False otherwise.
+    '''
+    return isinstance(arg, MapProjection)
+def to_map_projection(arg):
+    '''
+    to_map_projection(mp) yields mp if mp is a map projection object.
+    to_map_projection((name, hemi)) is equivalent to map_projection(name, chirality=hemi).
+    to_map_projection((name, opts)) uses the given options dictionary as options to map_projection;
+      (name, hemi, opts) is also allowed as input.
+    to_map_projection(filename) yields the map projection loaded from the given filename.
+    to_map_projection('<name>:<hemi>') is equivalent to to_map_projection(('<name>', '<hemi>')).
+    to_map_projection('<name>') is equivalent to to_map_projection(('<name>', 'lr')).
+    '''
+    if is_map_projection(arg): return arg
+    elif pimms.is_str(arg):
+        # first see if there's a hemi appended
+        if ':' in arg:
+            spl = arg.split(':')
+            (a,h) = (':'.join(spl[:-1]), spl[-1])
+            try: h = to_hemi_str(h)
+            except: h = None
+            if h: return to_map_projection((a, h))
+        # otherwise, strings alone might be filenames; otherwise it's an mp name without the :lr
+        try: return load_map_projection(arg)
+        except: return to_map_projection((arg, 'lr'))
+    elif pimms.is_vector(arg):
+        if   len(arg) == 1: (a,h,o) = (arg,    'lr',   {})
+        elif len(arg) == 2: (a,h,o) = (arg[0], arg[1], {})
+        elif len(arg) == 3: (a,h,o) = arg
+        else: raise ValueError('too many objects in first arg of to_map_projection([...])')
+        return map_projection(a, chirality=h, **o)
+    else: raise ValueError('Cannot interpret argument to to_map_projection')
+def to_flatmap(name, obj):
+    '''
+    to_flatmap(name, topo) yields a flatmap of the given topology topo using the map projection
+      obtained via to_map_projection(name).
+    to_flatmap(name, mesh) yields a flatmap of the given mesh. If no hemisphere is specified in the
+      name argument nor in the mesh meta-data, then 'lr' is assumed.
+    to_flatmap(name, subj) uses the given hemisphere from the given subject.
     '''
     from neuropythy.mri import Subject
-    hemi = chirality
-    if isinstance(obj, Subject):
-        if hemi is None: raise ValueError('hemi is required when subject object is given')
-        h = to_hemi_str(hemi) if hemi not in obj.hemis else hemi
-        if h not in obj.hemis: raise ValueError('Given hemi not found for give subject')
-        obj = obj.hemis[h]
-    if isinstance(obj, Topology):
-        mp = map_projection(name, obj)
-        if mp.mesh is None: raise ValueError('could not match projection to topology')
-        else: return mp(mp.mesh)
-    elif not isinstance(obj, Mesh): raise ValueError('Could not interpret to_flatmap arg')
-    if hemi is not None: obj = obj.with_meta(chirality=to_hemi_str(hemi))
-    mp = map_projection(name, obj,
-                        center=center, center_right=center_right, radius=radius,
-                        method=method, registration=registration,
-                        sphere_radius=sphere_radius,
-                        pre_affine=pre_affine, post_affine=post_affine)
-    if mp.mesh is None: warnings.warn('could not match projection to mesh')
+    mp = to_map_projection(name)
     return mp(obj)
 
 @pimms.immutable
@@ -2661,6 +2700,18 @@ class Topology(VertexSet):
                              sphere_radius=sphere_radius,
                              pre_affine=pre_affine, post_affine=post_affine)
         return proj(self, tag=tag)
+def is_topo(obj):
+    '''
+    is_topo(obj) yields True if obj is a Topology object and False otherwise.
+    '''
+    return isinstance(obj, Topology)
+def topo(tess, registrations, properties=None, meta_data=None, chirality=None):
+    '''
+    topo(tess, regs) yields a Topology object with the given tesselation object tess and the given
+      registration map regs.
+    '''
+    return Topology(tess, registrations, properties=properties, meta_data=meta_data,
+                    chirarality=chirality)
 
 ####################################################################################################
 # Curves, Loops, and Regions on the cortical surface
@@ -3148,6 +3199,11 @@ class Path(ObjectWithMetaData):
         '''
         addrs = {k:np.fliplr(v) for (k,v) in six.iteritems(self.addresses)}
         return Path(self.surface, addrs, meta_data=meta_data)
+def is_path(p):
+    '''
+    is_path(p) yields True if p is a Path object and False otherwise.
+    '''
+    return isinstance(p, Path)
 
 @pimms.immutable
 class PathTrace(ObjectWithMetaData):
@@ -3171,9 +3227,7 @@ class PathTrace(ObjectWithMetaData):
         self.closed         = closed
     @pimms.option(None)
     def map_projection(mp):
-        if not isinstance(mp, MapProjection):
-            raise ValueError('trace map_projection must be a MapProjection or None')
-        return mp.persist()
+        return to_map_projection(mp).persist()
     @pimms.param
     def points(x):
         '''
@@ -3241,6 +3295,11 @@ class PathTrace(ObjectWithMetaData):
         # okay, we have the points--address them and make a path
         addrs = fmap.address(allpts)
         return Path(obj, addrs, meta_data={'source_trace': self})
+def is_path_trace(pt):
+    '''
+    is_path_trace(p) yields True if p is a PathTrace object and False otherwise.
+    '''
+    return isinstance(p, PathTrace)
 def path_trace(map_projection, pts, closed=False, meta_data=None):
     '''
     path_trace(proj, points) yields a path-trace object that represents the given path of points on
@@ -3254,12 +3313,12 @@ def path_trace(map_projection, pts, closed=False, meta_data=None):
         object.
     '''
     return PathTrace(map_projection, pts, closed=closed, meta_data=meta_data)
-def close_path(*args):
+def close_paths(*args):
     '''
-    close_path(path1, path2...) yields the path formed by joining the list of paths at their
-      intersection points in the order given. Note that the order in which each path is specified is
-      ultimately ignored by this function--the only order that matters is the order in which the
-      list of paths is given.
+    close_paths(path1, path2...) yields the path formed by joining the list of paths at their
+      intersection points in the order given. Note that the direction in which each individual path
+      is specified is ultimately ignored by this function--the only order that matters is the order
+      in which the list of paths is given.
     '''
     #TODO
     pass
@@ -3267,7 +3326,7 @@ def close_path(*args):
 ####################################################################################################
 # Some Functions that deal with converting to/from the above classes
 
-def to_tess(obj, properties=None, meta_data=None):
+def to_tess(obj):
     '''
     to_tess(obj) yields a Tesselation object that is equivalent to obj; if obj is a tesselation
       object already and no changes are requested (see options) then obj is returned unmolested.
@@ -3276,44 +3335,37 @@ def to_tess(obj, properties=None, meta_data=None):
       * a tesselation object
       * a mesh or topology object (yields their tess objects)
       * a 3 x n or n x 3 matrix of integers (the faces)
-      * a tuple (coords, faces), as returned when, for example, loading a freesurfer geometry file;
-        in this cases, the result is equivalent to to_tess(faces)
-
-    The following options are accepted:
-      * properties (default: None) specifies properties that should be given to the tesselation
-        object (see Tesselation and VertexSet).
-      * meta_data (default: None) specifies meta-data that should be attached to the tesselation
-        object (see Tesselation).
+      * a tuple of coordinates and faces that can be passed to to_mesh
     '''
-    if isinstance(obj, Tesselation): res = obj
-    elif isinstance(obj, Mesh): res = obj.tess
-    elif isinstance(obj, Topology): res = obj.tess
-    elif pimms.is_matrix(obj, 'number'): res = Tesselation(obj)
-    elif isinstance(obj, _tuple_type) and len(obj) == 2 and pimms.is_matrix(obj[1], 'int'):
-        res = Tesselation(obj[1])
-    else: raise ValueError('Cannot deduce how object is a tesselation')
-    if properties is not None: res = res.with_prop(properties)
-    if meta_data is not None:  res = res.with_meta(meta_data)
-    return res
-def to_mesh(obj, properties=None, meta_data=None):
+    if   is_tess(obj): return obj
+    elif is_mesh(obj): return obj.tess
+    elif is_topo(obj): return obj.tess
+    else:
+        # couple things to try: (1) might specify a tess face matrix, (2) might be a mesh-like obj
+        try:    return tess(obj)
+        except: pass
+        try:    return to_mesh(obj).tess
+        except: pass
+    raise ValueError('Could not convert argument to tesselation object')
+def to_mesh(obj):
     '''
-    to_mesh(obj) yields a Mesh object that is equivalent to obj; if obj is a mesh object and no
-      changes are requested (see options) then obj is returned unmolested.
+    to_mesh(obj) yields a Mesh object that is equivalent to obj or identical to obj if obj is itself
+      a mesh object.
 
     The following objects can be converted into meshes:
       * a mesh object
       * a tuple (coords, faces) where coords is a coordinate matrix and faces is a matrix of
         coordinate indices that make-up the triangles
+      * a tuple (faces, coords) where faces is a triangle matrix and coords is a coordinate matrix;
+        note that if neither matrix is of integer type, then the latter ordering (which is the same
+        as that accepted by the mesh() function) is assumed.
     '''
-    if isinstance(obj, Mesh):
-        res = obj
-        if properties is not None: res = res.with_prop(properties)
-        if meta_data is not None: res = res.with_meta(meta_data)
-        return res
-    elif isinstance(obj, _tuple_type) and len(obj) == 2:
-        return Mesh(obj[1], obj[0], properties=properties, meta_data=meta_data)
-    else:
-        raise ValueError('Could not deduce how object can be convertex into a mesh')
+    if is_mesh(obj): return obj
+    elif pimms.is_vector(obj) and len(obj) == 2:
+        (f,x) = obj
+        if pimms.is_matrix(x, 'int') and not pimms.is_matrix(f, 'int'): (f,x) = (x,f)
+        return mesh(f, x)
+    else: raise ValueError('Could not deduce how object can be convertex into a mesh')
 
 # The Gifti importer goes here because it relies on Mesh
 @importer('gifti', ('gii', 'gii.gz'))

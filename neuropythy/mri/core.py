@@ -590,6 +590,11 @@ class Subject(ObjectWithMetaData):
             return hemi.from_image(image, surface=surface, affine=affine,
                                    method=method, fill=fill, dtype=dtype, weight=weight,
                                    native_to_vertex_matrix=self.native_to_vertex_matrix)
+def is_subject(s):
+    '''
+    is_subject(s) yields True if s is a Subject object and False otherwise.
+    '''
+    return isinstance(s, Subject)
 
 @pimms.immutable
 class Cortex(geo.Topology):
@@ -839,6 +844,27 @@ class Cortex(geo.Topology):
             (wtx, ptx) = [sx[:,faces].T for sx in (wx, px)]
         (wu, pu) = [geo.barycentric_to_cartesian(tx, bc) for tx in (wtx, ptx)]
         return wu*ds + pu*(1 - ds)
+def is_cortex(c):
+    '''
+    is_cortex(c) yields True if c is a Cortex object and False otherwise.
+    '''
+    return isinstance(c, Cortex)
+def to_cortex(c):
+    '''
+    to_cortex(c) yields a Cortex object if the argument c can be coerced to one and otherwise raises
+      an error.
+
+    An object can be coerced to a Cortex object if:
+      * it is a cortex object
+      * it is a tuple (subject, h) where subject is a subject object and h is a subject hemisphere.
+    '''
+    if is_cortex(c): return c
+    elif pimms.is_vector(c) and len(c) == 2:
+        (s,h) = c
+        if is_subject(s) and pimms.is_str(h):
+            if h in s.hemis: return s.hemis[h]
+            else: raise ValueError('to_cortex: hemi %s not found in given subject' % h)
+    raise ValueError('Could not coerce argument to Cortex object')
 
 ####################################################################################################
 # These functions deal with cortex_to_image and image_to_cortex interpolation:
