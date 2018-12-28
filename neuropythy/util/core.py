@@ -808,7 +808,7 @@ def flattest(x):
       np.asarray(x).flatten, flattest(x) works with sparse matrices. It does not, however, work with
       ragged arrays.
     '''
-    x = x.flat if sps.issparse(x) else np.asarray(x).flat
+    x = x.toarray().flat if sps.issparse(x) else np.asarray(x).flat
     return np.array(x)
 def flatter(x, k=1):
     '''

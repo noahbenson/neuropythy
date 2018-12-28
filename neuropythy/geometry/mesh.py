@@ -489,6 +489,36 @@ class TesselationIndex(object):
     def face_index(fi):
         if not pimms.is_pmap(fi): fi = pyr.pmap(fi)
         return fi
+    @pimms.value
+    def vertex_matrix(vertex_index):
+        ks = np.array(vertex_index.keys())
+        vs = np.array(vertex_index.values())
+        n = np.max(ks)
+        return sps.csr_matrix((vs + 1, (np.ones(len(ks)), ks)), shape=(1, n), dtype=np.int)
+    @pimms.value
+    def vertex_matrix(vertex_index):
+        ls = np.array(vertex_index.keys())
+        ii = np.array(vertex_index.values())
+        n = np.max(ls) + 1
+        return sps.csr_matrix((ii + 1, (np.zeros(len(ls)), ls)), shape=(1, n), dtype=np.int)
+    @pimms.value
+    def edge_matrix(edge_index):
+        (us,vs) = np.array(edge_index.keys()).T
+        ii = np.array(edge_index.values())
+        n = np.max([us,vs]) + 1
+        ii = np.concatenate([ii,ii])
+        (us,vs) = (np.concatenate([us,vs]), np.concatenate([vs,us]))
+        return sps.csr_matrix((ii + 1, (us, vs)), shape=(n, n), dtype=np.int)
+    @pimms.value
+    def face_matrix(face_index):
+        (a,b,c) = np.array(face_index.keys()).T
+        ii = np.array(face_index.values())
+        n = np.max([a,b,c]) + 1
+        (a,b,c) = [np.concatenate([aa,bb,cc]) for (aa,bb,cc) in [(a,b,c),(b,c,a),(c,a,b)]]
+        ii = np.concatenate([ii,ii,ii])
+        # we have to cheat with the last two
+        bc = b*n + c
+        return sps.csr_matrix((ii + 1, (a,bc)), shape=(n, n*n), dtype=np.int)
     
     def __repr__(self):
             return "TesselationIndex(<%d vertices>)" % len(self.vertex_index)
@@ -501,27 +531,45 @@ class TesselationIndex(object):
         elif isinstance(index, colls.Set):
             return {k:self[k] for k in index}
         elif pimms.is_vector(index):
-            vi = self.vertex_index
-            return np.asarray([vi[k] if k >= 0 else k for k in index])
+            index = np.array(index)
+            mtx = self.vertex_matrix
+            yy = np.where((index >= 0) & (index < mtx.shape[1]))[0]
+            if len(yy) < len(index):
+                index = np.array(index)
+                res = np.full(len(index), -1)
+                res[yy] = flattest(mtx[0, index[yy]]) - 1
+            else: res = flattest(mtx[0, index]) - 1
         elif pimms.is_matrix(index):
             m = np.asarray(index)
             if m.shape[0] != 2 and m.shape[0] != 3: m = m.T
-            idx = self.edge_index if m.shape[0] == 2 else self.face_index
-            return pimms.imm_array([idx[k] for k in zip(*m)])
-        else:
-            return self.vertex_index[index]
+            if m.shape[0] == 2:
+                (u,v) = m
+                xx = np.where((u < 0) | (v < 0) | (u >= mtx.shape[0]) | (v >= mtx.shape[1]))[0]
+                if len(xx) > 0:
+                    (u,v) = [np.array(x) for x in (u,v)]
+                    u[xx] = 0
+                    v[xx] = 0
+                res = flattest(self.edge_matrix[(u,v)]) - 1
+            else:
+                (a,b,c) = m
+                mtx = self.face_matrix
+                bc = b*mtx.shape[0] + c
+                xx = np.where((a >= mtx.shape[0]) | (bc >= mtx.shape[1]))[0]
+                if len(xx) > 0:
+                    bc[xx] = 0
+                    a = np.array(a)
+                    a[xx] = 0
+                res = flattest(mtx[(a, bc)]) - 1
+        else: return self.vertex_index.get(index, None)
+        ii = np.where(res < 0)[0]
+        if len(ii) == 0: return res
+        res = res.astype(np.object)
+        res[ii] = None
+        return res
     def __call__(self, index):
-        vi = self.vertex_index
-        if is_tuple(index):
-            return tuple([vi[k] if k >= 0 else k for k in index])
-        elif isinstance(index, colls.Set):
-            return set([vi[k] if k >= 0 else k for k in index])
-        elif pimms.is_vector(index):
-            return np.asarray([vi[k] if k >= 0 else k for k in index], dtype=np.int)
-        elif pimms.is_matrix(index):
-            return np.asarray([[vi[k] if k >= 0 else k for k in u] for u in index], dtype=np.int)
-        else:
-            return vi[index]
+        if pimms.is_scalar(index): return self.vertex_index.get(index, None)
+        elif is_tuple(index):      return tuple([self[ii] for ii in index])
+        else:                      return np.reshape(self[flattest(index)], np.shape(index))
 
 @pimms.immutable
 class Tesselation(VertexSet):
