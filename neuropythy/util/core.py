@@ -18,6 +18,28 @@ else:       (_tuple_type, _list_type) = (tuple, list)
 default_rtol = inspect.getargspec(np.isclose)[3][0]
 default_atol = inspect.getargspec(np.isclose)[3][1]
 
+def to_hemi_str(s):
+    '''
+    to_hemi_str(s) yields either 'lh', 'rh', or 'lr' depending on the input s.
+
+    The match rules for s are as follows:
+      * if s is None or Ellipsis, returns 'lr'
+      * if s is not a string, error; otherwise s becomes s.lower()
+      * if s is in ('lh','rh','lr'), returns s
+      * if s is in ('left', 'l', 'sh'), returns 'lh'
+      * if s is in ('right', 'r', 'dh'), returns 'rh'
+      * if s in in ('both', 'all', 'xh'), returns 'lr'
+      * otherwise, raises an error
+    '''
+    if s is None or s is Ellipsis: return 'lr'
+    if not pimms.is_str(s): raise ValueError('to_hemi_str(%s): not a string or ... or None' % s)
+    s = s.lower()
+    if   s in ('lh',    'rh',  'lr'): return s
+    elif s in ('left',  'l',   'sh'): return 'lh'
+    elif s in ('right', 'r',   'dh'): return 'rh'
+    elif s in ('both',  'all', 'xh'): return 'lr'
+    else: raise ValueError('Could not understand to_hemi_str argument: %s' % s)
+
 def curry(f, *args0, **kwargs0):
     '''
     curry(f, ...) yields a function equivalent to f with all following arguments and keyword

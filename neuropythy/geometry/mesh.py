@@ -22,7 +22,7 @@ from .util  import (triangle_area, triangle_address, alignment_matrix_3D, rotati
                     barycentric_to_cartesian, point_in_triangle)
 from ..util import (ObjectWithMetaData, to_affine, zinv, is_image, is_address, address_data, curry,
                     curve_spline, CurveSpline, chop, zdivide, flattest, inner, config, library_path,
-                    dirpath_to_list)
+                    dirpath_to_list, to_hemi_str)
 from ..io   import (load, importer)
 from functools import reduce
 
@@ -2220,6 +2220,32 @@ class MapProjection(ObjectWithMetaData):
         x = aff0.dot(np.concatenate((x, ones)))[0:3]
         # that's it!
         return x
+    def extract_mesh(self, obj):
+        '''
+        proj.extract_mesh(topo) yields the mesh registration object from the given topology topo
+          that is registered to the given projection, or None if no such registration is found.
+        proj.extract_mesh(subj) yields the registration for a subject.
+
+        Note that None is also returned if the projection cannot find an appropriate hemisphere in
+        the subject.
+        '''
+        from neuropythy.mri import Subject
+        if isinstance(obj, Subject):
+            if self.chirality is None: return None
+            else: ch = self.chirality
+            if ch not in obj.hemis: return None
+            else: obj = obj.hemis[ch]
+        if isinstance(obj, Topology):
+            # check the chiralities
+            if (obj.chirality  is not None and
+                self.chirality is not None and
+                obj.chirality != self.chirality): return None
+            # We need to figure out if there is a matching registration
+            reg = self.registration
+            if self.registration is None: reg = 'native'
+            if reg in obj.registrations: return obj.registrations[reg]
+            else: return None
+        else: raise ValueError('extract_mesh arg must be a Subject or Topology object')
     def __call__(self, obj, tag='projection'):
         '''
         proj(x) performs the map projection proj on the given coordinate or coordinate matrix x and
@@ -2234,19 +2260,12 @@ class MapProjection(ObjectWithMetaData):
         proj(topo) yields a 2D mesh that is derived from one of the registrations in the given
           topology topo, determined by the proj.registration parameter.
         '''
-        if isinstance(obj, Topology):
-            # check the chiralities
-            if obj.chirality is not None and self.chirality is not None:
-                if obj.chirality != self.chirality:
-                    raise ValueError('given topology is the wrong chirality for projection')
-            # We need to figure out if there is a matching registration
-            reg = self.registration
-            if self.registration is None: reg = 'native'
-            if reg in obj.registrations:
-                return self(obj.registrations[reg], tag=tag)
-            else:
-                raise ValueError('given topology does not include the registration %s' % reg)
-        elif isinstance(obj, Mesh):
+        from neuropythy.mri import Subject
+        if isinstance(obj, Topology) or isinstance(obj, Subject):
+            msh = self.extract_mesh(obj)
+            if msh is None: raise ValueError('Could not find matching registration for %s' % obj)
+            else: obj = msh
+        if isinstance(obj, Mesh):
             proj = self if self.mesh is obj else self.copy(mesh=obj)
             submesh = self.select_domain(obj)
             res = self.forward(submesh)
@@ -2357,6 +2376,94 @@ def projections_path(path=Ellipsis):
     '''
     if path is Ellipsis: return config['projections_path']
     else: config['projections_path'] = path
+def map_projection(name, arg,
+                   center=None, center_right=None, radius=None, method='equirectangular',
+                   registration='native', sphere_radius=None,
+                   pre_affine=None, post_affine=None, meta_data=None):
+    '''
+    map_projection(name, hemi) yields the map projection with the given name if it exists; hemi must
+      be either 'lh' or 'rh'.
+    map_projection(name, topo) yields a map projection using the given topology object topo to
+      determine the hemisphere and assigning to the resulting projection's 'mesh' parameter the
+      appropriate registration from the given topology.
+    map_projection(name, mesh) uses the given mesh; the mesh's meta-data must specify the hemisphere
+      for this to work.
+
+    All options that can be passed to load_map_projection and MapProjection can be passed to
+    map_projection:
+      * center specifies the 3D vector that points toward the center of the map.
+      * center_right specifies the 3D vector that points toward any point on the positive x-axis
+        of the resulting map.
+      * radius specifies the radius that should be assumed by the model in radians of the
+        cortical sphere.
+      * method specifies the projection method used (default: 'equirectangular').
+      * registration specifies the registration to which the map is aligned (default: 'native').
+      * chirality specifies whether the projection applies to left or right hemispheres.
+      * sphere_radius specifies the radius of the sphere that should be assumed by the model.
+        Note that in Freesurfer, spheres have a radius of 100.
+      * pre_affine specifies the pre-projection affine transform to use on the cortical sphere.
+      * post_affine specifies the post-projection affine transform to use on the 2D map.
+      * meta_data specifies any additional meta-data to attach to the projection.
+    '''
+    if not pimms.is_str(name): raise ValueError('map_projection name must be a string')
+    if pimms.is_str(arg):
+        hemi = to_hemi_str(arg)
+        topo = None
+        mesh = None
+    elif isinstance(arg, Topology):
+        hemi = arg.chirality
+        topo = arg
+        mesh = None
+    elif isinstance(arg, Mesh):
+        if   'chirality' in arg.meta_data: hemi = to_hemi_str(arg.meta_data['chirality'])
+        elif 'hemi'      in arg.meta_data: hemi = to_hemi_str(arg.meta_data['hemi'])
+        else: raise ValueError('Could not deduce hemisphere from mesh')
+        topo = None
+        mesh = arg
+    else: raise ValueError('Could not understand map_projection argument: %s' % arg)
+    if   name         in map_projections[hemi]: mp = map_projections[hemi][name]
+    elif name.lower() in map_projections[hemi]: mp = map_projections[hemi][name.lower()]
+    else:
+        try: mp = load_map_projection(name, chirality=hemi,
+                                      center=center, center_right=center_right, radius=radius,
+                                      method=method, registration=registration,
+                                      sphere_radius=sphere_radius,
+                                      pre_affine=pre_affine, post_affine=post_affine)
+        except: raise ValueError('could neither find nor load projection %s (%s)' % (arg, hemi))
+    if topo: mesh = mp.extract_mesh(topo)
+    # okay, return the projection with the mesh attached
+    return mp if mesh is None else mp.copy(mesh=mesh)
+def to_flatmap(name, obj, chirality=None,
+               center=None, center_right=None, radius=None, method='equirectangular',
+               registration='native', sphere_radius=None,
+               pre_affine=None, post_affine=None, meta_data=None):
+    '''
+    to_flatmap(name, topo) yields a flatmap of the given topology topo using the map projection with
+      the given name or path.
+    to_flatmap(name, mesh, h) yields a flatmap of the given mesh, which is of the given hemisphere;
+      if h is not given, then the hemisphere must be in the meta-data of the mesh.
+    to_flatmap(name, subj, h) uses the given hemisphere from the given subject.
+    '''
+    from neuropythy.mri import Subject
+    hemi = chirality
+    if isinstance(obj, Subject):
+        if hemi is None: raise ValueError('hemi is required when subject object is given')
+        h = to_hemi_str(hemi) if hemi not in obj.hemis else hemi
+        if h not in obj.hemis: raise ValueError('Given hemi not found for give subject')
+        obj = obj.hemis[h]
+    if isinstance(obj, Topology):
+        mp = map_projection(name, obj)
+        if mp.mesh is None: raise ValueError('could not match projection to topology')
+        else: return mp(mp.mesh)
+    elif not isinstance(obj, Mesh): raise ValueError('Could not interpret to_flatmap arg')
+    if hemi is not None: obj = obj.with_meta(chirality=to_hemi_str(hemi))
+    mp = map_projection(name, obj,
+                        center=center, center_right=center_right, radius=radius,
+                        method=method, registration=registration,
+                        sphere_radius=sphere_radius,
+                        pre_affine=pre_affine, post_affine=post_affine)
+    if mp.mesh is None: warnings.warn('could not match projection to mesh')
+    return mp(obj)
 
 @pimms.immutable
 class Topology(VertexSet):
