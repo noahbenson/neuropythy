@@ -1124,3 +1124,17 @@ def tmpdir(prefix='npythy_tempdir_', delete=True):
     if not os.path.isdir(path): raise ValueError('Could not find or create temp directory')
     if delete: atexit.register(shutil.rmtree, path)
     return path
+
+def dirpath_to_list(p):
+    '''
+    dirpath_to_list(path) yields a list of directories contained in the given path specification.
+
+    A path may be either a single directory name (==> [path]), a :-separated list of directories
+    (==> path.split(':')), a list of directory names (==> path), or None (==> []). Note that the
+    return value filters out parts of the path that are not directories.
+    '''
+    if   p is None: p = []
+    elif pimms.is_str(p): p = p.split(':')
+    if len(p) > 0 and not pimms.is_vector(p, str):
+        raise ValueError('Path is not equivalent to a list of dirs')
+    return [pp for pp in p if os.path.isdir(pp)]
