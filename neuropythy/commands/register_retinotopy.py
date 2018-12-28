@@ -500,7 +500,7 @@ def save_surface_files(note, error, registrations, subject,
     files = []
     note('Exporting files...')
     for h in six.iterkeys(registrations):
-        hemi = getattr(subject, h)
+        hemi = subject.hemis[h]
         reg = registrations[h]
         note('Extracting %s predicted mesh...' % h.upper())
         pmesh = reg['predicted_mesh']
