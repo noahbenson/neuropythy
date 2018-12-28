@@ -1,0 +1,6 @@
+{"version": 1.0,
+ "registration": "fsaverage",
+ "hemisphere": "lh",
+ "center": [-8.19000, -83.55000, -54.34000],
+ "center_right": [36.55000, -75.07000, -55.03000],
+ "method": "orthographic"}
