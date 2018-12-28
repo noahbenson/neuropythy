@@ -67,6 +67,8 @@ setup(
              'neuropythy/lib/models/v123.fmm.gz',
              'neuropythy/lib/models/lh.benson17.fmm.gz',
              'neuropythy/lib/models/rh.benson17.fmm.gz',
+             'neuropythy/lib/projections/lh.occipital_pole.mp.json',
+             'neuropythy/lib/projections/rh.occipital_pole.mp.json',
              'neuropythy/lib/data/fsaverage/surf/lh.benson14_angle.v4_0.mgz',
              'neuropythy/lib/data/fsaverage/surf/lh.benson14_sigma.v4_0.mgz',
              'neuropythy/lib/data/fsaverage/surf/lh.benson14_varea.v4_0.mgz',

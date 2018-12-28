@@ -14,14 +14,15 @@ import nibabel                      as nib
 import nibabel.freesurfer.mghformat as fsmgh
 import pyrsistent                   as pyr
 import collections                  as colls
-import sys, six, types, logging, warnings, pimms
+import os, sys, six, types, logging, warnings, gzip, json, pimms
 
 from .util  import (triangle_area, triangle_address, alignment_matrix_3D, rotation_matrix_3D,
                     cartesian_to_barycentric_3D, cartesian_to_barycentric_2D,
                     segment_intersection_2D,
                     barycentric_to_cartesian, point_in_triangle)
 from ..util import (ObjectWithMetaData, to_affine, zinv, is_image, is_address, address_data, curry,
-                    curve_spline, CurveSpline, chop, zdivide, flattest, inner)
+                    curve_spline, CurveSpline, chop, zdivide, flattest, inner, config, library_path,
+                    dirpath_to_list)
 from ..io   import (load, importer)
 from functools import reduce
 
@@ -1889,6 +1890,76 @@ class MapProjection(ObjectWithMetaData):
         self.post_affine = post_affine
         self.meta_data = meta_data
 
+    @staticmethod
+    def load(filename,
+             center=None, center_right=None, radius=None, method='equirectangular',
+             registration='native', chirality=None, sphere_radius=None,
+             pre_affine=None, post_affine=None, meta_data=None):
+        '''
+        MapProjection.load(file) yields the map projection indicated by the given file name or file
+          object file. Map projections define the parameters of a projection to the 2D cortical
+          surface via a registartion name and projection parameters.
+
+        The following options may be given; all of these options represent parameters that may or
+        may not be defined by the map-projection file; in the case that a parameter is defined by
+        the file, the optional argument is ignored. To force parameters to have particular values,
+        you must modify or copy the map projection that is by this function (but note that all the
+        parameters below match parameters of the map projection class. All of these parameters
+        except the method (default: 'equirectangular'), registration (default: 'native'), and
+        meta_data parameters have default values of None, which means that they are, by default,
+        handled by the MapProjection class. The meta_data parameter, if provided, is merged with any
+        meta-data in the projection file such that the passed meta-data is overwritten by the file's
+        meta-data.
+          * center specifies the 3D vector that points toward the center of the map.
+          * center_right specifies the 3D vector that points toward any point on the positive x-axis
+            of the resulting map.
+          * radius specifies the radius that should be assumed by the model in radians of the
+            cortical sphere.
+          * method specifies the projection method used (default: 'equirectangular').
+          * registration specifies the registration to which the map is aligned (default: 'native').
+          * chirality specifies whether the projection applies to left or right hemispheres.
+          * sphere_radius specifies the radius of the sphere that should be assumed by the model.
+            Note that in Freesurfer, spheres have a radius of 100.
+          * pre_affine specifies the pre-projection affine transform to use on the cortical sphere.
+          * post_affine specifies the post-projection affine transform to use on the 2D map.
+          * meta_data specifies any additional meta-data to attach to the projection.
+        '''
+        # import the file first:
+        if pimms.is_str(filename):
+            filename = os.path.expandvars(os.path.expanduser(filename))
+            if not os.path.isfile(filename):
+                raise ValueError('Given filename (%s) is not a file!' % filename)
+            gz = (len(filename) > 3 and filename[-3:] == '.gz')
+            dat = None
+            with (gzip.open(filename, 'rt') if gz else open(filename, 'rt')) as f:
+                dat = json.load(f)
+            fname = filename
+        else:
+            dat = json.load(filename)
+            fname = '<file-stream>'
+        dat = {k.lower():v for (k,v) in six.iteritems(dat)}
+        # check version
+        if 'version' not in dat: warnings.warn('projection file contains no version: %s' % fname)
+        elif dat['version'] < 1: warnings.warn('projection file version < 1: %s' % fname)
+        elif dat['version'] > 1: logging.info('projection file version > 1: %s' % fname)
+        # build up the parameter dict we will use:
+        params = dict(center=center, center_right=center_right, radius=radius, method=method,
+                      registration=registration, chirality=chirality, sphere_radius=sphere_radius,
+                      pre_affine=pre_affine, post_affine=post_affine)
+        params = {k:(dat[k] if k in dat else v) for (k,v) in six.iteritems(params)}
+        # get meta-data if included and/or set it up
+        meta = dat['meta_data'] if 'meta_data' in dat else {}
+        if not pimms.is_map(meta): raise ValueError('projection meta_data was not a mapping object')
+        if meta_data is not None: meta = pimms.merge(meta_data, meta)
+        meta = dict(meta)
+        if 'version' not in meta: meta['version'] = dat['version'] if 'version' in dat else None
+        if 'json' not in meta: meta['json'] = dat
+        if 'filename' not in meta and pimms.is_str(filename): meta['filename'] = filename
+        # add in meta-data
+        params['meta_data'] = meta
+        # and use these to create an object...
+        return MapProjection(**params)
+        
     @pimms.param
     def mesh(m):
         '''
@@ -2195,7 +2266,98 @@ MapProjection.projection_inverse_methods = pyr.m(
     mercator        = MapProjection.mercator_projection_inverse,
     sinusoidal      = MapProjection.sinusoidal_projection_inverse)
 
-        
+@importer('map_projection', ('mp.json', 'mp.json.gz', 'map.json', 'map.json.gz',
+                             'projection.json', 'projection.json.gz'))
+def load_map_projection(filename,
+                        center=None, center_right=None, radius=None, method='equirectangular',
+                        registration='native', chirality=None, sphere_radius=None,
+                        pre_affine=None, post_affine=None, meta_data=None):
+    '''
+    load_map_projection(filename) yields the map projection indicated by the given file name. Map
+      projections define the parameters of a projection to the 2D cortical surface via a
+      registartion name and projection parameters.
+
+    This function is primarily a wrapper around the MapProjection.load() function; for information
+    about options, see MapProjection.load.
+    '''
+    return MapProjection.load(filename,
+                              center=center, center_right=center_right, radius=radius,
+                              method=method, registration=registration, chirality=chirality,
+                              sphere_radius=sphere_radius, pre_affine=pre_affine,
+                              post_affine=post_affine)
+
+# Auto-loaded Map Projections (#map_projections)
+projections_libdir = (os.path.join(library_path(), 'projections'),)
+# the projections in the neuropythy libdir
+def load_projections_from_path(p):
+    '''
+    load_projections_from_path(p) yields a lazy-map of all the map projection files found in the
+      given path specification p. The path specification may be either a directory name, a
+      :-separated list of directory names, or a python list of directory names.
+
+    In order to be included in the returned mapping of projections, a projection must have a
+    filename that matches the following format:
+      <hemi>.<name>[.mp | .map | .projection | <nothing>].json[.gz]
+    For example, the following match:
+      lh.occipital_pole.mp.json    => map_projections['lh']['occipital_pole']
+      rh.frontal.json.gz           => map_projections['rh']['frontal']
+      lh.motor.projection.json.gz  => map_projections['lh']['motor']
+    '''
+    p = dirpath_to_list(p)
+    return pyr.pmap(
+        {h:pimms.lazy_map(
+            {parts[1]: curry(lambda flnm,h: load_map_projection(flnm, chirality=h),
+                             os.path.join(pp, fl), h)
+             for pp    in p
+             for fl    in os.listdir(pp)  if fl.endswith('.json') or fl.endswith('.json.gz')
+             for parts in [fl.split('.')] if len(parts) > 2 and parts[0] == h})
+         for h in ('lh','rh')})
+# just the neuropythy lib-dir projections:
+try: npythy_map_projections = load_projections_from_path(projections_libdir)
+except:
+    warnings.warn('Error raised while loading neuropythy libdir map projections')
+    npythy_map_projections = pyr.m(lh=pyr.m(), rh=pyr.m())
+# all the map projections:
+map_projections = npythy_map_projections
+def check_projections_path(path):
+    '''
+    check_projections_path(path) yields the given path after checking that it is valid and updating
+      neuropythy.map_projections to include any projections found on the given path.
+
+    This function is called whenever neuropythy.config['projections_path'] is edited; it should not
+    generally be called directly.
+    '''
+    path = dirpath_to_list(path)
+    tmp = load_projections_from_path(path)
+    # okay, seems like it passed; go ahead and update
+    global map_projections
+    map_projections = pimms.merge(npythy_map_projections, tmp)
+    return path
+config.declare('projections_path', filter=check_projections_path)
+def projections_path(path=Ellipsis):
+    '''
+    projections_path() yields the projections path currently being used by neuropythy. This is
+      equivalent to projections_path(Ellipsis).
+    projections_path(path) sets the neuropythy projections path to be the given argument. The path
+      may be either a single directory, a list of directories, or a :-separated list of directories.
+
+    Before returnings, the map projections mapping stored in neuropythy.map_projections is updated
+    to include all map projections found in the given directories. Old map projections found in the
+    previous projections-path directories are discarded; though map projections found in
+    neuropythy's lib directory are always kept (but may be overwritten by projections in the path
+    with the same name)
+
+    In order to be included in the returned mapping of projections, a projection must have a
+    filename that matches the following format:
+      <hemi>.<name>[.mp | .map | .projection | <nothing>].json[.gz]
+    For example, the following match:
+      lh.occipital_pole.mp.json    => map_projections['lh']['occipital_pole']
+      rh.frontal.json.gz           => map_projections['rh']['frontal']
+      lh.motor.projection.json.gz  => map_projections['lh']['motor']
+    '''
+    if path is Ellipsis: return config['projections_path']
+    else: config['projections_path'] = path
+
 @pimms.immutable
 class Topology(VertexSet):
     '''
@@ -2824,7 +2986,7 @@ class Path(ObjectWithMetaData):
         triangle coordinates, one set for each surface in topo.
         '''
         if isinstance(surface, Topology):
-            conv1 = lambda s,xs:pimms.imm_array(surfaces[s].unaddress(xs).T)
+            conv1 = lambda s,xs:pimms.imm_array(surface[s].unaddress(xs).T)
             conv2 = lambda s: tuple([conv1(s,xs) for xs in all_border_triangle_addresses])
             return pimms.lazy_map({k:curry(conv2, k) for k in six.iterkeys(surface.surfaces)})
         else: return tuple([pimms.imm_array(surface.unaddress(xs).T)

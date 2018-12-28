@@ -2,6 +2,8 @@ include neuropythy/lib/nben/target/nben-standalone.jar
 include neuropythy/lib/models/v123.fmm.gz
 include neuropythy/lib/models/lh.benson17.fmm.gz
 include neuropythy/lib/models/rh.benson17.fmm.gz
+include neuropythy/lib/projections/lh.occipital_pole.mp.json
+include neuropythy/lib/projections/rh.occipital_pole.mp.json
 include neuropythy/lib/data/fsaverage/surf/lh.benson14_angle.v4_0.mgz
 include neuropythy/lib/data/fsaverage/surf/lh.benson14_sigma.v4_0.mgz
 include neuropythy/lib/data/fsaverage/surf/lh.benson14_varea.v4_0.mgz

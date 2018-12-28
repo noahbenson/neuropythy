@@ -67,8 +67,9 @@ from   .vision     import (retinotopy_data, empirical_retinotopy_data, predicted
                            register_retinotopy, retinotopy_anchors, retinotopy_model,
                            neighborhood_cortical_magnification, as_retinotopy, retinotopy_data,
                            retinotopy_comparison)
-from   .geometry   import (VertexSet, Mesh, Tesselation, Topology,
-                           to_mesh, to_tess, to_property, to_mask)
+from   .geometry   import (VertexSet, Mesh, Tesselation, Topology, MapProjection, Path, PathTrace,
+                           to_mesh, to_tess, to_property, to_mask, path_trace,
+                           map_projections)
 from   .freesurfer import (subject as freesurfer_subject, to_mgh)
 from   .hcp        import (subject as hcp_subject)
 from   .datasets   import data
