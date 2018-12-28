@@ -15,6 +15,7 @@ from ..           import mri      as mri
 from ..java       import (java_link, serialize_numpy,
                                      to_java_doubles, to_java_ints, to_java_array)
 from ..util       import (to_affine, library_path)
+from ..io         import importer
 
 if six.PY2: (_tuple_type, _list_type) = (types.TupleType, types.ListType)
 else:       (_tuple_type, _list_type) = (tuple, list)
@@ -520,6 +521,7 @@ class RegisteredRetinotopyModel(RetinotopyModel):
         else:
             return self.model.angle_to_cortex(*args)
 
+@importer('flatmap_model', ('fmm', 'fmm.gz'))
 def load_fmm_model(filename, radius=np.pi/3.0, sphere_radius=100.0):
     '''
     load_fmm_model(filename) yields the fmm model indicated by the given file name. Fmm models are
