@@ -14,11 +14,8 @@ from ..           import geometry as geo
 from ..           import mri      as mri
 from ..java       import (java_link, serialize_numpy,
                                      to_java_doubles, to_java_ints, to_java_array)
-from ..util       import (to_affine, library_path)
+from ..util       import (to_affine, library_path, is_tuple, is_list)
 from ..io         import importer
-
-if six.PY2: (_tuple_type, _list_type) = (types.TupleType, types.ListType)
-else:       (_tuple_type, _list_type) = (tuple, list)
 
 # These two variables are intended to provide default orderings to visual areas (but in general,
 # visual areas should be referred to by name OR as a number paired with a model).
@@ -125,15 +122,14 @@ class SchiraModel(RetinotopyModel):
         scale = params['scale']
         if pimms.is_number(scale):
             params = params.set('scale', (scale, scale))
-        elif not isinstance(scale, _tuple_type):
+        elif not is_tuple(scale):
             params = params.set('scale', tuple(scale))
         shear = params['shear']
         if pimms.is_number(shear) and np.isclose(shear, 0):
             params = params.set('shear', ((1, 0), (0, 1)))
         elif shear[0][0] != 1 or shear[1][1] != 1:
             raise RuntimeError('shear matrix diagonal elements must be 1!')
-        elif not isinstance(shear, _tuple_type) or \
-             not all(isinstance(s, _tuple_type) for s in shear):
+        elif not is_tuple(shear) or not all(is_tuple(s) for s in shear):
             params.set('shear', tuple([tuple(s) for s in shear]))
         center = params['center']
         if pimms.is_number(center) and np.isclose(center, 0):

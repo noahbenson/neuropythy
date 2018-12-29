@@ -14,16 +14,13 @@ from .. import geometry       as geo
 from .. import freesurfer     as nyfs
 from .. import mri            as mri
 from .. import io             as nyio
-from ..util               import (zinv, library_path)
+from ..util               import (zinv, library_path, is_tuple, is_list)
 from ..registration       import (mesh_register, java_potential_term)
 from ..java               import (to_java_doubles, to_java_ints)
 from functools            import reduce
 
 from .models import (RetinotopyModel, SchiraModel, RetinotopyMeshModel, RegisteredRetinotopyModel,
                      load_fmm_model, visual_area_names, visual_area_numbers)
-
-if six.PY2: (_tuple_type, _list_type) = (types.TupleType, types.ListType)
-else:       (_tuple_type, _list_type) = (tuple, list)
 
 # Tools for extracting retinotopy data from a subject:
 _empirical_retinotopy_names = {
@@ -252,7 +249,7 @@ def as_retinotopy(data, output_style='visual', units=Ellipsis, prefix=None, suff
     if output_style not in _retinotopy_style_fns:
         raise ValueError('Unrecognized output style: %s' % output_style)
     # First step: get the retinotopy into a format we can deal with easily
-    if isinstance(data, tuple) and len(data) == 2:
+    if is_tuple(data) and len(data) == 2:
         data = {'polar_angle': data[0], 'eccentricity': data[1]}
     if isinstance(data, list):
         data = np.asarray(data)
@@ -946,13 +943,11 @@ def retinotopy_anchors(mesh, mdl,
     select = ['close', [40]] if select == 'close'   else \
              ['close', [40]] if select == ['close'] else \
              select
-    lttyp = (_list_type, _tuple_type)
     if select is None:
         select = lambda a,b: b
-    elif isinstance(select, lttyp) and len(select) == 2 and select[0] == 'close':
-        if isinstance(select[1], lttyp):
-            d = np.mean(mesh.edge_lengths)*select[1][0]
-        else: d = select[1]
+    elif pimms.is_vector(select) and len(select) == 2 and select[0] == 'close':
+        if pimms.is_vector(select[1]): d = np.mean(mesh.edge_lengths) * select[1][0]
+        else:                          d = select[1]
         select = lambda idx,ancs: [a for a in ancs if a[0] is not None if npla.norm(X[idx] - a) < d]
     # Okay, apply the model:
     res = mdl.angle_to_cortex(polar_angle[idcs], eccentricity[idcs])
@@ -1903,7 +1898,7 @@ def retinotopy_comparison(arg1, arg2, arg3=None,
         result['z' + s] = x + 1j * y
     n = len(ps[0])
     # figure out the weight
-    if isinstance(weight, tuple) and len(weight) == 2:
+    if pimms.is_vector(weight) and len(weight) == 2:
         ws = [(None  if w is None                   else
                ds[w] if pimms.is_str(w) and w in ds else
                geo.to_property(obj, w))
@@ -1928,7 +1923,7 @@ def retinotopy_comparison(arg1, arg2, arg3=None,
     if ws[0] is not None: result['weight_1'] = ws[0]
     if ws[1] is not None: result['weight_2'] = ws[1]
     # figure out the visual areas
-    if isinstance(visual_area, tuple) and len(visual_area) == 2:
+    if is_tuple(visual_area) and len(visual_area) == 2:
         ls = [(None  if l is None                   else
                ds[l] if pimms.is_str(l) and l in ds else
                geo.to_property(obj, l))

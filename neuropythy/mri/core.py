@@ -13,10 +13,8 @@ import pyrsistent          as pyr
 import collections         as colls
 import os, sys, types, six, itertools, pimms
 
-from ..util import (ObjectWithMetaData, to_affine, is_image, is_address, address_data, curry)
-
-if six.PY2: (_tuple_type, _list_type) = (types.TupleType, types.ListType)
-else:       (_tuple_type, _list_type) = (tuple, list)
+from ..util import (ObjectWithMetaData, to_affine, is_image, is_address, is_tuple, address_data,
+                    curry)
 
 @pimms.immutable
 class Subject(ObjectWithMetaData):
@@ -1085,7 +1083,7 @@ def cortex_to_image_interpolation(obj, mask=None, affine=None, method='linear', 
     # okay, having handled that no-arg case, lets parse the argument we have
     if pimms.is_matrix(mask):
         # we take this to be the list; we don't chante its order
-        if not isinstance(mask, _tuple_type) or len(mask) != 3:
+        if not is_tuple(mask) or len(mask) != 3:
             mask = np.asarray(mask, dtype=np.int)
             mask = tuple(mask.T if mask.shape[0] != 3 else mask)
     elif isinstance(mask, colls.Set):
