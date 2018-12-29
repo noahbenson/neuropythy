@@ -11,10 +11,12 @@ import scipy.spatial       as spspace
 import neuropythy.geometry as geo
 import pyrsistent          as pyr
 import collections         as colls
-import os, sys, types, six, itertools, pimms
+import os, sys, types, six, pimms
+
+from itertools import chain
 
 from ..util import (ObjectWithMetaData, to_affine, is_image, is_address, is_tuple, address_data,
-                    curry)
+                    curry, to_hemi_str)
 
 @pimms.immutable
 class Subject(ObjectWithMetaData):
@@ -472,35 +474,33 @@ class Subject(ObjectWithMetaData):
             subject's image_dimensions is used.
         '''
         # what hemisphere(s)?
-        hemi = 'both' if hemi is None else hemi.lower()
-        if hemi == 'both': hemi = ('lh', 'rh')
-        elif hemi == 'lh': hemi = ('lh', None)
-        elif hemi == 'rh': hemi = (None, 'rh')
-        else: raise ValueError('unrecognized hemi argument: %s' % hemi)
-        nhems = len([x for x in hemi if x is not None])
+        hemi = to_hemi_str(hemi)
+        hemi = ('lh', None) if hemi == 'lh' else (None, 'rh') if hemi == 'rh' else ('lh','rh')
+        nhems = len([x for x in hemi if x])
+        tr = None
         # Make the data match this format...
-        if pimms.is_map(data):
-            if   hemi[0] is None: data = (None, data['rh'])
-            elif hemi[1] is None: data = (data['lh'], None)
-            else: data = (data['lh'], data['rh'])
-        elif pimms.is_str(data):
-            data = (data, data)
-        elif hasattr(data, '__iter__') and len(data) == 2:
+        if   is_tuple(data) and len(data) == 2: pass
+        elif pimms.is_map(data): data = ((None,       data['rh']) if hemi[0] is None else
+                                         (data['lh'], None)       if hemi[1] is None else
+                                         (data['lh'], data['rh']))
+        elif pimms.is_str(data): data = (data, data)
+        elif pimms.is_array(data):
             data = np.asarray(data)
-        else:
-            if   hemi[0] is None: data = (data, None)
-            elif hemi[1] is None: data = (None, data)
-            else: raise ValueError('1 data vector but 2 hemispheres given')
+            sh = data.shape
+            if   nhems == 1: data = tuple([None if k is None else data for k in hemi])
+            elif 2 in sh:
+                ax = next([k for (k,d) in enumerate(sh) if d == 2])
+                data = np.transpose(data, list(chain([ax], range(0, ax), range(ax+1, len(sh)))))
+            else: raise ValueError('bad data shape for number of hemispheres')
+        else: raise ValueError('cortex_to_image cannot deduce data structure')
         # Make sure we have all the data...
         data = list(data)
         for (dat,h,ii) in zip(data, hemi, [0,1]):
-            if h is None:
-                data[ii] = None
-                continue
+            if h is None: continue
             if dat is None: raise ValueError('hemisphere %s requested but data not provided' % h)
-            hem = getattr(self, h)
-            dat = np.asarray(hem.prop(dat) if pimms.is_str(dat) else dat)
-            if not pimms.is_matrix(dat) and not pimms.is_vector(dat):
+            hem = self.hemis[h]
+            dat = hem.property(dat)
+            if not pimms.is_array(dat, None, (1,2)):
                 raise ValueError('data given for %s is neither a vector nor a matrix' % h)
             if pimms.is_matrix(dat) and dat.shape[0] != hem.vertex_count: dat = dat.T
             if dat.shape[0] != hem.vertex_count:
@@ -517,8 +517,7 @@ class Subject(ObjectWithMetaData):
                 raise ValueError('hemisphere data shapes must match in non-vertex dimension')
             elif data[0].shape[1] != data[1].shape[1]:
                 raise ValueError('hemisphere data shapes must match in non-vertex dimension')
-            else:
-                frames = data[0].shape[1]
+            else: frames = data[0].shape[1]
         elif data[0] is None:
             frames = data[1].shape[1] if pimms.is_matrix(data[1]) else 1
         else:
@@ -526,9 +525,8 @@ class Subject(ObjectWithMetaData):
         # Figure out the dtype
         if dtype is None:
             # check the input...
-            if all(d is None or not pimms.is_vector(d, np.inexact) for d in data):
-                dtype = np.int32
-            else: dtype = np.float32
+            dtype = (np.float32 if any(d and pimms.is_array(d, np.inexact) for d in data) else
+                     np.int32)
         shape = self.image_dimensions if shape is None else shape
         # make our output array
         dims = shape + (frames,) if frames > 1 and len(shape) < 4 else shape
@@ -738,7 +736,7 @@ class Cortex(geo.Topology):
         mesh = self.surface(surface) if not isinstance(surface, geo.Mesh) else surface
         return mesh.from_image(image, affine=affine, method=method, fill=fill, dtype=dtype,
                                native_to_vertex_matrix=native_to_vertex_matrix, weight=weight)
-    def address(self, data, idcs=None, native_to_vertex_matrix=None):
+    def address(self, data, indices=None, native_to_vertex_matrix=None):
         '''
         cortex.address(points) yields the barycentric coordinates of the given point or points; the
           return value is a dict whose keys are 'face_id' and 'coordinates'. The address may be used
@@ -753,6 +751,7 @@ class Cortex(geo.Topology):
         provide an affine-transformation from the image's native coordinate system to the cortex's
         vertex coordinate system.
         '''
+        idcs = indices
         if is_image(data):
             arr = np.asarray(data.get_data())
             if idcs is None: idcs = np.isfinte(arr) & arr.astype(np.bool)
@@ -766,8 +765,7 @@ class Cortex(geo.Topology):
                 aff,
                 np.concatenate((idcs, np.ones(1 if len(idcs.shape) == 1 else (1, idcs.shape[1])))))
             return self.address(xyz[:3])
-        # data must be a point matrix then
-        data = np.asarray(data)
+        else: data = np.asarray(data) # data must be a point matrix then
         if len(data.shape) > 2: raise ValueError('point or point matrix required')
         if len(data.shape) == 2: xyz = data.T if data.shape[0] == 3 else data
         else:                    xyz = np.asarray([data])
