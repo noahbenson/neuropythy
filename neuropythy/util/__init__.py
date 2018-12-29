@@ -3,7 +3,7 @@
 # This file defines the general tools that are available as part of neuropythy.
 
 from .core     import (ObjectWithMetaData, to_hemi_str, to_affine, simplex_summation_matrix,
-                       simplex_averaging_matrix, is_image, curry,
+                       simplex_averaging_matrix, is_image, is_image_header, curry,
                        numel, rows, part, hstack, vstack, repmat, replace_close, chop,
                        flatter, flattest, is_tuple, is_list,
                        plus, cplus, minus, cminus, times, ctimes,

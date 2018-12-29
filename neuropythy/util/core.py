@@ -223,10 +223,16 @@ def simplex_averaging_matrix(simplices, weight=None, inverse=False):
 
 def is_image(image):
     '''
-    is_image(img) yields True if img is an instance if nibabe.analuze.SpatialImage and false
+    is_image(img) yields True if img is an instance if nibabel.spatialimages.SpatialImagee and False
       otherwise.
     '''
-    return isinstance(image, nib.analyze.SpatialImage)
+    return isinstance(image, nib.spatialimages.SpatialImage)
+def is_image_header(x):
+    '''
+    is_image_header(x) yields True if x is a nibabel.spatialimages.SpatialHeader object and False
+      otherwise.
+    '''
+    return isinstance(x, nib.spatialimages.SpatialHeader)
 
 def is_address(data):
     '''
