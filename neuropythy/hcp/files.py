@@ -150,6 +150,20 @@ config.declare_credentials('hcp_credentials',
 # Subject Data Structure
 # This structure details how neuropythy understands an HCP subject to be structured.
 
+def gifti_to_array(gii):
+    '''
+    gifti_to_array(gii) yields the squeezed array of data contained in the given gifti object, gii,
+      Note that if gii does not contain simple data in its darray object, then this will produce
+      undefined results. This operation is effectively equivalent to:
+      np.squeeze([x.data for x in gii.darrays]).
+    gifti_to_array(gii_filename) is equivalent to gifti_to_array(neyropythy.load(gii_filename)).
+    '''
+    if pimms.is_str(gii): return gifti_to_array(ny.load(gii, 'gifti'))
+    elif pimms.is_nparray(gii): return gii #already done
+    elif isinstance(gii, nib.gifti.gifti.GiftiImage):
+        return np.squeeze(np.asarray([x.data for x in gii.darrays]))
+    else: raise ValueError('Could not understand argument to gifti_to_array')
+
 # A few loading functions used by the description below
 # Used to auto-download a single file
 def _auto_download_file(filename, data):
@@ -189,7 +203,7 @@ def _data_load(filename, data):
         res = nyio.load(filename)
     elif data['type'] == 'property':
         if filename.endswith('.gii') or filename.endswith('.gii.gz'):
-            res = nyio.load(filename).darrays[0].data
+            res = gifti_to_array(nyio.load(filename))
         else:
             res = nyio.load(filename)
         res = np.squeeze(res)
