@@ -14,4 +14,4 @@ for interacting with cortical data. The primary data include:
 
 from .core   import (Subject, Cortex, is_subject, is_cortex, to_cortex,
                      cortex_to_image_interpolation)
-from .images import (to_image_meta_data, to_image)
+from .images import (to_image_meta_data, to_image, to_image_header)

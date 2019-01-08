@@ -63,7 +63,7 @@ def reload_neuropythy():
 
 from   .util       import config
 from   .io         import (load, save, to_nifti)
-from   .mri        import (is_subject, is_cortex, to_cortex)
+from   .mri        import (is_subject, is_cortex, to_cortex, to_image)
 from   .vision     import (retinotopy_data, empirical_retinotopy_data, predicted_retinotopy_data,
                            register_retinotopy, retinotopy_anchors, retinotopy_model,
                            neighborhood_cortical_magnification, as_retinotopy, retinotopy_data,

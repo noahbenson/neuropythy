@@ -55,8 +55,9 @@ class ImageType(object):
         Parses the dtype out of the header data or the array, depending on which is given; if both,
           then the header-data overrides the array; if neither, then np.float32.
         '''
-        if dataobj: dtype = np.asarray(dataobj).dtype
-        else:       dtype = self.default_type()
+        try:    dataobj = dataobj.dataobj
+        except: pass
+        dtype = np.asarray(dataobj).dtype if dataobj else self.default_type()
         if   hdat and 'type'  in hdat: dtype = np.dtype(hdat['type'])
         elif hdat and 'dtype' in hdat: dtype = np.dtype(hdat['dtype'])
         return dtype
@@ -74,6 +75,8 @@ class ImageType(object):
         if ish is Ellipsis: ish = None
         # make a numpy array of the appropriate dtype
         dtype = self.parse_type(hdat, dataobj=dataobj)
+        try:    dataobj = dataobj.dataobj
+        except: pass
         if   dataobj: arr = np.asarray(dataobj).astype(dtype)
         elif ish:     arr = np.zeros(ish,       dtype=dtype)
         else:         arr = np.zeros([1,1,1,0], dtype=dtype)
@@ -89,7 +92,14 @@ class ImageType(object):
         return arr
     @classmethod
     def parse_kwargs(self, arr, hdat={}):
-        return {k:hdat[k] for k in ['header', 'extra', 'file_map'] if k in hdat}
+        ext = hdat.get('extra', {})
+        for (k,v) in six.iteritems(hdat):
+            if k in ['header', 'extra', 'file_map']: continue
+            ext[k] = v
+        kw = {'extra': ext} if len(ext) > 0 else {}
+        if 'header' in hdat: kw['header'] = hdat['header']
+        if 'file_map' in hdat: kw['file_map'] = hdat['file_map']
+        return kw
     @classmethod
     def to_image(self, arr, hdat={}):
         # reshape the data object or create it empty if None was given:
@@ -194,13 +204,11 @@ class Nifti1ImageType(ImageType):
     @classmethod
     def header_type(self): return nib.Nifti1Header
     @classmethod
-    def default_type(self): return np.dtype('float32')
-    @classmethod
     def aliases(self): return ('nii', 'nii.gz', 'nifti')
     @classmethod
     def meta_data(self, img):
         from nibabel.nifti1 import (slice_order_codes, unit_codes)
-        d = super(self, MGHImageType).meta_data(img)
+        d = super(self, Nifti1ImageType).meta_data(img)
         hdr = to_image_header(img)
         try:    d['dimension_information'] = hdr.get_dim_info()
         except: pass
@@ -251,6 +259,7 @@ class Nifti1ImageType(ImageType):
         except: pass
         try:    d['auxiliary_filename'] = hdr['aux_file']
         except: pass
+        return d
     @classmethod
     def unit_to_name(self, u):
         for name in ('meter', 'mm', 'sec', 'msec', 'usec'):
@@ -349,11 +358,101 @@ class Nifti2ImageType(Nifti1ImageType):
     @classmethod
     def header_type(self): return nib.Nifti2Header
     @classmethod
-    def default_type(self): return np.dtype('float32')
-    @classmethod
     def aliases(self): return ('nii2', 'nii2.gz')
+class Spm99AnalyzeImageType(ImageType):
+    @classmethod
+    def image_name(self): return 'spm99analyze'
+    @classmethod
+    def image_type(self): return nib.Spm99AnalyzeImage
+    @classmethod
+    def header_type(self): return nib.Spm99AnalyzeHeader
+class Spm2AnalyzeImageType(Spm99AnalyzeImageType):
+    @classmethod
+    def image_name(self): return 'analyze'
+    @classmethod
+    def image_type(self): return nib.Spm2AnalyzeImage
+    @classmethod
+    def header_type(self): return nib.Spm2AnalyzeHeader
+    @classmethod
+    def aliases(self): return ('spm2analyze')
+class Minc1ImageType(ImageType):
+    @classmethod
+    def image_name(self): return 'minc1'
+    @classmethod
+    def image_type(self): return nib.minc1.Minc1Image
+    @classmethod
+    def header_type(self): return nib.minc1.Minc1Header
+    @classmethod
+    def aliases(self): return ()
+class Minc2ImageType(ImageType):
+    @classmethod
+    def image_name(self): return 'minc'
+    @classmethod
+    def image_type(self): return nib.minc2.Minc2Image
+    @classmethod
+    def header_type(self): return nib.minc2.Minc2Header
+    @classmethod
+    def aliases(self): return ('minc2')
+class PARRECImageType(ImageType):
+    @classmethod
+    def image_name(self): return 'parrec'
+    @classmethod
+    def image_type(self): return nib.parrec.PARRECImage
+    @classmethod
+    def header_type(self): return nib.parrec.PARRECHeader
+    @classmethod
+    def aliases(self): return ()
+    @classmethod
+    def meta_data(self, img):
+        d = super(self, PARRECImageType).meta_data(img)
+        hdr = to_image_header(img)
+        try:
+            (bvals,bvec) = hdr.get_bvals_bvecs()
+            d['b_values'] = bvals
+            d['b_vectors'] = bvecs
+        except: pass
+        try:
+            (m,b) = hdr.get_data_scaling()
+            d['data_slope'] = m
+            d['data_offset'] = b
+        except: pass
+        # get_def(name)?
+        try:    d['echo_train_length'] = hdr.get_echo_train_length()
+        except: pass
+        try:    d['record_shape'] = hdr.get_record_shape()
+        except: pass
+        try:    d['slice_orientation'] = hdr.get_slice_orientation()
+        except: pass
+        try:    d['sorted_slice_indices'] = hdr.get_sorted_slice_indices()
+        except: pass
+        try:    d['volume_labels'] = hdr.get_volume_labels()
+        except: pass
+        try:    d['water_fat_shift'] = hdr.get_water_fat_shift()
+        except: pass
+        return d
+class EcatImageType(ImageType):
+    @classmethod
+    def image_name(self): return 'ecat'
+    @classmethod
+    def image_type(self): return nib.ecat.EcatImage
+    @classmethod
+    def header_type(self): return nib.ecat.EcatHeader
+    @classmethod
+    def aliases(self): return ()
+    @classmethod
+    def meta_data(self, img):
+        d = super(self, EcatImageType).meta_data(img)
+        hdr = to_image_header(img)
+        try: d['filetype'] = hdr.get_filetype()
+        except: pass
+        try: d['patient_orientation'] = hdr.get_patient_orient()
+        except: pass
+        return d
 
-image_types = (Nifti1ImageType, Nifti2ImageType, MGHImageType)
+image_types = (Nifti1ImageType, Nifti2ImageType, MGHImageType,
+               Spm99AnalyzeImageType, Spm2AnalyzeImageType,
+               Minc1ImageType, Minc2ImageType,
+               PARRECImageType, EcatImageType)
 image_types_by_name        = pyr.pmap({it.image_name():it  for it in image_types})
 image_types_by_image_type  = pyr.pmap({it.image_type():it  for it in image_types})
 image_types_by_header_type = pyr.pmap({it.header_type():it for it in image_types})
@@ -422,7 +521,7 @@ def to_image(img, image_type=None, meta_data=None, **kwargs):
         else: raise ValueError('cannot parse more than 3 elements from image tuple')
     else: (aff,mdat) = (None,None)
     # see if the img argument is an image object
-    try:    (img,aff0,mdat0) = (img.dataobj, img.affine, image_meta_data(img))
+    try:    (img,aff0,mdat0) = (img.dataobj, img.affine, to_image_meta_data(img))
     except: (aff0,mdat0) = (None, {})
     # check that the affine wasn't given as the meta-data (e.g. (img,aff) instead of (img,mdat))
     if aff is None and mdat is not None:
@@ -435,15 +534,3 @@ def to_image(img, image_type=None, meta_data=None, **kwargs):
     if aff0 is not None and 'affine' not in mdat: mdat['affine'] = to_affine(aff0, 3)
     # okay, we create the image now:
     return image_type.create(img, meta_data=mdat)
-
-# conversion to nibabel images and nibabel image headers
-#def nifti1_image(): pass
-#def nifti2_image(): pass
-#def mgh_image(): pass
-#def spatial_image(): pass
-#def minc1_image(): pass
-#def minc2_image(): pass
-#def parrec_image(): pass
-#def spm2analyze_image(): pass
-#def spm99analyze_image(): pass
-#def ecat_image(): pass
