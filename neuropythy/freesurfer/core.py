@@ -648,6 +648,12 @@ def load_freesurfer_label(filename, read_scalars=False):
     load_freesurfer_label(filename) is equivalent to nibabel.freesurfer.io.read_label(filename).
     '''
     return fsio.read_label(filename, read_scalars=read_scalars)
+@nyio.importer('freesurfer_annot', ('annot',))
+def load_freesurfer_annot(filename, orig_ids=False):
+    '''
+    load_freesurfer_annot(filename) is equivalent to nibabel.freesurfer.io.read_annot(filename).
+    '''
+    return fsio.read_annot(filename, orig_ids=orig_ids)
     
 
     
