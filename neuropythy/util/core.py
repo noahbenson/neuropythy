@@ -149,7 +149,7 @@ def to_affine(aff, dims=None):
         aff = np.concatenate((aff, lastrow))
     if aff.shape[1] != dims+1 or aff.shape[0] != dims+1:
         arg = (dims, dims,dims+1, dims+1,dims+1)
-        raise ValueError('%dD affine matrix must be %dx%d or %dx%d' % args)
+        raise ValueError('%dD affine matrix must be %dx%d or %dx%d' % arg)
     return aff
 
 class AutoDict(dict):
