@@ -26,33 +26,6 @@ from ..util import (ObjectWithMetaData, to_affine, zinv, is_image, is_address, a
 from ..io   import (load, importer)
 from functools import reduce
 
-# This function creates the tkr matrix for a volume given the dims
-def tkr_vox2ras(img, zooms=None):
-    '''
-    tkr_vox2ras(img) yields the FreeSurfer tkr VOX2RAS matrix for the given nibabel image object
-      img. The img must have a get_shape() method and header member with a get_zooms() method.
-    tkr_vox2ras(hdr) operates on a nibabel image header object.
-    tkr_vox2ras(shape, zooms) operates on the shape (e.g., for FreeSurfer subjects (256,256,256))
-      and the zooms or voxel dimensions (e.g., for FreeSurfer subjects, (1.0, 1.0, 1.0)).
-    '''
-    if zooms is not None:
-        # let's assume that they passed shape, zooms
-        shape = img
-    else:
-        try:    img = img.header
-        except: pass
-        try:    (shape, zooms) = (img.get_data_shape(), img.get_zooms())
-        except: raise ValueError('single argument must be nibabel image or header')
-    # Okay, we have shape and zooms...
-    zooms = zooms[0:3]
-    shape = shape[0:3]
-    (dC, dR, dS) = zooms
-    (nC, nR, nS) = 0.5 * (np.asarray(shape) * zooms)
-    return np.asarray([[-dC,   0,   0,  nC],
-                       [  0,   0,  dS, -nS],
-                       [  0, -dR,   0,  nR],
-                       [  0,   0,   0,   1]])
-
 @pimms.immutable
 class VertexSet(ObjectWithMetaData):
     '''
@@ -1680,7 +1653,8 @@ class Mesh(VertexSet):
             image = image.get_data()
         image = np.asarray(image)
         if affine is None:
-            # wild guess: the inverse of the tkr_vox2ras matrix without alignment to native
+            # wild guess: the inverse of FreeSurfer tkr_vox2ras matrix without alignment to native
+            from neuropythy.freesurfer import tkr_vox2ras
             affine = np.dot(np.linalg.inv(native_to_vertex_matrix),
                             tkr_vox2ras(image.shape[0:3], (1.0, 1.0, 1.0)))
             ijk0 = np.asarray(image.shape) * 0.5

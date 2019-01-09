@@ -81,6 +81,8 @@ setup(
              'neuropythy/lib/data/fsaverage/surf/rh.benson14_angle.v4_0.mgz',
              'neuropythy/lib/data/fsaverage/surf/rh.benson14_sigma.v4_0.mgz',
              'neuropythy/lib/data/fsaverage/surf/lh.benson14_retinotopy.v4_0.sphere.reg',
+             'neuropythy/lib/data/fsaverage/surf/lh.rosenke18_vcatlas.v1_0.mgz',
+             'neuropythy/lib/data/fsaverage/surf/rh.rosenke18_vcatlas.v1_0.mgz',
              'neuropythy/lib/data/fsaverage_sym/surf/lh.benson14_angle.v2_0.mgz',
              'neuropythy/lib/data/fsaverage_sym/surf/lh.benson14_angle.v2_1.mgz',
              'neuropythy/lib/data/fsaverage_sym/surf/lh.benson14_eccen.v3_0.mgz',

@@ -109,9 +109,8 @@ class PseudoDir(ObjectWithMetaData):
         if this is Ellipsis, then self-deletes only when the cache-directory is created by the
         PseudoDir class and is a temporary directory (i.e., not explicitly provided).
         '''
-        if d not in (True, False, Ellipsis):
-            raise ValueError('delete must be True, False, or Ellipsis')
-        return d
+        if d in (True, False, Ellipsis): return d
+        else: raise ValueError('delete must be True, False, or Ellipsis')
     @pimms.param
     def credentials(c):
         '''
@@ -278,7 +277,7 @@ def pseudo_dir(source_path, cache_path=None, delete=Ellipsis, credentials=None, 
 
     Pseudo-dir objects act as an interface for loading data from abstract sources. The given source
     path may be either a directory, a (possibly zipped) tarball, or a URL. In all cases but the
-    local directory, the pseudo-dir object will quietly extract/download the requested files to an
+    local directory, the pseudo-dir object will quietly extract/download the requested files to a
     cache directory as their paths are requested. This is managed through two methods:
       * find(args...) joins the argument list as in os.path.join, then, if the resulting file is
         found in the source_path, this (relative) path-name is returned; otherwise None is returned.
@@ -325,11 +324,18 @@ class FileMap(ObjectWithMetaData):
     def valid_path(p):
         '''
         FileMap.valid_path(path) yields os.path.abspath(path) if path is either a directory or a
-          tarball file; otherwise yields None.
+          tarball file; yields path if path is a URL or s3 path, and otherwise yields None. If the
+          path is a tarball path with a trailing inner-path, then the abspath of the tarball with
+          the inner path appended is yielded.
         '''
-        if os.path.isdir(p): return os.path.abspath(p)
-        elif any(p.endswith('.tar' + s) for s in _tarball_endings): return os.path.abspath(p)
-        else: return None
+        if   os.path.isdir(p):   return os.path.abspath(p)
+        elif is_s3_path(p):      return p
+        elif is_url(p):          return p
+        # could still be a tarball path
+        (tb,p) = split_tarball_path(path)
+        if   tb is None: return None
+        elif p  == '':   return os.path.abspath(tb)
+        else:            return os.path.abspath(tb) + ':' + p
     @pimms.param
     def load_function(lf):
         '''
