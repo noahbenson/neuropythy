@@ -108,7 +108,7 @@ setup(
                       'pimms>=0.3.0',
                       'py4j>=0.10'],
     extras_require={
-        'HCP': ['s3fs>=0.1.5', 'h5py>=2.8.0'],
+        'HCP':        ['s3fs>=0.1.5', 'h5py>=2.8.0'],
         'graphics2D': ['matplotlib>=1.5.3'],
         'graphics3D': ['matplotlib>=1.5.3', 'ipyvolume>=0.5.1'],
-        'all': ['s3fs>=0.1.5', 'h5py>=2.8.0', 'matplotlib>=1.5.3', 'ipyvolume>=0.5.1']})
+        'all':        ['s3fs>=0.1.5', 'h5py>=2.8.0', 'matplotlib>=1.5.3', 'ipyvolume>=0.5.1']})
