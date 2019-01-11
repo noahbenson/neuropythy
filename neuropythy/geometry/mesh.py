@@ -1964,7 +1964,7 @@ class MapProjection(ObjectWithMetaData):
           * center_right specifies the 3D vector that points toward any point on the positive x-axis
             of the resulting map.
           * radius specifies the radius that should be assumed by the model in radians of the
-            cortical sphere.
+            cortical sphere. If the default (None) is given, then pi/3.5 is used.
           * method specifies the projection method used (default: 'equirectangular').
           * registration specifies the registration to which the map is aligned (default: 'native').
           * chirality specifies whether the projection applies to left or right hemispheres.
@@ -2046,9 +2046,9 @@ class MapProjection(ObjectWithMetaData):
         proj.radius is the radius of inclusion for the given map projection; this may be an value
         given as a number or a quantity in terms of radians, turns, or degrees (e.g.,
         pimms.quant(30, 'deg') will create a map projection all points within 30 degrees of the
-        center).
+        center). If None, then pi/3.5 radians is used.
         '''
-        if r is None: return None
+        if r is None: return np.pi/3.5
         if not pimms.is_real(r) or r <= 0:
             raise ValueError('radius must be a real number that is greater than 0')
         if pimms.is_quantity(r) and not pimms.like_units(r, 'radians'):
@@ -2195,7 +2195,7 @@ class MapProjection(ObjectWithMetaData):
         th = np.arccos(x)
         # and we want to know what points are within the angle given by the radius; if the radius
         # is a radian-like quantity, we use th itself; otherwise, we convert it to a distance
-        rad = pimms.mag(self.radius, 'radians') if pimms.is_quantity(self.radius) else self.radius
+        rad = pimms.mag(self.radius, 'radians')
         return (th < rad)
     def select_domain(self, x):
         '''
@@ -2424,9 +2424,9 @@ def projections_path(path=Ellipsis):
     if path is Ellipsis: return config['projections_path']
     else: config['projections_path'] = path
 def map_projection(name, arg,
-                   center=None, center_right=None, radius=None, method='equirectangular',
-                   registration='native', sphere_radius=None,
-                   pre_affine=None, post_affine=None, meta_data=None):
+                   center=Ellipsis, center_right=Ellipsis, radius=Ellipsis,
+                   method=Ellipsis, registration=Ellipsis, sphere_radius=Ellipsis,
+                   pre_affine=Ellipsis, post_affine=Ellipsis, meta_data=Ellipsis):
     '''
     map_projection(name, hemi) yields the map projection with the given name if it exists; hemi must
       be either 'lh', 'rh', or 'lr'/None.
@@ -2442,7 +2442,7 @@ def map_projection(name, arg,
       * center_right specifies the 3D vector that points toward any point on the positive x-axis
         of the resulting map.
       * radius specifies the radius that should be assumed by the model in radians of the
-        cortical sphere.
+        cortical sphere; if the default value (Ellipsis) is given, then pi/3.5 is used.
       * method specifies the projection method used (default: 'equirectangular').
       * registration specifies the registration to which the map is aligned (default: 'native').
       * chirality specifies whether the projection applies to left or right hemispheres.
@@ -2468,18 +2468,21 @@ def map_projection(name, arg,
         topo = None
         mesh = arg
     else: raise ValueError('Could not understand map_projection argument: %s' % arg)
+    kw = dict(center=center, center_right=center_right, radius=radius,
+              method=method, registration=registration, sphere_radius=sphere_radius,
+              pre_affine=pre_affine, post_affine=post_affine, meta_data=meta_data)
+    kw = {k:v for (k,v) in six.iteritems(kw) if v is not Ellipsis}
     if   name         in map_projections[hemi]: mp = map_projections[hemi][name]
     elif name.lower() in map_projections[hemi]: mp = map_projections[hemi][name.lower()]
     else:
-        try: mp = load_map_projection(name, chirality=hemi,
-                                      center=center, center_right=center_right, radius=radius,
-                                      method=method, registration=registration,
-                                      sphere_radius=sphere_radius,
-                                      pre_affine=pre_affine, post_affine=post_affine)
+        try:    mp = load_map_projection(name, chirality=hemi)
         except: raise ValueError('could neither find nor load projection %s (%s)' % (arg, hemi))
+    # if there are things to update, do so:
     if topo: mesh = mp.extract_mesh(topo)
-    # okay, return the projection with the mesh attached
-    return mp if mesh is None else mp.copy(mesh=mesh)
+    if mesh is not None: kw['mesh'] = mesh
+    if len(kw) > 0: mp = mp.copy(**kw)
+    # okay, return the projection
+    return mp
 def is_map_projection(arg):
     '''
     is_map_projection(arg) yields True if arg is a map-projection object and False otherwise.
@@ -3166,9 +3169,11 @@ class Path(ObjectWithMetaData):
         triangle coordinates, one set for each surface in topo.
         '''
         if isinstance(surface, Topology):
-            conv1 = lambda s,xs:pimms.imm_array(surface[s].unaddress(xs).T)
-            conv2 = lambda s: tuple([conv1(s,xs) for xs in all_border_triangle_addresses])
-            return pimms.lazy_map({k:curry(conv2, k) for k in six.iterkeys(surface.surfaces)})
+            def conv(s):
+                return tuple([tuple([pimms.imm_array(surface.surfaces[s].unaddress(xs).T)
+                                     for xs in bta])
+                              for bta in all_border_triangle_addresses])
+            return pimms.lazy_map({k:curry(conv, k) for k in six.iterkeys(surface.surfaces)})
         else: return tuple([pimms.imm_array(surface.unaddress(xs).T)
                             for xs in all_border_triangle_addresses])
     @pimms.value
@@ -3210,7 +3215,7 @@ class Path(ObjectWithMetaData):
             if pimms.is_str(srf): (srf,btris) = (surface.surfaces[srf],border_triangles[srf])
             else: btris = border_triangles
             cxs = np.asarray([srf.coordinates[:,f] for f in contained_faces])
-            return triangle_areas(*cxs) + triangle_areas(*btris)
+            return np.sum(triangle_area(*cxs)) + np.sum(triangle_area(*btris))
         if isinstance(surface, Topology):
             return pimms.lazy_map({k:curry(sarea, k) for k in six.iterkeys(surface.surfaces)})
         else: return sarea(surface)
@@ -3249,7 +3254,9 @@ class PathTrace(ObjectWithMetaData):
         self.closed         = closed
     @pimms.option(None)
     def map_projection(mp):
-        return to_map_projection(mp).persist()
+        mp = to_map_projection(mp).persist()
+        if mp.radius is None: mp = mp.copy(radius=np.pi/2)
+        return mp
     @pimms.param
     def points(x):
         '''
@@ -3288,18 +3295,18 @@ class PathTrace(ObjectWithMetaData):
         '''
         # make a flat-map of whatever we've been given...
         if isinstance(obj, Mesh) and obj.coordinates.shape[0] == 2: fmap = obj
-        else: fmap = self.map_projection(obj) 
+        else: fmap = self.map_projection(obj)
         # we are doing this in 2D
         fmap = self.map_projection(obj)
         crv = self.curve
         cids = fmap.container(crv.coordinates)
         pts = crv.coordinates.T
-        if self.closed: pts = np.concatenate([pts, [pts[0]]])
-        coords = pts.T
+        if self.closed and not np.array_equal(pts[0], pts[-1]):
+            pts = np.concatenate([pts, [pts[0]]])
         allpts = []
         for ii in range(len(pts) - 1):
             allpts.append([pts[ii]])
-            seg = coords[:,[ii,ii+1]].T
+            seg  = pts[[ii,ii+1]]
             ipts = segment_intersection_2D(seg, fmap.edge_coordinates)
             ipts = np.transpose(ipts)
             ipts = ipts[np.isfinite(ipts[:,0])]
