@@ -146,14 +146,29 @@ class TestNeuropythy(unittest.TestCase):
             # for this pick a couple random properties:
             ps = ['prf_variance_explained', 'inf-prf10_visual_area']
             intersub = choose(allsubs, 1)[0]
-            logging.info('neuropythy:  - Testing properties %s via subject %s', ps, intersub.name)
-            logging.info('neuropythy:    - Testing LH interpolation')
+            logging.info('neuropythy:   - Testing properties %s via subject %s', ps, intersub.name)
+            logging.info('neuropythy:     - Testing LH interpolation')
             vs = calc_interp(sub.lh, intersub.lh, ps)
             check_interp(sub.lh, ps, vs)
-            logging.info('neuropythy:    - Testing RH interpolation')
+            logging.info('neuropythy:     - Testing RH interpolation')
             vs = calc_interp(sub.rh, intersub.rh, ps)
             check_interp(sub.rh, ps, vs)
 
+    def test_path(self):
+        '''
+        test_path() ensures that the neuropythy.geometry.path and .path_trace data structures are
+          working correctly.
+        '''
+        logging.info('neuropythy: Testing Path and PathTrace')
+        # simple box: should have an area of ~1600 in a map and close 
+        pts = [(-20,-20), (20,-20), (20,20), (-20,20)]
+        # use a simple map projection
+        mpj = ny.map_projection('occipital_pole', 'lh', radius=np.pi/3)
+        ctx = ny.freesurfer_subject('fsaverage').lh
+        trc = ny.geometry.path_trace(mpj, pts, closed=True)
+        fmp = mpj(ctx)
+        pth = trc.to_path(fmp)
+        self.assertTrue(np.isclose(1600, pth.surface_area))
         
 if __name__ == '__main__':
     unittest.main()
