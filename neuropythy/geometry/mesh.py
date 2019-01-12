@@ -479,16 +479,12 @@ class TesselationIndex(object):
         (us,vs) = np.array(edge_index.keys()).T
         ii = np.array(edge_index.values())
         n = np.max([us,vs]) + 1
-        ii = np.concatenate([ii,ii])
-        (us,vs) = (np.concatenate([us,vs]), np.concatenate([vs,us]))
         return sps.csr_matrix((ii + 1, (us, vs)), shape=(n, n), dtype=np.int)
     @pimms.value
     def face_matrix(face_index):
         (a,b,c) = np.array(face_index.keys()).T
         ii = np.array(face_index.values())
         n = np.max([a,b,c]) + 1
-        (a,b,c) = [np.concatenate([aa,bb,cc]) for (aa,bb,cc) in [(a,b,c),(b,c,a),(c,a,b)]]
-        ii = np.concatenate([ii,ii,ii])
         # we have to cheat with the last two
         bc = b*n + c
         return sps.csr_matrix((ii + 1, (a,bc)), shape=(n, n*n), dtype=np.int)
@@ -2840,7 +2836,7 @@ class Path(ObjectWithMetaData):
         always on the outside.
         '''
         # walk along the address points...
-        (faces, coords) = address_data(addresses)
+        (faces, coords) = address_data(addresses, 2)
         coords = np.vstack([coords, [1 - np.sum(coords, axis=0)]])
         n = faces.shape[1]
         (u,v,wu,wv,fs,ps) = ([],[],[],[], [], [])
@@ -2937,17 +2933,19 @@ class Path(ObjectWithMetaData):
         n = tess.vertex_count
         # we know from addresses where the intersections are freom edge_data
         (u,v,wu,wv) = edge_data[:4]
+        # convert weights
+        (wu,wv) = [np.array(x) for x in (wu,wv)]
+        (wu,wv) = (0.75 + 0.5*(wu - 0.5), 0.25 + 0.5*(wv - 0.5))
+        # labels need to be indexed...
+        (u,v) = (tess.index(u), tess.index(v))
         same  = np.union1d(u,v)
-        other = np.setdiff1d(tess.labels, same)
         (q,wq) = [np.concatenate([a,b]) for (a,b) in [(u,v),(wu,wv)]]
         m = len(q)
         # for the labels, the u and v have repeats, so we want to average their values
         mm  = sps.csr_matrix((np.ones(m), (q, np.arange(m))), shape=(n, m))
         lbl = zdivide(mm.dot(wq), flattest(mm.sum(axis=1)))
-        q   = np.unique(q)
-        wq  = lbl[q]
         # we crawl across vertices by edges until we find all of them
-        nei  = np.asarray(tess.neighborhoods)
+        nei  = np.asarray(tess.indexed_neighborhoods)
         unk  = np.full(tess.vertex_count, True, dtype=np.bool)
         unk[q] = False
         q = np.unique(u[v != u])
@@ -2981,7 +2979,7 @@ class Path(ObjectWithMetaData):
           returned in a (3 x n) matrix of vertex labels.
         '''
         msk = np.where(label >= 0.5)[0]
-        fs = np.where(np.sum(np.isin(surface.tess.faces, msk), axis=0) == 3)[0]
+        fs = np.where(np.sum(np.isin(surface.tess.indexed_faces, msk), axis=0) == 3)[0]
         return pimms.imm_array(surface.tess.faces[:,fs])
     @pimms.value
     def intersected_faces(edge_data, closed):
@@ -3168,14 +3166,12 @@ class Path(ObjectWithMetaData):
         If path.surface is a topology, then border_triangles is instead a lazy-map of the border
         triangle coordinates, one set for each surface in topo.
         '''
+        conv = lambda surf: tuple([tuple([pimms.imm_array(surf.unaddress(xs).T) for xs in bta])
+                                   for bta in all_border_triangle_addresses])
         if isinstance(surface, Topology):
-            def conv(s):
-                return tuple([tuple([pimms.imm_array(surface.surfaces[s].unaddress(xs).T)
-                                     for xs in bta])
-                              for bta in all_border_triangle_addresses])
-            return pimms.lazy_map({k:curry(conv, k) for k in six.iterkeys(surface.surfaces)})
-        else: return tuple([pimms.imm_array(surface.unaddress(xs).T)
-                            for xs in all_border_triangle_addresses])
+            return pimms.lazy_map({k:curry(lambda k: conv(surface.surfaces[k]), k)
+                                   for k in six.iterkeys(surface.surfaces)})
+        else: return conv(surface)
     @pimms.value
     def border_triangles(all_border_triangles):
         '''
@@ -3211,9 +3207,11 @@ class Path(ObjectWithMetaData):
         remains None.
         '''
         if not closed: return None
+        contained_faces = surface.tess.index(contained_faces)
         def sarea(srf):
             if pimms.is_str(srf): (srf,btris) = (surface.surfaces[srf],border_triangles[srf])
             else: btris = border_triangles
+            btris = np.transpose(btris, [0,2,1])
             cxs = np.asarray([srf.coordinates[:,f] for f in contained_faces])
             return np.sum(triangle_area(*cxs)) + np.sum(triangle_area(*btris))
         if isinstance(surface, Topology):
@@ -3296,8 +3294,6 @@ class PathTrace(ObjectWithMetaData):
         # make a flat-map of whatever we've been given...
         if isinstance(obj, Mesh) and obj.coordinates.shape[0] == 2: fmap = obj
         else: fmap = self.map_projection(obj)
-        # we are doing this in 2D
-        fmap = self.map_projection(obj)
         crv = self.curve
         cids = fmap.container(crv.coordinates)
         pts = crv.coordinates.T
