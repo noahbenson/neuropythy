@@ -657,7 +657,7 @@ def retinotopy_mesh_field(mesh, mdl,
                           exclusion_threshold=None):
     '''
     retinotopy_mesh_field(mesh, model) yields a list that can be used with mesh_register as a
-      potentialterm. This should generally be used in a similar fashion to retinotopy_anchors.
+      potential term. This should generally be used in a similar fashion to retinotopy_anchors.
 
     Options:
       * polar_angle (default None) specifies that the given data should be used in place of the
