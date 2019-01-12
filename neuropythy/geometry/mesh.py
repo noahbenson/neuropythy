@@ -23,8 +23,11 @@ from .util  import (triangle_area, triangle_address, alignment_matrix_3D, rotati
 from ..util import (ObjectWithMetaData, to_affine, zinv, is_image, is_address, address_data, curry,
                     curve_spline, CurveSpline, chop, zdivide, flattest, inner, config, library_path,
                     dirpath_to_list, to_hemi_str, is_tuple, is_list)
-from ..io   import (load, importer)
+from ..io   import (load, importer, exporter)
 from functools import reduce
+
+try:    from StringIO import StringIO
+except: from io import StringIO
 
 @pimms.immutable
 class VertexSet(ObjectWithMetaData):
@@ -1863,65 +1866,64 @@ class MapProjection(ObjectWithMetaData):
     def orthographic_projection_forward(X, sphere_radius=100.0):
         X = np.asarray(X)
         X = X if X.shape[0] == 3 else X.T
-        return X[1:3]
+        return X[0:2]
     @staticmethod
     def orthographic_projection_inverse(X, sphere_radius=100.0):
         X = np.asarray(X)
         X = X if X.shape[0] == 2 else X.T
         Xnorm = X / sphere_radius
-        return np.asarray([sphere_radius * np.sqrt(1.0 - (Xnorm ** 2).sum(0)), X[0], X[1]])
+        return np.asarray([X[0], X[1], sphere_radius * np.sqrt(1.0 - (Xnorm ** 2).sum(0))])
     @staticmethod
     def equirectangular_projection_forward(X, sphere_radius=100.0):
         X = np.asarray(X)
         X = X if X.shape[0] == 3 else X.T
         X = X / np.sqrt((X ** 2).sum(0))
-        return sphere_radius / np.pi * np.asarray([np.arctan2(X[1], X[0]), np.arcsin(X[2])])
+        return sphere_radius / np.pi * np.asarray([np.arctan2(X[0], X[2]), np.arcsin(X[1])])
     @staticmethod
     def equirectangular_projection_inverse(X, sphere_radius=100.0):
         X = np.asarray(X)
         X = X if X.shape[0] == 2 else X.T
         X = np.pi / sphere_radius * X
         cos1 = np.cos(X[1])
-        return np.asarray([cos1 * np.cos(X[0]) * sphere_radius, 
-                           cos1 * np.sin(X[0]) * sphere_radius,
-                           np.sin(X[1]) * sphere_radius])
+        return np.asarray([cos1 * np.sin(X[0]) * sphere_radius,
+                           np.sin(X[1]) * sphere_radius,
+                           cos1 * np.cos(X[0]) * sphere_radius])
     @staticmethod
     def mercator_projection_forward(X, sphere_radius=100.0):
         X = np.asarray(X)
         X = X if X.shape[0] == 3 else X.T
         X = X / np.sqrt((X ** 2).sum(0))
-        return sphere_radius * np.asarray([np.arctan2(X[1], X[0]),
-                                           np.log(np.tan(0.25 * np.pi + 0.5 * np.arcsin(X[2])))])
+        return sphere_radius * np.asarray([np.arctan2(X[2], X[1]),
+                                           np.log(np.tan(0.25 * np.pi + 0.5 * np.arcsin(X[0])))])
     @staticmethod
     def mercator_projection_inverse(X, sphere_radius=100.0):
         X = np.asarray(X)
         X = X if X.shape[0] == 2 else X.T
         X = X / sphere_radius
-        return sphere_radius * np.asarray([np.cos(X[0]), np.sin(X[0]),
-                                           np.sin(2 * (np.arctan(np.exp(X[1])) - 0.25*np.pi))])
+        return sphere_radius * np.asarray([np.sin(2 * (np.arctan(np.exp(X[1])) - 0.25*np.pi)),
+                                           np.cos(X[0]), np.sin(X[0])])
     @staticmethod
     def sinusoidal_projection_forward(X, sphere_radius=100.0):
         X = np.asarray(X)
         X = X if X.shape[0] == 3 else X.T
         X = X / np.sqrt((X ** 2).sum(0))
-        phi = np.arcsin(X[2])
-        return sphere_radius / np.pi * np.asarray([np.arctan2(X[1], X[0]) * np.cos(phi), phi])
+        phi = np.arcsin(X[0])
+        return sphere_radius / np.pi * np.asarray([np.arctan2(X[2], X[1]) * np.cos(phi), phi])
     @staticmethod
     def sinusoidal_projection_inverse(X, sphere_radius=100.0):
         X = np.asarray(X)
         X = X if X.shape[0] == 2 else X.T
         X = np.pi * X / sphere_radius
-        z = np.sin(X[1])
         cosphi = np.cos(X[1])
-        return np.asarray([np.cos(X[0] / cosphi) * sphere_radius,
-                           np.sin(X[0] / cosphi) * sphere_radius,
-                           np.sin(X[1]) * sphere_radius])
+        return np.asarray([np.sin(X[1]) * sphere_radius,
+                           np.cos(X[0] / cosphi) * sphere_radius,
+                           np.sin(X[0] / cosphi) * sphere_radius])
     # These are given actual values just below the class definition
     projection_forward_methods = {}
     projection_inverse_methods = {}
 
     def __init__(self, mesh=None,
-                 center=None, center_right=None, radius=None, method='equirectangular',
+                 center=None, center_right=None, radius=None, method='orthographic',
                  registration='native', chirality=None, sphere_radius=None,
                  pre_affine=None, post_affine=None, meta_data=None):
         self.mesh = mesh
@@ -1937,8 +1939,27 @@ class MapProjection(ObjectWithMetaData):
         self.meta_data = meta_data
 
     @staticmethod
+    def denormalize(dat, defaults=None):
+        '''
+        MapProjection.denormalize(data) yields a map projection object equivalent to the given
+        denormalized data, which generally should be produced by either mapproj.normalize() or by
+        loading in a map-projection json file.
+        '''
+        # check version; we assume it's fine if not given
+        if 'version' in dat:
+            if   dat['version'] < 1: warnings.warn('projection file version < 1: %s' % fname)
+            elif dat['version'] > 1: logging.info('projection file version > 1: %s' % fname)
+        items = ['center', 'center_right', 'radius', 'method', 'registration', 'chirality',
+                 'sphere_radius', 'pre_affine', 'post_affine', 'meta_data']
+        if defaults is None: defaults = {}
+        params = {}
+        for k in items:
+            if   k in dat:      params[k] = dat[k]
+            elif k in defaults: params[k] = defaults[k]
+        return MapProjection(**params)
+    @staticmethod
     def load(filename,
-             center=None, center_right=None, radius=None, method='equirectangular',
+             center=None, center_right=None, radius=None, method='orthographic',
              registration='native', chirality=None, sphere_radius=None,
              pre_affine=None, post_affine=None, meta_data=None):
         '''
@@ -1949,10 +1970,10 @@ class MapProjection(ObjectWithMetaData):
         The following options may be given; all of these options represent parameters that may or
         may not be defined by the map-projection file; in the case that a parameter is defined by
         the file, the optional argument is ignored. To force parameters to have particular values,
-        you must modify or copy the map projection that is by this function (but note that all the
-        parameters below match parameters of the map projection class. All of these parameters
-        except the method (default: 'equirectangular'), registration (default: 'native'), and
-        meta_data parameters have default values of None, which means that they are, by default,
+        you must modify or copy the map projection that is yielded by this function (but note that
+        all the parameters below match parameters of the map projection class). All of these
+        parameters except the method (default: 'orthographic'), registration (default: 'native'),
+        and meta_data parameters have default values of None, which means that they are, by default,
         handled by the MapProjection class. The meta_data parameter, if provided, is merged with any
         meta-data in the projection file such that the passed meta-data is overwritten by the file's
         meta-data.
@@ -1961,7 +1982,7 @@ class MapProjection(ObjectWithMetaData):
             of the resulting map.
           * radius specifies the radius that should be assumed by the model in radians of the
             cortical sphere. If the default (None) is given, then pi/3.5 is used.
-          * method specifies the projection method used (default: 'equirectangular').
+          * method specifies the projection method used (default: 'orthographic').
           * registration specifies the registration to which the map is aligned (default: 'native').
           * chirality specifies whether the projection applies to left or right hemispheres.
           * sphere_radius specifies the radius of the sphere that should be assumed by the model.
@@ -1984,28 +2005,46 @@ class MapProjection(ObjectWithMetaData):
             dat = json.load(filename)
             fname = '<file-stream>'
         dat = {k.lower():v for (k,v) in six.iteritems(dat)}
-        # check version
-        if 'version' not in dat: warnings.warn('projection file contains no version: %s' % fname)
-        elif dat['version'] < 1: warnings.warn('projection file version < 1: %s' % fname)
-        elif dat['version'] > 1: logging.info('projection file version > 1: %s' % fname)
-        # build up the parameter dict we will use:
+        # make the object
         params = dict(center=center, center_right=center_right, radius=radius, method=method,
                       registration=registration, chirality=chirality, sphere_radius=sphere_radius,
                       pre_affine=pre_affine, post_affine=post_affine)
-        params = {k:(dat[k] if k in dat else v) for (k,v) in six.iteritems(params)}
-        # get meta-data if included and/or set it up
-        meta = dat['meta_data'] if 'meta_data' in dat else {}
-        if not pimms.is_map(meta): raise ValueError('projection meta_data was not a mapping object')
-        if meta_data is not None: meta = pimms.merge(meta_data, meta)
-        meta = dict(meta)
-        if 'version' not in meta: meta['version'] = dat['version'] if 'version' in dat else None
-        if 'json' not in meta: meta['json'] = dat
-        if 'filename' not in meta and pimms.is_str(filename): meta['filename'] = filename
-        # add in meta-data
-        params['meta_data'] = meta
-        # and use these to create an object...
-        return MapProjection(**params)
-        
+        params = {k:v for (k,v) in six.iteritems(params) if v is not None}
+        return MapProjection.denormalize(dat, params)
+    def normalize(self):
+        '''
+        mp.normalize() yields a json-friendly structure representing the given map projection.
+        '''
+        dat = {'version':1,
+               'center':self.center, 'center_right':self.center_right, 'radius':self.radius,
+               'method':self.method, 'registration':self.registration,
+               'chirality':self.chirality, 'sphere_radius':self.sphere_radius,
+               'pre_affine':self.pre_affine, 'post_affine':self.post_affine}
+        dat = {k:(v.tolist() if pimms.is_nparray(v) else v)
+               for (k,v) in six.iteritems(dat)
+               if v is not None}
+        meta = {} if self.meta_data is None else dict(self.meta_data)
+        # these are tracked by the load/save system and aren't needed
+        if 'json' in meta:     del meta['json']
+        if 'filename' in meta: del meta['filename']
+        if len(meta) > 0: dat['meta_data'] = meta
+        return dat
+    def save(self, filename):
+        '''
+        map_projection.save(file) writes a json version of the given map_projection object to the
+          given file name or stream object, file.
+        '''
+        # okay, we need to make a json-like structure of ourselves then turn it into a string;
+        # note that we cannot save the mesh, so it is always left off
+        dat = self.normalize()
+        txt = json.dumps(dat)
+        # if it's a filename, we'll need to open it then close it later
+        if pimms.is_str(filename):
+            filename = os.path.expandvars(os.path.expanduser(filename))
+            gz = (len(filename) > 3 and filename[-3:] == '.gz')
+            with (gzip.open(filename, 'wt') if gz else open(filename, 'wt')) as f: f.write(txt)
+        else: filename.write(txt)
+        return filename
     @pimms.param
     def mesh(m):
         '''
@@ -2114,23 +2153,27 @@ class MapProjection(ObjectWithMetaData):
     def alignment_matrix(pre_affine, center, center_right):
         '''
         proj.alignment_matrix is a 4x4 matrix that aligns the 3D spherical mesh such that the center
-        of the projection lies on the positive x-axis and the center_right of the projection lies in
-        the x-y plane.
+        of the projection lies on the positive z-axis and the center_right of the projection lies in
+        the x-z plane with a positive x value.
+
+        Note that the alignment_matrix applies the pre_affine prior to determining the rotation of
+        the center and center_right; accordingly, the center should be specified in post-pre_affine
+        transfomration coordinates.
         '''
         mtx = np.eye(4) if pre_affine is None else pre_affine
         cmtx = np.eye(4)
         if center is not None:
-            tmp = alignment_matrix_3D(center, [1,0,0])
+            tmp = alignment_matrix_3D(center, [0,0,1])
             cmtx[0:3,0:3] = tmp
             mtx = cmtx.dot(mtx)
         crmtx = np.eye(4)
         if center_right is not None:
             # Tricky: we need to run this coordinate through the center transform then align it with
             # the x-y plane:
-            cr = cmtx[0:3,0:3].dot(center_right)
+            cr = cmtx.dot(np.concatenate([center_right, [1]]))[:3]
             # what angle do we need to rotate this?
-            ang = np.arctan2(cr[2], cr[1])
-            crmtx[0:3,0:3] = rotation_matrix_3D([1,0,0], -ang)
+            ang = np.arctan2(cr[1], cr[0])
+            crmtx[0:3,0:3] = rotation_matrix_3D([0,0,1], -ang)
             mtx = crmtx.dot(mtx)
         # That's all that actually needs to be done in preprocessing
         return pimms.imm_array(mtx)
@@ -2186,8 +2229,8 @@ class MapProjection(ObjectWithMetaData):
         if self.radius is None: return np.ones(x.shape[1], dtype=np.bool)
         # put the coordinates through the initial transformation:
         x = self.alignment_matrix.dot(np.concatenate((x, np.ones((1,x.shape[1])))))
-        x = np.clip(x[0] / self._sphere_radius, -1, 1)
-        # okay, we want the angle of the vertex [1,0,0] to these points...
+        x = np.clip(x[2] / self._sphere_radius, -1, 1)
+        # okay, we want the angle of the vertex [0,0,1] to these points...
         th = np.arccos(x)
         # and we want to know what points are within the angle given by the radius; if the radius
         # is a radian-like quantity, we use th itself; otherwise, we convert it to a distance
@@ -2330,7 +2373,7 @@ MapProjection.projection_inverse_methods = pyr.m(
 @importer('map_projection', ('mp.json', 'mp.json.gz', 'map.json', 'map.json.gz',
                              'projection.json', 'projection.json.gz'))
 def load_map_projection(filename,
-                        center=None, center_right=None, radius=None, method='equirectangular',
+                        center=None, center_right=None, radius=None, method='orthographic',
                         registration='native', chirality=None, sphere_radius=None,
                         pre_affine=None, post_affine=None, meta_data=None):
     '''
@@ -2346,7 +2389,14 @@ def load_map_projection(filename,
                               method=method, registration=registration, chirality=chirality,
                               sphere_radius=sphere_radius, pre_affine=pre_affine,
                               post_affine=post_affine)
-
+@exporter('map_projection', ('mp.json', 'mp.json.gz', 'map.json', 'map.json.gz',
+                             'projection.json', 'projection.json.gz'))
+def save_map_projection(filename, mp, **kw):
+    '''
+    save_map_projection(filename, map_projection) saves the given map projection to the given file
+      or stream object, filename, and returns filename.
+    '''
+    return mp.save(filename, **kw)
 # Auto-loaded Map Projections (#map_projections)
 projections_libdir = (os.path.join(library_path(), 'projections'),)
 # the projections in the neuropythy libdir
@@ -2419,10 +2469,10 @@ def projections_path(path=Ellipsis):
     '''
     if path is Ellipsis: return config['projections_path']
     else: config['projections_path'] = path
-def map_projection(name, arg,
+def map_projection(name=None, chirality=Ellipsis,
                    center=Ellipsis, center_right=Ellipsis, radius=Ellipsis,
                    method=Ellipsis, registration=Ellipsis, sphere_radius=Ellipsis,
-                   pre_affine=Ellipsis, post_affine=Ellipsis, meta_data=Ellipsis):
+                   pre_affine=Ellipsis, post_affine=Ellipsis, meta_data=Ellipsis, remember=False):
     '''
     map_projection(name, hemi) yields the map projection with the given name if it exists; hemi must
       be either 'lh', 'rh', or 'lr'/None.
@@ -2431,9 +2481,17 @@ def map_projection(name, arg,
       appropriate registration from the given topology.
     map_projection(name, mesh) uses the given mesh; the mesh's meta-data must specify the hemisphere
       for this to work--otherwise 'lr' is always used as the hemisphere.
+    map_projection(affine, hemi) creates a map projection from the given affine matrix, which must
+      align a set of spherical coordinates to a new set of 3D coordinates that are used as input to
+      the method argument (default method 'orthographic' uses the first two of these coordinates as
+      the x and y values of the map).
+    map_projection() creates a new map projection using the optional arguments, if provided.
 
     All options that can be passed to load_map_projection and MapProjection can be passed to
     map_projection:
+      * name is the first optional parameter appearing as name and affine above.
+      * chirality is the second optional parameter, and, if set, will ensure that the resulting
+        map projection's chirality is equivalent to the given chirality.
       * center specifies the 3D vector that points toward the center of the map.
       * center_right specifies the 3D vector that points toward any point on the positive x-axis
         of the resulting map.
@@ -2444,39 +2502,94 @@ def map_projection(name, arg,
       * chirality specifies whether the projection applies to left or right hemispheres.
       * sphere_radius specifies the radius of the sphere that should be assumed by the model.
         Note that in Freesurfer, spheres have a radius of 100.
-      * pre_affine specifies the pre-projection affine transform to use on the cortical sphere.
+      * pre_affine specifies the pre-projection affine transform to use on the cortical sphere. Note
+        that if the first (name) argument is provided as an affine transform, then that transform is
+        applied after the pre_affine but before alignment of the center and center_right points.
       * post_affine specifies the post-projection affine transform to use on the 2D map.
       * meta_data specifies any additional meta-data to attach to the projection.
+      * remember may be set to True to indicate that, after the map projection is constructed, the
+        map_projection cache of named projections should be updated with the provided name. This
+        can only be used when the provided name or first argument is a string.
     '''
-    if not pimms.is_str(name): raise ValueError('map_projection name must be a string')
-    if pimms.is_str(arg):
-        hemi = to_hemi_str(arg)
-        topo = None
-        mesh = None
-    elif isinstance(arg, Topology):
-        hemi = arg.chirality
-        topo = arg
-        mesh = None
-    elif isinstance(arg, Mesh):
-        if   'chirality' in arg.meta_data: hemi = to_hemi_str(arg.meta_data['chirality'])
-        elif 'hemi'      in arg.meta_data: hemi = to_hemi_str(arg.meta_data['hemi'])
-        else:                              hemi = 'lr'
-        topo = None
-        mesh = arg
-    else: raise ValueError('Could not understand map_projection argument: %s' % arg)
+    global map_projections # save flag lets us modify this
+    # make a dict of the map parameters:
     kw = dict(center=center, center_right=center_right, radius=radius,
               method=method, registration=registration, sphere_radius=sphere_radius,
               pre_affine=pre_affine, post_affine=post_affine, meta_data=meta_data)
     kw = {k:v for (k,v) in six.iteritems(kw) if v is not Ellipsis}
-    if   name         in map_projections[hemi]: mp = map_projections[hemi][name]
-    elif name.lower() in map_projections[hemi]: mp = map_projections[hemi][name.lower()]
-    else:
-        try:    mp = load_map_projection(name, chirality=hemi)
-        except: raise ValueError('could neither find nor load projection %s (%s)' % (arg, hemi))
-    # if there are things to update, do so:
-    if topo: mesh = mp.extract_mesh(topo)
-    if mesh is not None: kw['mesh'] = mesh
-    if len(kw) > 0: mp = mp.copy(**kw)
+    # interpret the hemi argument first
+    hemi = chirality
+    if hemi is None or hemi is Ellipsis:
+        hemi = 'lr'
+        topo = None
+        mesh = None
+    if pimms.is_str(hemi):
+        hemi = to_hemi_str(hemi)
+        topo = None
+        mesh = None
+    elif isinstance(hemi, Topology):
+        topo = hemi
+        hemi = hemi.chirality
+        mesh = None
+    elif isinstance(hemi, Mesh):
+        mesh = hemi
+        if   'chirality' in hemi.meta_data: hemi = to_hemi_str(hemi.meta_data['chirality'])
+        elif 'hemi'      in hemi.meta_data: hemi = to_hemi_str(hemi.meta_data['hemi'])
+        else:                               hemi = 'lr'
+        topo = None
+    else: raise ValueError('Could not understand map_projection hemi argument: %s' % hemi)
+    # name might be an affine matrix
+    try:    aff = to_affine(name)
+    except: aff = None
+    if pimms.is_matrix(aff):
+        # see if this is an affine matrix
+        aff = np.asarray(aff)
+        (n,m) = aff.shape
+        mtx = None
+        # might be a transformation into 2-space or into 3-space:
+        if n == 2:
+            if   m == 3: mtx = np.vstack([np.hstack([mtx, [[0,0,0],[0,0,0]]]), [[0],[0],[0],[1]]])
+            elif m == 4: mtx = np.vstack([mtx, [[0,0,0,0], [0,0,0,1]]])
+        elif n == 3:
+            if   m == 3: mtx = np.vstack([np.hstack([mtx, [[0,0,0]]]), [[0],[0],[0],[1]]])
+            elif m == 4: mtx = np.vstack([mtx, [[0,0,0,1]]])
+        elif n == 4:
+            if   m == 4: mtx = aff
+        if mtx is None: raise ValueError('Invalid affine matrix shape; must be {2,3}x{3,4} or 4x4')
+        # Okay, since center and center-right ignore the pre-affine matrix, we can just use this as
+        # the pre-affine and set the center to whatever comes out
+        kw['pre_affine'] = mtx if kw.get('pre_affine') is None else mtx.dot(to_affine(pre_affine))
+        name = None
+    # load name if it's a string
+    if pimms.is_str(name):
+        if   name         in map_projections[hemi]: mp = map_projections[hemi][name]
+        elif name.lower() in map_projections[hemi]: mp = map_projections[hemi][name.lower()]
+        else:
+            try:    mp = load_map_projection(name, chirality=hemi)
+            except: raise ValueError('could neither find nor load projection %s (%s)' % (arg, hemi))
+        # update parameters if need-be:
+        if len(kw) > 0: mp = mp.copy(**kw)
+    elif name is None:
+        # make a new map_projection
+        if chirality is not Ellipsis: kw['chirality'] = hemi
+        mp = MapProjection(**kw)
+    elif is_map_projection(name):
+        # just updating an existing projection
+        if chirality is not Ellipsis: kw['chirality'] = hemi
+        mp = name
+        if len(kw) > 0: mp = mp.copy(**kw)
+    else: raise ValueError('first argument must be affine, string, or None')
+    # if we have a topology/mesh, we should add it:
+    if topo is not None: mesh = mp.extract_mesh(topo)
+    if mesh is not None: mp   = mp.copy(mesh=mesh)
+    # if save was requested, save it
+    mp = mp.persist()
+    if remember is True:
+        if pimms.is_str(name):
+            name = name.lower()
+            hval = map_projections.get(hemi, pyr.m())
+            map_projections = map_projections.set(hemi, hval.set(name, mp))
+        else: warnings.warn('Cannot save map-projection with non-string name')
     # okay, return the projection
     return mp
 def is_map_projection(arg):
@@ -2493,8 +2606,11 @@ def to_map_projection(arg):
     to_map_projection(filename) yields the map projection loaded from the given filename.
     to_map_projection('<name>:<hemi>') is equivalent to to_map_projection(('<name>', '<hemi>')).
     to_map_projection('<name>') is equivalent to to_map_projection(('<name>', 'lr')).
+    to_map_projection((affine, hemi)) converts the given affine transformation, which must be a
+      transformation from spherical coordinates to 2D map coordinates (once the transformed z-value
+      is dropped), to a map projection. The hemi argument may alternately be an options mapping.
     '''
-    if is_map_projection(arg): return arg
+    if   is_map_projection(arg): return arg
     elif pimms.is_str(arg):
         # first see if there's a hemi appended
         if ':' in arg:
@@ -2504,7 +2620,7 @@ def to_map_projection(arg):
             except: h = None
             if h: return to_map_projection((a, h))
         # otherwise, strings alone might be filenames; otherwise it's an mp name without the :lr
-        try: return load_map_projection(arg)
+        try:    return load_map_projection(arg)
         except: return to_map_projection((arg, 'lr'))
     elif pimms.is_vector(arg):
         if   len(arg) == 1: (a,h,o) = (arg,    'lr',   {})
@@ -2706,7 +2822,7 @@ class Topology(VertexSet):
             raise ValueError('All shared topologies raised errors during interpolation!', errs)
         return res
     def projection(self,
-                   center=None, center_right=None, radius=None, method='equirectangular',
+                   center=None, center_right=None, radius=None, method='orthographic',
                    registration='native', chirality=Ellipsis, sphere_radius=None,
                    pre_affine=None, post_affine=None, tag='projection'):
         '''
@@ -3224,6 +3340,19 @@ class Path(ObjectWithMetaData):
         '''
         addrs = {k:np.fliplr(v) for (k,v) in six.iteritems(self.addresses)}
         return Path(self.surface, addrs, meta_data=meta_data)
+    def boundary_vertices(self, distance, outer=False, indices=False):
+        '''
+        path.boundary_vertices(d) yields an array of vertex labels representing all vertices that
+          are both on the on the inner/left-hand side of the given path and within a distance d of
+          the boundary of the path.
+        
+        The following options may be given:
+          * outer (default: False) may be set to True in order to use the right-hand/outer side of
+            the path instead of the inner/left-hand side.
+          * indices (default: False) may be set to True in order to yield indices instead of labels.
+        '''
+        #TODO
+        raise NotImplementedError('Path.boundary_vertices is not yet implemented')
 def is_path(p):
     '''
     is_path(p) yields True if p is a Path object and False otherwise.
@@ -3320,6 +3449,73 @@ class PathTrace(ObjectWithMetaData):
         # okay, we have the points--address them and make a path
         addrs = fmap.address(allpts)
         return Path(obj, addrs, meta_data={'source_trace': self})
+    def normalize(self):
+        '''
+        path_trace.normalize() yields a json-friendly structure that represents the data in the
+          given path trace object; the return value of this function should be compatibly with the
+          PathTrace.denormalize() function.
+        '''
+        dat = {'version':1,
+               'map_projection': self.map_projection.normalize(),
+               'points': self.points.tolist(),
+               'closed': self.closed}
+        meta = {} if self.meta_data is None else dict(self.meta_data)
+        if 'json'     in meta: del meta['json']
+        if 'filename' in meta: del meta['filename']
+        if len(meta) > 0: dat['meta_data'] = meta
+        return dat
+    def save(self, filename):
+        '''
+        path_trace.save(filename) saves the given path_trace object to the given filename. If
+          filename is a stream object, writes path_trace to the stream. This function uses a json
+          format for the path_trace; it will fail if the path trace includes any data that cannot
+          be rendered as json, e.g. in the path trace's meta-data.
+        '''
+        # okay, we need to make a json-like structure of ourselves then turn it into a string;
+        # note that we cannot save the mesh, so it is always left off
+        dat = self.normalize()
+        txt = json.dumps(dat)
+        # if it's a filename, we'll need to open it then close it later
+        if pimms.is_str(filename):
+            filename = os.path.expandvars(os.path.expanduser(filename))
+            gz = (len(filename) > 3 and filename[-3:] == '.gz')
+            with (gzip.open(filename, 'wt') if gz else open(filename, 'wt')) as f: f.write(txt)
+        else: filename.write(txt)
+        return filename
+    @staticmethod
+    def denormalize(dat):
+        '''
+        PathTrace.denormalize(data) yields a path trace object that is equivalent to the given 
+        normalized data. The data should generally come from a path_trace.normalize() call or from
+        a loaded json path-trace file.
+        '''
+        # check version; we assume it's fine if not given
+        if 'version' in dat:
+            if   dat['version'] < 1: warnings.warn('projection file version < 1: %s' % fname)
+            elif dat['version'] > 1: logging.info('projection file version > 1: %s' % fname)
+        if not all(k in dat for k in ['map_projection', 'closed', 'points']):
+            raise ValueError('Missing field from path_trace file')
+        return PathTrace(MapProjection.denormalize(dat['map_projection']), dat['points'],
+                         closed=dat['closed'], meta_data=dat.get('meta_data'))
+    @staticmethod
+    def load(filename):
+        '''
+        PathTrace.load(filename) loads a path trace object from the given filename and returns it.
+        '''
+        if pimms.is_str(filename):
+            filename = os.path.expandvars(os.path.expanduser(filename))
+            if not os.path.isfile(filename):
+                raise ValueError('Given filename (%s) is not a file!' % filename)
+            gz = (len(filename) > 3 and filename[-3:] == '.gz')
+            dat = None
+            with (gzip.open(filename, 'rt') if gz else open(filename, 'rt')) as f:
+                dat = json.load(f)
+            fname = filename
+        else:
+            dat = json.load(filename)
+            fname = '<file-stream>'
+        dat = {k.lower():v for (k,v) in six.iteritems(dat)}
+        return PathTrace.denormalize(dat)
 def is_path_trace(pt):
     '''
     is_path_trace(p) yields True if p is a PathTrace object and False otherwise.
@@ -3346,7 +3542,27 @@ def close_paths(*args):
       in which the list of paths is given.
     '''
     #TODO
-    pass
+    raise NotImplementedError('close_paths is not yet implemented')
+@importer('path_trace', ('pt.json',         'pt.json.gz',
+                         'pathtrace.json',  'pathtrace.json.gz',
+                         'path_trace.json', 'path_trace.json.gz',
+                         'path-trace.json', 'path-trace.json.gz',))
+def load_path_trace(filename, **kw):
+    '''
+    load_path_trace(filename) yields the path trace indicated by the given file name or stream
+      object, filename. The file or stream must be encoded in json.
+    '''
+    return PathTrace.load(filename, **kw)
+@exporter('path_trace', ('pt.json',         'pt.json.gz',
+                         'pathtrace.json',  'pathtrace.json.gz',
+                         'path_trace.json', 'path_trace.json.gz',
+                         'path-trace.json', 'path-trace.json.gz',))
+def save_path_trace(filename, pt, **kw):
+    '''
+    save_path_trace(filename, map_projection) saves the given path trace object to the given file
+      or stream object, filename, and returns filename.
+    '''
+    return pt.save(filename, **kw)
         
 ####################################################################################################
 # Some Functions that deal with converting to/from the above classes
