@@ -160,7 +160,7 @@ class TestNeuropythy(unittest.TestCase):
           working correctly.
         '''
         logging.info('neuropythy: Testing Path and PathTrace')
-        # simple box: should have an area of ~1600 in a map and close 
+        # simple box: should have an area of ~1600 in a flatmap and something close in a sphere
         pts = [(-20,-20), (20,-20), (20,20), (-20,20)]
         # use a simple map projection
         mpj = ny.map_projection('occipital_pole', 'lh', radius=np.pi/3)
