@@ -1301,8 +1301,7 @@ def curve_intersection(c1, c2, grid=16):
     def f(t): return np.sum((c1(t[0]) - c2(t[1]))**2)
     (t1,t2) = minimize(f, (t01, t02)).x
     return (t1,t2)
-def close_curves(*crvs, grid=16, order=None, even_out=True,
-                 smoothing=None, periodic=False, meta_data=None):
+def close_curves(*crvs, **kw):
     '''
     close_curves(crv1, crv2...) yields a single curve that merges all of the given list of curves
       together. The curves must be given in order, such that the i'th curve should be connected to
@@ -1317,6 +1316,10 @@ def close_curves(*crvs, grid=16, order=None, even_out=True,
       * even_out (True) whether to even out the distances along the curve.
       * meta_data (None) an optional map of meta-data to give the spline representation.
     '''
+    for k in six.iterkeys(kw):
+        if k not in close_curves.default_options: raise ValueError('Unrecognized option: %s' % k)
+    kw = {k:(kw[k] if k in kw else v) for (k,v) in six.iteritems(close_curves.default_options)}
+    (grid, order) = (kw['grid'], kw['order'])
     crvs = [(crv if is_curve_spline(crv) else to_curve_spline(crv)).even_out() for crv in crvs]
     # find all intersections:
     isects = [curve_intersection(u,v, grid=grid)
@@ -1327,7 +1330,8 @@ def close_curves(*crvs, grid=16, order=None, even_out=True,
     o = np.min([crv.order for crv in crvs]) if order is None else order
     return curve_spline(crds, periodic=True, order=o, even_out=even_out, meta_data=meta_data,
                         smoothing=smoothing)
-
+close_curves.default_options = dict(grid=16, order=None, even_out=True,
+                                    smoothing=None, meta_data=None)
 class DataStruct(object):
     '''
     A DataStruct object is an immutable map-like object that accepts any number of kw-args on input
