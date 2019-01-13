@@ -8,5 +8,5 @@ auto-detecting many common formats and data-types and yields data in the neuropy
 '''
 
 from .core import (load, save, importer, exporter, forget_importer, forget_exporter,
-                   to_nifti)
+                   to_nifti, load_json, save_json)
 

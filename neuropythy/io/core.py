@@ -3,12 +3,12 @@
 # This file implements the load and save functions that can be used to read and write various kinds
 # of neuroscience data
 
-import numpy                        as np
-import pyrsistent                   as pyr
-import nibabel                      as nib
-import os, six, pimms
+import numpy      as np
+import pyrsistent as pyr
+import nibabel    as nib
+import os, six, json, pimms
 
-from ..util import ObjectWithMetaData
+from ..util import (ObjectWithMetaData, normalize as norm, denormalize as denorm)
 
 # The list of import-types we understand
 importers = pyr.m()
@@ -148,14 +148,16 @@ def guess_export_format(filename, data, **kwargs):
     Keyword arguments that are passed to save should also be passed to guess_export_format.
     '''
     
-    # first try file extension
+    # First try file endings
     (_,filename) = os.path.split(filename)
-    if '.' in filename:
-        fnm = filename.lower()
-        fmt = next((k for (k,(_,es,_)) in six.iteritems(exporters)
-                    if any(fnm.endswith('.' + e) for e in es)),
-                   None)
-        if fmt: return fmt
+    fnm = filename.lower()
+    fmt = None
+    # to make sure we get the most specific ending, sort the exporters by their length
+    es = sorted(((k,e) for (k,es) in six.iteritems(exporters) for e in es),
+                key=lambda x:x[1])
+    for (k,e) in es:
+        if fnm.endswith(('.' + e) if e[0] != '.' else e):
+            return k
     # that didn't work; let's check the sniffers
     for (k,(_,_,sniff)) in six.iteritems(exporters):
         try:
@@ -178,7 +180,7 @@ def save(filename, data, format=None, **kwargs):
     Keyword options may be passed to save; these must match those accepted by the given export
     function.
     '''
-    filename = os.path.expanduser(filename)
+    filename = os.path.expanduser(os.path.expandvars(filename))
     if format is None:
         format = guess_export_format(filename, data, **kwargs)
         if format is None:
@@ -243,8 +245,46 @@ def forget_exporter(name):
 ####################################################################################################
 # General/universal importers/exporters
 
+# JSON: used with neuropythy.util's normalize/denormalize system
+@importer('json', ('json', 'json.gz', 'json.bz2', 'json.lzma'))
+def load_json(filename, to='auto'):
+    '''
+    load_json(filename) yields the object represented by the json file or stream object filename.
+    
+    The optional argument to may be set to None to indicate that the JSON data should be returned
+    verbatim rather than parsed by neuropythy's denormalize system.
+    '''
+    if pimms.is_str(filename):
+        try:
+            with gzip.open(filename, 'rt') as fl: dat = json.load(fl)
+        except:
+            with open(filename, 'rt') as fl: dat = json.load(fl)
+    else:
+        dat = json.load(filename)
+        filename = '<stream>'
+    if to is None: return dat
+    elif to == 'auto': return denorm(dat)
+    else: raise ValueError('unrecognized to option: %s' % to)
+@exporter('json', ('json', 'json.gz', 'json.bz2', 'json.lzma'))
+def save_json(filename, obj, normalize=True):
+    '''
+    save_json(filename, obj) writes the given object to the given filename (or stream) in a
+      normalized JSON format.
+
+    The optional argument normalize (default True) may be set to False to prevent the object from
+    being run through neuropythy's normalize system.
+    '''
+    dat = norm(obj) if normalize else obj
+    if pimms.is_str(filename):
+        if any(filename.endswith(s) for s in ('.gz', '.bz2', '.lzma')):
+            with gzip.open(filename, 'wt') as fl: json.dump(dat, fl)
+        else:
+            with open(filename, 'wt') as fl: json.dump(dat, fl)
+    else: json.dump(dat, filename)
+    return filename
+
 # Nifti!
-@importer('nifti', ('nii', 'nii.gz'))
+@importer('nifti', ('nii', 'nii.gz', 'nii.bz2', 'nii.lzma'))
 def load_nifti(filename, to='auto'):
     '''
     load_nifti(filename) yields the Nifti1Image or Nifti2Image referened by the given filename by
