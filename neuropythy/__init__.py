@@ -70,7 +70,7 @@ from   .vision     import (retinotopy_data, empirical_retinotopy_data, predicted
                            retinotopy_comparison)
 from   .geometry   import (mesh, tess, topo, map_projection, path_trace, 
                            is_vset, is_mesh, is_tess, is_topo, is_flatmap,
-                           is_map_projection, is_path, is_path_trace,
+                           is_map_projection, is_path, is_path_trace, close_path_traces,
                            to_mesh, to_tess, to_property, to_mask, to_flatmap, to_map_projection,
                            map_projections)
 from   .freesurfer import (subject as freesurfer_subject, to_mgh)
