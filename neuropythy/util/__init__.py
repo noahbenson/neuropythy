@@ -2,10 +2,11 @@
 # neuropythy/util/__init__.py
 # This file defines the general tools that are available as part of neuropythy.
 
-from .core     import (ObjectWithMetaData, to_hemi_str, to_affine, simplex_summation_matrix,
+from .core     import (ObjectWithMetaData, normalize, denormalize,
+                       to_hemi_str, to_affine, simplex_summation_matrix,
                        simplex_averaging_matrix, is_image, is_image_header, curry,
                        numel, rows, part, hstack, vstack, repmat, replace_close, chop,
-                       flatter, flattest, is_tuple, is_list,
+                       flatter, flattest, is_tuple, is_list, is_set,
                        plus, cplus, minus, cminus, times, ctimes,
                        inv, zinv, divide, cdivide, zdivide, czdivide, power, cpower, inner,
                        sine, cosine, tangent, cotangent, secant, cosecant,

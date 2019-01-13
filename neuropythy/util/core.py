@@ -3,7 +3,8 @@
 # This file implements the command-line tools that are available as part of neuropythy as well as
 # a number of other random utilities.
 
-import types, inspect, atexit, shutil, tempfile, pimms, os, six
+import types, inspect, atexit, shutil, tempfile, importlib, pimms, os, six
+import collections                       as colls
 import numpy                             as np
 import scipy.sparse                      as sps
 import pyrsistent                        as pyr
@@ -50,6 +51,11 @@ def is_list(arg):
     is_list(arg) yields True if arg is a list and False otherwise.
     '''
     return isinstance(arg, _list_type)
+def is_set(arg):
+    '''
+    is_set(arg) yields True if arg is a set or frozenset and False otherwise.
+    '''
+    isinstance(arg, colls.Set)
     
 def curry(f, *args0, **kwargs0):
     '''
@@ -105,7 +111,140 @@ class ObjectWithMetaData(object):
             else:
                 md = md.discard(a)
         return self if md is self.meta_data else self.copy(meta_data=md)
+    def normalize(self):
+        '''
+        obj.normalize() yields a JSON-friendly Python native data-structure (i.e., dicts, lists,
+          strings, numbers) that represents the given object obj. If obj contains data that cannot
+          be represented in a normalized format, raises an error.
 
+        Note that if the object's meta_data cannot be encoded, then any part of the meta_data that
+        fails is simply excluded from the normalized representation.
+
+        This function generally shouldn't be called directly unless you plan to call
+        <class>.denormalize(data) directly as well--rather, use normalize(obj) and
+        denormalize(data). These latter calls ensure that the type information necessary to deduce
+        the proper class's denormalize function is embedded in the data.
+        '''
+        params = pimms.imm_params(self)
+        if 'meta_data' in params:
+            md = dict(params['meta_data'])
+            del params['meta_data']
+            params = normalize(params)
+            for k in list(md.keys()):
+                if not pimms.is_str(k):
+                    del md[k]
+                    continue
+                try:    md[k] = normalize(md[k])
+                except: del md[k]
+            params['meta_data'] = md
+        else: params = normalize(params)
+        return params
+    @classmethod
+    def denormalize(self, params):
+        '''
+        ObjectWithMetaData.denormalize(params) is used to denormalize an object given a mapping of
+          normalized JSON parameters, as produced via obj.normalize() or normalize(obj).
+
+        This function should generally be called by the denormalize() function rather than being
+        called directly unless the data you have was produced by a call to obj.normalize() rather
+        than normalize(obj).
+        '''
+        return self(**params)
+normalize_type_key = '__type__'
+def normalize(data):
+    '''
+    normalize(obj) yields a JSON-friendly normalized description of the given object. If the data
+      cannot be normalized an error is raised.
+
+    Any object that implements a normalize() function can be normalized, so long as the mapping 
+    object returned by normalize() itself can be normalized. Note that the normalize() function
+    must return a mapping object.
+
+    Objects that can be represented as themselves are returned as themselves. Any other object will
+    be represented as a map that includes the reserved key '__type__' which will map to a
+    2-element list [module_name, class_name]; upon denomrlization, the module and class k are looked
+    up and k.denomalize(data) is called.
+    '''
+    if data is None: return None
+    elif pimms.is_array(data, 'complex') and not pimms.is_array(data, 'real'):
+        # any complex number must be handled specially:
+        return {normalize_type_key: [None, 'complex'], 're':np.real(data), 'im': np.imag(data)}
+    elif is_set(data):
+        # sets also have a special type:
+        return {normalize_type_key: [None, 'set'], 'elements': normalize(list(data))}
+    elif pimms.is_scalar(data, ('number', 'string', 'bool')):
+        # scalars are already normalized
+        return data
+    elif sps.issparse(data):
+        # sparse matrices always get encoded as if they were csr_matrices (for now)
+        (i,j,v) = sps.find(data)
+        return {normalize_type_key: [None, 'sparse_matrix'],
+                'rows':i.tolist(), 'cols':j.tolist(), 'vals': v.tolist(),
+                'shape':data.shape}
+    elif pimms.is_array(data, ('number', 'string', 'bool')):
+        # numpy arrays just get turned into lists
+        return data.tolist() if pimms.is_nparray(data) else data
+    elif pimms.is_map(data):
+        # maps are tricky; if we don't change any values, we can return the identical; otherwise,
+        # we need to make a new object and return it
+        orig = data
+        for (k,v) in six.iteritems(data):
+            if not pimms.is_str(k):
+                raise ValueError('Only maps with strings for keys can be normalized')
+            vv = normalize(v)
+            if vv is v: continue
+            if data is orig: data = dict(orig)
+            data[k] = vv
+        return data
+    elif data is Ellipsis:
+        return {normalize_type_key: [None, 'ellipsis']}
+    elif pimms.is_scalar(data):
+        # we have an object of some type we don't really recognize
+        try:    m = data.normalize()
+        except: raise ValueError('Failed to run obj.normalize() on unrecognized obj: %s' % data)
+        if not pimms.is_map(m): raise ValueError('obj.normalize() returned non-map; obj: %s' % data)
+        m = dict(m)
+        tt = type(data)
+        m[normalize_type_key] = [tt.__module__, tt.__name__]
+        return m
+    else:
+        # we have an array/list of some kind that isn't a number, string, or boolean
+        return [normalize(x) for x in data]
+def denormalize(data):
+    '''
+    denormalize(data) yield a denormalized version of the given JSON-friendly normalized data. This
+      is the inverse of the normalize(obj) function.
+
+    The normalize and denormalize functions use the reserved keyword '__type__' along with the
+    <obj>.normalize() and <class>.denormalize(data) functions to manage types of objects that are
+    not JSON-compatible. Please see help(normalize) for more details.
+    '''
+    if   data is None: return None
+    elif pimms.is_scalar(data, ('number', 'bool', 'string')): return data
+    elif pimms.is_map(data):
+        # see if it's a non-native map
+        if normalize_type_key in data:
+            (mdl,cls) = data[normalize_type_key]
+            if mdl is None:
+                if   cls == 'ellipsis': return Ellipsis
+                elif cls == 'complex':  return np.array(data['re']) + 1j*np.array(data['im'])
+                elif cls == 'set':      return set(denormalize(data['elements']))
+                elif cls == 'sparse_matrix':
+                    return sps.csr_matrix((data['vals'], (data['rows'],data['cols'])),
+                                          shape=data['shape'])
+                else: raise ValueError('unrecognized builtin denormalize class: %s' % cls)
+            else:
+                cls = getattr(importlib.import_module(mdl), cls)
+                d = {k:denormalize(v) for (k,v) in six.iteritems(data) if k != normalize_type_key}
+                return cls.denormalize(d)
+        else: return {k:denormalize(v) for (k,v) in six.iteritems(data)} # native map
+    else:
+        # must be a list of some type
+        if not hasattr(data, '__iter__'):
+            raise ValueError('denormalize does not recognized object: %s' % data)
+        # lists of primitives need not be changed
+        if pimms.is_array(data, ('number', 'bool', 'string')): return data
+        return [denormalize(x) for x in data]
 def to_affine(aff, dims=None):
     '''
     to_affine(None) yields None.

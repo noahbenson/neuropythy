@@ -13,7 +13,6 @@ import scipy.optimize               as spopt
 import nibabel                      as nib
 import nibabel.freesurfer.mghformat as fsmgh
 import pyrsistent                   as pyr
-import collections                  as colls
 import os, sys, six, types, logging, warnings, gzip, json, pimms
 
 from .util  import (triangle_area, triangle_address, alignment_matrix_3D, rotation_matrix_3D,
@@ -22,7 +21,8 @@ from .util  import (triangle_area, triangle_address, alignment_matrix_3D, rotati
                     barycentric_to_cartesian, point_in_triangle)
 from ..util import (ObjectWithMetaData, to_affine, zinv, is_image, is_address, address_data, curry,
                     curve_spline, CurveSpline, chop, zdivide, flattest, inner, config, library_path,
-                    dirpath_to_list, to_hemi_str, is_tuple, is_list, close_curves)
+                    dirpath_to_list, to_hemi_str, is_tuple, is_list, is_set, close_curves,
+                    normalize, denormalize)
 from ..io   import (load, importer, exporter)
 from functools import reduce
 
@@ -117,7 +117,7 @@ class VertexSet(ObjectWithMetaData):
         '''
         if pimms.is_str(name):
             return self.properties[name]
-        elif isinstance(name, colls.Set):
+        elif is_set(name):
             return pyr.pmap({nm:self.properties[nm] for nm in name})
         elif pimms.is_vector(name):
             if len(name) == self.properties.row_count:
@@ -349,7 +349,7 @@ def to_property(obj, prop=None,
     if pimms.is_str(prop):
         if obj is None: raise ValueError('a property name but no data object given to to_property')
         else: prop = obj[prop]
-    if isinstance(prop, colls.Set):
+    if is_set(prop):
         def _lazy_prop(kk):
             return lambda:to_property(obj, kk,
                                       dtype=dtype,           null=null,
@@ -500,7 +500,7 @@ class TesselationIndex(object):
             elif len(index) == 2: return self.edge_index.get(index, None)
             elif len(index) == 1: return self.vertex_index.get(index[0], None)
             else:                 raise ValueError('Unrecognized tesselation item: %s' % index)
-        elif isinstance(index, colls.Set):
+        elif is_set(index):
             return {k:self[k] for k in index}
         elif pimms.is_vector(index):
             index = np.array(index)
@@ -1937,25 +1937,12 @@ class MapProjection(ObjectWithMetaData):
         self.pre_affine = pre_affine
         self.post_affine = post_affine
         self.meta_data = meta_data
-
-    @staticmethod
-    def denormalize(dat, defaults=None):
-        '''
-        MapProjection.denormalize(data) yields a map projection object equivalent to the given
-        denormalized data, which generally should be produced by either mapproj.normalize() or by
-        loading in a map-projection json file.
-        '''
-        # check version; we assume it's fine if not given
-        if 'version' in dat:
-            if   dat['version'] < 1: warnings.warn('projection file version < 1: %s' % fname)
-            elif dat['version'] > 1: logging.info('projection file version > 1: %s' % fname)
-        items = ['center', 'center_right', 'radius', 'method', 'registration', 'chirality',
-                 'sphere_radius', 'pre_affine', 'post_affine', 'meta_data']
-        if defaults is None: defaults = {}
-        params = {}
-        for k in items:
-            if   k in dat:      params[k] = dat[k]
-            elif k in defaults: params[k] = defaults[k]
+    @classmethod
+    def denormalize(self, data):
+        params = dict(mesh=None, center=None, center_right=None, radius=None, method=None,
+                      registration='native', chirality=None, sphere_radius=None,
+                      pre_affine=None, post_affine=None, meta_data=None)
+        params = {k:denormalize(data[k]) for k in params.keys() if k in data}
         return MapProjection(**params)
     @staticmethod
     def load(filename,
@@ -1966,6 +1953,11 @@ class MapProjection(ObjectWithMetaData):
         MapProjection.load(file) yields the map projection indicated by the given file name or file
           object file. Map projections define the parameters of a projection to the 2D cortical
           surface via a registartion name and projection parameters.
+
+        Note that although load uses the normalize/denormalize system, it does not call
+        denormalize(data) but rather MapProjection.denormalize(data); this is because
+        MapProjection's load/save system expects that it will not encode type-data as the
+        normalization system does.
 
         The following options may be given; all of these options represent parameters that may or
         may not be defined by the map-projection file; in the case that a parameter is defined by
@@ -2004,31 +1996,15 @@ class MapProjection(ObjectWithMetaData):
         else:
             dat = json.load(filename)
             fname = '<file-stream>'
-        dat = {k.lower():v for (k,v) in six.iteritems(dat)}
+        dat = {k.lower():denormalize(v) for (k,v) in six.iteritems(dat)}
         # make the object
         params = dict(center=center, center_right=center_right, radius=radius, method=method,
                       registration=registration, chirality=chirality, sphere_radius=sphere_radius,
                       pre_affine=pre_affine, post_affine=post_affine)
-        params = {k:v for (k,v) in six.iteritems(params) if v is not None}
-        return MapProjection.denormalize(dat, params)
-    def normalize(self):
-        '''
-        mp.normalize() yields a json-friendly structure representing the given map projection.
-        '''
-        dat = {'version':1,
-               'center':self.center, 'center_right':self.center_right, 'radius':self.radius,
-               'method':self.method, 'registration':self.registration,
-               'chirality':self.chirality, 'sphere_radius':self.sphere_radius,
-               'pre_affine':self.pre_affine, 'post_affine':self.post_affine}
-        dat = {k:(v.tolist() if pimms.is_nparray(v) else v)
-               for (k,v) in six.iteritems(dat)
-               if v is not None}
-        meta = {} if self.meta_data is None else dict(self.meta_data)
-        # these are tracked by the load/save system and aren't needed
-        if 'json' in meta:     del meta['json']
-        if 'filename' in meta: del meta['filename']
-        if len(meta) > 0: dat['meta_data'] = meta
-        return dat
+        dat = {k:(dat[k] if k in dat else v)
+               for (k,v) in six.iteritems(params)
+               if v is not None or k in dat}
+        return MapProjection.denormalize(dat)
     def save(self, filename):
         '''
         map_projection.save(file) writes a json version of the given map_projection object to the
@@ -2036,7 +2012,7 @@ class MapProjection(ObjectWithMetaData):
         '''
         # okay, we need to make a json-like structure of ourselves then turn it into a string;
         # note that we cannot save the mesh, so it is always left off
-        dat = self.normalize()
+        dat = normalize(self.normalize())
         txt = json.dumps(dat)
         # if it's a filename, we'll need to open it then close it later
         if pimms.is_str(filename):
@@ -3170,7 +3146,7 @@ class Path(ObjectWithMetaData):
             (rfs,lfs) = ([],[]) # left and right side triangles
             cfs = rfs # we always start with the right side
             # we walk across points then back sweeping triangles around as we go...
-            path  = np.concatenate([np.arange(n), np.flip(np.arange(n-1))])
+            path  = np.concatenate([np.arange(n), np.flip(np.arange(n-1), 0)])
             plen  = len(path)
             # figure out what side we enter on...
             (u0,v0) = (0,1) if pts[0,1] == 0 else (2,0) if pts[0,0] == 0 else (1,2)
@@ -3449,21 +3425,6 @@ class PathTrace(ObjectWithMetaData):
         # okay, we have the points--address them and make a path
         addrs = fmap.address(allpts)
         return Path(obj, addrs, meta_data={'source_trace': self})
-    def normalize(self):
-        '''
-        path_trace.normalize() yields a json-friendly structure that represents the data in the
-          given path trace object; the return value of this function should be compatibly with the
-          PathTrace.denormalize() function.
-        '''
-        dat = {'version':1,
-               'map_projection': self.map_projection.normalize(),
-               'points': self.points.tolist(),
-               'closed': self.closed}
-        meta = {} if self.meta_data is None else dict(self.meta_data)
-        if 'json'     in meta: del meta['json']
-        if 'filename' in meta: del meta['filename']
-        if len(meta) > 0: dat['meta_data'] = meta
-        return dat
     def save(self, filename):
         '''
         path_trace.save(filename) saves the given path_trace object to the given filename. If
@@ -3482,19 +3443,15 @@ class PathTrace(ObjectWithMetaData):
             with (gzip.open(filename, 'wt') if gz else open(filename, 'wt')) as f: f.write(txt)
         else: filename.write(txt)
         return filename
-    @staticmethod
-    def denormalize(dat):
+    @classmethod
+    def denormalize(self, dat):
         '''
         PathTrace.denormalize(data) yields a path trace object that is equivalent to the given 
         normalized data. The data should generally come from a path_trace.normalize() call or from
         a loaded json path-trace file.
         '''
-        # check version; we assume it's fine if not given
-        if 'version' in dat:
-            if   dat['version'] < 1: warnings.warn('projection file version < 1: %s' % fname)
-            elif dat['version'] > 1: logging.info('projection file version > 1: %s' % fname)
-        if not all(k in dat for k in ['map_projection', 'closed', 'points']):
-            raise ValueError('Missing field from path_trace file')
+        for k in ['map_projection', 'closed', 'points']:
+            if k not in dat: raise ValueError('Missing field from path_trace data: %s' % k)
         return PathTrace(MapProjection.denormalize(dat['map_projection']), dat['points'],
                          closed=dat['closed'], meta_data=dat.get('meta_data'))
     @staticmethod
@@ -3514,7 +3471,7 @@ class PathTrace(ObjectWithMetaData):
         else:
             dat = json.load(filename)
             fname = '<file-stream>'
-        dat = {k.lower():v for (k,v) in six.iteritems(dat)}
+        dat = {k.lower():denormalize(v) for (k,v) in six.iteritems(dat)}
         return PathTrace.denormalize(dat)
 def is_path_trace(pt):
     '''
