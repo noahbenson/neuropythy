@@ -22,7 +22,7 @@ from .util  import (triangle_area, triangle_address, alignment_matrix_3D, rotati
                     barycentric_to_cartesian, point_in_triangle)
 from ..util import (ObjectWithMetaData, to_affine, zinv, is_image, is_address, address_data, curry,
                     curve_spline, CurveSpline, chop, zdivide, flattest, inner, config, library_path,
-                    dirpath_to_list, to_hemi_str, is_tuple, is_list)
+                    dirpath_to_list, to_hemi_str, is_tuple, is_list, close_curves)
 from ..io   import (load, importer, exporter)
 from functools import reduce
 
@@ -3520,7 +3520,7 @@ def is_path_trace(pt):
     '''
     is_path_trace(p) yields True if p is a PathTrace object and False otherwise.
     '''
-    return isinstance(p, PathTrace)
+    return isinstance(pt, PathTrace)
 def path_trace(map_projection, pts, closed=False, meta_data=None):
     '''
     path_trace(proj, points) yields a path-trace object that represents the given path of points on
@@ -3534,15 +3534,28 @@ def path_trace(map_projection, pts, closed=False, meta_data=None):
         object.
     '''
     return PathTrace(map_projection, pts, closed=closed, meta_data=meta_data)
-def close_paths(*args):
+def close_path_traces(*args):
     '''
-    close_paths(path1, path2...) yields the path formed by joining the list of paths at their
-      intersection points in the order given. Note that the direction in which each individual path
-      is specified is ultimately ignored by this function--the only order that matters is the order
-      in which the list of paths is given.
+    close_path_traces(pt1, pt2...) yields the path-trace formed by joining the list of path traces
+      at their intersection points in the order given. Note that the direction in which each
+      individual path trace's coordinates are specified is ultimately ignored by this function--the
+      only ordering that matters is the order in which the list of paths is given.
+
+    Each path argument may alternately be a curve-spline object or coordinate matrix, so long as all
+    paths and curves track the same 2D space.
     '''
-    #TODO
-    raise NotImplementedError('close_paths is not yet implemented')
+    pts = [x for x in args if is_path_trace(x)]
+    if len(pts) == 0:
+        if len(args) == 1 and hasattr(args[0], '__iter__'): return close_path_traces(*args[0])
+        raise ValueError('at least one argument to close_path_traces must be a path trace')
+    mp0 = pts[0].map_projection
+    if not all(mp is None or mp.normalize() == mp0.normalize()
+               for x in pts[1:] for mp in [x.map_projection]):
+        warnings.warn('path traces do not share a map projection')
+    crvs = [x.points if is_path_trace(x) else to_curve_spline(x) for x in args]
+    loop = close_curves(*crvs)
+    return path_trace(mp0, loop.coordinates, closed=True)
+    
 @importer('path_trace', ('pt.json',         'pt.json.gz',
                          'pathtrace.json',  'pathtrace.json.gz',
                          'path_trace.json', 'path_trace.json.gz',

@@ -45,6 +45,6 @@ from .mesh import (VertexSet, Tesselation, Mesh, Topology, MapProjection, Path, 
                    map_projection, is_map_projection,
                    load_map_projection, load_projections_from_path,
                    projections_path, map_projections, 
-                   path_trace, is_path_trace,
+                   path_trace, is_path_trace, close_path_traces,
                    to_tess, to_mesh, to_property, to_mask, to_map_projection, to_flatmap)
 
