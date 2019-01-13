@@ -172,7 +172,7 @@ def normalize(data):
     elif is_set(data):
         # sets also have a special type:
         return {normalize_type_key: [None, 'set'], 'elements': normalize(list(data))}
-    elif pimms.is_scalar(data, ('number', 'string', 'bool')):
+    elif pimms.is_scalar(data, ('number', 'string', 'unicode', 'bool')):
         # scalars are already normalized
         return data
     elif sps.issparse(data):
@@ -181,7 +181,7 @@ def normalize(data):
         return {normalize_type_key: [None, 'sparse_matrix'],
                 'rows':i.tolist(), 'cols':j.tolist(), 'vals': v.tolist(),
                 'shape':data.shape}
-    elif pimms.is_array(data, ('number', 'string', 'bool')):
+    elif pimms.is_array(data, ('number', 'string', 'unicode', 'bool')):
         # numpy arrays just get turned into lists
         return data.tolist() if pimms.is_nparray(data) else data
     elif pimms.is_map(data):
@@ -220,7 +220,7 @@ def denormalize(data):
     not JSON-compatible. Please see help(normalize) for more details.
     '''
     if   data is None: return None
-    elif pimms.is_scalar(data, ('number', 'bool', 'string')): return data
+    elif pimms.is_scalar(data, ('number', 'bool', 'string', 'unicode')): return data
     elif pimms.is_map(data):
         # see if it's a non-native map
         if normalize_type_key in data:
@@ -244,7 +244,7 @@ def denormalize(data):
             msg = 'denormalize does not recognized object %s with type %s' % (data, type(data))
             raise ValueError(msg)
         # lists of primitives need not be changed
-        if pimms.is_array(data, ('number', 'bool', 'string')): return data
+        if pimms.is_array(data, ('number', 'bool', 'string', 'unicode')): return data
         return [denormalize(x) for x in data]
 def to_affine(aff, dims=None):
     '''
