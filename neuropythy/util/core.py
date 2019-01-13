@@ -241,7 +241,8 @@ def denormalize(data):
     else:
         # must be a list of some type
         if not hasattr(data, '__iter__'):
-            raise ValueError('denormalize does not recognized object: %s' % data)
+            msg = 'denormalize does not recognized object %s with type %s' % (data, type(data))
+            raise ValueError(msg)
         # lists of primitives need not be changed
         if pimms.is_array(data, ('number', 'bool', 'string')): return data
         return [denormalize(x) for x in data]
