@@ -1089,7 +1089,7 @@ class CurveSpline(ObjectWithMetaData):
             distances=dists,
             meta_data=self.meta_data)
 
-def curve_spline(x, y=None, weights=None, order=3, even_out=False,
+def curve_spline(x, y=None, weights=None, order=3, even_out=True,
                  smoothing=None, periodic=False, meta_data=None):
     '''
     curve_spline(coords) yields a bicubic spline function through
@@ -1105,7 +1105,7 @@ def curve_spline(x, y=None, weights=None, order=3, even_out=False,
       * smoothing (None) the amount to smooth the points.
       * order (3) the order of the polynomial used in the splines.
       * periodic (False) whether the points are periodic or not.
-      * even_out (False) whether to even out the distances along
+      * even_out (True) whether to even out the distances along
         the curve.
       * meta_data (None) an optional map of meta-data to give the
         spline representation.
@@ -1116,13 +1116,42 @@ def curve_spline(x, y=None, weights=None, order=3, even_out=False,
                        meta_data=meta_data)
     if even_out: curv = curv.even_out()
     return curv
+def is_curve_spline(obj):
+    '''
+    is_curve_spline(obj) yields True if obj is a curve spline object and False otherwise.
+    '''
+    return isinstance(obj, CurveSpline)
+def to_curve_spline(obj):
+    '''
+    to_curve_spline(obj) obj if obj is a curve spline and otherwise attempts to coerce obj into a
+      curve spline, raising an error if it cannot.
+    '''
+    if   is_curve_spline(obj):            return obj
+    elif is_tuple(obj) and len(obj) == 2: (crds,opts) = obj
+    else:                                 (crds,opts) = (obj,{})
+    if pimms.is_matrix(crds) or is_curve_spline(crds): crds = [crds]
+    spls = [c for c in crds if is_curve_spline(c)]
+    opts = dict(opts)
+    if 'weights' not in opts and len(spls) == len(crds):
+        if all(c.weights is not None for c in crds):
+            opts['weights'] = np.concatenate([c.weights for c in crds])
+    if 'order' not in opts and len(spls) > 0:
+        opts['order'] = np.min([c.order for c in spls])
+    if 'smoothing' not in opts and len(spls) > 0:
+        sm = set([c.smoothing for c in spls])
+        if len(sm) == 1: opts['smoothing'] = list(sm)[0]
+        else: opts['smoothing'] = None
+    crds = [x.crds if is_curve_spline(crds) else np.asarray(x) for x in crds]
+    crds = [x if x.shape[0] == 2 else x.T for x in crds]
+    crds = np.hstack(crds)
+    return curve_spline(crds, **opts)
 def curve_intersection(c1, c2, grid=16):
     '''
     curve_intersect(c1, c2) yields the parametric distances (t1, t2)
       such that c1(t1) == c2(t2).
       
     The optional parameter grid may specify the number of grid-points
-    to use in the initial search for a start-point (default: 20).
+    to use in the initial search for a start-point (default: 16).
     '''
     from scipy.optimize import minimize
     (ts1,ts2) = [np.linspace(c.t[0], c.t[-1], grid) for c in (c1,c2)]
@@ -1133,6 +1162,32 @@ def curve_intersection(c1, c2, grid=16):
     def f(t): return np.sum((c1(t[0]) - c2(t[1]))**2)
     (t1,t2) = minimize(f, (t01, t02)).x
     return (t1,t2)
+def close_curves(*crvs, grid=16, order=None, even_out=True,
+                 smoothing=None, periodic=False, meta_data=None):
+    '''
+    close_curves(crv1, crv2...) yields a single curve that merges all of the given list of curves
+      together. The curves must be given in order, such that the i'th curve should be connected to
+      to the (i+1)'th curve circularly to form a perimeter.
+
+    The following optional parameters may be given:
+      * grid may specify the number of grid-points to use in the initial search for a start-point
+        (default: 16).
+      * order may specify the order of the resulting curve; by default (None) uses the lowest order
+        of all curves.
+      * smoothing (None) the amount to smooth the points.
+      * even_out (True) whether to even out the distances along the curve.
+      * meta_data (None) an optional map of meta-data to give the spline representation.
+    '''
+    crvs = [(crv if is_curve_spline(crv) else to_curve_spline(crv)).even_out() for crv in crvs]
+    # find all intersections:
+    isects = [curve_intersection(u,v, grid=grid)
+              for (u,v) in zip(crvs, np.roll(crvs,-1))]
+    # subsample curves
+    crds = np.hstack([crv.subcurve(s1[1], s0[0]).coordinates[:,:-1]
+                      for (crv,s0,s1) in zip(crvs, isects, np.roll(isects,1,0))])
+    o = np.min([crv.order for crv in crvs]) if order is None else order
+    return curve_spline(crds, periodic=True, order=o, even_out=even_out, meta_data=meta_data,
+                        smoothing=smoothing)
 
 class DataStruct(object):
     '''
