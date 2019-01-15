@@ -270,6 +270,18 @@ class PseudoDir(ObjectWithMetaData):
         join = data['pathmod'].join
         path = join(*args)
         return gtfn(path)
+    def local_cache_path(self, *args):
+        '''
+        pdir.local_cache_path(paths...) is similar to os.path.join(pdir, paths...) except that it
+          yields a local version of the given path, much like pdir.local_path(paths...). The 
+          local_cache_path function differs from the local_path function in that, if no existing
+          file is found at the given destination, no error is raised and the path is still returned.
+        '''
+        # if the file exists in the pseudo-dir, just return the local path
+        if self.find(*args) is not None: return self.local_path(*args)
+        cp = self._path_data['cache']
+        if cp is None: cp = self.source_path
+        return os.path.join(cp, *args)
 def pseudo_dir(source_path, cache_path=None, delete=Ellipsis, credentials=None, meta_data=None):
     '''
     pseudo_dir(source_path) yields a pseudo-directory object that represents files in the given
