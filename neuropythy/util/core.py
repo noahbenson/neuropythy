@@ -1074,7 +1074,7 @@ class CurveSpline(ObjectWithMetaData):
     via the curve_spline() function.
     '''
     def __init__(self, x, y=None,
-                 order=3, weights=None, smoothing=None, periodic=False,
+                 order=1, weights=None, smoothing=None, periodic=False,
                  distances=None,
                  meta_data=None):
         ObjectWithMetaData.__init__(self, meta_data=meta_data)
@@ -1141,10 +1141,8 @@ class CurveSpline(ObjectWithMetaData):
     def splrep(coordinates, t, order, weights, smoothing, periodic):
         from scipy import interpolate
         (x,y) = coordinates
-        xtck = interpolate.splrep(t, x, k=order, s=smoothing,
-                                  w=weights, per=periodic)
-        ytck = interpolate.splrep(t, y, k=order, s=smoothing,
-                                  w=weights, per=periodic)
+        xtck = interpolate.splrep(t, x, k=order, s=smoothing, w=weights, per=periodic)
+        ytck = interpolate.splrep(t, y, k=order, s=smoothing, w=weights, per=periodic)
         return tuple([tuple([pimms.imm_array(u) for u in tck])
                       for tck in (xtck,ytck)])
     def __repr__(self):
@@ -1153,8 +1151,8 @@ class CurveSpline(ObjectWithMetaData):
             self.order, self.t[0], self.t[-1])
     def __call__(self, t, derivative=0):
         from scipy import interpolate
-        xint = interpolate.splev(t, self.splrep[0], der=derivative)
-        yint = interpolate.splev(t, self.splrep[1], der=derivative)
+        xint = interpolate.splev(t, self.splrep[0], der=derivative, ext=0)
+        yint = interpolate.splev(t, self.splrep[1], der=derivative, ext=0)
         return np.asarray([xint,yint])
     def curve_length(self, start=None, end=None, precision=0.01):
         '''
@@ -1189,12 +1187,17 @@ class CurveSpline(ObjectWithMetaData):
         '''
         dists = [self.curve_length(s, e, precision=precision)
                  for (s,e) in zip(self.t[:-1], self.t[1:])]
-        return CurveSpline(self.coordinates,
+        crds = self.coordinates.T
+        tmp = crds[-1]
+        crds = [x0 for (x0,d) in zip(crds[:-1],dists) if not np.isclose(d,0)]
+        if not np.isclose(0, np.linalg.norm(crds[-1] - tmp)): crds.append(tmp)
+        crds = np.vstack(crds)
+        return CurveSpline(crds.T,
                            order=self.order,
                            weights=self.weights,
                            smoothing=self.smoothing,
                            periodic=self.periodic,
-                           distances=dists,
+                           distances=[d for d in dists if not np.isclose(d,0)],
                            meta_data=self.meta_data)
     def reverse(self):
         '''
@@ -1229,7 +1232,7 @@ class CurveSpline(ObjectWithMetaData):
             distances=dists,
             meta_data=self.meta_data)
 
-def curve_spline(x, y=None, weights=None, order=3, even_out=True,
+def curve_spline(x, y=None, weights=None, order=1, even_out=True,
                  smoothing=None, periodic=False, meta_data=None):
     '''
     curve_spline(coords) yields a bicubic spline function through
@@ -1287,8 +1290,7 @@ def to_curve_spline(obj):
     return curve_spline(crds, **opts)
 def curve_intersection(c1, c2, grid=16):
     '''
-    curve_intersect(c1, c2) yields the parametric distances (t1, t2)
-      such that c1(t1) == c2(t2).
+    curve_intersect(c1, c2) yields the parametric distances (t1, t2) such that c1(t1) == c2(t2).
       
     The optional parameter grid may specify the number of grid-points
     to use in the initial search for a start-point (default: 16).
@@ -1328,9 +1330,10 @@ def close_curves(*crvs, **kw):
     # subsample curves
     crds = np.hstack([crv.subcurve(s1[1], s0[0]).coordinates[:,:-1]
                       for (crv,s0,s1) in zip(crvs, isects, np.roll(isects,1,0))])
-    o = np.min([crv.order for crv in crvs]) if order is None else order
-    return curve_spline(crds, periodic=True, order=o, even_out=even_out, meta_data=meta_data,
-                        smoothing=smoothing)
+    kw['order'] = np.min([crv.order for crv in crvs]) if order is None else order
+    kw = {k:v for (k,v) in six.iteritems(kw)
+          if v is not None and k in ('order','smoothing','even_out','meta_data')}
+    return curve_spline(crds, periodic=True, **kw)
 close_curves.default_options = dict(grid=16, order=None, even_out=True,
                                     smoothing=None, meta_data=None)
 class DataStruct(object):
