@@ -1942,7 +1942,7 @@ class MapProjection(ObjectWithMetaData):
         params = dict(mesh=None, center=None, center_right=None, radius=None, method=None,
                       registration='native', chirality=None, sphere_radius=None,
                       pre_affine=None, post_affine=None, meta_data=None)
-        params = {k:denormalize(data[k]) for k in params.keys() if k in data}
+        params = {k:data[k] for k in params.keys() if k in data}
         return MapProjection(**params)
     @staticmethod
     def load(filename,
@@ -3367,7 +3367,7 @@ class PathTrace(ObjectWithMetaData):
         trace object or is the curve-spline object that represents the given path trace.
         '''
         if isinstance(x, CurveSpline): return x.persist()
-        x = np.asarray(x)
+        x = np.array(x)
         if not pimms.is_matrix(x, 'number'): return ValueError('trace points must be a matrix')
         if x.shape[0] != 2: x = x.T
         if x.shape[0] != 2: raise ValueError('trace points must be 2D')
@@ -3385,7 +3385,7 @@ class PathTrace(ObjectWithMetaData):
         trace.curve is the curve-spline object that represents the given path-trace.
         '''
         if isinstance(points, CurveSpline):
-            if closed != bool(points.periodic): return points
+            if closed == bool(points.periodic): return points
             else: return points.copy(periodic=closed)
         # default order to use is 0 for a trace
         return curve_spline(points[0], points[1], order=1, periodic=closed).persist()
@@ -3452,7 +3452,7 @@ class PathTrace(ObjectWithMetaData):
         '''
         for k in ['map_projection', 'closed', 'points']:
             if k not in dat: raise ValueError('Missing field from path_trace data: %s' % k)
-        return PathTrace(MapProjection.denormalize(dat['map_projection']), dat['points'],
+        return PathTrace(dat['map_projection'], dat['points'],
                          closed=dat['closed'], meta_data=dat.get('meta_data'))
     @staticmethod
     def load(filename):
@@ -3509,7 +3509,7 @@ def close_path_traces(*args):
     if not all(mp is None or mp.normalize() == mp0.normalize()
                for x in pts[1:] for mp in [x.map_projection]):
         warnings.warn('path traces do not share a map projection')
-    crvs = [x.points if is_path_trace(x) else to_curve_spline(x) for x in args]
+    crvs = [x.curve if is_path_trace(x) else to_curve_spline(x) for x in args]
     loop = close_curves(*crvs)
     return path_trace(mp0, loop.coordinates, closed=True)
     
