@@ -181,21 +181,16 @@ def normalize(data):
         return {normalize_type_key: [None, 'sparse_matrix'],
                 'rows':i.tolist(), 'cols':j.tolist(), 'vals': v.tolist(),
                 'shape':data.shape}
-    elif pimms.is_array(data, ('number', 'string', 'unicode', 'bool')):
-        # numpy arrays just get turned into lists
-        return data.tolist() if pimms.is_nparray(data) else data
     elif pimms.is_map(data):
-        # maps are tricky; if we don't change any values, we can return the identical; otherwise,
-        # we need to make a new object and return it
-        orig = data
+        newdict = {}
         for (k,v) in six.iteritems(data):
             if not pimms.is_str(k):
                 raise ValueError('Only maps with strings for keys can be normalized')
-            vv = normalize(v)
-            if vv is v: continue
-            if data is orig: data = dict(orig)
-            data[k] = vv
-        return data
+            newdict[k] = normalize(v)
+        return newdict
+    elif pimms.is_array(data, ('number', 'string', 'unicode', 'bool')):
+        # numpy arrays just get turned into lists
+        return data.tolist() if pimms.is_nparray(data) else data
     elif data is Ellipsis:
         return {normalize_type_key: [None, 'ellipsis']}
     elif pimms.is_scalar(data):
@@ -1142,6 +1137,17 @@ class CurveSpline(ObjectWithMetaData):
     def splrep(coordinates, t, order, weights, smoothing, periodic):
         from scipy import interpolate
         (x,y) = coordinates
+        # we need to skip anything where t[i] and t[i+1] are too close
+        wh = np.where(np.isclose(np.diff(t), 0))[0]
+        if len(wh) > 0:
+            (t,x,y) = [np.array(u) for u in (t,x,y)]
+            ii = np.arange(len(t))
+            for i in reversed(wh):
+                ii[i+1:-1] = ii[i+2:]
+                for u in (t,x,y):
+                    u[i] = np.mean(u[i:i+2])
+            ii = ii[:-len(wh)]
+            (t,x,y) = [u[ii] for u in (t,x,y)]
         xtck = interpolate.splrep(t, x, k=order, s=smoothing, w=weights, per=periodic)
         ytck = interpolate.splrep(t, y, k=order, s=smoothing, w=weights, per=periodic)
         return tuple([tuple([pimms.imm_array(u) for u in tck])
@@ -1292,11 +1298,13 @@ def curve_intersection(c1, c2, grid=16):
     to use in the initial search for a start-point (default: 16).
     '''
     from scipy.optimize import minimize
-    (ts1,ts2) = [np.linspace(c.t[0], c.t[-1], grid) for c in (c1,c2)]
+    if pimms.is_vector(grid): (ts1,ts2) = [c.t[0] + (c.t[-1] - c.t[0])*grid for c in (c1,c2)]
+    else:                     (ts1,ts2) = [np.linspace(c.t[0], c.t[-1], grid) for c in (c1,c2)]
     (pts1,pts2) = [c(ts) for (c,ts) in zip([c1,c2],[ts1,ts2])]
     ds = np.sqrt([np.sum((pts2.T - pp)**2, axis=1) for pp in pts1.T])
     (ii,jj) = np.unravel_index(np.argmin(ds), ds.shape)
     (t01,t02) = (ts1[ii], ts2[jj])
+    ttt = []
     def f(t): return np.sum((c1(t[0]) - c2(t[1]))**2)
     (t1,t2) = minimize(f, (t01, t02)).x
     return (t1,t2)
