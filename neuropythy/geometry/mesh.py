@@ -607,7 +607,7 @@ class Tesselation(VertexSet):
         '''
         limit = np.max(faces) + 1
         all_edges = np.hstack([[faces[0],faces[1]], [faces[1],faces[2]], [faces[2],faces[0]]])
-        edge_list = np.unique(np.sort(all_edges, axis=0), axis=1)
+        (edge_list,cnt) = np.unique(np.sort(all_edges, axis=0), axis=1, return_counts=True)
         rng = np.arange(edge_list.shape[1])
         poss_edges = np.hstack([edge_list, np.flipud(edge_list)])
         poss_idcs = np.concatenate([rng,rng])
@@ -615,17 +615,11 @@ class Tesselation(VertexSet):
         rng = np.arange(faces.shape[1])
         face_idcs = np.concatenate([rng,rng,rng])
         esrt = np.sort(all_edges, axis=0)
-        (ee,cnt) = np.unique(esrt, return_counts=True, axis=1)
-        edge2face = {k:ii for (k,ii) in zip(zip(all_edges[0],all_edges[1]), face_idcs)}
-        tmp = ee[:,cnt == 2]
-        for (e,er) in zip(zip(tmp[0],tmp[1]), zip(*np.flipud(tmp))):
-            tup = (edge2face[e], edge2face[er])
-            edge2face[e] = edge2face[er] = tup
-        tmp = ee[:,cnt == 1]
-        for (e,er) in zip(zip(tmp[0],tmp[1]), zip(*np.flipud(tmp))):
-            try:    tup = (edge2face[e],)
-            except: tup = (edge2face[er],)
-            edge2face[e] = edge2face[er] = tup
+        edge2face = {k:ii for (k,ii) in zip(zip(*all_edges), face_idcs)}
+        for (e,er) in zip(zip(*edge_list), zip(*np.flipud(edge_list))):
+            tup = tuple([eff for q in (e,er) for eff in [edge2face.get(q)] if eff is not None])
+            assert(len(tup) > 0)
+            for eidx in (e,er): edge2face[eidx] = tup
         edge_list.setflags(write=False)
         return pyr.m(edges=edge_list,
                      edge_index=pyr.pmap(idx),
@@ -1243,7 +1237,7 @@ class Mesh(VertexSet):
           closer to p than x0 is to p. The value n depends on your starting parameter k, but is
           approximately 256.
         '''
-        pt = np.asarray(pt, dtype=np.float32)
+        pt = np.asarray(pt)
         if len(pt.shape) == 1:
             return self.container([pt], k=k, n_jobs=n_jobs)[0]
         else:
@@ -3521,7 +3515,7 @@ class PathTrace(ObjectWithMetaData):
         trace.curve is the curve-spline object that represents the given path-trace.
         '''
         if isinstance(points, CurveSpline):
-            if closed == bool(points.periodic): return points
+            if closed == bool(points.periodic): return points.even_out()
             points = points.coordinates
         if closed:
             (x0,xx) = (points[:,0], points[:,-1])
