@@ -1982,7 +1982,7 @@ def load_retinotopy_cache(sdir, sid, alignment='MSMAll'):
             if hh not in files: files[hh] = {}
             files[hh][k] = v
     if len(files) == 0: return files
-    def _loader(fls, h, k): return lambda:nyio.load(fls[h][k])
+    def _loader(fls, h, k): return (lambda:nyio.load(fls[h][k]))
     return {h:pimms.lazy_map({k:_loader(files, h, k) for k in six.iterkeys(v)})
             for (h,v) in six.iteritems(files)}
 def save_retinotopy_cache(sdir, sid, hemi, props, alignment='MSMAll', overwrite=False):
