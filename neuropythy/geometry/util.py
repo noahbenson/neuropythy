@@ -7,6 +7,8 @@
 import numpy as np
 import math
 
+from ..util import czdivide
+
 def normalize(u):
     '''
     normalize(u) yields a vetor with the same direction as u but unit length, or, if u has zero
@@ -24,7 +26,9 @@ def vector_angle_cos(u, v):
     or v (or both) is a (d x n) matrix of n vectors, the result will be a length n vector of the
     cosines.
     '''
-    return (u * v).sum(0) / np.sqrt((np.asarray(u) ** 2).sum(0) * (np.asarray(v) ** 2).sum(0))
+    u = np.asarray(u)
+    v = np.asarray(v)
+    return (u * v).sum(0) / np.sqrt((u ** 2).sum(0) * (v ** 2).sum(0))
 
 def vector_angle(u, v, direction=None):
     '''
@@ -113,6 +117,102 @@ def alignment_matrix_2D(u, v):
     '''
     return rotation_matrix_2D(vector_angle_2D(u, v, direction=True))
 
+def point_on_line(ab, c):
+    '''
+    point_on_line((a,b), c) yields True if point x is on line (a,b) and False otherwise.
+    '''
+    (a,b) = ab
+    abc = [np.asarray(u) for u in (a,b,c)]
+    if any(len(u.shape) == 2 for u in abc): (a,b,c) = [np.reshape(u,(len(u),-1)) for u in abc]
+    else:                                   (a,b,c) = abc
+    vca = a - c
+    vcb = b - c
+    uba = czdivide(vba, np.sqrt(np.sum(vba**2, axis=0)))
+    uca = czdivide(vca, np.sqrt(np.sum(vca**2, axis=0)))
+    return (np.isclose(np.sqrt(np.sum(vca**2, axis=0)), 0) |
+            np.isclose(np.sqrt(np.sum(vcb**2, axis=0)), 0) |
+            np.isclose(np.abs(np.sum(uba*uca, axis=0)), 1))
+
+def point_on_segment(ab, c):
+    '''
+    point_on_segment((a,b), c) yields True if point x is on segment (a,b) and False otherwise. Note
+    that this differs from point_in_segment in that a point that if c is equal to a or b it is
+    considered 'on' but not 'in' the segment.
+    '''
+    (a,c) = ac
+    abc = [np.asarray(u) for u in (a,b,c)]
+    if any(len(u.shape) > 1 for u in abc): (a,b,c) = [np.reshape(u,(len(u),-1)) for u in abc]
+    else:                                  (a,b,c) = abc
+    vab = b - a
+    vbc = c - b
+    vac = c - a
+    dab = np.sqrt(np.sum(vab**2, axis=0))
+    dbc = np.sqrt(np.sum(vbc**2, axis=0))
+    dac = np.sqrt(np.sum(vac**2, axis=0))
+    return np.isclose(dab + dbc, dac)
+def point_in_segment(ac, b):
+    '''
+    point_in_segment((a,b), c) yields True if point x is in segment (a,b) and False otherwise. Note
+    that this differs from point_on_segment in that a point that if c is equal to a or b it is
+    considered 'on' but not 'in' the segment.
+    '''
+    (a,c) = ac
+    abc = [np.asarray(u) for u in (a,b,c)]
+    if any(len(u.shape) > 1 for u in abc): (a,b,c) = [np.reshape(u,(len(u),-1)) for u in abc]
+    else:                                  (a,b,c) = abc
+    vab = b - a
+    vbc = c - b
+    vac = c - a
+    dab = np.sqrt(np.sum(vab**2, axis=0))
+    dbc = np.sqrt(np.sum(vbc**2, axis=0))
+    dac = np.sqrt(np.sum(vac**2, axis=0))
+    return np.isclose(dab + dbc, dac) & ~np.isclose(dac,dab) & ~np.isclose(dac,dbc)
+
+def lines_colinear(ab, cd):
+    '''
+    liness_colinear((a, b), (c, d)) yields True if the lines containing points (a,b) and points (c,d)
+    are colinear and false otherwise. All of a, b, c, and d must be (x,y) coordinates or 2xN (x,y)
+    coordinate matrices, or (x,y,z) or 3xN matrices.
+    '''
+    # simple check: a and b must be on (c,d)
+    return point_on_line(ab, cd[0]) & point_on_line(ab, cd[1])
+
+def segments_colinear(ab, cd):
+    '''
+    segments_colinear_2D((a, b), (c, d)) yields True if either a or b is on the line segment (c,d) or
+    if c or d is on the line segment (a,b) and the lines are colinear; otherwise yields False. All
+    of a, b, c, and d must be (x,y) coordinates or 2xN (x,y) coordinate matrices, or (x,y,z) or 3xN
+    matrices.
+    '''
+    (a,b) = ab
+    (c,d) = cd
+    ss = [point_on_segment(ab, c), point_on_segment(ab, d),
+          point_on_segment(cd, a), point_on_segment(cd, b)]
+    return np.sum(ss, axis=0) > 1
+
+def points_close(a,b):
+    '''
+    points_close(a,b) yields True if points a and b are close to each other and False otherwise.
+    '''
+    (a,b) = [np.asarray(u) for u in (a,b)]
+    if len(a.shape) == 2 or len(b.shape) == 2: (a,b) = [np.reshape(u,(len(u),-1)) for u in (a,b)]
+    return np.isclose(np.sqrt(np.sum((a - b)**2, axis=0)), 0)
+
+def segments_overlapping(ab, cd):
+    '''
+    segments_overlapping((a, b), (c, d)) yields True if the line segments (a,b) and (c,d) are both
+    colinear and have a non-finite overlap. If (a,b) and (c,d) touch at a single point, they are not
+    considered overlapping.
+    '''
+    (a,b) = ab
+    (c,d) = cd
+    ss = [point_in_segment(ab, c), point_in_segment(ab, d),
+          point_in_segment(cd, a), point_in_segment(cd, b)]
+    return (~(points_close(a,b) | points_close(c,d)) & 
+            ((np.sum(ss, axis=0) > 1) |
+             (points_close(a,c) & points_close(b,d)) |
+             (points_close(a,d) & points_close(b,c))))
+
 def line_intersection_2D(abarg, cdarg):
     '''
     line_intersection((a, b), (c, d)) yields the intersection point between the lines that pass
@@ -179,6 +279,20 @@ def segment_intersection_2D(p12arg, p34arg):
         xi[bad] = np.nan
         yi[bad] = np.nan
         return (xi,yi)
+
+def lines_touch_2D(ab, cd):
+    '''
+    lines_touch_2D((a,b), (c,d)) is equivalent to lines_colinear((a,b), (c,d)) |
+    numpy.isfinite(line_intersection_2D((a,b), (c,d))[0])
+    '''
+    return lines_colinear(ab, cd) | np.isfinite(line_intersection_2D(ab, cd)[0])
+
+def segments_touch_2D(ab, cd):
+    '''
+    segmentss_touch_2D((a,b), (c,d)) is equivalent to segments_colinear((a,b), (c,d)) |
+    numpy.isfinite(segment_intersection_2D((a,b), (c,d))[0])
+    '''
+    return segments_colinear(ab, cd) | np.isfinite(segment_intersection_2D(ab, cd)[0])
 
 def line_segment_intersection_2D(p12arg, p34arg):
     '''

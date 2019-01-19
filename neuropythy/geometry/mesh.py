@@ -16,13 +16,13 @@ import pyrsistent                   as pyr
 import os, sys, six, types, logging, warnings, gzip, json, pimms
 
 from .util  import (triangle_area, triangle_address, alignment_matrix_3D, rotation_matrix_3D,
-                    cartesian_to_barycentric_3D, cartesian_to_barycentric_2D,
-                    segment_intersection_2D,
+                    cartesian_to_barycentric_3D, cartesian_to_barycentric_2D, vector_angle_cos,
+                    segment_intersection_2D, segments_overlapping, points_close, point_in_segment,
                     barycentric_to_cartesian, point_in_triangle)
 from ..util import (ObjectWithMetaData, to_affine, zinv, is_image, is_address, address_data, curry,
                     curve_spline, CurveSpline, chop, zdivide, flattest, inner, config, library_path,
                     dirpath_to_list, to_hemi_str, is_tuple, is_list, is_set, close_curves,
-                    normalize, denormalize)
+                    normalize, denormalize, AutoDict)
 from ..io   import (load, importer, exporter)
 from functools import reduce
 
@@ -606,28 +606,28 @@ class Tesselation(VertexSet):
         tess.edge_data is a mapping of data relevant to the edges of the given tesselation.
         '''
         limit = np.max(faces) + 1
-        edge2face = {}
-        idx = {}
-        edge_list = [None for i in range(3*faces.size)]
-        k = 0
-        rng = range(faces.shape[1])
-        for (e,i) in zip(
-            zip(np.concatenate((faces[0], faces[1], faces[2])),
-                np.concatenate((faces[1], faces[2], faces[0]))),
-            np.concatenate((rng, rng, rng))):
-            e = tuple(sorted(e))
-            if e in idx:
-                edge2face[e].append(i)
-            else:
-                idx[e] = k
-                idx[e[::-1]] = k
-                edge_list[k] = e
-                edge2face[e] = [i]
-                k += 1
-        edge2face = {k:tuple(v) for (k,v) in six.iteritems(edge2face)}
-        for ((a,b),v) in six.iteritems(pyr.pmap(edge2face)):
-            edge2face[(b,a)] = v
-        return pyr.m(edges=pimms.imm_array(np.transpose(edge_list[0:k])),
+        all_edges = np.hstack([[faces[0],faces[1]], [faces[1],faces[2]], [faces[2],faces[0]]])
+        edge_list = np.unique(np.sort(all_edges, axis=0), axis=1)
+        rng = np.arange(edge_list.shape[1])
+        poss_edges = np.hstack([edge_list, np.flipud(edge_list)])
+        poss_idcs = np.concatenate([rng,rng])
+        idx = {k:ii for (k,ii) in zip(zip(poss_edges[0],poss_edges[1]), poss_idcs)}
+        rng = np.arange(faces.shape[1])
+        face_idcs = np.concatenate([rng,rng,rng])
+        esrt = np.sort(all_edges, axis=0)
+        (ee,cnt) = np.unique(esrt, return_counts=True, axis=1)
+        edge2face = {k:ii for (k,ii) in zip(zip(all_edges[0],all_edges[1]), face_idcs)}
+        tmp = ee[:,cnt == 2]
+        for (e,er) in zip(zip(tmp[0],tmp[1]), zip(*np.flipud(tmp))):
+            tup = (edge2face[e], edge2face[er])
+            edge2face[e] = edge2face[er] = tup
+        tmp = ee[:,cnt == 1]
+        for (e,er) in zip(zip(tmp[0],tmp[1]), zip(*np.flipud(tmp))):
+            try:    tup = (edge2face[e],)
+            except: tup = (edge2face[er],)
+            edge2face[e] = edge2face[er] = tup
+        edge_list.setflags(write=False)
+        return pyr.m(edges=edge_list,
                      edge_index=pyr.pmap(idx),
                      edge_face_index=pyr.pmap(edge2face))
     @pimms.value
@@ -2346,6 +2346,25 @@ MapProjection.projection_inverse_methods = pyr.m(
     mercator        = MapProjection.mercator_projection_inverse,
     sinusoidal      = MapProjection.sinusoidal_projection_inverse)
 
+def deduce_chirality(obj):
+    '''
+    deduce_chirality(x) attempts to deduce the chirality of x ('lh', 'rh', or 'lr') and yeilds the
+      deduced string. If no chirality can be deduced, yields None.
+    '''
+        # few simple tests:
+    try: return obj.chirality
+    except: pass
+    try: return obj.meta_data['chirality']
+    except: pass
+    try: return obj.meta_data['hemi']
+    except: pass
+    try: return obj.meta_data['hemisphere']
+    except: pass
+    if obj is None or obj is Ellipsis: return None
+    try: return to_hemi_str(obj)
+    except: pass
+    return None
+
 @importer('map_projection', ('mp.json', 'mp.json.gz', 'map.json', 'map.json.gz',
                              'projection.json', 'projection.json.gz'))
 def load_map_projection(filename,
@@ -2614,7 +2633,8 @@ def to_flatmap(name, obj):
     to_flatmap(name, subj) uses the given hemisphere from the given subject.
     '''
     from neuropythy.mri import Subject
-    mp = to_map_projection(name)
+    try:    mp = to_map_projection(name)
+    except: mp = to_map_projection(name, deduce_chirality(obj))
     return mp(obj)
 
 @pimms.immutable
@@ -2934,8 +2954,9 @@ class Path(ObjectWithMetaData):
         (u,v,wu,wv,fs,ps) = ([],[],[],[], [], [])
         pcur = []
         lastf = faces[:, -1] if closed else None
+        maxv = np.max(faces) + 1
+        mtx = sps.dok_matrix((maxv,maxv))
         for (ii,f,w) in zip(range(n), faces.T, coords.T):
-            ff = Ellipsis
             zs = np.isclose(w,0)
             nz = np.sum(zs)
             pcur.append(ii)
@@ -2954,11 +2975,17 @@ class Path(ObjectWithMetaData):
                 elif rev == 4:
                     rev = len(np.unique(np.concatenate([lastf,f[k]])))
                     if rev == 4: k = list(reversed(k))
-                vtx = None if len(u) == 0 else np.setdiff1d(f[k], [u[-1],v[-1]])[0]
-                for (q,qq) in zip([u,v],   f[k]): q.append(qq)
+                if len(u) == 0: (uv,vtx) = (f[k],None)
+                else:
+                    uvl = [u[-1],v[-1]]
+                    sdif = np.setdiff1d(f[k], uvl)
+                    if len(sdif) == 0: (uv,vtx) = (uvl[::-1], np.setdiff1d(lastf, uv)[0])
+                    else:              (uv,vtx) = (f[k],      sdif[0])
+                for (q,qq) in zip([u,v],   uv):   q.append(qq)
                 for (q,qq) in zip([wu,wv], w[k]): q.append(qq)
             else: raise ValueError('address contained all-zero weights')
-            if ff is Ellipsis: ff = None if lastf is None or vtx is None else (u[-2], v[-2], vtx)
+            mtx[u[-1],v[-1]] += 1
+            ff = None if lastf is None or vtx is None else (u[-2], v[-2], vtx)
             fs.append(ff)
             ps.append(tuple(pcur))
             pcur = [ii]
@@ -2970,10 +2997,19 @@ class Path(ObjectWithMetaData):
         # set to None
         if closed:
             tmp = np.setdiff1d((u[0],v[0]), (u[-1],v[-1]))
-            # might be that we started/ended on a point
             if len(tmp) == 0:
-                tmp = np.setdiff1d((u[-2],v[-2]), (u[-1],u[-2]))
-                fs[0] = (u[-1],v[-1],tmp[0])
+                (f0,f1) = faces[:,[0,-1]].T
+                (x0,x1) = coords[:,[0,-1]].T
+                # most likely we start/end in same face but exit/enter through one edge
+                f0but1 = np.setdiff1d(f0,f1)
+                if len(f0but1) == 0:
+                    fs[0] = f0
+                    pcur = (ps[-1][-1],) + ps[0]
+                elif len(f0but1) == 1:
+                    f0ii = np.where(f0 == f0but1[0])[0]
+                    if np.isclose(x0[foii], 0): fs[0] = f1
+                    else: fs[0] = f0
+                else: raise ValueError('closed path does not start/end correctly')
                 ps[0] = tuple(pcur)
             elif len(tmp) == 1:
                 fs[0] = (u[-1], v[-1], tmp[0])
@@ -2982,6 +3018,14 @@ class Path(ObjectWithMetaData):
         else:
             fs[0] = None
             ps[0] = None
+        # any edge that was crossed by the path an even number of times isn't actually in the path
+        # if closed, so we set both values to 0.25
+        (u,v,wu,wv) = [np.asarray(x) for x in (u,v,wu,wv)]
+        (ii,jj,qq) = sps.find(mtx + mtx.T)
+        k = np.where(np.mod(qq, 2) == 0)[0]
+        for (uu,vv) in zip(ii[k], jj[k]):
+            wu[u == uu] = 0.25
+            wv[v == vv] = 0.25
         fs = np.roll(fs, -1, axis=0)
         ps = np.roll(ps, -1, axis=0)
         if not closed: (wu,wv) = [np.asarray(w) * 0.5 for w in (wu,wv)]
@@ -3026,8 +3070,7 @@ class Path(ObjectWithMetaData):
         # we know from addresses where the intersections are freom edge_data
         (u,v,wu,wv) = edge_data[:4]
         # convert weights
-        (wu,wv) = [np.array(x) for x in (wu,wv)]
-        (wu,wv) = (0.75 + 0.5*(wu - 0.5), 0.25 + 0.5*(wv - 0.5))
+        (wu,wv) = (0.75 + 0.5*(np.asarray(wu) - 0.5), 0.25 + 0.5*(np.asarray(wv) - 0.5))
         # labels need to be indexed...
         (u,v) = (tess.index(u), tess.index(v))
         same  = np.union1d(u,v)
@@ -3040,9 +3083,10 @@ class Path(ObjectWithMetaData):
         nei  = np.asarray(tess.indexed_neighborhoods)
         unk  = np.full(tess.vertex_count, True, dtype=np.bool)
         unk[q] = False
-        q = np.unique(u[v != u])
+        q = np.unique(u[~np.isin(u, v)])
         while len(q) > 0:
-            q = np.unique([k for neitup in nei[q] for k in neitup]) # get all their neighbors
+            # get all their neighbors
+            q = np.unique([k for neitup in nei[q] for k in neitup]).astype(np.int64) 
             q = q[unk[q]] # only not visited neighbors
             lbl[q] = 1.0 # they are inside the region now
             unk[q] = False # now we've visited them
@@ -3091,146 +3135,215 @@ class Path(ObjectWithMetaData):
         (u0,v0) = uv[-1] if closed else (np.nan,np.nan)
         for (u,v) in uv:
             res.append([u0,v0,np.setdiff1d((u,v), (u0,v0))[0]])
+            (u0,v0) = (u,v)
         res = np.array(res[1:] if not np.isfinite(res[0][0]) else res)
         res.setflags(write=False)
         return res
-    class BorderTriangleSplitter(object):
+    @pimms.value
+    def intersected_face_paths(edge_data, addresses, closed):
         '''
-        The Path.BorderTriangleSplitter class performs the splitting of border triangles in a path
-        into inner and outer triangles. It should not be used directly; rather Path objects use it
-        as a tool.
+        path.intersected_face_paths is a dict of all the faces intersected by the the given path
+        along with the barycentric coordinates of all points that lie in that face. This means that
+        if you instantiate these points and list them all there will be duplicate points every time
+        the path crosses an edge. Keys of this dict are the face tuples (a,b,c) rotated such that a
+        is always the label with the lowest value.
+        '''
+        (faces, coords) = address_data(addresses, 2)
+        coords = np.vstack([coords, [1 - np.sum(coords, axis=0)]])
+        (faces, coords) = [x.T for x in (faces,coords)]
+        def bc_conv(f0, x0, ftarg):
+            r = np.zeros(len(x0))
+            for (f,x) in zip(f0,x0):
+                if   np.isclose(x, 0): continue
+                elif f not in ftarg:   raise ValueError('Non-zero bc-conv value')
+                else:                  r[f == ftarg] = x
+            return r
+        # walk along edge data; mostly this isn't too hard
+        (fs,ps) = edge_data[4:6]
+        if fs[-1] is None: fs = fs[:-1]
+        # standardize them all without reflecting them
+        fs = np.asarray([np.roll(f, -np.argmin(f)) for f in fs])
+        idx = AutoDict()
+        idx.on_miss = lambda:[]
+        for (f,p) in zip(zip(*fs.T), ps): idx[f].append(p)
+        # make each of these into a separate entry
+        def to_bcs(f,ps):
+            bcs = np.asarray([bc_conv(faces[p], coords[p], f) for p in ps]).T[:2]
+            bcs.setflags(write=False)
+            return bcs
+        return pyr.pmap({f: tuple([to_bcs(f,p) for p in ps])  for (f,ps) in six.iteritems(idx)})
+    @staticmethod
+    def tesselate_triangle_paths(paths):
+        '''
+        tesselate_triangle_paths([path1, path2...]) yields a (3x2xN) array of N 2D triangles that
+          tesselate a triangle without crossing any of the given paths. The paths themselves should
+          be in barycentric coordinates and should each start and end on an edge without touching any
+          edge between. The 2nd dimension consists of the first two barycentric coordinates while the
+          first dimensions corresponds to the edges of each tesselated triangle.
+
+        This function is probably not particularly performant--it operates by trying to connect every
+        pair of vertices and rejecting a pairing if it crosses any existing line.
         '''
         # these coords are used to reify BC triangles while figuring them out...
-        A = pimms.imm_array([0.0,              0.0])
-        B = pimms.imm_array([1.0/np.sqrt(2.0), 0.0])
-        C = pimms.imm_array([0.0,              1.0/np.sqrt(2.0)])
-        def __init__(self, edge_data, addresses, closed):
-            self.edges  = edge_data[:2]
-            self.faces  = edge_data[4]
-            self.pieces = edge_data[5]
-            (fs, xs) = address_data(addresses)
-            xs = chop(np.vstack([xs, [1.0 - xs[0] - xs[1]]]))
-            self.bc_faces = fs.T
-            self.bc_coords = xs.T
-            self.closed = closed
-        @staticmethod
-        def angle_order(pts, x0, x1=(1,0)): # order of pts around x0 starting at x1
-            '''
-            Given a set of points in the (A,B,C) triangle, yield their indices in order of the
-            angle about point x0 starting with the point x1.
-            '''
-            pts = (np.asarray(pts) - x0).T
-            x1  = np.asarray(x1) - x0
-            rs  = np.sqrt(np.sum(pts**2, axis=0))
-            th0 = np.arctan2(x1[1], x1[0])
-            ths = np.mod(np.arctan2(pts[1], pts[0]) - th0, 2*np.pi)
-            kk  = np.argsort(ths)
-            return np.array([k for k in kk
-                             if not np.isclose(pts[:,k], 0).all()
-                             if not np.isclose(pts[:,k], x1).all()])
-        @staticmethod
-        def scan_face_points(pts):
-            '''
-            scan_face_points(points) splits a single face containing all the given points into
-            left- and right-side sets of faces and returns the barycentric coordinates for these.
-            The given points must be in path order. The points argument must be the barycentric
-            weights on vertices A and B of the triangle.
-            '''
-            # turn all into coords for the calculation
-            (A,B,C) = (Path.BorderTriangleSplitter.A,
-                       Path.BorderTriangleSplitter.B,
-                       Path.BorderTriangleSplitter.C)
-            pts = np.asarray([A*x + B*y + C*z for (x,y,z) in pts])
-            n = len(pts)
-            allpts = np.vstack([pts, (A,B,C)])
-            (rfs,lfs) = ([],[]) # left and right side triangles
-            cfs = rfs # we always start with the right side
-            # we walk across points then back sweeping triangles around as we go...
-            path  = np.concatenate([np.arange(n), np.flip(np.arange(n-1), 0)])
-            plen  = len(path)
-            # figure out what side we enter on...
-            (u0,v0) = (0,1) if pts[0,1] == 0 else (2,0) if pts[0,0] == 0 else (1,2)
-            prev_p = v0 + n
-            skipto = None
-            for k in range(plen-1):
-                if skipto is not None and k != skipto: continue
-                else: skipto = None
-                (p,next_p) = path[[k,k+1]]
-                pt = allpts[p]
-                # order the points clockwise around this point
-                ii = Path.BorderTriangleSplitter.angle_order(allpts, pt, allpts[prev_p])
-                if p == n-1: # we've reached the edge/turnaround point, and i is the next
-                    cfs = lfs
-                    prev_p = ii[0]
-                    ii = ii[1:]
-                # we skip the first--it's the prev_pt
-                for i in ii:
-                    # for sure, this triad makes a triangle on whatever side we're on...
-                    cfs.append((p, prev_p, i))
-                    if i != next_p: prev_p = i
-                    if i == next_p: pass
-                    elif i < n: # another point in the path, but not the next
-                        if k+2 < plen and path[k+2] == i:
-                            cfs.append((p,i,next_p))
-                        elif k+3 < plen and path[k+3] == i:
-                            cfs.append((p,i,next_p))
-                            cfs.append((next_p,i,path[k+1]))
-                        else:
-                            warnings.warn('skipping concave segment of curve in single face')
-                        skipto = i
-                    else: continue # haven't found the next point yet--keep going
-                    break # all other conditions, we break
-            # we have lfs and rfs now, but they're in embedded triangle coords instead of
-            # barycentric coordinates...
-            res = []
-            for cfs in (lfs,rfs):
-                cfs = np.transpose([allpts[p] for p in np.transpose(cfs)], (0,2,1))
-                tri = np.array([[np.full(cfs.shape[2], x) for x in xx] for xx in (A,B,C)])
-                cfs = np.array([cartesian_to_barycentric_2D(tri, x) for x in cfs])
-                res.append(cfs)
-            return tuple(res)
-        def __call__(self):
-            '''
-            Scans the entire path to parcellate left and right border triangles, and yields the
-            tuple (lhs, rhs) of the left (inner) and right (outer) border triangles of the given
-            path. The lhs and rhs are 3-tuples (a,b,c) of the addresses of the three vertices of
-            each border triangle (in counter-clockwise ordering). These should not be expected to
-            be in a specific order; though they should be grouped by face.
-            '''
-            bcfs    = self.bc_faces
-            bcxs    = self.bc_coords
-            fs      = self.faces
-            (us,vs) = self.edges
-            ps      = self.pieces
-            ne      = us.shape[0]
-            nf      = fs.shape[0]
-            (lfs,rfs,lxs,rxs) = ([],[],[],[])
-            for (f,p) in zip(fs,ps):
-                if f is None:
-                    # last face -- we can just skip basically
+        A = np.array([0.0,              0.0])
+        B = np.array([1.0/np.sqrt(2.0), 0.0])
+        C = np.array([0.0,              1.0/np.sqrt(2.0)])
+        (a21,b21,c21) = [np.reshape(x,(2,1)) for x in (A,B,C)]
+        paths = np.asarray([path if len(path) == 3 else np.vstack([path, [1 - np.sum(path,0)]])
+                            for path in paths])
+        # for starters, we want to build up a matrix of all the individual reified coordinates
+        bccoords = np.hstack([[[1,0,0],[0,1,0],[0,0,1]], np.hstack(paths)]) # first three are A,B,C
+        coords = a21*bccoords[0] + b21*bccoords[1] + c21*bccoords[2] # reify all
+        (coords, bccoords) = [x.T for x in (coords, bccoords)]
+        # turn paths into indices instead of coords
+        (pidcs,k) = ([],3) # 3 is the first non-corner index in bccoords/coords
+        for path in paths:
+            qq = np.shape(path)[1]
+            pidcs.append(k + np.arange(qq))
+            k += qq
+        # now we want to make sure there aren't duplicate points
+        idcs = np.arange(len(coords)) # starting indices
+        ridcs = []
+        n = 0
+        for (ii,x) in enumerate(coords):
+            if idcs[ii] < ii: continue
+            dists = np.sqrt(np.sum((coords[ii:] - x)**2, axis=1))
+            idcs_eq = np.where(np.isclose(dists, 0, atol=1e-5))[0]
+            idcs[idcs_eq + ii] = n
+            n += 1
+            ridcs.append(ii)
+        if n > 64: warnings.warn('tesselating face with %d points: poor performance is likely' % n)
+        # fix the paths and coords matrices
+        pidcs = [[i0 for (i0,i1) in zip(pii[:-1],pii[1:]) if i0 != i1] + [pii[-1]]
+                 for p in pidcs
+                 for pii in [idcs[p]]]
+        coords   = coords[ridcs]
+        bccoords = bccoords[ridcs]
+        # we'll need to know what points are along what edge as part of this: we'll collect the point
+        # indices here--doing so is easier with the barycentric than the reified coordinates, so
+        # we'll use those and reify the coordinates as we go
+        internal_paths = [[],[]] # [0] is start, [1] is end; we use coordinate ids
+        on_edges = ([],[],[])
+        for pii in pidcs:
+            # make sure first/last are on an edge and the rest aren't
+            bcx = bccoords[pii]
+            if np.sum(np.isclose(bcx[1:-1], 0, atol=1e-5)) > 0:
+                raise ValueError('path middle touches edge')
+            (p0,p1) = bcx[[0,-1]]
+            (z0,z1) = [np.isclose(p,0) for p in (p0,p1)]
+            (s0,s1) = [np.sum(z)       for z in (z0,z1)]
+            (e0,e1) = [((0 if     z[2] else 1 if     z[0] else 2) if s == 1 else
+                        (0 if not z[0] else 1 if not z[1] else 2) if s == 2 else
+                        None)
+                       for (z,s) in [(z0,s0), (z1,s1)]]
+            if e0 is None or e1 is None: raise ValueError('path-piece does not start/end on edge')
+            # find fractional distance from first to second vertex
+            (w0,w1) = (bcx[0, np.mod(e0 + 1, 3)], bcx[-1, np.mod(e1 + 1, 3)])
+            # put these in the on_edges
+            on_edges[e0].append((pii[0],  w0))
+            on_edges[e1].append((pii[-1], w1))
+        # okay, we've validated and prepped the paths; now sort everything on each edges so that we
+        # can make them into segment lists
+        segs     = np.zeros((2,2,n*n))
+        seg_idcs = np.zeros((2,n*n), dtype=np.int)
+        m = 0 # number of segs so far
+        # (segs[i][j][k] is the j'th coordinates (j=0:x, j=1:y) of the start (i=0) or end (i=1)
+        #  of the k'th segment; this way segs can be passed straight to segments_intersection_2D)
+        eidx = [None,None,None]
+        for (ii,oes) in enumerate(on_edges):
+            # first sort this edge's intersection points by distance
+            idcs = np.asarray([u[0] for u in sorted(oes, key=lambda u:u[1])], dtype=np.int)
+            eidx[ii] = idcs
+            xs = coords[idcs]
+            l = len(xs)
+            seg_idcs[0,m]         = ii
+            seg_idcs[0,m+1:m+l+1] = idcs
+            seg_idcs[1,m:m+l]     = idcs
+            seg_idcs[1,m+l]       = np.mod(ii+1, 3)
+            m = m + l + 1
+        # once those are added to segs, we just need to add the internal segs from pidcs
+        for pii in pidcs:
+            l = len(pii)
+            seg_idcs[0,m:m+l-1] = pii[:-1]
+            seg_idcs[1,m:m+l-1] = pii[1:]
+            m = m + l - 1
+        segs[:,:,:m] = np.asarray([coords[ii[:m]].T for ii in seg_idcs])
+        # okay, we can now do the segmentation! Try every edge; take as many as possible that do not
+        # cross each other or any other edge.
+        seg_idcs = set(zip(*seg_idcs[:,:m]))
+        for i in range(n):
+            for j in range(i+1,n):
+                # if this edge (a) is in the segs already or (b) is colinear with anything in segs or
+                # (c) intersects anything in segs, then we reject it
+                if (i,j) in seg_idcs or (j,i) in seg_idcs: continue
+                ss = [coords[i], coords[j]]
+                if segments_overlapping(segs, ss).any(): continue
+                sii = np.asarray(segment_intersection_2D(segs, ss))
+                sii = sii[:,np.isfinite(sii[0])]
+                if len(sii) > 0:
+                    sii = ~(points_close(sii, ss[0]) | points_close(sii, ss[1]))
+                    if sii.any(): continue
+                if point_in_segment(ss, coords.T).any(): continue
+                # otherwise we add it to our collection of edges
+                seg_idcs.add((i,j))
+                segs[:,:,m] = [coords[i], coords[j]]
+                m += 1
+        # okay, we've drawn the edges; now we find faces by examining the neighborhood of each node
+        tris = set([])
+        neis = {u:set([]) for u in range(n)}
+        for (u,v) in seg_idcs:
+            neis[u].add(v)
+            neis[v].add(u)
+        for (a,nei) in six.iteritems(neis):
+            nei = np.asarray(list(nei))
+            # we sort each of the neighbors by their angle around u
+            (x,y) = (coords[nei] - coords[a]).T
+            ths   = np.arctan2(y, x)
+            ii    = np.argsort(ths)
+            nei   = nei[ii]
+            ths   = ths[ii]
+            dths  = np.mod(np.roll(ths, -1) - ths, 2*np.pi)
+            # every three must be a triangle
+            for (u,v,th) in zip(nei, np.roll(nei, -1), dths):
+                abc = [a,u,v]
+                # avoid colinear points and angles >= 180, i.e., any three points on the same edge
+                if np.isclose(th, [0,np.pi]).any() or th >= np.pi: continue
+                if any(np.sum(np.isin(abc, ee)) == 3 for ee in eidx): continue
+                tris.add(tuple(np.roll(abc, -np.argmin(abc))))
+        # That's the set of triangles--we can detect which are on the RHS/LHS of the the path by
+        # looking at the edges that make-up the path; we can be clever about this and use a sparse
+        # matrix where (u,v) and (v,u) are different
+        mtx = sps.lil_matrix((n,n), dtype=np.int)
+        for pii in pidcs:
+            for (u,v) in zip(pii[:-1],pii[1:]):
+                mtx[u,v] = 1
+                mtx[v,u] = -1
+        # now go through the triangles and look for edges that indicate direction
+        tskip = tris
+        (lhs, rhs) = (set([]), set([]))
+        while len(tskip) > 0:
+            tris = tskip
+            tskip = set([])
+            for abc in tris:
+                (a,b,c) = abc
+                h = next((sgn*h
+                          for (sgn,u,v) in zip([1,1,1,-1,-1,-1], [a,b,c,a,b,c], [b,c,a,c,a,b])
+                          for h in [mtx[u,v]] if h != 0),
+                         None)
+                if h is None:
+                    tskip.add(abc)
                     continue
-                # get the barycentric coords
-                bxs = np.array(bcxs[list(p)])
-                bfs = bcfs[list(p)]
-                # fix the barycentric coords if need be
-                for (ii,xx,ff) in zip(range(len(bxs)), bxs, bfs):
-                    if not np.array_equal(ff,f):
-                        bxs[ii] = [xx[ff == fi][0] if fi in ff else 0 for fi in f]
-                (lhs,rhs) = [xx.T for xx in Path.BorderTriangleSplitter.scan_face_points(bxs)]
-                # lhs and rhs are the barycentric coordinates...
-                frow = [f for _ in range(len(lhs) + len(rhs))]
-                for (xx,ff,hs) in zip([lxs,rxs],[lfs,rfs],[lhs,rhs]):
-                    xx.append(hs)
-                    ff.append([f for _ in range(len(hs))])
-            (lfs,rfs,lxs,rxs) = [np.vstack(xx).T for xx in (lfs,rfs,lxs,rxs)]
-            lfs = pimms.imm_array(lfs)
-            rfs = pimms.imm_array(rfs)
-            lxs = pimms.imm_array(lxs)
-            rxs = pimms.imm_array(rxs)
-            return tuple([tuple([pyr.m(coordinates=x, faces=fs) for x in xs])
-                          for (xs,fs) in [(lxs,lfs), (rxs,rfs)]])
+                for (u,v) in zip(abc,(b,c,a)):
+                    if mtx[v,u] == 0: mtx[v,u] = h
+                if h == 1: lhs.add(abc)
+                else:      rhs.add(abc)
+        # Convert them back to addresses; we only want first 2 BC coordinates for return value
+        bccoords = bccoords[:,:2]
+        return tuple([np.transpose(ll, (1,2,0)) if len(ll) > 0 else np.array(ll)
+                      for hs in (lhs,rhs)
+                      for ll in [[bccoords[abc] for abc in np.asarray(list(hs))]]])
     @pimms.value
-    def all_border_triangle_addresses(edge_data, addresses, closed):
+    def all_border_triangle_addresses(edge_data, addresses, closed, intersected_face_paths):
         '''
         path.all_border_triangle_addresses contains a nested tuple ((a,b,c), (d,e,f)); each of the
         (a,b,c) and (d,e,f) tuples represent arrays of triangles--each of the a-f represent an
@@ -3245,8 +3358,23 @@ class Path(ObjectWithMetaData):
         In the case that path is not closed, the triangles in (a,b,c) are on the left side of the
         path while those in (d,e,f) are on the right side, with respect to the direction of path.
         '''
-        bts = Path.BorderTriangleSplitter(edge_data, addresses, closed)
-        return bts()
+        # we need to step through each of the intersected faces, tesselate it, then determine which
+        # of the tesselated triangles are inside/outside the mesh
+        (lhs,rhs,lfs,rfs) = ([],[],[],[])
+        for (abc,bcxs) in six.iteritems(intersected_face_paths):
+            (ll,rr) = Path.tesselate_triangle_paths(bcxs)
+            if len(ll) == 0 or len(rr) == 0: continue
+            lhs.append(ll)
+            rhs.append(rr)
+            lfs.append(np.matlib.repmat([abc],ll.shape[2],1))
+            rfs.append(np.matlib.repmat([abc],rr.shape[2],1))
+        lhs = np.concatenate(lhs, axis=2)
+        rhs = np.concatenate(rhs, axis=2)
+        lfs = np.vstack(lfs).T
+        rfs = np.vstack(rfs).T
+        for x in (lhs,rhs,lfs,rfs): x.setflags(write=False)
+        return tuple([tuple([pyr.m(faces=fs, coordinates=xs) for xs in hs])
+                      for (hs,fs) in zip([lhs,rhs],[lfs,rfs])])
     @pimms.value
     def all_border_triangles(all_border_triangle_addresses, surface):
         '''
@@ -3309,6 +3437,14 @@ class Path(ObjectWithMetaData):
         if isinstance(surface, Topology):
             return pimms.lazy_map({k:curry(sarea, k) for k in six.iterkeys(surface.surfaces)})
         else: return sarea(surface)
+    @pimms.value
+    def estimated_distances(addresses, surface, closed):
+        '''
+        path.estimated_distances is a vector of estimated distance values from the given path. The
+        distance estimates are upper bounds on the actual distance but are not exact.
+        '''
+        # start by walking the addresses and getting the initial 
+        raise NotImplementedError('Path.estimated_distances is not yet implemented')
     def reverse(self, meta_data=None):
         '''
         path.reverse() yields a path that is equivalent to the given path but reversed (thus it is
@@ -3386,18 +3522,26 @@ class PathTrace(ObjectWithMetaData):
         '''
         if isinstance(points, CurveSpline):
             if closed == bool(points.periodic): return points
-            else: return points.copy(periodic=closed)
-        # default order to use is 0 for a trace
+            points = points.coordinates
+        if closed:
+            (x0,xx) = (points[:,0], points[:,-1])
+            if not np.isclose(np.linalg.norm(xx - x0), 0):
+                points = np.hstack([points, np.reshape(x0, (2,1))])
         return curve_spline(points[0], points[1], order=1, periodic=closed).persist()
-    def to_path(self, obj):
+    def to_path(self, obj, flatmap=None):
         '''
         trace.to_path(subj) yields a path reified on the given subject's cortical surface; the
           returned value is a Path object.
         trace.to_path(topo) yields a path reified on the given topology/cortex object topo.
         trace.to_path(mesh) yields a path reified on the given spherical mesh.
+
+        The optional argument flatmap (default: None) may be given if a flatmap has already been made
+        with the given path-trace's map_projection; this is recommended only if you know what you are
+        doing and need to save computational resources.
         '''
         # make a flat-map of whatever we've been given...
-        if isinstance(obj, Mesh) and obj.coordinates.shape[0] == 2: fmap = obj
+        if   flatmap is not None: fmap = flatmap
+        elif isinstance(obj, Mesh) and obj.coordinates.shape[0] == 2: fmap = obj
         else: fmap = self.map_projection(obj)
         crv = self.curve
         cids = fmap.container(crv.coordinates)
