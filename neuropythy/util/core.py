@@ -1123,11 +1123,12 @@ class CurveSpline(ObjectWithMetaData):
         if ds is None: return None
         ds = pimms.imm_array(ds)
         assert(pimms.is_vector(ds, 'number'))
-        assert((ds > 0).all())
+        assert((ds >= 0).all())
         return ds
     @pimms.require
-    def check_distances(distances, coordinates):
-        if distances is not None and len(distances) != coordinates.shape[1] - 1:
+    def check_distances(distances, coordinates, periodic):
+        if distances is None: return True
+        if len(distances) != coordinates.shape[1] - 1:
             raise ValueError('Distances must be diffs of coordinates')
         return True
     @pimms.value
@@ -1187,17 +1188,12 @@ class CurveSpline(ObjectWithMetaData):
         '''
         dists = [self.curve_length(s, e, precision=precision)
                  for (s,e) in zip(self.t[:-1], self.t[1:])]
-        crds = self.coordinates.T
-        tmp = crds[-1]
-        crds = [x0 for (x0,d) in zip(crds[:-1],dists) if not np.isclose(d,0)]
-        if not np.isclose(0, np.linalg.norm(crds[-1] - tmp)): crds.append(tmp)
-        crds = np.vstack(crds)
-        return CurveSpline(crds.T,
+        return CurveSpline(self.coordinates,
                            order=self.order,
                            weights=self.weights,
                            smoothing=self.smoothing,
                            periodic=self.periodic,
-                           distances=[d for d in dists if not np.isclose(d,0)],
+                           distances=dists,
                            meta_data=self.meta_data)
     def reverse(self):
         '''
