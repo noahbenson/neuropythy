@@ -64,8 +64,7 @@ class Subject(mri.Subject):
         # merge cache in now
         for (hname,hcache) in six.iteritems(cache):
             if hname not in hemmap: continue
-            hemmap = hemmap.set(hname,
-                                curry(lambda hm,hn,hc:hm[hn].with_prop(hc), hemmap, hname, hcache))
+            hemmap = hemmap.set(hname, curry(lambda m,n,c:m[n].with_prop(c), hemmap,hname,hcache))
         hfrompat = '%%s_LR%%dk_%s' % align
         # now make a filter that adds the properties when the hemi is loaded
         def check_hemi_retinotopy(hname):
