@@ -6,9 +6,7 @@
 import numpy      as np
 import pyrsistent as pyr
 import nibabel    as nib
-import os, six, json, pimms
-
-from ..util import (ObjectWithMetaData, normalize as norm, denormalize as denorm)
+import os, six, json, gzip, pimms
 
 # The list of import-types we understand
 importers = pyr.m()
@@ -63,6 +61,7 @@ def load(filename, format=None, **kwargs):
     Keyword options may be passed to load; these must match those accepted by the given import
     function.
     '''
+    from neuropythy.util import ObjectWithMetaData
     filename = os.path.expanduser(filename)
     if format is None:
         format = guess_import_format(filename, **kwargs)
@@ -254,6 +253,7 @@ def load_json(filename, to='auto'):
     The optional argument to may be set to None to indicate that the JSON data should be returned
     verbatim rather than parsed by neuropythy's denormalize system.
     '''
+    from neuropythy.util import denormalize as denorm
     if pimms.is_str(filename):
         try:
             with gzip.open(filename, 'rt') as fl: dat = json.load(fl)
@@ -274,6 +274,7 @@ def save_json(filename, obj, normalize=True):
     The optional argument normalize (default True) may be set to False to prevent the object from
     being run through neuropythy's normalize system.
     '''
+    from neuropythy.util import normalize as norm
     dat = norm(obj) if normalize else obj
     if pimms.is_str(filename):
         if any(filename.endswith(s) for s in ('.gz', '.bz2', '.lzma')):
