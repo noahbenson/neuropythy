@@ -3183,8 +3183,8 @@ class Path(ObjectWithMetaData):
         B = np.array([1.0/np.sqrt(2.0), 0.0])
         C = np.array([0.0,              1.0/np.sqrt(2.0)])
         (a21,b21,c21) = [np.reshape(x,(2,1)) for x in (A,B,C)]
-        paths = np.asarray([path if len(path) == 3 else np.vstack([path, [1 - np.sum(path,0)]])
-                            for path in paths])
+        paths = [path if len(path) == 3 else np.vstack([path, [1 - np.sum(path,0)]])
+                 for path in paths]
         # for starters, we want to build up a matrix of all the individual reified coordinates
         bccoords = np.hstack([[[1,0,0],[0,1,0],[0,0,1]], np.hstack(paths)]) # first three are A,B,C
         coords = a21*bccoords[0] + b21*bccoords[1] + c21*bccoords[2] # reify all
@@ -3431,14 +3431,80 @@ class Path(ObjectWithMetaData):
         if isinstance(surface, Topology):
             return pimms.lazy_map({k:curry(sarea, k) for k in six.iterkeys(surface.surfaces)})
         else: return sarea(surface)
+    @staticmethod
+    def estimate_distances(addresses, mesh):
+        '''
+        Path.estimate_distances(addresses, mesh) estimates all the distances between the vertices in
+          the mesh and the path implied by the given set of addresses using a minimum-graph-distance
+          algorithm over the mesh edges.
+        '''
+        # we're going to estimate an unsigned distance for every vertex, one can add the sign in for
+        # a closed path using the contained_faces or similar if desired
+        d = np.full(mesh.vertex_count, np.inf) # initial distances
+        # for starters, we need to get distances from all the addresses
+        (faces, coords) = address_data(addresses, 2)
+        coords = np.vstack([coords, [1 - np.sum(coords, axis=0)]])
+        faces  = mesh.tess.index(faces)
+        # each face implies a minimum distance to each of its vertices
+        for (f,x) in zip(faces.T, coords.T):
+            fx = mesh.coordinates[:,f]
+            pt = np.sum(fx * x, axis=1)
+            # distances between...
+            dd = np.sqrt(np.sum((fx.T - pt)**2, axis=1))
+            ii = (d[f] > dd)
+            d[f[ii]] = dd[ii]
+        # okay, starting distances obtained; now let's do a search!
+        ii0 = np.where(np.isfinite(d))[0]
+        if len(ii0) == 0: raise ValueError('No distances obtained from addresses!')
+        # we iterate until we cannot decrease the path-length of anything
+        (max_iter,it) = (mesh.vertex_count + 1, 0)
+        (u,v) = np.hstack([mesh.tess.indexed_edges, np.flipud(mesh.tess.indexed_edges)])
+        elens = np.concatenate([mesh.edge_lengths, mesh.edge_lengths])
+        updated = ii0
+        while len(updated) > 0:
+            if it > max_iter: raise ValueError('Max iterations exceeded in min-distance search loop')
+            else: it += 1
+            # what edges might be affected by this update
+            ii = np.where(np.isin(u, updated))[0]
+            (uu,vv) = (u[ii],v[ii])
+            dnew = d[uu] + elens[ii]
+            # we want to compare into vv, but vv will have repeats, so we must min across these;
+            # easy way to do this is to put them all in a sparse matrix and min/argmin across
+            (vv,ridx) = np.unique(vv, return_inverse=True)
+            # we want to take the smallest value that is greater than 0, so we have to use a trick
+            mx = np.max(dnew) + 1.0
+            mtx = sps.csr_matrix((mx - dnew, (ridx, np.arange(len(dnew)))))
+            dnew = mx - flattest(mtx.max(axis=1))
+            # okay, find out where this distance is less than the previous dist
+            jj = np.where(d[vv] > dnew)[0]
+            updated = vv[jj]
+            d[updated] = dnew[jj]
+        return d
     @pimms.value
-    def estimated_distances(addresses, surface, closed):
+    def estimated_distances(addresses, surface):
         '''
         path.estimated_distances is a vector of estimated distance values from the given path. The
         distance estimates are upper bounds on the actual distance but are not exact.
         '''
-        # start by walking the addresses and getting the initial 
-        raise NotImplementedError('Path.estimated_distances is not yet implemented')
+        if is_topo(surface):
+            return pimms.lazy_map(
+                {k:curry(lambda a,k: Path.estimate_distances(a, surface.surfaces[k]), addresses, k)
+                 for k in six.iterkeys(surface.surfaces)})
+        else: return Path.estimate_distances(addresses, surface)
+    @pimms.value
+    def estimated_signed_distances(estimated_distances, contained_faces, surface):
+        '''
+        path.estimated_distances is a vector of estimated distance values from the given path. The
+        distance estimates are upper bounds on the actual distance but are not exact.
+        '''
+        fs = surface.tess.index(np.unique(contained_faces))
+        mlt = np.ones(surface.vertex_count, dtype=np.int)
+        mlt[fs] = -1
+        if is_topo(surface):
+            return pimms.lazy_map(
+                {k:curry(lambda k: estimated_distances[k]*mlt, k)
+                 for k in six.iterkeys(estimated_distances)})
+        else: return estimated_distances * mlt
     def reverse(self, meta_data=None):
         '''
         path.reverse() yields a path that is equivalent to the given path but reversed (thus it is
