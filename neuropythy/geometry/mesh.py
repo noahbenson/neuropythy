@@ -2628,7 +2628,7 @@ def to_flatmap(name, obj):
     '''
     from neuropythy.mri import Subject
     try:    mp = to_map_projection(name)
-    except: mp = to_map_projection(name, deduce_chirality(obj))
+    except: mp = to_map_projection((name, deduce_chirality(obj)))
     return mp(obj)
 
 @pimms.immutable

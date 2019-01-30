@@ -16,7 +16,8 @@ from   ..                import geometry as geo
 from   ..                import mri      as mri
 from   ..util            import (numel, rows, part, hstack, vstack, repmat, flatter, flattest,
                                  times, plus, minus, zdivide, zinv, power, ctimes, cpower, inner,
-                                 sine, cosine, tangent, cosecant, secant, cotangent)
+                                 cplus, sine, cosine, tangent, cosecant, secant, cotangent,
+                                 arctangent)
 from   ..geometry        import (triangle_area)
 
 # Helper Functions #################################################################################
@@ -179,7 +180,7 @@ class PotentialFunction(object):
             elif np.isclose(x.c, 0).all(): return x
             elif is_const_potential(self): return const_potential(self.c * x.c)
             else:                          return PotentialTimesConstant(self, x.c)
-        elif is_const_potential(self):     return PotentialTimesConstant(x.c, self)
+        elif is_const_potential(self):     return PotentialTimesConstant(x, self.c)
         else:                              return PotentialTimesPotential(self, x)
     def __rmul__(self, x):
         return (self * x)
@@ -500,10 +501,10 @@ class ConstantPowerPotential(PotentialFunction):
         z = self.f.value(params)
         return self.c**z
     def jacobian(self, params, into=None):
-        z = self.value(params)
+        ctoz = self.value(params)
         dz = self.f.jacobian(params)
-        if into is None: into =  times(dz, self.log_c * z)
-        else:            into += times(dz, self.log_c * z)
+        if into is None: into =  times(dz, self.log_c * ctoz)
+        else:            into += times(dz, self.log_c * ctoz)
         return into
 def exp(x):
     x = to_potential(x)
@@ -940,7 +941,7 @@ class PotentialPiecewise(PotentialFunction):
             f = to_potential(f)
             r.append(((mn,mx),f))
         r = sorted(r, key=lambda x:x[0])
-        for ((lmn,lmx),(umn,umx)) in zip(r[:-1],r[1:]):
+        for (((lmn,lmx),_),((umn,umx),_)) in zip(r[:-1],r[1:]):
             if lmx > umn: raise ValueError('pieces contain overlapping ranges')
         return tuple(r)
     @pimms.value
@@ -991,7 +992,29 @@ def piecewise(dflt, *spec):
     The ((mn,mx), f) may alternately be specified (mn,mx,f).
     '''
     return PotentialPiecewise(dflt, *spec)
-def cos_well(f=Ellipsis, width=np.pi, offset=0, scale=1):
+def cos_well(f=Ellipsis, width=np.pi/2, offset=0, scale=1):
+    '''
+    cos_edge() yields a potential function g(x) that calculates 0 for x < pi/2, 1 for x > pi/2, and
+      0.5*(1 + cos(pi/2*(1 - x))) for x between -pi/2 and pi/2.
+    
+    The full formulat of the cosine well is, including optional arguments:
+      scale/2 * (1 + cos(pi*(0.5 - (x - offset)/width)
+
+    The following optional arguments may be given:
+      * width (default: pi) specifies that the frequency of the cos-curve should be pi/width; the
+        width is the distance between the points on the cos-curve with the value of 1.
+      * offset (default: 0) specifies the offset of the minimum value of the coine curve on the
+        x-axis.
+      * scale (default: 1) specifies the height of the cosine well.
+    '''
+    f = to_potential(f)
+    freq = np.pi/width
+    (xmn,xmx) = (offset - width/2, offset + width/2)
+    F = piecewise(scale, ((xmn,xmx), scale/2 * (1 - cos(freq * (identity - offset)))))
+    if   is_const_potential(f):    return const_potential(F.value(f.c))
+    elif is_identity_potential(f): return F
+    else:                          return compose(F, f)
+def cos_edge(f=Ellipsis, width=np.pi, offset=0, scale=1):
     '''
     cos_well() yields a potential function g(x) that calculates 0.5*(1 - cos(x)) for -pi/2 <= x
       <= pi/2 and is 1 outside of that range.
@@ -1007,9 +1030,11 @@ def cos_well(f=Ellipsis, width=np.pi, offset=0, scale=1):
       * scale (default: 1) specifies the height of the cosine well.
     '''
     f = to_potential(f)
-    freq = np.pi/width
-    (xmn,xmx) = (offset - width/2, offset + width/2)
-    F = piecewise(scale, ((xmn,xmx), scale/2 * (1 - cos(freq * (identity - offset)))))
+    freq = np.pi/2
+    (xmn,xmx) = (-offset - width/2, -offset + width/2)
+    F = piecewise(scale,
+                  ((-np.inf, xmn), 0),
+                  ((xmn,xmx), scale/2 * (1 + cos(np.pi*(0.5 - (identity + offset)/width)))))
     if   is_const_potential(f):    return const_potential(F.value(f.c))
     elif is_identity_potential(f): return F
     else:                          return compose(F, f)
@@ -1176,7 +1201,7 @@ class TriangleArea2DPotential(PotentialFunction):
         if into is None: into =  z
         else:            intp += z
         return into
-def face_areas(faces, input_len=None):
+def face_areas(faces, axis=1):
     '''
     face_areas(faces) yields a potential function f(x) that calculates the unsigned area of each
       faces represented by the simplices matrix faces.

@@ -8,6 +8,6 @@ from .core import (fapply, finto,
                    is_const_potential, const_potential, const, identity, is_identity_potential,
                    compose, part, exp, exp2, power, sqrt, log, log2, log10, erf, sum, dot,
                    cos, sin, tan, sec, csc, cot, asin, acos, atan, atan2,
-                   piecewise, cos_well, gaussian, sigmoid,
+                   piecewise, cos_well, cos_edge, gaussian, sigmoid,
                    row_norms, col_norms, distances,
                    signed_face_areas, face_areas)
