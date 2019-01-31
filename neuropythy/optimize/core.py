@@ -975,7 +975,10 @@ class PotentialPiecewise(PotentialFunction):
             kk = ii[k]
             j = f.jacobian(params[k])
             if j.shape[0] == 1 and j.shape[1] > 1: j = repmat(j, j.shape[1], 1)
-            for (us,ju) in zip([rs,cs,zs], sps.find(j)): us.append(ju)
+            (rj,cj,vj) = sps.find(j)
+            rs.append(rj)
+            cs.append(kk[cj])
+            zs.append(vj)
             ii = np.delete(ii, k)
             params = np.delete(params, k)
         (rs,cs,zs) = [np.concatenate(us) for us in (rs,cs,zs)]
