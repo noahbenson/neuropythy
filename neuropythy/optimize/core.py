@@ -976,7 +976,7 @@ class PotentialPiecewise(PotentialFunction):
             j = f.jacobian(params[k])
             if j.shape[0] == 1 and j.shape[1] > 1: j = repmat(j, j.shape[1], 1)
             (rj,cj,vj) = sps.find(j)
-            rs.append(rj)
+            rs.append(kk[rj])
             cs.append(kk[cj])
             zs.append(vj)
             ii = np.delete(ii, k)
@@ -997,28 +997,6 @@ def piecewise(dflt, *spec):
     return PotentialPiecewise(dflt, *spec)
 def cos_well(f=Ellipsis, width=np.pi/2, offset=0, scale=1):
     '''
-    cos_edge() yields a potential function g(x) that calculates 0 for x < pi/2, 1 for x > pi/2, and
-      0.5*(1 + cos(pi/2*(1 - x))) for x between -pi/2 and pi/2.
-    
-    The full formulat of the cosine well is, including optional arguments:
-      scale/2 * (1 + cos(pi*(0.5 - (x - offset)/width)
-
-    The following optional arguments may be given:
-      * width (default: pi) specifies that the frequency of the cos-curve should be pi/width; the
-        width is the distance between the points on the cos-curve with the value of 1.
-      * offset (default: 0) specifies the offset of the minimum value of the coine curve on the
-        x-axis.
-      * scale (default: 1) specifies the height of the cosine well.
-    '''
-    f = to_potential(f)
-    freq = np.pi/width
-    (xmn,xmx) = (offset - width/2, offset + width/2)
-    F = piecewise(scale, ((xmn,xmx), scale/2 * (1 - cos(freq * (identity - offset)))))
-    if   is_const_potential(f):    return const_potential(F.value(f.c))
-    elif is_identity_potential(f): return F
-    else:                          return compose(F, f)
-def cos_edge(f=Ellipsis, width=np.pi, offset=0, scale=1):
-    '''
     cos_well() yields a potential function g(x) that calculates 0.5*(1 - cos(x)) for -pi/2 <= x
       <= pi/2 and is 1 outside of that range.
     
@@ -1033,11 +1011,33 @@ def cos_edge(f=Ellipsis, width=np.pi, offset=0, scale=1):
       * scale (default: 1) specifies the height of the cosine well.
     '''
     f = to_potential(f)
+    freq = np.pi/width*2
+    (xmn,xmx) = (offset - width/2, offset + width/2)
+    F = piecewise(scale, ((xmn,xmx), scale/2 * (1 - cos(freq * (identity - offset)))))
+    if   is_const_potential(f):    return const_potential(F.value(f.c))
+    elif is_identity_potential(f): return F
+    else:                          return compose(F, f)
+def cos_edge(f=Ellipsis, width=np.pi, offset=0, scale=1):
+    '''
+    cos_edge() yields a potential function g(x) that calculates 0 for x < pi/2, 1 for x > pi/2, and
+      0.5*(1 + cos(pi/2*(1 - x))) for x between -pi/2 and pi/2.
+    
+    The full formulat of the cosine well is, including optional arguments:
+      scale/2 * (1 + cos(pi*(0.5 - (x - offset)/width)
+
+    The following optional arguments may be given:
+      * width (default: pi) specifies that the frequency of the cos-curve should be pi/width; the
+        width is the distance between the points on the cos-curve with the value of 1.
+      * offset (default: 0) specifies the offset of the minimum value of the coine curve on the
+        x-axis.
+      * scale (default: 1) specifies the height of the cosine well.
+    '''
+    f = to_potential(f)
     freq = np.pi/2
-    (xmn,xmx) = (-offset - width/2, -offset + width/2)
+    (xmn,xmx) = (offset - width/2, offset + width/2)
     F = piecewise(scale,
                   ((-np.inf, xmn), 0),
-                  ((xmn,xmx), scale/2 * (1 + cos(np.pi*(0.5 - (identity + offset)/width)))))
+                  ((xmn,xmx), scale/2 * (1 + cos(np.pi*(0.5 - (identity - offset)/width)))))
     if   is_const_potential(f):    return const_potential(F.value(f.c))
     elif is_identity_potential(f): return F
     else:                          return compose(F, f)
@@ -1113,6 +1113,57 @@ def sigmoid(f=Ellipsis, mu=0, sigma=1, scale=1, invert=False, normalize=False):
     F = np.sqrt(np.pi / 2) * scale * F
     if normalize: F = F / (np.sqrt(2.0*np.pi) * sigma)
     return F
+@pimms.immutable
+class AbsPotential(PotentialFunction):
+    '''
+    AbsPotential is a potential function that represents the absolute value function.
+    '''
+    def __init__(self): pass
+    def value(self, x): return np.abs(flattest(x))
+    def jacobian(self, x, into=None):
+        x = flattest(x)
+        z = np.sign(x)
+        z = sps.diags(z)
+        if into is None: into =  z
+        else:            into += z
+        return into
+def abs(f=Ellipsis):
+    '''
+    abs() yields a potential function equivalent to the absolute value of the input.
+    abs(f) yields the absolute value of the potential function f.
+
+    Note that abs has a derivative of 0 at 0; this is not mathematically correct, but it is useful
+    for the purposes of numerical methods. If you want traditional behavior, it is suggested that
+    one instead employ sqrt(f**2).
+    '''
+    f = to_potential(f)
+    if is_const_potential(f): return const_potential(np.abs(f.c))
+    elif is_identity_potential(f): return AbsPotential()
+    else: return compose(AbsPotential(), f)
+@pimms.immutable
+class SignPotential(PotentialFunction):
+    '''
+    SignPotential is a potential function that represents the sign function.
+    '''
+    def __init__(self): pass
+    def value(self, x): return np.sign(flattest(x))
+    def jacobian(self, x, into=None):
+        n = len(flattest(x))
+        return sps.csr_matrix(([], [[],[]]), shape=(n,n)) if into is None else into
+def sign(f=Ellipsis):
+    '''
+    sign() yields a potential function equivalent to the sign of the input.
+    sign(f) yields the sign of the potential function f.
+
+    Note that sign has a derivative of 0 at all points; this is not mathematically correct, but it is
+    useful for the purposes of numerical methods. If you want traditional behavior, it is suggested
+    that one instead employ f/sqrt(f**2).
+    '''
+    f = to_potential(f)
+    if is_const_potential(f): return const_potential(np.sign(f.c))
+    elif is_identity_potential(f): return SignPotential()
+    else: return compose(SignPotential(), f)
+    
 @pimms.immutable
 class TriangleSignedArea2DPotential(PotentialFunction):
     '''
