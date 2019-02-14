@@ -1298,6 +1298,23 @@ def curve_intersection(c1, c2, grid=16):
     to use in the initial search for a start-point (default: 16).
     '''
     from scipy.optimize import minimize
+    from neuropythy.geometry import segment_intersection_2D
+    if c1.coordinates.shape[1] > c2.coordinates.shape[1]:
+        (t1,t2) = curve_intersection(c2, c1, grid=grid)
+        return (t2,t1)
+    # before doing a search, see if there are literal exact intersections of the segments
+    x1s  = c1.coordinates.T
+    x2s  = c2.coordinates
+    for (ts,te,xs,xe) in zip(c1.t[:-1], c1.t[1:], x1s[:-1], x1s[1:]):
+        pts = segment_intersection_2D((xs,xe), (x2s[:,:-1], x2s[:,1:]))
+        ii = np.where(np.isfinite(pts[0]))[0]
+        if len(ii) > 0:
+            ii = ii[0]
+            def f(t): return np.sum((c1(t[0]) - c2(t[1]))**2)
+            t01 = 0.5*(ts + te)
+            t02 = 0.5*(c2.t[ii] + c2.t[ii+1])
+            (t1,t2) = minimize(f, (t01, t02)).x
+            return (t1,t2)
     if pimms.is_vector(grid): (ts1,ts2) = [c.t[0] + (c.t[-1] - c.t[0])*grid for c in (c1,c2)]
     else:                     (ts1,ts2) = [np.linspace(c.t[0], c.t[-1], grid) for c in (c1,c2)]
     (pts1,pts2) = [c(ts) for (c,ts) in zip([c1,c2],[ts1,ts2])]
