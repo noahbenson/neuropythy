@@ -66,7 +66,8 @@ try:
     '''
     cmap_polar_angle_lh = blend_cmap(
         'polar_angle_lh',
-        [(0.5,0,0), (0.75,0,0.5), (1,0,1), (0.5,0,0.75), (0,0,0.5), (0,1,1), (0,0.5,0), (1,1,0), (0.5,0,0)])
+        [(0.5,0,0), (0.75,0,0.5), (1,0,1), (0.5,0,0.75), (0,0,0.5), (0,1,1), (0,0.5,0), (1,1,0),
+         (0.5,0,0)])
     cmap_polar_angle_lh.__doc__ = '''
     cmap_polar_angle_lh is a colormap for plotting the pRF polar angle of a vertex.
     Values passed to cmap_polar_angle_lh should be scaled such that (-180,180 deg) -> (0,1).
@@ -76,7 +77,8 @@ try:
     '''
     cmap_polar_angle_rh = blend_cmap(
         'polar_angle_rh',
-        [(0.5,0,0), (1,1,0), (0,0.5,0), (0,1,1), (0,0,0.5), (0.5,0,0.75), (1,0,1), (0.75,0,0.5), (0.5,0,0)])
+        [(0.5,0,0), (1,1,0), (0,0.5,0), (0,1,1), (0,0,0.5), (0.5,0,0.75), (1,0,1), (0.75,0,0.5),
+         (0.5,0,0)])
     cmap_polar_angle_rh.__doc__ = '''
     cmap_polar_angle_rh is a colormap for plotting the pRF polar angle of a vertex.
     Values passed to cmap_polar_angle_rh should be scaled such that (-180,180 deg) -> (0,1).
