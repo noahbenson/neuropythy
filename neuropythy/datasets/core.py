@@ -112,7 +112,7 @@ class Dataset(ObjectWithMetaData):
         '''
         if os.path.isdir(cache_directory): return True
         if not create_directories: raise ValueError('dataset cache directory not found: %s')
-        os.makedirs(cache_directory, create_mode)
+        os.makedirs(cache_directory, create_mode, exist_ok=True)
         return True
 # We create the dataset repository: this is a lazy map; to add a dataset to it, use the function
 # add_dataset(), immediately below

@@ -22,16 +22,18 @@ def is_url(url):
     '''
     try: return bool(urllib.request.urlopen(url))
     except: return False
-def url_download(url, topath, create_dirs=True):
+def url_download(url, topath=None, create_dirs=True):
     '''
-    url_download(url, topath) downloads the given url to the given path, topath.
+    url_download(url) yields the contents of the given url as a byte-string.
+    url_download(url, topath) downloads the given url to the given path, topath and yields that path
+      on success.
 
     The option create_dirs (default: True) may be set to False to prevent the topath directory from
     being created.
     '''
     # ensure directory exists
     if topath: topath = os.path.expanduser(os.path.expandvars(topath))
-    if create_dirs and topath: os.makedirs(os.path.dirname(topath))
+    if create_dirs and topath: os.makedirs(os.path.dirname(topath), exist_ok=True)
     if six.PY2:
         response = urllib.request.urlopen(url)
         if topath is None: topath = response.read()
@@ -654,13 +656,13 @@ class FileMap(ObjectWithMetaData):
         for (s,p) in six.iteritems(supplemental_paths):
             if actual_cache_path:
                 cp = os.path.join(actual_cache_path, 'supp', s)
-                os.makedirs(cp)
+                os.makedirs(cp, exist_ok=True)
                 n += 1
             spaths[s] = pseudo_dir(p, delete=False, cache_path=cp)
         if actual_cache_path:
             if n > 0: cp = os.path.join(actual_cache_path, 'main')
             else:     cp = actual_cache_path
-            os.makedirs(cp)
+            os.makedirs(cp, exist_ok=True)
         spaths[None] = pseudo_dir(path, delete=False, cache_path=cp)
         return pyr.pmap(spaths)
     @pimms.value
