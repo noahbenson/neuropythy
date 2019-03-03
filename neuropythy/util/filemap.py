@@ -81,7 +81,18 @@ def is_tarball_path(path):
     (tb,p) = split_tarball_path(path)
     return tb is not None
 osf_basepath = 'https://api.osf.io/v2/nodes/%s/files/%s/'
-def osf_crawl(k, *pths, base='osfstorage'):
+def _osf_tree(proj, path=None, base='osfstorage'):
+    if path is None: path = (osf_basepath % (proj, base))
+    else:            path = (osf_basepath % (proj, base)) + path.lstrip('/')
+    dat = json.loads(url_download(path, None))
+    if 'data' not in dat: raise ValueError('Cannot detect kind of url for ' + path)
+    dat = dat['data']
+    if pimms.is_map(dat): return dat['links']['download']
+    res = {r['name']:(u['links']['download'] if r['kind'] == 'file' else
+                      curry(lambda r: _osf_tree(proj, r, base), r['path']))
+           for u in dat for r in [u['attributes']]}
+    return pimms.lazy_map(res)
+def osf_crawl(k, *pths, **kw):
     '''
     osf_crawl(k) crawls the osf repository k and returns a lazy nested map structure of the
       repository's files. Folders have values that are maps of their contents while files have
@@ -91,14 +102,17 @@ def osf_crawl(k, *pths, base='osfstorage'):
     The optional named argument base (default: 'osfstorage') may be specified to search in a
     non-standard storage position in the OSF URL; e.g. in the github storage.
     '''
-    if k.startswith('osf:'): pth0 = osf_basepath % (k[4:].lstrip('/'), base)
-    else:                    pth0 = osf_basepath % (k.lstrip('/'), base)
-    pth = pth0 if len(pths) == 0 else urljoin(pth0, *[p.lstrip('/') for p in pths])
-    dat = json.loads(url_download(pth, None))
-    res = {r['name']:(l['download'] if r['kind'] == 'file' else
-                      curry(lambda rr: osf_crawl(k, rr), r['path']))
-           for u in dat['data'] for r in [u['attributes']] for l in [u['links']]}
-    return pimms.lazy_map(res)
+    from six.moves import reduce
+    base = kw.pop('base', 'osfstorage')
+    root = kw.pop('root', None)
+    if len(kw) > 0: raise ValueError('Unknown optional parameters: %s' % (list(kw.keys()),))
+    if k.lower().startswith('osf:'): k = k[4:]
+    k = k.lstrip('/')
+    pths = [p.lstrip('/') for p in (k.split('/') + list(pths))]
+    (bpth, pths) = (pths[0], pths[1:])
+    if root is None: root = _osf_tree(bpth, base=base)
+    return reduce(lambda m,k: m[k], pths, root)
+    
 @pimms.immutable
 class PseudoDir(ObjectWithMetaData):
     '''
