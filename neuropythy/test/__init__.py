@@ -3,7 +3,7 @@
 # Tests for the neuropythy library.
 # By Noah C. Benson
 
-import unittest, os, sys, six, logging, pimms
+import unittest, os, sys, six, warnings, logging, pimms
 import numpy      as np
 import pyrsistent as pyr
 import neuropythy as ny
@@ -25,6 +25,7 @@ class TestNeuropythy(unittest.TestCase):
         '''
         from neuropythy.geometry import triangle_area
         import neuropythy.optimize as opt
+        import warnings
         from . import optimize as opttest
         mesh = opttest.mesh
         logging.info('neuropythy: Testing optimization package...')
@@ -77,7 +78,7 @@ class TestNeuropythy(unittest.TestCase):
         self.assertGreaterEqual(v123_area, 500)
         (v1_ecc, v1_rad) = msh.property(['prf_eccentricity','prf_radius'],
                                         mask=('inf-prf_visual_area', 1),
-                                        weight='prf_variance_explained',
+                                        weights='prf_variance_explained',
                                         weight_min=0.1,
                                         clipped=0,
                                         null=np.nan)
