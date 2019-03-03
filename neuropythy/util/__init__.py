@@ -16,7 +16,7 @@ from .core     import (ObjectWithMetaData, normalize, denormalize,
                        to_curve_spline, CurveSpline,
                        DataStruct, data_struct, tmpdir, dirpath_to_list)
 from .conf     import (config, to_credentials, detect_credentials, load_credentials)
-from .filemap  import (FileMap, file_map, pseudo_dir)
+from .filemap  import (FileMap, file_map, pseudo_dir, osf_crawl)
 
 
 

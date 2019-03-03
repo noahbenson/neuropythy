@@ -3,12 +3,13 @@
 # Utility for presenting a directory with a particular format as a data structure.
 # By Noah C. Benson
 
-import os, warnings, six, tarfile, atexit, shutil, posixpath, pimms
+import os, warnings, six, tarfile, atexit, shutil, posixpath, json, pimms
 import numpy          as np
 import pyrsistent     as pyr
 from   posixpath  import join as urljoin, split as urlsplit, normpath as urlnormpath
 from   six.moves  import urllib
-from   .core      import (library_path, curry, ObjectWithMetaData, AutoDict, data_struct, tmpdir)
+from   .core      import (library_path, curry, ObjectWithMetaData, AutoDict, data_struct, tmpdir,
+                          is_tuple, is_list)
 from   .conf      import to_credentials
 
 # Not required, but try to load it anyway:
@@ -29,22 +30,31 @@ def url_download(url, topath, create_dirs=True):
     being created.
     '''
     # ensure directory exists
-    topath = os.path.expanduser(os.path.expandvars(topath))
-    if create_dirs: os.makedirs(os.path.dirname(topath))
+    if topath: topath = os.path.expanduser(os.path.expandvars(topath))
+    if create_dirs and topath: os.makedirs(os.path.dirname(topath))
     if six.PY2:
         response = urllib.request.urlopen(url)
-        with open(topath, 'wb') as fl:
-            shutil.copyfileobj(response, fl)
-    else:
-        with urllib.request.urlopen(url) as response:
+        if topath is None: topath = response.read()
+        else:
             with open(topath, 'wb') as fl:
                 shutil.copyfileobj(response, fl)
+    else:
+        with urllib.request.urlopen(url) as response:
+            if topath is None: topath = response.read()
+            else:
+                with open(topath, 'wb') as fl:
+                    shutil.copyfileobj(response, fl)
     return topath
 def is_s3_path(path):
     '''
     is_s3_path(path) yields True if path is a valid Amazon S3 path and False otherwise.
     '''
-    return path.lower().startswith('s3:')
+    return pimms.is_str(path) and path.lower().startswith('s3:')
+def is_osf_path(path):
+    '''
+    is_osf_path(path) yields True if path starts with 'osf:' and False otherwise.
+    '''
+    return pimms.is_str(path) and path.lower().startswith('osf:')
 tarball_endings = tuple([('.tar' + s) for s in ('','.gz','.bz2','.lzma')])
 def split_tarball_path(path):
     '''
@@ -70,7 +80,25 @@ def is_tarball_path(path):
     '''
     (tb,p) = split_tarball_path(path)
     return tb is not None
+osf_basepath = 'https://api.osf.io/v2/nodes/%s/files/%s/'
+def osf_crawl(k, *pths, base='osfstorage'):
+    '''
+    osf_crawl(k) crawls the osf repository k and returns a lazy nested map structure of the
+      repository's files. Folders have values that are maps of their contents while files have
+      values that are their download links.
+    osf_crawl(k1, k2, ...) is equivalent to osf_crawl(posixpath.join(k1, k2...)).
 
+    The optional named argument base (default: 'osfstorage') may be specified to search in a
+    non-standard storage position in the OSF URL; e.g. in the github storage.
+    '''
+    if k.startswith('osf:'): pth0 = osf_basepath % (k[4:].lstrip('/'), base)
+    else:                    pth0 = osf_basepath % (k.lstrip('/'), base)
+    pth = pth0 if len(pths) == 0 else urljoin(pth0, *[p.lstrip('/') for p in pths])
+    dat = json.loads(url_download(pth, None))
+    res = {r['name']:(l['download'] if r['kind'] == 'file' else
+                      curry(lambda rr: osf_crawl(k, rr), r['path']))
+           for u in dat['data'] for r in [u['attributes']] for l in [u['links']]}
+    return pimms.lazy_map(res)
 @pimms.immutable
 class PseudoDir(ObjectWithMetaData):
     '''
@@ -139,13 +167,30 @@ class PseudoDir(ObjectWithMetaData):
         url = urljoin(urlbase, path)
         return url_download(url, cpath)
     @staticmethod
-    def _s3_exists(fs, cache_path, path):
+    def _osf_exists(fls, osfbase, cache_path, path):
+        cpath = os.path.join(cache_path, PseudoDir._url_to_ospath(path))
+        if os.path.exists(cpath): return cpath
+        fl = fls
+        for pp in path.split('/'):
+            if   pimms.is_str(fl): return False
+            elif pp in fl:         fl = fl[pp]
+            else:                  return False
+        return True
+    @staticmethod
+    def _osf_getpath(fls, osfbase, cache_path, path):
+        cpath = os.path.join(cache_path, PseudoDir._url_to_ospath(path))
+        if os.path.exists(cpath): return cpath
+        fl = fls
+        for pp in path.split('/'): fl = fl[pp]
+        return url_download(fl, cpath)
+    @staticmethod
+    def _s3_exists(fs, urlbase, cache_path, path):
         cpath = os.path.join(cache_path, PseudoDir._url_to_ospath(path))
         if os.path.exists(cpath): return cpath
         url = urljoin(urlbase, path)
         return fs.exists(url)
     @staticmethod
-    def _s3_getpath(fs, cache_path, path):
+    def _s3_getpath(fs, urlbase, cache_path, path):
         cpath = os.path.join(cache_path, PseudoDir._url_to_ospath(path))
         if os.path.exists(cpath): return cpath
         url = urljoin(urlbase, path)
@@ -176,11 +221,7 @@ class PseudoDir(ObjectWithMetaData):
             join_fn = os.path.join
             need_cache = False
             pathmod = os.path
-        elif s3fs is not None and isinstance(source_path, s3fs.S3FileSystem):
-            def exists_fn(p):  return PseudoDir._s3_exists(source_path,  cache_path, p)
-            def getpath_fn(p): return PseudoDir._s3_getpath(source_path, cache_path, p)
-            pathmod = posixpath
-        elif isinstance(source_path, tuple):
+        elif is_tuple(source_path):
             (el0,pp) = (source_path[0], source_path[1:])
             if s3fs is not None and isinstance(el0, s3fs.S3FileSystem):
                 rpr = 'S3:/' + urljoin(*pp)
@@ -201,8 +242,13 @@ class PseudoDir(ObjectWithMetaData):
             if s3fs is None: raise ValueError('s3fs module is not installed')
             elif credentials is None: fs = s3fs.S3FileSystem(anon=True)
             else: fs = s3fs.S3FileSystem(key=credentials[0], secret=credentials[1])
-            def exists_fn(p):  return PseudoDir._s3_exists(fs,  cache_path, p)
-            def getpath_fn(p): return PseudoDir._s3_getpath(fs, cache_path, p)
+            def exists_fn(p):  return PseudoDir._s3_exists(fs, source_path, cache_path, p)
+            def getpath_fn(p): return PseudoDir._s3_getpath(fs, source_path, cache_path, p)
+            pathmod = posixpath
+        elif is_osf_path(source_path):
+            fs = osf_crawl(source_path)
+            def exists_fn(p):  return PseudoDir._osf_exists(fs, source_path, cache_path, p)
+            def getpath_fn(p): return PseudoDir._osf_getpath(fs, source_path, cache_path, p)
             pathmod = posixpath
         elif is_url(source_path):
             def exists_fn(pth):  return PseudoDir._url_exists(source_path,  cache_path, pth)
@@ -223,9 +269,38 @@ class PseudoDir(ObjectWithMetaData):
         # ok, don't know what it is...
         else: raise ValueError('Could not interpret source path: %s' % source_path)
         cache_path = tmpdir(delete=(True if delete is Ellipsis else delete)) if need_cache else None
+        # one final layer on the exist and getpath functions: we want to automatically interpret
+        # and expand internal tarball files as we go...
+        tarballs = {}
+        def tar_pdir(tb, path):
+            if tb in tarballs: return tarballs[tb]
+            ostb = tb if pathmod.sep == os.sep else PseudoDir._url_to_ospath(tb)
+            pd = PseudoDir(tb, cache_path=os.path.join(cache_path, '.extracted_tarballs', tb),
+                           delete=False, meta_data={'container_path':source_path})
+            tarballs[tb] = pd
+            return pd
+        def exists_tar_fn(p):
+            x = exists_fn(p)
+            if x: return True
+            # see if x has a tarball in it
+            (tb,pth) = split_tarball_path(p)
+            if tb is None or len(path) == 0: return False
+            if pathmod.sep != os.sep: pth = PseudoDir._url_to_ospath(pth)
+            # there is a tarball: we auto-extract it into a new pseudo-dir
+            tb = tar_pdir(tb, pth)
+            return tb._path_data['exists'](pth)
+        def getpath_tar_fn(p):
+            if exists_fn(p): return getpath_fn(p)
+            # see if x has a tarball in it
+            (tb,pth) = split_tarball_path(p)
+            if tb is None or len(path) == 0: return getpath_fn(p)
+            if pathmod.sep != os.sep: pth = PseudoDir._url_to_ospath(pth)
+            # there is a tarball: we auto-extract it into a new pseudo-dir
+            tb = tar_pdir(tb, pth)
+            return tb._path_data['getpath'](pth)
         return pyr.pmap({'repr':    rpr,
-                         'exists':  exists_fn,
-                         'getpath': getpath_fn,
+                         'exists':  exists_tar_fn,
+                         'getpath': getpath_tar_fn,
                          'cache':   cache_path,
                          'pathmod': pathmod})
 
