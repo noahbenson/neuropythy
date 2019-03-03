@@ -61,7 +61,8 @@ def reload_neuropythy():
             sys.modules[mdl] = reload(sys.modules[mdl])
     return reload(sys.modules['neuropythy'])
 
-from   .util       import config
+from   .util       import (config, is_image, library_path, to_affine, is_address, address_data,
+                           is_curve_spline, to_curve_spline)
 from   .io         import (load, save, to_nifti)
 from   .mri        import (is_subject, is_cortex, to_cortex, to_image)
 from   .vision     import (retinotopy_data, empirical_retinotopy_data, predicted_retinotopy_data,
