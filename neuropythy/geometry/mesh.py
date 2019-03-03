@@ -149,7 +149,7 @@ class VertexSet(ObjectWithMetaData):
     def property(self, prop,
                  dtype=Ellipsis,
                  outliers=None,  data_range=None,    clipped=np.inf,
-                 weight=None,    weight_min=0,       weight_transform=Ellipsis,
+                 weights=None,   weight_min=0,       weight_transform=Ellipsis,
                  mask=None,      valid_range=None,   null=np.nan,
                  transform=None, yield_weight=False):
         '''
@@ -158,7 +158,7 @@ class VertexSet(ObjectWithMetaData):
         return to_property(self, prop,
                            dtype=dtype,           null=null,
                            outliers=outliers,     data_range=data_range,
-                           clipped=clipped,       weight=weight,
+                           clipped=clipped,       weights=weights,
                            weight_min=weight_min, weight_transform=weight_transform,
                            mask=mask,             valid_range=valid_range,
                            transform=transform,   yield_weight=yield_weight)
@@ -209,10 +209,11 @@ def is_vset(v):
     '''
     return isinstance(v, VertexSet)
         
-def to_mask(obj, m, indices=False):
+def to_mask(obj, m=None, indices=None):
     '''
     to_mask(obj, m) yields the set of indices from the given vertex-set or itable object obj that
       correspond to the given mask m.
+    to_mask((obj, m)) is equivalent to to_mask(obj, m).
     
     The mask m may take any of the following forms:
        * a list of vertex indices
@@ -234,7 +235,16 @@ def to_mask(obj, m, indices=False):
     vertex indices instead of the vertex labels. If obj is not a VertexSet object, then this
     option is ignored.
     '''
-    if isinstance(obj, VertexSet):
+    if pimms.is_vector(obj) and len(obj) < 4 and m is None:
+        if   len(obj) == 1: obj = obj[0]
+        elif len(obj) == 2: (obj, m) = obj
+        else:
+            (obj, m, q) = obj
+            if indices is None:
+                if pimms.is_map(q): indices = q.get('indices', False)
+                else: indices = q
+    if indices is None: indices = False
+    if is_vset(obj):
         lbls = obj.labels
         idcs = obj.indices
         obj = obj.properties
@@ -269,7 +279,7 @@ def to_mask(obj, m, indices=False):
 def to_property(obj, prop=None,
                 dtype=Ellipsis,
                 outliers=None,  data_range=None,    clipped=np.inf,
-                weight=None,    weight_min=0,       weight_transform=Ellipsis,
+                weights=None,   weight_min=0,       weight_transform=Ellipsis,
                 mask=None,      valid_range=None,   null=np.nan,
                 transform=None, yield_weight=False):
     '''
@@ -330,16 +340,18 @@ def to_property(obj, prop=None,
     
     '''
     # was an arg given, or is obj a tuple?
-    if pimms.is_vector(obj) and len(obj) == 2:
-        return to_property(obj[0], obj[1],
-                           dtype=dtype,           null=null,
-                           outliers=outliers,     data_range=data_range,
-                           clipped=clipped,       weight=weight,
-                           weight_min=weight_min, weight_transform=weight_transform,
-                           mask=mask,             valid_range=valid_range,
-                           transform=transform,   yield_weight=yield_weight)
+    if pimms.is_vector(obj) and len(obj) < 4 and prop is None:
+        kw0 = dict(dtype=dtype,           null=null,
+                   outliers=outliers,     data_range=data_range,
+                   clipped=clipped,       weights=weights,
+                   weight_min=weight_min, weight_transform=weight_transform,
+                   mask=mask,             valid_range=valid_range,
+                   transform=transform,   yield_weight=yield_weight)
+        if   len(obj) == 2: return to_property(obj[0], obj[1], **kw0)
+        elif len(obj) == 3: return to_property(obj[0], obj[1], **pimms.merge(kw0, obj[2]))
+        else: raise ValueError('Bad input vector given to to_property()')
     # we could have been given a property alone or a map/vertex-set and a property
-    if prop is None: (prop, obj) = (obj, None)
+    if prop is None: raise ValueError('No property given to to_property()')
     # if it's a vertex-set, we want to note that and get the map
     if isinstance(obj, VertexSet): (vset, obj) = (obj,  obj.properties)
     elif pimms.is_map(obj):        (vset, obj) = (None, obj)
@@ -354,7 +366,7 @@ def to_property(obj, prop=None,
             return lambda:to_property(obj, kk,
                                       dtype=dtype,           null=null,
                                       outliers=outliers,     data_range=data_range,
-                                      clipped=clipped,       weight=weight,
+                                      clipped=clipped,       weights=weights,
                                       weight_min=weight_min, weight_transform=weight_transform,
                                       mask=mask,             valid_range=valid_range,
                                       transform=transform,   yield_weight=yield_weight)
@@ -364,7 +376,7 @@ def to_property(obj, prop=None,
         return np.asarray([to_property(obj, k,
                                        dtype=dtype,           null=null,
                                        outliers=outliers,     data_range=data_range,
-                                       clipped=clipped,       weight=weight,
+                                       clipped=clipped,       weights=weights,
                                        weight_min=weight_min, weight_transform=weight_transform,
                                        mask=mask,             valid_range=valid_range,
                                        transform=transform,   yield_weight=yield_weight)
@@ -375,22 +387,22 @@ def to_property(obj, prop=None,
     if not np.isnan(null): prop  = np.asarray([np.nan if x == null else x for x in prop])
     prop = np.asarray(prop, dtype=dtype)
     # Next, do the same for weight:
-    if pimms.is_str(weight):
+    if pimms.is_str(weights):
         if obj is None: raise ValueError('a weight name but no data object given to to_property')
-        else: weight = obj[weight]
-    weight_orig = weight
-    if weight is None or weight_min is None:
+        else: weights = obj[weights]
+    weights_orig = weights
+    if weights is None or weight_min is None:
         low_weight = []
     else:
         if weight_transform is Ellipsis:
-            weight = np.array(weight, dtype=np.float)
-            weight[weight < 0] = 0
-            weight[np.isclose(weight, 0)] = 0
+            weights = np.array(weights, dtype=np.float)
+            weights[weights < 0] = 0
+            weights[np.isclose(weights, 0)] = 0
         elif weight_transform is not None:
-            weight = weight_transform(np.asarray(weight))
-        if not pimms.is_vector(weight, 'real'):
-            raise ValueError('weight must be a real-valued vector or property name for such')
-        low_weight = [] if weight_min is None else np.where(weight <= weight_min)[0]
+            weight = weight_transform(np.asarray(weights))
+        if not pimms.is_vector(weights, 'real'):
+            raise ValueError('weights must be a real-valued vector or property name for such')
+        low_weight = [] if weight_min is None else np.where(weights <= weight_min)[0]
     # Next, find the mask; these are values that can be included theoretically;
     all_vertices = np.asarray(range(len(prop)), dtype=np.int)
     where_nan = np.where(np.isnan(prop))[0]
@@ -427,14 +439,14 @@ def to_property(obj, prop=None,
         prop[where_nan] = null
         prop[outliers]  = clipped
     if yield_weight:
-        weight = np.array(weight, dtype=np.float)
-        weight[where_nan] = 0
-        weight[outliers] = 0
+        if weights is None or not pimms.is_vector(weights): weights = np.ones(len(prop))
+        else: weights = np.array(weights, dtype=np.float)
+        weights[where_nan] = 0
+        weights[outliers] = 0
     # transform?
     if transform: prop = transform(prop)
     # That's it, just return
-    return (prop, weight) if yield_weight else prop
-    
+    return (prop, weights) if yield_weight else prop
 
 @pimms.immutable
 class TesselationIndex(object):
@@ -1612,7 +1624,7 @@ class Mesh(VertexSet):
         return barycentric_to_cartesian(tx, coords)
 
     def from_image(self, image, affine=None, method=None, fill=0, dtype=None,
-                   native_to_vertex_matrix=None, weight=None):
+                   native_to_vertex_matrix=None, weights=None):
         '''
         mesh.from_image(image) interpolates the given 3D image array at the values in the given 
           mesh's coordinates and yields the property that results. If image is given as a string,
@@ -1629,7 +1641,7 @@ class Mesh(VertexSet):
           * fill (default: 0) values filled in when a vertex falls outside of the image.
           * native_to_vertex_matrix (default: None) may optionally give a final transformation that
             converts from native subject orientation encoded in images to vertex positions.
-          * weight (default: None) may optionally provide an image whose voxels are weights to use
+          * weights (default: None) may optionally provide an image whose voxels are weights to use
             during the interpolation; these weights are in addition to trilinear weights and are
             ignored in the case of nearest interpolation.
           * native_to_vertex_matrix (default: None) specifies a matrix that aligns the surface
@@ -1671,10 +1683,10 @@ class Mesh(VertexSet):
             res[ok] = image[tuple(ijk[:,ok])]
             return res
         # otherwise, we do linear interpolation; start by parsing the weights if given
-        if weight is None: weight = np.ones(image.shape)
-        elif pimms.is_str(weight): weight = load(weight).get_data()
-        elif isinstance(weight, nib.analyze.SpatialImage): weight = weight.get_data()
-        else: weight = np.asarray(weight)
+        if weights is None: weights = np.ones(image.shape)
+        elif pimms.is_str(weights): weights = load(weights).get_data()
+        elif is_image(weights): weights = weights.get_data()
+        else: weights = np.asarray(weights)
         # find the 8 neighboring voxels
         mins = np.floor(xyz)
         maxs = np.ceil(xyz)
@@ -1692,7 +1704,7 @@ class Mesh(VertexSet):
         # trilinear weights
         wgts_tri = np.asarray([np.prod(1 - np.abs(xyz - row), axis=0) for row in voxs])
         # weight-image weights
-        wgts_wgt = np.asarray([weight[tuple(row)] for row in voxs])
+        wgts_wgt = np.asarray([weights[tuple(row)] for row in voxs])
         # note that there might be a 4D image here
         if len(wgts_wgt.shape) > len(wgts_tri.shape):
             for _ in range(len(wgts_wgt.shape) - len(wgts_tri.shape)):
@@ -1767,13 +1779,13 @@ class Mesh(VertexSet):
         # Whittle down the mask to what we are sure is in the minimization:
         mask = reduce(np.setdiff1d,
                       [all_vertices if mask is None else all_vertices[mask],
-                       where_nan,
-                       np.where(np.isclose(weights, 0))[0]])
+                       where_nan, np.where(~np.isfinite(weights))[0]])
         # Find the outliers: values specified as outliers or inf values; we'll build this as we go
         outliers = [] if outliers is None else all_vertices[outliers]
         outliers = np.intersect1d(outliers, mask) # outliers not in the mask don't matter anyway
         # no matter what, trim out the infinite values (even if inf was in the data range)
         outliers = np.union1d(outliers, mask[np.where(np.isinf(prop[mask]))[0]])
+        outliers = np.union1d(outliers, mask[np.where(np.isclose(weights[mask], 0))[0]])
         outliers = np.asarray(outliers, dtype=np.int)
         # here are the vertex sets we will use below
         tethered = np.setdiff1d(mask, outliers)
@@ -1794,13 +1806,12 @@ class Mesh(VertexSet):
                          if a in maskset and b in maskset])
         # These are the weights and objective function/gradient in the minimization
         (ks, ke) = (smoothness, 1.0 - smoothness)
-        e2v = lil_matrix((len(x0), len(el)), dtype=np.int)
-        for (i,(u,v)) in enumerate(el):
-            e2v[u,i] = 1
-            e2v[v,i] = -1
-        e2v = csr_matrix(e2v)
+        (zs, ix) = (np.ones(len(el)), np.arange(len(el)))
+        e2v = sps.csr_matrix((np.concatenate([zs,-zs]), (el.T.flatten(),np.concatenate([ix, ix]))),
+                             shape=(len(x0), len(el)), dtype=np.int)
         (us, vs) = el.T
         weights_tth = weights[tethered]
+        # build the optimization
         def _f(x):
             rs = np.dot(weights_tth, (x0[mask_tethered] - x[mask_tethered])**2)
             re = np.sum((x[us] - x[vs])**2)
@@ -2284,8 +2295,8 @@ class MapProjection(ObjectWithMetaData):
         Note that None is also returned if the projection cannot find an appropriate hemisphere in
         the subject.
         '''
-        from neuropythy.mri import Subject
-        if isinstance(obj, Subject):
+        from neuropythy.mri import is_subject
+        if is_subject(obj):
             if self.chirality is None: return None
             else: ch = self.chirality
             if ch not in obj.hemis: return None
@@ -2315,8 +2326,8 @@ class MapProjection(ObjectWithMetaData):
         proj(topo) yields a 2D mesh that is derived from one of the registrations in the given
           topology topo, determined by the proj.registration parameter.
         '''
-        from neuropythy.mri import Subject
-        if isinstance(obj, Topology) or isinstance(obj, Subject):
+        from neuropythy.mri import is_subject
+        if is_topo(obj) or is_subject(obj):
             msh = self.extract_mesh(obj)
             if msh is None: raise ValueError('Could not find matching registration for %s' % obj)
             else: obj = msh
@@ -2343,9 +2354,10 @@ MapProjection.projection_inverse_methods = pyr.m(
 def deduce_chirality(obj):
     '''
     deduce_chirality(x) attempts to deduce the chirality of x ('lh', 'rh', or 'lr') and yeilds the
-      deduced string. If no chirality can be deduced, yields None.
+      deduced string. If no chirality can be deduced, yields None. Note that a if x is either None
+      or Ellipsis, this is converted into 'lr'.
     '''
-        # few simple tests:
+    # few simple tests:
     try: return obj.chirality
     except: pass
     try: return obj.meta_data['chirality']
@@ -2354,7 +2366,7 @@ def deduce_chirality(obj):
     except: pass
     try: return obj.meta_data['hemisphere']
     except: pass
-    if obj is None or obj is Ellipsis: return None
+    if obj is None or obj is Ellipsis: return 'lr'
     try: return to_hemi_str(obj)
     except: pass
     return None
@@ -2516,17 +2528,16 @@ def map_projection(name=None, chirality=Ellipsis,
         hemi = to_hemi_str(hemi)
         topo = None
         mesh = None
-    elif isinstance(hemi, Topology):
+    elif is_topo(hemi):
         topo = hemi
         hemi = hemi.chirality
         mesh = None
-    elif isinstance(hemi, Mesh):
+    elif is_mesh(hemi):
         mesh = hemi
-        if   'chirality' in hemi.meta_data: hemi = to_hemi_str(hemi.meta_data['chirality'])
-        elif 'hemi'      in hemi.meta_data: hemi = to_hemi_str(hemi.meta_data['hemi'])
-        else:                               hemi = 'lr'
+        hemi = deduce_chirality(hemi)
         topo = None
     else: raise ValueError('Could not understand map_projection hemi argument: %s' % hemi)
+    hemi = to_hemi_str(hemi)
     # name might be an affine matrix
     try:    aff = to_affine(name)
     except: aff = None
@@ -2555,7 +2566,7 @@ def map_projection(name=None, chirality=Ellipsis,
         elif name.lower() in map_projections[hemi]: mp = map_projections[hemi][name.lower()]
         else:
             try:    mp = load_map_projection(name, chirality=hemi)
-            except: raise ValueError('could neither find nor load projection %s (%s)' % (arg, hemi))
+            except: raise ValueError('could neither find nor load projection %s (%s)' % (name,hemi))
         # update parameters if need-be:
         if len(kw) > 0: mp = mp.copy(**kw)
     elif name is None:
@@ -2586,7 +2597,10 @@ def is_map_projection(arg):
     is_map_projection(arg) yields True if arg is a map-projection object and False otherwise.
     '''
     return isinstance(arg, MapProjection)
-def to_map_projection(arg):
+def to_map_projection(arg, hemi=Ellipsis, chirality=Ellipsis,
+                      center=Ellipsis, center_right=Ellipsis, radius=Ellipsis,
+                      method=Ellipsis, registration=Ellipsis, sphere_radius=Ellipsis,
+                      pre_affine=Ellipsis, post_affine=Ellipsis, meta_data=Ellipsis):
     '''
     to_map_projection(mp) yields mp if mp is a map projection object.
     to_map_projection((name, hemi)) is equivalent to map_projection(name, chirality=hemi).
@@ -2598,38 +2612,90 @@ def to_map_projection(arg):
     to_map_projection((affine, hemi)) converts the given affine transformation, which must be a
       transformation from spherical coordinates to 2D map coordinates (once the transformed z-value
       is dropped), to a map projection. The hemi argument may alternately be an options mapping.
+
+    The to_map_projection() function may also be called with the the elements of the above tuples
+    passed directly; i.e. to_map_projection(name, hemi) is equivalent to
+    to_map_projection((name,hemi)).
+
+    Additionaly, all optional arguments to the map_projection function may be given and will be
+    copied into the map_projection that is returned. Note that the named chirality argument is used
+    to set the chirality of the returned map projection but never to specify the chirality of a
+    map projection that is being looked up or loaded; for that use the second argument, second tuple
+    entry, or hemi keyword.
     '''
-    if   is_map_projection(arg): return arg
+    kw = dict(center=center, center_right=center_right, radius=radius, chirality=chirality,
+              method=method, registration=registration, sphere_radius=sphere_radius,
+              pre_affine=pre_affine, post_affine=post_affine, meta_data=meta_data)
+    kw = {k:v for (k,v) in six.iteritems(kw) if v is not Ellipsis}
+    if pimms.is_vector(arg):
+        if   len(arg) == 1: arg = arg[0]
+        elif len(arg) == 2:
+            (arg, tmp) = arg
+            if pimms.is_map(tmp):
+                kw = {k:v for (k,v) in six.iteritems(pimms.merge(tmp, kw)) if v is not Ellipsis}
+            elif hemi is Ellipsis: hemi = arg
+        elif len(arg) == 3:
+            (arg, h, opts) = arg
+            kw = {k:v for (k,v) in six.iteritems(pimms.merge(opts, kw)) if v is not Ellipsis}
+            if hemi is Ellipsis: hemi = h
+        else: raise ValueError('Invalid vector argument given to to_map_projection()')
+    hemi = deduce_chirality(hemi)
+    mp = None
+    if   is_map_projection(arg): mp = arg
     elif pimms.is_str(arg):
         # first see if there's a hemi appended
         if ':' in arg:
             spl = arg.split(':')
             (a,h) = (':'.join(spl[:-1]), spl[-1])
-            try: h = to_hemi_str(h)
-            except: h = None
-            if h: return to_map_projection((a, h))
-        # otherwise, strings alone might be filenames; otherwise it's an mp name without the :lr
-        try:    return load_map_projection(arg)
-        except: return to_map_projection((arg, 'lr'))
-    elif pimms.is_vector(arg):
-        if   len(arg) == 1: (a,h,o) = (arg,    'lr',   {})
-        elif len(arg) == 2: (a,h,o) = (arg[0], arg[1], {})
-        elif len(arg) == 3: (a,h,o) = arg
-        else: raise ValueError('too many objects in first arg of to_map_projection([...])')
-        return map_projection(a, chirality=h, **o)
+            try:
+                (hemtmp, arg) = (to_hemi_str(h), a)
+                if hemi is None: hemi = hemtmp
+            except: pass
+        # otherwise, strings alone might be map projection names or filenames
+        mp = map_projection(arg, hemi)
     else: raise ValueError('Cannot interpret argument to to_map_projection')
-def to_flatmap(name, obj):
+    if len(kw) == 0: return mp
+    else: return mp.copy(**kw)
+def to_flatmap(name, hemi=Ellipsis, 
+               center=Ellipsis, center_right=Ellipsis, radius=Ellipsis, chirality=Ellipsis,
+               method=Ellipsis, registration=Ellipsis, sphere_radius=Ellipsis,
+               pre_affine=Ellipsis, post_affine=Ellipsis, meta_data=Ellipsis):
     '''
     to_flatmap(name, topo) yields a flatmap of the given topology topo using the map projection
       obtained via to_map_projection(name).
     to_flatmap(name, mesh) yields a flatmap of the given mesh. If no hemisphere is specified in the
       name argument nor in the mesh meta-data, then 'lr' is assumed.
     to_flatmap(name, subj) uses the given hemisphere from the given subject.
+    to_flatmap((name, obj)) is equivalent to to_flatmap(name, obj).
+    to_flatmap((name, obj, opts_map)) is equivalent to to_flatmap(name, obj, **opts_map).
+
+    All optional arguments that can be passed to map_projection() may also be passed to the
+    to_flatmap() function and are copied into the map projection object prior to its use in creating
+    the resulting 2D mesh. Note that the named chirality argument is used to set the chirality of
+    the returned map projection but never to specify the chirality of a map projection that is being
+    looked up or loaded; for that use the second argument, second tuple entry, or hemi keyword.
     '''
-    from neuropythy.mri import Subject
-    try:    mp = to_map_projection(name)
-    except: mp = to_map_projection((name, deduce_chirality(obj)))
-    return mp(obj)
+    from neuropythy.mri import is_subject
+    kw = dict(center=center, center_right=center_right, radius=radius, chirality=chirality,
+              method=method, registration=registration, sphere_radius=sphere_radius,
+              pre_affine=pre_affine, post_affine=post_affine, meta_data=meta_data)
+    kw = {k:v for (k,v) in six.iteritems(kw) if v is not Ellipsis}
+    if pimms.is_vector(name):
+        if   len(name) == 1: name = name[0]
+        elif len(name) == 2:
+            (name, tmp) = name
+            if pimms.is_map(tmp):
+                kw = {k:v for (k,v) in six.iteritems(pimms.merge(tmp, kw)) if v is not Ellipsis}
+            else: hemi = tmp
+        elif len(name) == 3:
+            (name, hemi, opts) = name
+            kw = {k:v for (k,v) in six.iteritems(pimms.merge(opts, kw)) if v is not Ellipsis}
+    if 'hemi' in kw:
+        if hemi is Ellipsis: hemi = kw['hemi']
+        del kw['hemi']
+    # okay, we can get the map projection now...
+    mp = to_map_projection(name, hemi, **kw)
+    return mp(hemi)
 
 @pimms.immutable
 class Topology(VertexSet):
