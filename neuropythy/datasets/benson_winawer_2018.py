@@ -160,7 +160,7 @@ class BensonWinawer2018Dataset(Dataset):
         dataset_urls = BensonWinawer2018Dataset.dataset_urls
         if not os.path.isdir(path):
             if not create_directories: raise ValueError('Path given to download() does not exist')
-            else: os.makedirs(path, mode, exist_ok=True)
+            elif not os.path.isdir(path): os.makedirs(os.path.abspath(path), mode)
         if not overwrite:
             if all(os.path.isdir(os.path.join(path, x)) for x in six.iterkeys(dataset_urls)):
                 return path

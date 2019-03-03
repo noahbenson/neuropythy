@@ -33,7 +33,9 @@ def url_download(url, topath=None, create_dirs=True):
     '''
     # ensure directory exists
     if topath: topath = os.path.expanduser(os.path.expandvars(topath))
-    if create_dirs and topath: os.makedirs(os.path.dirname(topath), exist_ok=True)
+    if create_dirs and topath:
+        dnm = os.path.dirname(topath)
+        if not os.path.isdir(dnm): os.makedirs(os.path.abspath(dnm), 0o755))
     if six.PY2:
         response = urllib.request.urlopen(url)
         if topath is None: topath = response.read()
@@ -656,13 +658,13 @@ class FileMap(ObjectWithMetaData):
         for (s,p) in six.iteritems(supplemental_paths):
             if actual_cache_path:
                 cp = os.path.join(actual_cache_path, 'supp', s)
-                os.makedirs(cp, exist_ok=True)
+                if not os.path.isdir(cp): os.makedirs(os.path.abspath(cp), 0o755)
                 n += 1
             spaths[s] = pseudo_dir(p, delete=False, cache_path=cp)
         if actual_cache_path:
             if n > 0: cp = os.path.join(actual_cache_path, 'main')
             else:     cp = actual_cache_path
-            os.makedirs(cp, exist_ok=True)
+            if not os.path.isdir(cp): os.makedirs(os.path.abspath(cp), 0o755)
         spaths[None] = pseudo_dir(path, delete=False, cache_path=cp)
         return pyr.pmap(spaths)
     @pimms.value

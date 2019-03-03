@@ -102,8 +102,7 @@ def find_subject_path(sid):
     # first see if the subject existst there
     pth = os.path.join(_auto_download_options['subjects_path'], sub)
     if os.path.isdir(pth): return pth
-    try:
-        os.makedirs(pth, 0o755)
+    try: os.makedirs(os.path.abspath(pth), 0o755)
     except: return None
     return pth
 
@@ -186,7 +185,7 @@ def _auto_download_file(filename, data):
     if not fs.exists(hcp_flnm): return None
     # download it...
     basedir = os.path.split(filename)[0]
-    if not os.path.isdir(basedir): os.makedirs(basedir, 0o755)
+    if not os.path.isdir(basedir): os.makedirs(os.path.abspath(basedir), 0o755)
     logging.info('neuropythy: Fetching HCP file "%s"', filename)
     fs.get(hcp_flnm, filename)
     return filename
@@ -1815,7 +1814,7 @@ def download(sid, credentials=None, subjects_path=None, overwrite=False, release
         if not overwrite and os.path.isfile(loc_flnm): continue
         # gotta download it!
         basedir = os.path.split(loc_flnm)[0]
-        if not os.path.isdir(basedir): os.makedirs(basedir, 0o755)
+        if not os.path.isdir(basedir): os.makedirs(os.path.abspath(basedir), 0o755)
         fs.get(hcp_flnm, loc_flnm)
         pulled.append(loc_flnm)
     return pulled
@@ -2003,7 +2002,7 @@ def save_retinotopy_cache(sdir, sid, hemi, props, alignment='MSMAll', overwrite=
         p = np.asarray(props[p])
         if np.issubdtype(p.dtype, np.floating): p = np.asarray(p, np.float32)
         dr = os.path.split(os.path.abspath(fl))[0]
-        if not os.path.isdir(dr): os.makedirs(dr, 0o755)
+        if not os.path.isdir(dr): os.makedirs(os.path.abspath(dr), 0o755)
         nyio.save(fl, p)
 def _find_retinotopy_path(size=59):
     dirs = config['hcp_subject_paths']
@@ -2108,7 +2107,7 @@ def subject_filemap(sid, subject_path=None):
             # we didn't find it, but we have a place to put it
             sdir = _auto_download_options['subjects_path']
             sdir = os.path.join(sdir, str(sid))
-            if not os.path.isdir(sdir): os.makedirs(sdir, 0o755)
+            if not os.path.isdir(sdir): os.makedirs(os.path.abspath(sdir), 0o755)
         else:
             raise ValueError('Could not find HCP subject %s' % sid)
     ff = {'id':sid}

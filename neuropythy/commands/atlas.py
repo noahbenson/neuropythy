@@ -299,7 +299,7 @@ def calc_filemap(atlas_properties, subject, atlas_version_tags, worklog,
         if not os.path.isdir(output_path):
             if not create_directory:
                 raise ValueError('No such path and create_direcotry is False: %s' % output_path)
-            os.makedirs(output_path, 0o755)
+            os.makedirs(os.path.abspath(output_path), 0o755)
         filenames = []
         worklog('Extracting Files...')
         wl = worklog.indent()
