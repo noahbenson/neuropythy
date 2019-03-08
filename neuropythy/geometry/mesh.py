@@ -235,7 +235,7 @@ def to_mask(obj, m=None, indices=None):
     vertex indices instead of the vertex labels. If obj is not a VertexSet object, then this
     option is ignored.
     '''
-    if pimms.is_vector(obj) and len(obj) < 4 and m is None:
+    if not pimms.is_map(obj) and pimms.is_vector(obj) and len(obj) < 4 and m is None:
         if   len(obj) == 1: obj = obj[0]
         elif len(obj) == 2: (obj, m) = obj
         else:
