@@ -124,9 +124,9 @@ def extract_retinotopy_argument(obj, retino_type, arg, default='any'):
     if len(values) != n:
         found = False
         # could be that we were given a mesh data-field for a map
-        try:
-            values = values[obj.labels]
-        except:
+        try:    values = values[obj.labels]
+        except: values = None
+        if values is None:
             raise RuntimeError('%s data: length %s should be %s' % (retino_type, len(values), n))
     return values
 
@@ -945,7 +945,8 @@ def retinotopy_anchors(mesh, mdl,
              select
     if select is None:
         select = lambda a,b: b
-    elif pimms.is_vector(select) and len(select) == 2 and select[0] == 'close':
+    elif ((pimms.is_vector(select) or is_list(select) or is_tuple(select))
+          and len(select) == 2 and select[0] == 'close'):
         if pimms.is_vector(select[1]): d = np.mean(mesh.edge_lengths) * select[1][0]
         else:                          d = select[1]
         select = lambda idx,ancs: [a for a in ancs if a[0] is not None if npla.norm(X[idx] - a) < d]
@@ -1542,258 +1543,6 @@ def predict_retinotopy(sub, template='benson14', registration='fsaverage'):
     return tpl[0] if len(tpl) == 1 else tpl
 predict_retinotopy.retinotopy_templates = pyr.m(fsaverage={}, fsaverage_sym={})
 
-def clean_retinotopy(obj, retinotopy='empirical', output_style='visual', weight=Ellipsis,
-                     equality_sigma=0.15, equality_scale=10.0,
-                     smoothness_scale=0.04, orthogonality_scale=0,
-                     yield_report=False):
-    '''
-    clean_retinotopy(mesh) attempts to cleanup the retinotopic maps on the given cortical mesh by
-      minimizing an objective function that tracks the smoothness of the fields, the orthogonality
-      of polar angle to eccentricity, and the deviation of the values from the measured values; the
-      yielded result is the smoothed retinotopy, as would be returned by
-      as_retinotopy(..., 'visual').
-    clean_retinotopy(hemi) performs the identical operation on the hemisphere's white surface.
-    
-    The following options are accepted:
-      * retinotopy ('empirical') specifies the retinotopy data; this should be understood by the
-        retinotopy_data function or the as_retinotopy function.
-      * output_style ('visual') specifies the style of the output data that should be returned;
-        this should be a string understood by as_retinotopy.
-      * yield_report (False) may be set to True, in which case a tuple (retino, report) is returned,
-        where the report is the return value of the scipy.optimization.minimize function.
-    '''
-    from scipy.optimize import minimize
-    from scipy.sparse import (lil_matrix, csr_matrix)
-    if isinstance(obj, mri.Cortex): obj = obj.white_surface
-    # get the retinotopy first:
-    if pimms.is_str(retinotopy):
-        retinotopy = retinotopy_data(obj, retinotopy.lower())
-    (theta0, eccen0) = as_retinotopy(retinotopy, 'visual')
-    # we want to scale eccen by a log-transform; this is the inverse of the cortical magnification
-    # function in Horton & Hoyt 1991
-    def _hh_ecc2cd(ecc):
-        return 17.3 * (0.287682 + np.log(0.75 + ecc))
-    def _hh_cd2ecc(d):
-        return 0.75*(np.exp(0.0578035*d) - 1)
-    rho_max = _hh_ecc2cd(90.0)
-    rho0    = _hh_ecc2cd(eccen0) / rho_max # range from 0-1
-    # We scale theta down to +/- pi
-    theta0 *= np.pi/180.0
-
-    # our x0 value is just a joining of theta with rho:
-    x0 = np.concatenate((theta0, rho0))
-    n = len(theta0)
-    es  = obj.indexed_edges if isinstance(obj, geo.Tesselation) else obj.tess.indexed_edges
-    fcs = obj.indexed_faces if isinstance(obj, geo.Tesselation) else obj.tess.indexed_faces
-    m = es.shape[1]
-    p = fcs.shape[1]
-    ninv = 1.0 / n
-    minv = 1.0 / m
-
-    # figure out the weights...
-    if weight is Ellipsis:
-        varexp_aliases = ['variance_explained', 'varexp', 'vexpl', 'weight']
-        wgt = next((retinotopy[x] for x in varexp_aliases if x in retinotopy), ninv)
-    elif weight is None:
-        wgt = ninv
-    elif isinstance(weight, basestring):
-        wgt = obj.prop(weight)
-    else:
-        wgt = weight
-    wgt = np.asarray(wgt / np.sum(wgt))
-    ww  = wgt if wgt.shape is () else np.concatenate((wgt, wgt))
-
-    # Next, setup the potential functions
-
-    # PE1: equality; we use a Gaussian function so that patches of noise do not drive the potential
-    # too strongly...
-    (hpi, tau) = (0.5*np.pi, 2.0*np.pi)
-    sig = equality_sigma if hasattr(equality_sigma, '__iter__') else (equality_sigma,equality_sigma)
-    sig_tht = sig[0] * np.pi
-    sig_rho = sig[1]
-    f1_coef = ww
-    d1_coef = ww / np.concatenate([np.full(n, s**2) for s in [sig_tht,sig_rho]])
-    def _f_equal(x):
-        theta = x[0:n]
-        rho   = x[n:]
-        # differences...
-        dtht  = theta - theta0
-        drho  = rho - rho0
-        dtht2 = (dtht / sig_tht)**2
-        drho2 = (drho / sig_rho)**2
-        # okay, the equation itself
-        fexp  = np.exp(-0.5 * np.concatenate((dtht2, drho2)))
-        f     = np.sum(f1_coef * (1.0 - fexp))
-        # and the derivative
-        df    = d1_coef * fexp * np.concatenate((dtht, drho))
-        # That's it:
-        return (f, df)
-
-
-    # PE2: smoothness; we want the change along any edge to be minimal
-    # setup a fast edge-to-vertex summation:
-    e2v = lil_matrix((n, m))
-    for (k,(u,v)) in enumerate(es.T):
-        e2v[u,k] = 1.0
-        e2v[v,k] = -1.0
-    e2v = csr_matrix(e2v)
-    els = obj.edge_lengths
-    elsuu = np.isclose(els, 0)
-    els2inv = (1 + elsuu) / (els**2 + elsuu)
-    def _f_smooth(x):
-        theta = x[0:n]
-        rho   = x[n:]
-        # edge-values:
-        etht1 = theta[es[0]]
-        etht2 = theta[es[1]]
-        erho1 = rho[es[0]]
-        erho2 = rho[es[1]]
-        # differences along edges:
-        dtht  = (etht1 - etht2)
-        drho  = (erho1 - erho2)
-        dtht_r2 = dtht * els2inv
-        drho_r2 = drho * els2inv
-        # the potential is just the sum of squares of these
-        f = 0.5 * minv * (np.sum(dtht_r2*dtht) + np.sum(drho_r2*drho))
-        # for the derivative, we have to convert from edges back to vertices
-        df = minv * np.concatenate((e2v.dot(dtht_r2), e2v.dot(drho_r2)))
-        return (f, df)
-
-    # PE3: orthogonality; we want eccentricity and polar angle to be orthogonal
-    # at every triangle
-    # We need to calculate some constants beforehand...
-    fx = np.asarray([obj.coordinates[:,ii] for ii in fcs])
-    ## side lengths:
-    (s0_2,s1_2,s2_2) = [np.sum(dx**2, axis=0) for dx in (fx[2]-fx[1], fx[0]-fx[2], fx[1]-fx[0])]
-    ## height of the triangle (from a point in side 12 to point 0
-    (s0,s1,s2) = [np.sqrt(s) for s in (s0_2, s1_2, s2_2)]
-    s0uu = np.isclose(s0_2, 0)
-    inv_s0 = (1 - s0uu) / (s0 + s0uu)
-    part12 = (s0_2 - s1_2 + s2_2) * (0.5 * inv_s0)
-    height = np.sqrt(2*s0_2*(s1_2 + s2_2) - s0_2**2 - (s1_2 - s2_2)**2) * (0.5 * inv_s0)
-    heightuu = np.isclose(height, 0)
-    inv_h = (1 - heightuu) / (height + heightuu)
-    ## convenience function for calculating gradients wrt the faces and such
-    def _face_retino_grads(fs_tht, fs_rho):
-        # We can use the height and fraction of side 1-2 to find gradient vectors relative to the
-        # ad-hoc axes formed by traingle side 1-2 (x-axis) and the perpendicular to it (y-axis):
-        (gtht, grho) = [np.asarray([dx, (z[0] - (z[1] + dx*part12))*inv_h])
-                        for z  in [fs_tht, fs_rho]
-                        for dx in [(z[2] - z[1])*inv_s0]]
-        # find the norms of the gradients
-        (ntht_2, nrho_2) = [np.sum(gr**2, axis=0) for gr  in (gtht, grho)]
-        (ntht,   nrho)   = [np.sqrt(nz2)          for nz2 in (ntht_2, nrho_2)]
-        # dot product vecotrs, u, can now be calculated:
-        (utht, urho) = [gz * ((1 - uu)/(nz + uu))
-                        for (gz,nz) in [(gtht,ntht), (grho,nrho)]
-                        for uu in [np.isclose(nz, 0)]]
-        return (gtht,utht,ntht,ntht_2, grho,urho,nrho,nrho_2)
-    ## We need to know the initial gradient lengths
-    (fs_tht0, fs_rho0) = [[z0[ii] for ii in fcs] for z0 in [theta0, rho0]]
-    (_,_,ntht0,ntht0_2, _,_,nrho0,nrho0_2) = _face_retino_grads(fs_tht0, fs_rho0)
-    fidcs = np.where(np.logical_not(np.isclose(ntht0_2 * nrho0_2, 0)))[0]
-    ## we are only interested in faces whose initial gradients are not near 0; this prevents
-    ## discontinuities in the potential. Go ahead and filter these:
-    (fcs, fs_tht0, fs_rho0)             = [np.asarray(z)[:,fidcs] for z in (fcs, fs_tht0, fs_rho0)]
-    (s0, s1, s2, inv_h, inv_s0, part12, ntht0_2, nrho0_2) = [
-        np.asarray(z)[fidcs]
-        for z in (s0, s1, s2, inv_h, inv_s0, part12, ntht0_2, nrho0_2)]
-    ## we now know the number of triangles and can calculate our normalization constants:
-    p = len(fidcs)
-    pinv = 1.0 / p
-    invtot = ninv + minv + pinv
-    (ninv, minv, pinv) = (ninv/invtot, minv/invtot, pinv/invtot)
-    ## we can also pre-calculate a part of the jacobian:
-    #jac_gr_z = [[height, 0], [height*(part12/s0 - 1), -1.0/s0], [-height*part12/s0, 1.0/s0]]
-    jac_gr_z_T = [[0,       inv_h],
-                  [-inv_s0, (part12 - s0)*inv_h*inv_s0],
-                  [inv_s0,  -part12*inv_s0*inv_h]]
-    ## We also need some data about how to get from faces to vertices
-    f2vs = []
-    for frow in fcs:
-        lm = lil_matrix((n,p))
-        for (f,u) in enumerate(frow):
-            lm[u,f] = 1
-        f2vs.append(csr_matrix(lm))
-    def _f_ortho(x):
-        # This calculation is a bit opaque; the actual value computed is the square of the dot
-        # product of the normalized normal vector of the triangle for each field...
-        # This can be found by decomposing the derivative of the dot product using the
-        # multiplication rule:
-        theta = x[0:n]
-        rho   = x[n:]
-        # separate out by triangle:
-        fs_tht = np.asarray([theta[ii] for ii in fcs])
-        fs_rho = np.asarray([rho[ii]   for ii in fcs])
-        # get the face data:
-        (gtht,utht,ntht,ntht_2, grho,urho,nrho,nrho_2) = _face_retino_grads(fs_tht, fs_rho)
-        # the angle cosine is just this:
-        cos_phi = np.sum(utht * urho, axis=0)
-        # now, we consider the jacobian; first, we already calculated the jacobian of gtht and grho
-        # above (jac_gr_z); we also need the jacobian of the normalized grads in terms of the grads:
-        (ntht_3_inv, nrho_3_inv) = [(1 - uu) / (v + uu)
-                                    for v  in [ntht*ntht_2, nrho*nrho_2]
-                                    for uu in [np.isclose(v, 0)]]
-        (jac_norm_tht, jac_norm_rho) = [
-            np.asarray([[z[1]**2 * inz3,           -z01],
-                        [          -z01, z[0]**2 * inz3]])
-            for (z,inz3)  in [(gtht,ntht_3_inv), (grho,nrho_3_inv)]
-            for z01           in [z[0]*z[1]*inz3]]
-        # Okay, we can stick together the jacobians:
-        (jac_tht, jac_rho) = [
-            np.asarray([j0*u0 + j1*u1 for (j0,j1) in jac_gr_z_T])
-            for (jac_gz, gw) in [(jac_norm_tht, urho), (jac_norm_rho, utht)]
-            for (u0,u1)      in [(jac_gz[0,0]*gw[0] + jac_gz[0,1]*gw[1],
-                                  jac_gz[1,0]*gw[0] + jac_gz[1,1]*gw[1])]]
-        # last, we just need to move these over to vertices:
-        (jac_tht, jac_rho) = [np.sum([m.dot(cos_phi * jz) for (m,jz) in zip(f2vs,jac_z)], axis=0)
-                              for jac_z in [jac_tht, jac_rho]]
-        # That's it, there is just dressing to put on the first part:
-        f_ang  = 0.5 * pinv * np.sum(cos_phi**2)
-        df_ang = pinv * np.concatenate((jac_tht, jac_rho))
-        # The second part of the gradient is the part that prevents flat 0-gradients:
-        # 1/2(log(1/2 |grad t|/|grad t0|)^2 + log(1/2 |grad r|/|grad r0|)^2)
-        if np.isclose(ntht_2, 0).any() or np.isclose(nrho_2, 0).any():
-            return (np.inf, 0)
-        log_tht = np.log(ntht_2 / ntht0_2)
-        log_rho = np.log(nrho_2 / nrho0_2)
-        # potential is now easy...
-        f_flt = 0.25 * pinv * (np.sum(log_tht**2) + np.sum(log_rho**2))
-        # we need to calculate the gradient:
-        (cc_tht, cc_rho) = [lgz / rz for (lgz,rz) in [(log_tht,ntht_2), (log_rho,nrho_2)]]
-        (lg_tht, lg_rho) = [np.asarray([cc_z * (j0*uz[0] + j1*uz[1]) for (j0,j1) in jac_gr_z_T])
-                            for (uz,cc_z) in [(utht,cc_tht), (urho,cc_rho)]]
-        df_flt = pinv * np.concatenate([np.sum([m.dot(gzrow) for (gzrow,m) in zip(gz,f2vs)], axis=0)
-                                        for gz in (lg_tht, lg_rho)])
-        return (f_ang + f_flt, df_ang + df_flt)
-
-    # Okay, mix these together!
-    def _f(x):
-        (fe, dfe) = _f_equal(x)  if equality_scale != 0      else (0,0)
-        (fs, dfs) = _f_smooth(x) if smoothness_scale != 0    else (0,0)
-        (fo, dfo) = _f_ortho(x)  if orthogonality_scale != 0 else (0,0)
-        scales = [equality_scale, smoothness_scale, orthogonality_scale]
-        if not np.isfinite([fe,fs,fo]).all():
-            return (np.inf, np.full(len(x), np.inf))
-        f  = equality_scale*fe + smoothness_scale*fs + orthogonality_scale*fo
-        df = np.sum([d*s for (d,s) in zip([dfe,dfs,dfo],
-                                          [equality_scale,smoothness_scale,orthogonality_scale])],
-                    axis=0)
-        return (f, df)
-
-    # That's our potential; now we can do the minimization
-    res = minimize(_f, x0, jac=True, method='L-BFGS-B')
-    #return (x0, _f, (_f_equal, _f_smooth, _f_ortho))
-    theta = res.x[0:n]
-    rho = res.x[n:]
-    # rescale rho
-    eccen = _hh_cd2ecc(rho * rho_max)
-    angle = theta*180.0/np.pi
-    if yield_report is True:
-        return (as_retinotopy({'polar_angle':angle, 'eccentricity':eccen}, output_style), res)
-    else:
-        return as_retinotopy({'polar_angle':angle, 'eccentricity':eccen}, output_style)
-
 def retinotopy_comparison(arg1, arg2, arg3=None,
                           eccentricity_range=None, polar_angle_range=None, visual_area_mask=None,
                           weight=Ellipsis, weight_min=None, visual_area=Ellipsis,
@@ -1996,4 +1745,223 @@ def retinotopy_comparison(arg1, arg2, arg3=None,
         if gsrad_inv is not None:
             result[resprop + '_radii_error'] = aerr * gsrad_inv
     return pimms.itable(result)
-        
+
+def clean_retinotopy_potential(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=Ellipsis,
+                               surface='midgray', min_weight=Ellipsis, min_eccentricity=0.75,
+                               measurement_uncertainty=0.3, measurement_knob=1,
+                               magnification_knob=0, fieldsign_knob=12, edge_knob=0):
+    '''
+    clean_retinotopy_potential(hemi) yields a retinotopic potential function for the given
+      hemisphere that, when minimized, should yeild a cleaned/smoothed version of the retinotopic
+      maps.
+
+    The potential function f returned by clean_retinotopy_potential() is a PotentialFunction object,
+    as defined in neuropythy.optimize. The potential function consists of four terms that are summed
+    with weights derived from the four '*_knob' options (see below). The function f as well as the
+    three terms that it comprises require as input a matrix X of the pRF centers of mesh or the
+    masked part of the mesh (X0 is the initial measurement matrix). These four potential terms are:
+      * The measurement potential. The retinotopic map that is being minimized is referred to as the
+        measured map, and the measurement potential function, fm(X), increases as X becomes farther
+        from X0. Explicitly, fm(X) is the sum over all pRF centers (x,y) in X (with initial position
+        (x0,y0) in X0) of exp(-0.5 * ((x - x0)**2 + (y - y0)**2) / s**2). The parameter s is the
+        initial eccentricity (sqrt(x0**2 + y0**2)) times the measurement_uncertainty option.
+      * The magnification potential. The retinotopy cleaning is performed in part by attempting to
+        smooth the visual magnification (the inverse of cortical magnification: deg**2 / mm**2)
+        across the cortical surface; the magnification potential fg(X) specifies how the visual
+        magnification contributes to the overall potential: it decreases as the magnification
+        becomes smoother and increases as it becomes less smooth. Explicitly, fg(X) is equal to the
+        sum over all pairs of faces (s,t) sharing one edge e of
+        (vmag(s) - sgn(vmag(t))*vmag(e))**2 + (vmag(t) - sgn(vmag(s))*vmag(e))**2. Note that the
+        function vmag(s) yields the areal visual magnification (deg**2 / mm**2) of any face s and
+        vmag(e) is the square of the linear magnification of any edge e; additionally, the sign of
+        vmag(s) for a face s is always equal to the fieldsign of the face (while for edges vmag(e)
+        is always positive).
+      * The fieldsign potential. The next way in which the potential function attempts to clean the
+        retinotopy is via the use of fieldsign: adjacent faces should have the same fieldsign under
+        most circumstanced. This is modeled by the function fs(X), which is 0 for any pair of faces
+        that have the same fieldsign and non-zero for faces that have different fieldsigns. The
+        form of fs(X) is the sum over all pairs of adjacent triangles (s,t) of -vmag(s)*vmag(t) if
+        vmag(s) and vmag(t) have different fieldsigns, otherwise 0.
+      * The edge potential. Finally, the potential function attempts to force edges to be smooth by
+        penalizing edges whose endpoints are far apart in the visual field. The edge potential
+        function fe(X) is equal to the sum for all edges (u,v) of
+        (x[u] - x[v])**2 + (y[u] - y[v])**2 / mean(eccen(u), eccen(v)).
+
+    Note additionally that all four potential functions are normalized by a factor intended to keep
+    them on similar scales (this factor is not mentioned above or below, but it is automatically
+    applied to all potential terms). For the magnification, fieldsign, and edge potential terms, the
+    normalization factor is 1/m where m is the number of non-perimeter edges (or, alternately, the
+    number of adjacent face pairs) in the mesh. For the measurement potential term, the
+    normalization factor is 1/W where W is the sum of the weights on the measurement vertices (if
+    no weights are given, they are considered to be 1 for each vertex).
+
+    The following options may be given:
+      * retinotopy (default: Ellipsis) specifies the retinotopy data to use for the hemisphere;
+        the argument may be a map from retinotopy_data or a valid argument to it. The default
+        indicates that the result of calling retinotopy_data(hemi) is used.
+      * mask (default: Ellipsis) specifies that the specific mask should be used; by default, the
+        mask is made using the vertices kept in to_flatmap('occipital_pole', hemi, radius=pi/2.75).
+      * weight (default: Ellipsis) specifies the weight to use; the default indicates that the
+        weight found in the retinotopy data, if any, should be used. If None, then all values
+        in the mask are equally weighted.
+      * min_weight (default: Ellipsis) specifies the minimum weight to include, after the
+        weights have been normalized such that sum(weights) == 1. If the value is a list or
+        tuple containing a single item [p] then p is taken to be a percentile below which
+        vertices should be excluded. The default, Ellipsis, is equivalent to [5].
+      * min_eccentricity (default: 0.75) specifies the eccentricity below which no measurement-based
+        potential is applied; i.e., by default, vertices with eccentricity below 0.75 degrees will
+        be considered as having 0 weight.
+      * surface (default: 'midgray') specifies which surface should be used to establish cortical
+        magnification; may be 'pial', 'midgray', or 'white'.
+      * measurement_uncertainty (default: 0.3) is used to determine the standard deviation of the 
+        Gaussian potential well used to prevent individual vertices with valid retinotopic
+        measurements from straying too far from their initial measured positions. In other words, if
+        a vertex has a weight that is above threshold and a pRF center of (x0,y0), then the 
+        measurement-potential for that vertex is exp(-0.5 * ((x - x0)**2 + (y - y0)**2)/s**2) where
+        (x,y) is the center of the pRF during minimization and s is equal to
+        measurement_uncertainty * sqrt(x0**2 + y0**2).
+      * measurement_knob, magnification_knob, fieldsign_knob, and edge_knob (defaults: 1, 0, 12, 0,
+        respectively) specify the relative weights of the terms of the potential function on a log2
+        scale. In other words, if the measurement, magnification, fieldsign, and edge potential
+        terms are fm, fg, fs, and fe while the knobs are km, kg, ks, and ke, then the overall
+        potential function f is equal to:
+        f(X) = (2**km * fm(X) + 2**kg * fg(X) + 2**ks * fs(X) + 2**ke * fe(X)) / q
+        where w = (2**km + 2**kg + 2**ks + 2**ke)
+        If any knob is set to None, then its value is 0 instead of 2**k.
+    '''
+    import neuropythy.optimize as op
+    mesh = (hemi.surfaces[surface] if geo.is_topo(hemi) and pimms.is_str(surface) else
+            surface                if geo.is_mesh(surface)                        else
+            hemi)
+    if mask is Ellipsis:
+        if mesh.coordinates.shape[0] == 2: mask = mesh.indices
+        else: mask = mri.to_flatmap('occipital_pole', hemi, radius=np.pi/2.75).labels
+    else: mask = hemi.mask(mask, indices=True)
+    rdat = (retinotopy_data(mesh) if retinotopy is Ellipsis   else
+            retinotopy            if pimms.is_map(retinotopy) else
+            retinotopy_data(mesh, retinotopy))
+    wght = (rdat.get('variance_explained') if weight is Ellipsis else
+            rdat.get(weight)               if weight in rdat     else
+            hemi.property(weight)          if weight is not None else
+            None)
+    # fix rdat, weight, and mesh to match the mask
+    rdat = {k:(v[mask] if len(v) > len(mask) else v) for (k,v) in six.iteritems(rdat)}
+    mesh = mesh.submesh(mask)
+    n    = mesh.vertex_count # number vertices
+    N    = 2*n # number parameters
+    if wght is None:            wght = np.ones(n)
+    elif len(wght) > len(mask): wght = np.array(wght)[mask]
+    else:                       wght = np.array(wght)
+    wght[~np.isfinite(wght)] = 0
+    if min_eccentricity < 0 or np.isclose(min_eccentricity, 0):
+        raise ValueError('min_eccentricity should be small but must be > 0')
+    # we'll need a potential function...
+    # The input to the potential function will be a 2 x N matrix of (x,y) visual field coordinates:
+    xy      = op.identity
+    (x,y)   = (xy[np.arange(0,N,2)],xy[np.arange(1,N,2)])
+    # We have a few components to the potential function
+    # [1] Deviation from measurements:
+    # These are the initial measurements we will use
+    xy0     = np.array(as_retinotopy(rdat, 'geographical')).T
+    (x0,y0) = xy0.T
+    xy0     = xy0.flatten()
+    ecc0    = np.sqrt(x0**2 + y0**2)
+    ii      = np.where(ecc0 > min_eccentricity)[0]
+    minw    = (0                             if min_weight is None          else
+               np.percentile(wght[ii], 0.05) if min_weight is Ellipsis      else
+               min_weight                    if pimms.is_number(min_weight) else
+               0                             if np.std(wght[ii]) < 0.00001  else
+               np.percentile(wght[ii], min_weight[0]))
+    ii      = np.intersect1d(ii, np.where(wght > minw)[0])
+    wsum    = np.sum(wght[ii])
+    if wsum < 0 or np.isclose(wsum, 0): raise ValueError('all-zero weights given')
+    wght    = wght / wsum
+    s2_meas = (measurement_uncertainty * ecc0[ii])**2
+    d2_meas = (x[ii] - x0[ii])**2 + (y[ii] - y0[ii])**2
+    f_meas  = (1 - op.exp(-0.5*d2_meas/s2_meas)) * wght[ii]
+    f_meas  = op.sum(f_meas)
+    # [2] For adjacent triangles, how different are the cortical magnifications?
+    sarea   = mesh.face_areas
+    faces   = mesh.tess.indexed_faces.T
+    selen   = mesh.edge_lengths
+    # we want to ensure that vmag is locally smooth across triangles, but we need
+    # to make sure there aren't any edges or faces with 0 surface-areas (so that
+    # we don't divide by zero)
+    mnden   = 0.0001
+    (e,s,t) = np.transpose([(i,e[0],e[1]) for (i,e) in enumerate(mesh.tess.edge_faces)
+                            if len(e) == 2 and selen[i] > mnden
+                            if sarea[e[0]] > mnden and sarea[e[1]] > mnden])    
+    m       = len(e)
+    (fis,q) = np.unique(np.concatenate([s,t]), return_inverse=True)
+    (s,t)   = np.reshape(q, (2,-1))
+    faces   = faces[fis]
+    sarea   = sarea[fis]
+    selen   = selen[e]
+    (u,v)   = mesh.tess.indexed_edges[:,e]
+    # we will use visual mag instead of cortical mag: this way we aren't worried about
+    # varea going to 0 and creating a singularity, and it should have a linear 
+    # relationship with eccentricity
+    velen2  = (x[u] - x[v])**2 + (y[u] - y[v])**2
+    vme     = velen2 / selen**2 # visual magnification: edges
+    varea   = op.signed_face_areas(faces)
+    vmf     = varea / sarea # visual magnification: faces
+    vms     = vmf[s]
+    vmt     = vmf[t]
+    vsgns   = op.sign(vmf)
+    f_magn  = (1.0 / m) * op.sum((vms - vsgns[t]*vme)**2 + (vmt - vsgns[s]*vme)**2)
+    # [3] we want a special function for faces whose vmags are different signs
+    f_sign  = op.compose(op.piecewise(0, ((-np.inf, 0), -op.identity)), vms*vmt)
+    f_sign  = (1.0 / m) * op.sum(f_sign)
+    # and the edge potential...
+    ex      = 0.5*(x[u] + x[v])
+    ey      = 0.5*(y[u] + y[v])
+    eecc2   = (ex**2 + ey**2)
+    f_edge  = (1.0 / m) * op.sum(((x[u] - x[v])**2 + (y[u] - y[v])**2) / (eecc2 + 0.05))
+    # This is the potential function:
+    (k_meas, k_magn, k_sign, k_edge) = [
+        0 if knob is None else (2**knob)
+        for knob in (measurement_knob, magnification_knob, fieldsign_knob, edge_knob)]
+    fs = (k_meas*f_meas, k_magn*f_magn, k_sign*f_sign, k_edge*f_edge)
+    f = (fs[0] + fs[1] + fs[2] + fs[3]) / (k_meas + k_magn + k_sign + k_edge)
+    object.__setattr__(f, 'meta_data',
+                       pyr.m(f_meas=f_meas, f_magn=f_magn, f_sign=f_sign, f_edge=f_edge,
+                             mesh=mesh, X0=np.reshape(xy0, (-1,2))))
+    return f
+
+def clean_retinotopy(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=Ellipsis,
+                     surface='midgray', min_weight=Ellipsis, min_eccentricity=0.75,
+                     measurement_uncertainty=0.3, measurement_knob=1,
+                     magnification_knob=0, fieldsign_knob=12, edge_knob=0,
+                     yield_report=False, steps=100, rounds=4, output_style='visual'):
+
+    '''
+    clean_retinotopy(hemi) attempts to cleanup the retinotopic maps on the given cortical mesh by
+      minimizing an objective function that tracks the smoothness of the fields, the orthogonality
+      of polar angle to eccentricity, and the deviation of the values from the measured values; the
+      yielded result is the smoothed retinotopy, as would be returned by
+      as_retinotopy(..., 'visual').
+
+    The argument hemi may be a Cortex object or a Mesh. See also clean_retinotopy_potential for
+    information on the various parameters related to the potential function that is minimized by
+    clean_retinotopy(). The following additional options are also accepted:
+      * output_style (default: 'visual') specifies the style of the output data that should be
+        returned; this should be a string understood by as_retinotopy.
+      * yield_report (False) may be set to True, in which case a tuple (retino, report) is returned,
+        where the report is the return value of the scipy.optimization.minimize function.
+    '''
+    # First, make the potential function:
+    f = clean_retinotopy_potential(hemi, retinotopy=retinotopy, mask=mask, weight=weight,
+                                   surface=surface, min_weight=min_weight,
+                                   min_eccentricity=min_eccentricity,
+                                   measurement_uncertainty=measurement_uncertainty,
+                                   measurement_knob=measurement_knob,
+                                   magnification_knob=magnification_knob,
+                                   fieldsign_knob=fieldsign_knob, edge_knob=edge_knob)
+    # The initial parameter vector is stored in the meta-data:
+    X0 = f.meta_data['X0']
+    X = X0
+    for r in range(rounds):
+        mtd = 'L-BFGS-B' if (r % 2) == 0 else 'TNC'
+        X = f.minimize(X, method=mtd, options=dict(maxiter=steps, disp=False)).x
+    X = np.reshape(X, (-1,2)).T
+    return as_retinotopy({'latitude':X[0], 'longitude':X[1]}, output_style)
