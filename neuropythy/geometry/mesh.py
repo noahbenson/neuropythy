@@ -3033,8 +3033,9 @@ class Path(ObjectWithMetaData):
                 rev = 5 if lastf is None else len(np.unique([lastf, f])) # will be 3, 4, or 5
                 if   rev == 3: k = list(reversed(k))
                 elif rev == 4:
-                    rev = len(np.unique(np.concatenate([lastf,f[k]])))
-                    if rev == 4: k = list(reversed(k))
+                    rev = len(np.unique(np.concatenate([lastf, f[k]])))
+                    if rev == 4 and (len(u) < 1 or not (u[-1] not in f or v[-1] not in f)):
+                        k = list(reversed(k))
                 if len(u) == 0: (uv,vtx) = (f[k],None)
                 else:
                     uvl = [u[-1],v[-1]]
@@ -3237,12 +3238,12 @@ class Path(ObjectWithMetaData):
         '''
         tesselate_triangle_paths([path1, path2...]) yields a (3x2xN) array of N 2D triangles that
           tesselate a triangle without crossing any of the given paths. The paths themselves should
-          be in barycentric coordinates and should each start and end on an edge without touching any
-          edge between. The 2nd dimension consists of the first two barycentric coordinates while the
-          first dimensions corresponds to the edges of each tesselated triangle.
+          be in barycentric coordinates and should each start and end on an edge without touching 
+          any edge between. The 2nd dimension consists of the first two barycentric coordinates
+          while the first dimensions corresponds to the edges of each tesselated triangle.
 
-        This function is probably not particularly performant--it operates by trying to connect every
-        pair of vertices and rejecting a pairing if it crosses any existing line.
+        This function is probably not particularly performant--it operates by trying to connect
+        every pair of vertices and rejecting a pairing if it crosses any existing line.
         '''
         # these coords are used to reify BC triangles while figuring them out...
         A = np.array([0.0,              0.0])
@@ -3333,8 +3334,8 @@ class Path(ObjectWithMetaData):
         seg_idcs = set(zip(*seg_idcs[:,:m]))
         for i in range(n):
             for j in range(i+1,n):
-                # if this edge (a) is in the segs already or (b) is colinear with anything in segs or
-                # (c) intersects anything in segs, then we reject it
+                # if this edge (a) is in the segs already or (b) is colinear with anything in segs
+                # or (c) intersects anything in segs, then we reject it
                 if (i,j) in seg_idcs or (j,i) in seg_idcs: continue
                 ss = [coords[i], coords[j]]
                 if segments_overlapping(segs, ss).any(): continue
