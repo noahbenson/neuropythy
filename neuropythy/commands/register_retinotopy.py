@@ -424,7 +424,7 @@ def calc_retinotopy(note, error, subject, clean, run_lh, run_rh,
         # Do smoothing, if requested
         if clean:
             note('Cleaning %s retinotopy...' % h.upper())
-            (ang,ecc) = clean_retinotopy(hemi, props)
+            (ang,ecc) = clean_retinotopy(hemi, retinotopy=props, mask=None, weight='weight')
             props['polar_angle']  = ang
             props['eccentricity'] = ecc
         ctcs[h] = hemi.with_prop(props)
