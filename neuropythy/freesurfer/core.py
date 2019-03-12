@@ -264,6 +264,11 @@ class Subject(mri.Subject):
         for s in ['white', 'pial', 'inflated', 'sphere']:
             surfs[s] = _make_surf_loader(os.path.join(surf_path, chirality + '.' + s))
         surfs = pimms.lazy_map(surfs)
+        def _make_midgray():
+            x = np.mean([surfs['white'], surfs['pial']], axis=0)
+            x.setflags(write=False)
+            return x
+        surfs = surfs.set('midgray', _make_midgray)
         # okay, now we can do the same for the relevant registrations; since the sphere registration
         # is the same as the sphere surface, we can just copy that one over:
         regs = {'native': lambda:surfs['sphere']}
