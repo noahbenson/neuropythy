@@ -1963,5 +1963,7 @@ def clean_retinotopy(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=Ellipsis,
     for r in range(rounds):
         mtd = 'L-BFGS-B' if (r % 2) == 0 else 'TNC'
         X = f.minimize(X, method=mtd, options=dict(maxiter=steps, disp=False)).x
-    X = np.reshape(X, (-1,2)).T
-    return as_retinotopy({'latitude':X[0], 'longitude':X[1]}, output_style)
+    X = np.reshape(X, X0.shape)
+    if X.shape[0] != 2: X = X.T
+    return as_retinotopy({'x':X[0], 'y':X[1]}, output_style)
+
