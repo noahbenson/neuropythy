@@ -1932,7 +1932,8 @@ def clean_retinotopy(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=Ellipsis,
                      surface='midgray', min_weight=Ellipsis, min_eccentricity=0.75,
                      measurement_uncertainty=0.3, measurement_knob=1,
                      magnification_knob=0, fieldsign_knob=12, edge_knob=0,
-                     yield_report=False, steps=100, rounds=4, output_style='visual'):
+                     yield_report=False, steps=100, rounds=4, output_style='visual',
+                     jitter=None, average=None):
 
     '''
     clean_retinotopy(hemi) attempts to cleanup the retinotopic maps on the given cortical mesh by
@@ -1949,6 +1950,20 @@ def clean_retinotopy(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=Ellipsis,
       * yield_report (False) may be set to True, in which case a tuple (retino, report) is returned,
         where the report is the return value of the scipy.optimization.minimize function.
     '''
+    # parse our args
+    if jitter in [True, Ellipsis, 'auto', 'automatic']: jitter = (4, 0.05, 1)
+    if is_tuple(jitter) and len(jitter) > 0:
+        if len(jitter) > 3:  raise ValueError('jitter tuple must be (mod, scale, phase)')
+        if len(jitter) == 1: jitter = jitter + (0.005,)
+        if len(jitter) == 2: jitter = jitter + (1,)
+        (jitter_mod, jitter_scale, jitter_phase) = jitter
+    else: jitter = None
+    if average in [True, Ellipsis, 'auto', 'automatic']: average = (4, 3)
+    if is_tuple(average) and len(average) > 0:
+        if len(average) > 2:  raise ValueError('average tuple must be (mod, phase)')
+        if len(average) == 1: average = average + (3,)
+        (average_mod, average_phase) = average
+    else: average = None
     # First, make the potential function:
     f = clean_retinotopy_potential(hemi, retinotopy=retinotopy, mask=mask, weight=weight,
                                    surface=surface, min_weight=min_weight,
@@ -1959,9 +1974,18 @@ def clean_retinotopy(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=Ellipsis,
                                    fieldsign_knob=fieldsign_knob, edge_knob=edge_knob)
     # The initial parameter vector is stored in the meta-data:
     X0 = f.meta_data['X0']
+    submesh = f.meta_data['mesh']
     X = X0
-    for r in range(rounds):
-        mtd = 'L-BFGS-B' if (r % 2) == 0 else 'TNC'
+    for ii in range(rounds):
+        mtd = 'L-BFGS-B' if (ii % 2) == 0 else 'TNC'
+        if jitter is not None and ii % jitter_mod == jitter_phase:
+            ec = np.sqrt(np.sum(X**2, axis=1))
+            th = (np.random.rand(len(ec)) - 0.5)*2*np.pi
+            r  = np.random.exponential(ec*jitter_scale)
+            X = X + np.transpose([r*np.cos(th), r*np.sin(th)])
+        if average is not None and ii % average_mod == average_phase:
+            X = np.array([X[k] if len(nn) == 0 else np.mean(X[list(nn)],0)
+                          for (k,nn) in enumerate(submesh.tess.indexed_neighborhoods)])
         X = f.minimize(X, method=mtd, options=dict(maxiter=steps, disp=False)).x
     X = np.reshape(X, X0.shape)
     if X.shape[0] != 2: X = X.T

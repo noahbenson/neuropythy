@@ -337,14 +337,10 @@ class RetinotopyMeshModel(RetinotopyModel):
         tx = self.inverse_transform
         xy = np.asarray([x,y]).T if tx is None else np.dot(tx, [x,y,np.ones(len(x))])[0:2].T
         # we only need to interpolate from the inverse mesh in this case
-        interp_ae = self.cortical_mesh.interpolate(
-            xy,
-            [self.polar_angles, self.eccentricities],
-            method='linear')
-        interp_id = self.cortical_mesh.interpolate(
-            xy,
-            self.visual_areas,
-            method='nearest')
+        interp_ae = self.cortical_mesh.interpolate(xy, [self.polar_angles, self.eccentricities],
+                                                   method='linear')
+        interp_id = self.cortical_mesh.interpolate(xy, self.visual_areas,
+                                                   method='heaviest')
         interp = np.asarray([interp_ae[0], interp_ae[1], interp_id])
         bad = np.where(np.isnan(np.prod(interp, axis=0)))[0]
         interp[:,bad] = 0.0

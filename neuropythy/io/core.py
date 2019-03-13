@@ -152,8 +152,8 @@ def guess_export_format(filename, data, **kwargs):
     fnm = filename.lower()
     fmt = None
     # to make sure we get the most specific ending, sort the exporters by their length
-    es = sorted(((k,e) for (k,es) in six.iteritems(exporters) for e in es),
-                key=lambda x:x[1])
+    es = sorted(((k,e) for (k,es) in six.iteritems(exporters) for e in es[1]),
+                key=lambda x:-len(x[1]))
     for (k,e) in es:
         if fnm.endswith(('.' + e) if e[0] != '.' else e):
             return k

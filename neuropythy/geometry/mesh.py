@@ -1401,6 +1401,18 @@ class Mesh(VertexSet):
                 (xs[:,ii].flatten(), (np.tile(np.arange(n)[ii], 3), fsi.flatten())),
                 shape=(n, m))
         else: return self.linear_interpolation(self.address(coords, n_jobs=n_jobs))
+    def heaviest_interpolation(self, coords, n_jobs=-1):
+        '''
+        mesh.heaviest_interpolation(x) yields an interpolation matrix for the given coordinate or 
+          coordinate matrix x. The heaviest interpolation matrix is like a linear interpolation
+          except that it assigns to each value the vertex with the maximum weight.
+        '''
+        li = self.linear_interpolation(coords, n_jobs=n_jobs)
+        # rescale the rows
+        mx = flattest(li.argmax(axis=1))
+        wh = np.where(~np.isclose(flattest(li.sum(axis=1)), 0))[0]
+        mx = mx[wh]
+        return sps.csr_matrix((np.ones(len(mx)), (wh, mx)), shape=li.shape, dtype=np.int)
     def apply_interpolation(self, interp, data):
         '''
         mesh.apply_interpolation(interp, data) yields the result of applying the given interpolation
@@ -1490,6 +1502,11 @@ class Mesh(VertexSet):
                 self.linear_interpolation(x, n_jobs=n_jobs),
                 mask=mask,
                 weights=weights)
+        elif method in ['heaviest', 'heavy', 'corner', 'h']:
+            return Mesh.scale_interpolation(
+                self.heaviest_interpolation(x, n_jobs=n_jobs),
+                mask=mask,
+                weights=weights)
         else: raise ValueError('unknown interpolation method: %s' % method)
     def interpolate(self, x, data, mask=None, weights=None, method='automatic', n_jobs=-1):
         '''
@@ -1503,16 +1520,16 @@ class Mesh(VertexSet):
             be used; any point whose nearest neighbor (see below) is in the given mask will, instead
             of an interpolated value, be set to nan. The mask is interpreted by the mask() method.
           * method (default: 'automatic') specifies what method to use for interpolation. The only
-            currently supported methods are 'automatic', 'linear', or 'nearest'. The 'nearest'
-            method does not actually perform a nearest-neighbor interpolation but rather assigns to
+            currently supported methods are 'automatic', 'linear', 'heaviest', or 'nearest'. The
+            'heaviest' method is like a nearest-neighbor interpolation but rather assigns to
             a destination vertex the value of the source vertex whose voronoi-like polygon contains
             the destination vertex; note that the term 'voronoi-like' is used here because it uses
             the Voronoi diagram that corresponds to the triangle mesh and not the true delaunay
             triangulation. The 'linear' method uses linear interpolation; though if the given data
-            is non-numerical, then nearest interpolation is used instead. The 'automatic' method
-            uses linear interpolation for any floating-point data and nearest interpolation for any
-            integral or non-numeric data. Note that nearest-neighbor interpolation is used for
-            non-numeric data arrays no matter what the method argument is.
+            is non-numerical, then heaviest interpolation is used instead. The 'automatic' method
+            uses linear interpolation for any floating-point data and heaviest interpolation for any
+            integral or non-numeric data. Note that heaviest interpolation is used for non-numeric
+            data arrays if the method argument is 'linear'.
           * n_jobs (default: -1) is passed along to the cKDTree.query method, so may be set to an
             integer to specify how many processors to use, or may be -1 to specify all processors.
         '''
@@ -1520,26 +1537,32 @@ class Mesh(VertexSet):
         if isinstance(x, Mesh): x = x.coordinates
         # no matter what the input we want to calculate the interpolation matrices but once:
         interps = pimms.lazy_map(
-            {'nearest': lambda:self.interpolation_matrix(x,
-                                                         n_jobs=n_jobs, method='nearest',
-                                                         mask=mask, weights=weights),
-             'linear':  lambda:self.interpolation_matrix(x,
-                                                         n_jobs=n_jobs, method='linear',
-                                                         mask=mask, weights=weights)})
+            {'nearest':  lambda:self.interpolation_matrix(x,
+                                                          n_jobs=n_jobs, method='nearest',
+                                                          mask=mask, weights=weights),
+             'heaviest': lambda:self.interpolation_matrix(x,
+                                                          n_jobs=n_jobs, method='heaviest',
+                                                          mask=mask, weights=weights),
+             'linear':   lambda:self.interpolation_matrix(x,
+                                                          n_jobs=n_jobs, method='linear',
+                                                          mask=mask, weights=weights)})
         if pimms.is_str(method): method = method.lower()
         if method in [None, Ellipsis, 'auto', 'automatic']: method = None
         elif method in ['lin', 'linear', 'trilinear']: method = 'linear'
-        elif method in ['nn', 'nearest', 'near', 'nearest-neighbor', 'nearest_neighbor']:
+        elif method in ['heaviest', 'heavy', 'corner', 'h']: method = 'heaviest'
+        elif method in ['nn','nearest','near','nearest-neighbor','nearest_neighbor']:
             method = 'nearest'
         else: raise ValueError('cannot interpret method: %s' % method)
         # we now need to look over data...
         def _apply_interp(dat):
             if pimms.is_str(dat):
                 return _apply_interp(self.properties[dat])
-            elif pimms.is_array(dat, np.inexact, (1,2)) and method != 'nearest':
+            elif pimms.is_array(dat, np.inexact, (1,2)) and method in [None,'linear']:
                 return self.apply_interpolation(interps['linear'], dat)
             elif pimms.is_array(dat, 'int', (1,2)) and method == 'linear':
                 return self.apply_interpolation(interps['linear'], dat)
+            elif method in [None, 'linear', 'heaviest']:
+                return self.apply_interpolation(interps['heaviest'], dat)
             else:
                 return self.apply_interpolation(interps['nearest'], dat)
         if pimms.is_str(data) and data.lower() == 'all':
