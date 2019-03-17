@@ -135,7 +135,7 @@ The following options are accepted:
    0.05.
  * --prior=|-p<name>
    This specifies the name of the prior registration to use in the fsaverage or
-   fsaverage_sym subject; by default this is 'retinotopy'.
+   fsaverage_sym subject; by default this is 'benson17'.
  * --eccen-tag=|-y<tag>
    --angle-tag=|-t<tag>
    --label-tag=|-l<tag>
