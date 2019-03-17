@@ -19,6 +19,9 @@ else:       (_tuple_type, _list_type) = (tuple, list)
 default_rtol = inspect.getargspec(np.isclose)[3][0]
 default_atol = inspect.getargspec(np.isclose)[3][1]
 
+# A few functions were moved into pimms; they still appear here for compatibility
+from pimms import (is_tuple, is_list, is_set, curry)
+
 def to_hemi_str(s):
     '''
     to_hemi_str(s) yields either 'lh', 'rh', or 'lr' depending on the input s.
@@ -40,32 +43,6 @@ def to_hemi_str(s):
     elif s in ('right', 'r',   'dh'): return 'rh'
     elif s in ('both',  'all', 'xh'): return 'lr'
     else: raise ValueError('Could not understand to_hemi_str argument: %s' % s)
-
-def is_tuple(arg):
-    '''
-    is_tuple(arg) yields True if arg is a tuple and False otherwise.
-    '''
-    return isinstance(arg, _tuple_type)
-def is_list(arg):
-    '''
-    is_list(arg) yields True if arg is a list and False otherwise.
-    '''
-    return isinstance(arg, _list_type)
-def is_set(arg):
-    '''
-    is_set(arg) yields True if arg is a set or frozenset and False otherwise.
-    '''
-    isinstance(arg, colls.Set)
-    
-def curry(f, *args0, **kwargs0):
-    '''
-    curry(f, ...) yields a function equivalent to f with all following arguments and keyword
-      arguments passed. This is much like the partial function, but yields a function instead of
-      a partial object and thus is suitable for use with pimms lazy maps.
-    '''
-    def curried_f(*args, **kwargs):
-        return f(*(args0 + args), **pimms.merge(kwargs0, kwargs))
-    return curried_f
 
 @pimms.immutable
 class ObjectWithMetaData(object):
