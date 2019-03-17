@@ -1217,22 +1217,42 @@ def calc_anchors(preregistration_map, model, model_hemi,
     return ancs
 
 @pimms.calc('registered_map')
-def calc_registration(preregistration_map, model, anchors,
-                      max_steps=8000, max_step_size=0.05, method='random'):
+def calc_registration(preregistration_map, anchors,
+                      max_steps=2000, max_step_size=0.05, method='random'):
     '''
     calc_registration is a calculator that creates the registration coordinates.
     '''
-    # make the java object
-    x = mesh_register(
-        preregistration_map,
-        [['edge',      'harmonic',      'scale', 1.0],
-         ['angle',     'infinite-well', 'scale', 1.0],
-         ['perimeter', 'harmonic'],
-         anchors],
-        method=method,
-        max_steps=max_steps,
-        max_step_size=max_step_size)
-    return preregistration_map.copy(coordinates=x)
+    # if max steps is a tuple (max, stride) then a trajectory is saved into
+    # the registered_map meta-data
+    pmap = preregistration_map
+    if is_tuple(max_steps) or is_list(max_steps):
+        (max_steps, stride) = max_steps
+        traj = [preregistration_map.coordinates]
+        x = preregistration_map.coordinates
+        for s in np.arange(0, max_steps, stride):
+            x = mesh_register(
+                preregistration_map,
+                [['edge',      'harmonic',      'scale', 1.0],
+                 ['angle',     'infinite-well', 'scale', 1.0],
+                 ['perimeter', 'harmonic'],
+                 anchors],
+                initial_coordinates=x,
+                method=method,
+                max_steps=stride,
+                max_step_size=max_step_size)
+            traj.append(x)
+        pmap = pmap.with_meta(trajectory=np.asarray(traj))
+    else:
+        x = mesh_register(
+            preregistration_map,
+            [['edge',      'harmonic',      'scale', 1.0],
+             ['angle',     'infinite-well', 'scale', 1.0],
+             ['perimeter', 'harmonic'],
+             anchors],
+            method=method,
+            max_steps=max_steps,
+            max_step_size=max_step_size)
+    return pmap.copy(coordinates=x)
 @pimms.calc('registered_mesh', 'registration_prediction', 'prediction', 'predicted_mesh')
 def calc_prediction(registered_map, preregistration_mesh, native_mesh, model):
     '''
@@ -1438,7 +1458,10 @@ def register_retinotopy(hemi,
         minimization responsible for ensuring that the mesh is not overly deformed) are always held
         at a strength of 1.0.
       * select specifies the select option that should be passed to retinotopy_anchors.
-      * max_steps (default 8,000) specifies the maximum number of registration steps to run.
+      * max_steps (default 2,000) specifies the maximum number of registration steps to run. This
+        may be a tuple (max_steps, stride) in which case the registered map that is returned will
+        contain a piece of meta-data, 'trajectory' containing the vertex coordinates every stride
+        steps of the registration.
       * max_step_size (default 0.05) specifies the maxmim distance a single vertex is allowed to
         move in a single step of the minimization.
       * method (default 'random') is the method argument passed to mesh_register. This should be
