@@ -21,7 +21,7 @@ def _init_registration():
     if _java is not None: return
     _java_port = launch_gateway(
         classpath=os.path.join(library_path(), 'nben', 'target', 'nben-standalone.jar'),
-        javaopts=['-Xmx2g'],
+        javaopts=['-Xmx4g'],
         die_on_exit=True)
     _java = JavaGateway(gateway_parameters=GatewayParameters(port=_java_port))
 
