@@ -162,7 +162,13 @@ class VertexSet(ObjectWithMetaData):
                            weight_min=weight_min, weight_transform=weight_transform,
                            mask=mask,             valid_range=valid_range,
                            transform=transform,   yield_weight=yield_weight)
-
+    def isolines(self, prop, val, **kw):
+        '''
+        vset.isolines(prop, val, options...) is equivalent to isolines(tess, prop, val, options...).
+        
+        See the neurpythy.isolines() function for additional information.
+        '''
+        return isolines(self, prop, val, **kw) 
     def map(self, f):
         '''
         tess.map(f) is equivalent to tess.properties.map(f).
@@ -855,6 +861,7 @@ class Tesselation(VertexSet):
         The optional parameter tag is used identically as in tess.subtess().
         '''
         return self.subtess(self.map(fn), tag=tag)
+
 def is_tess(t):
     '''
     is_tess(t) yields True if t is a Tesselation object and False otherwise.
@@ -3806,7 +3813,188 @@ def close_path_traces(*args):
     crvs = [x.curve if is_path_trace(x) else to_curve_spline(x) for x in args]
     loop = close_curves(*crvs)
     return path_trace(mp0, loop.coordinates, closed=True)
+
+def isolines(obj, prop, val,
+             outliers=None,  data_range=None,  clipped=np.inf,
+             weights=None,   weight_min=0,     weight_transform=Ellipsis,
+             mask=None,      valid_range=None, transform=None,
+             smooth=False,   yield_addresses=False):
+    '''
+    isolines(mesh, prop, val) yields a 2 x D x N array of points that represent the lines of
+      equality of the given property to the given value, according to linear interpolation
+      of the property values over the mesh; D represents the dimensions of the mesh (2D or
+      3D) and N is the number of faces whose prop values surround val.
+    isolines(cortex, prop, val) yields the lines as addresses instead of coordinates.
+    isolines(subject, prop, val) yields a lazy map whose keys are the keys of subject.hemis
+      and whose values are equivalent to isolines(subject.hemis[key], prop, val).
     
+    The following optional arguments may be given:
+      * yield_addresses (default: False) may be set to True to instruct isolines to return the
+        addresses instead of the coordinates, even for meshes; if the first argument is not a
+        mesh then this argument is ignored.
+      * smooth (default: None) may optionally be True or a value n or a tuple (n,m) that are
+        used as arguments to the smooth_lines() function.
+      * Almost all options that can be passed to the to_property() function can be passed to
+        this function and are in turn passed along to to_property():
+          * outliers       * data_range          * clipped        * weights
+          * weight_min     * weight_transform    * mask           * valid_range
+          * transform
+        Weights, if specified, are not used in the isoline calculation; they are only used for
+        thresholding.
+    '''
+    import scipy.sparse as sps
+    from neuropythy import (is_subject, is_list, is_tuple, is_topo, is_mesh, is_tess)
+    from neuropythy.util import flattest
+    if is_subject(obj):
+        kw = dict(outliers=outliers,     data_range=data_range,
+                  clipped=clipped,       weights=weights,
+                  weight_min=weight_min, weight_transform=weight_transform,
+                  mask=mask,             valid_range=valid_range,
+                  transform=transform,   smooth=smooth,
+                  yield_addresses=yield_addresses)
+        return pimms.lazy_map({h:curry(lambda h: isolines(mesh.hemis[h],prop,val,**kw),h)
+                               for h in six.iterkeys(mesh.hemis)})
+    elif not (is_topo(obj) or is_mesh(obj)):
+        raise ValueError('argument must be a mesh, topology, or subject')
+    if   smooth is True:          smooth = ()
+    elif smooth in [False,None]:  smooth = None
+    elif pimms.is_vector(smooth): smooth = tuple(smooth)
+    else: raise ValueError('unrecognized smooth argument')
+    # find the addresses over the faces:
+    fs = obj.tess.indexed_faces if not is_tess(obj) else obj.indexed_faces
+    N  = obj.vertex_count
+    p  = obj.property(prop,
+                      outliers=outliers,     data_range=data_range,
+                      clipped=clipped,       weights=weights,
+                      weight_min=weight_min, weight_transform=weight_transform,
+                      mask=mask,             valid_range=valid_range,
+                      transform=transform)
+    ii  = np.isfinite(p)
+    fii = np.where(np.sum([ii[f] for f in fs], axis=0) == 3)[0]
+    fs  = fs[:,fii]
+    fp  = np.asarray([p[f] for f in fs])
+    lt  = (fp <= val)
+    slt = np.sum(lt, 0)
+    (ii1,ii2) = [(slt == k) for k in (1,2)]
+    wmtx = sps.lil_matrix((N, N), dtype='float')
+    emtx = sps.dok_matrix((N*N, N*N), dtype='bool')
+    for (ii,fl) in zip([ii1,ii2], [True,False]):
+        tmp = np.array(lt)
+        tmp[:,~ii] = False
+        if fl:
+            w = fs.T[tmp.T]
+            tmp[:,ii] = ~tmp[:,ii]
+            (u,v) = np.reshape(fs.T[tmp.T], (-1,2)).T
+        else:
+            (u,v) = np.reshape(fs.T[tmp.T], (-1,2)).T
+            tmp[:,ii] = ~tmp[:,ii]
+            w = fs.T[tmp.T]
+        (pu,pv,pw) = [p[q] for q in (u,v,w)]
+        # the line is from somewhere on (u,w) to somewhere on (v,w)
+        if pu[0] > pw[0]: (wu,wv) = [(val - pw) / (px - pw) for px in (pu,pv)]
+        else:             (wu,wv) = [(pw - val) / (pw - px) for px in (pu,pv)]
+        # put these in the weight matrix
+        wmtx[u,w] = wu
+        wmtx[v,w] = wv
+        wmtx[w,u] = (1 - wu)
+        wmtx[w,v] = (1 - wv)
+        # and in the edge matrix
+        e1 = np.sort([u,w],axis=0).T.dot([N,1])
+        e2 = np.sort([v,w],axis=0).T.dot([N,1])
+        emtx[e1, e2] = True
+        emtx[e2, e1] = True
+    # okay, now convert these into sequential lines...
+    wmtx = wmtx.tocsr()
+    (rs,cs,xs) = sps.find(emtx)
+    # we need to compress emtx
+    ((rs,ridx),(cs,cidx)) = [np.unique(x, return_inverse=True) for x in (rs,cs)]
+    assert(len(ridx) == len(cidx) and len(cidx) == len(xs) and np.array_equal(rs,cs))
+    em = sps.csr_matrix((xs, (ridx,cidx)), dtype='bool')
+    ecounts = flattest(em.sum(axis=1))
+    ccs = sps.csgraph.connected_components(em, directed=False)[1]
+    lines = {}
+    loops = {}
+    for (lbl,st) in zip(*np.unique(ccs, return_index=True)):
+        if lbl < 0: continue
+        o0 = sps.csgraph.depth_first_order(em, st, directed=False)[0]
+        o = rs[o0]
+        (u,v) = (np.floor(o/N).astype('int'), np.mod(o, N).astype('int'))
+        w = flattest(wmtx[u,v])
+        if ecounts[o0[-1]] == 2:
+            loops[lbl] = (u,v,w)
+        else:
+            if ecounts[st] != 1:
+                o0 = sps.csgraph.depth_first_order(em, o0[-1], directed=False)[0]
+                o = rs[o0]
+                (u,v) = (np.floor(o/N).astype('int'), np.mod(o, N).astype('int'))
+                w = flattest(wmtx[u,v])
+            lines[lbl] = (u,v,w)
+    # okay, we add all of these to the addrs that we return; it's potentially
+    # more useful to have each face's full crossing in its own BC coordinates
+    # at times, and the duplicates can be eliminated with just a slice
+    addrs = []
+    for (lbl,(us,vs,ws)) in six.iteritems(lines):
+        qs = [np.setdiff1d([u1,v1], [u0,v0])[0]
+              for (u0,v0,u1,v1) in zip(us[:-1],vs[:-1],us[1:],vs[1:])]
+        fs = np.asarray([us[:-1], qs, vs[:-1]], dtype=np.int)
+        fs = np.vstack([[row, row] for row in fs.T]).T
+        # convert faces back to labels
+        fs = np.asarray([obj.labels[f] for f in fs])
+        ws = flattest(list(zip(ws[:-1], ws[1:])))
+        ws = np.pad([ws], ((0,1),(0,0)), 'constant')
+        addrs.append({'faces': fs, 'coordinates': ws})
+    addrs = list(sorted(addrs, key=lambda a:a['faces'].shape[0]))
+    # if obj is a topology or addresses were requested, return them now
+    if yield_addresses or not is_mesh(obj): return addrs
+    # otherwise, we now convert these into coordinates
+    xs = [obj.unaddress(addr) for addr in addrs]
+    if smooth is not None: xs = smooth_lines(xs, *smooth)
+    return xs
+def smooth_lines(lns, n=1, inertia=0.5):
+    '''
+    smooth_lines(matrix) runs one smoothing iteration on the lines implied by the {2,3}xN matrix.
+    smooth_lines(collection) iteratively descends lists, sets, and the values of maps, converting
+      all valid matrices that it finds; note that if it encounters anything that cannot be
+      interpreted as a line matrix (such as a string), an error is raised.
+    
+    Smoothing is performed by adding to the coordinates of each vertex with two neighbors half of
+    the coordinates of each of its neighbors then dividing that sum by 2; i.e.:
+      x_new[i] == x_old[i]/2 + x_old[i-1]/4 + x_old[i+1]/4.
+
+    The following options may be given:
+      * n (default: 1) indicates the number of times to perform the above smoothing operation.
+      * inertia (default: 0.5) specifies the fraction of the new value that is derived from the
+        old value of a node as opposed to the old values of its neighbors. If intertia is m, then
+        x_new[i] == m*x_old[i] + (1-m)/2*(x_old[i-1] + x_old[i+1]).
+        A higher intertia will smooth the line less each iteration.
+    '''
+    if pimms.is_lazy_map(lns):
+        return pimms.lazy_map({k:curry(lambda k: smooth_lines(lns[k], n=n, inertia=inertia), k)
+                               for k in six.iterkeys(lns)})
+    elif pimms.is_map(lns):
+        m = {k:smooth_lines(v,n=n,inertia=inertia) for (k,v) in six.iteritems(lns)}
+        return pyr.pmap(m) if pimms.is_pmap(lns) else m
+    elif pimms.is_matrix(lns, 'number'):
+        (p,q) = (inertia, 1 - inertia)
+        l = lns if lns.shape[0] in (2,3) else lns.T
+        if np.allclose(l[:,0], l[:,-1]):
+            for ii in range(n):
+                lns = p*l + q/2*(np.roll(l, -1, 1) + np.roll(l, 1, 1))
+        else:
+            l = np.array(l)
+            for ii in range(n):
+                l[1:-1] = p*l[1:-1] + q/2*(l[:-2] + l[2:])
+        if lns.shape != l.shape: l = l.T
+        l.setflags(write=lns.flags['WRITEABLE'])
+        return l
+    elif not pimms.is_scalar(lns):
+        u = [smooth_lines(u, n=n, inertia=inertia) for u in lns]
+        return (tuple(u)       if is_tuple(lns)                else
+                pyr.pvector(u) if isinstance(lns, pyr.PVector) else
+                np.asarray(u)  if pimms.is_nparray(lns)        else
+                type(lns)(u))
+    else: raise ValueError('smooth_lines could not interpret object: %s' % lns)
+
 @importer('path_trace', ('pt.json',         'pt.json.gz',
                          'pathtrace.json',  'pathtrace.json.gz',
                          'path_trace.json', 'path_trace.json.gz',
