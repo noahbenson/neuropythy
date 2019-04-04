@@ -885,7 +885,7 @@ try:
                 mesh = [mesh.surface(surface) for m in mesh]
         elif isinstance(mesh, geo.Mesh):
             mesh = [mesh]
-        elif pimms.is_vetor(mesh):
+        elif pimms.is_vector(mesh):
             if pimms.is_str(hemi):
                 if   hemi.lower() == 'lh': mesh = mesh[0]
                 elif hemi.lower() == 'rh': mesh = mesh[1]
