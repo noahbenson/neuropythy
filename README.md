@@ -9,7 +9,7 @@ For additional documentation, in particular usage documentation, see
 [the OSF wiki](https://osf.io/knb5g/wiki/home/) for
 [Benson and Winawer, (2018)](https://doi.org/10.1101/325597).
 
-** Note: See Warning regarding Licenses at the bottom of this README. **
+**Note: See Warning regarding Licenses at the bottom of this README.**
 
 ## Author ##########################################################################################
 Noah C. Benson &lt;<nben@nyu.edu>&gt;
