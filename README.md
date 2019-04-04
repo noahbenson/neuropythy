@@ -12,6 +12,30 @@ For additional documentation, in particular usage documentation, see
 ## Author ##########################################################################################
 Noah C. Benson &lt;<nben@nyu.edu>&gt;
 
+## A Warning about Licenses ########################################################################
+Versions of neuropythy prior to version 1.0 have all used the GPLv3 license. Starting with version
+1.0, however, neuropythy will be licensed under one of the following licenses:
+ * MongoDB's [Server Side Public License](https://www.mongodb.com/licensing/server-side-public-license)
+ * A GPL or GPL-like license with the [Commons Clause](https://commonsclause.com/)
+ * [GNU Affero General Public License, v3.0](https://www.gnu.org/licenses/agpl-3.0.html)
+ * Another similar license
+
+As of neuropythy version 0.9.1, the author has not yet decided which license to use, but has
+concluded that neuropythy should be licensed in such a way that prevents free commercial use of the
+library; i.e., it should not be legal to download neuropythy, run it in a webserver, and charge
+users for that service without making the service itself open-source.
+
+If you wish to use neuropythy in any commercial software, you must do one of the following:
+ * Use a version of neuropythy prior to version 1.0 (all of which will remain licensed under the GPL
+   alone);
+ * Depending on the license eventually adopted by neuropythy, it may be possible to use neuropythy
+   commercially as long as all related source-code for the service is also made freely available
+   (see the SSPL license in particular);
+ * Obtain a custom license for neuropythy from the author.
+ 
+For details of the license included with neuropythy, see the License section at the bottom of this
+README file.
+ 
 ## Installation ####################################################################################
 
 The neuropythy library is available on [PyPI](https://pypi.python.org/pypi/neuropythy) and can be
