@@ -62,11 +62,12 @@ class ObjectWithMetaData(object):
         '''
         if md is None: return pyr.m()
         return md if pimms.is_pmap(md) else pyr.pmap(md)
-    def meta(self, name):
+    def meta(self, name, missing=None):
         '''
         obj.meta(x) is equivalent to obj.meta_data.get(name, None).
+        obj.meta(x, nf) is equivalent to obj.meta_data.get(name, nf)
         '''
-        return self.meta_data.get(name, None)
+        return self.meta_data.get(name, missing)
     def with_meta(self, *args, **kwargs):
         '''
         obj.with_meta(...) collapses the given arguments with pimms.merge into the object's current
