@@ -3340,8 +3340,8 @@ class Path(ObjectWithMetaData):
             if np.sum(np.isclose(bcx[1:-1], 0, atol=1e-5)) > 0:
                 raise ValueError('path middle touches edge')
             (p0,p1) = bcx[[0,-1]]
-            (z0,z1) = [np.isclose(p,0) for p in (p0,p1)]
-            (s0,s1) = [np.sum(z)       for z in (z0,z1)]
+            (z0,z1) = [np.isclose(p,0,atol=1e-5) for p in (p0,p1)]
+            (s0,s1) = [np.sum(z)                 for z in (z0,z1)]
             (e0,e1) = [((0 if     z[2] else 1 if     z[0] else 2) if s == 1 else
                         (0 if not z[0] else 1 if not z[1] else 2) if s == 2 else
                         None)
