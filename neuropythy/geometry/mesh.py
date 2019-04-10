@@ -3304,6 +3304,25 @@ class Path(ObjectWithMetaData):
             n += 1
             ridcs.append(ii)
         if n > 64: warnings.warn('tesselating face with %d points: poor performance is likely' % n)
+        elif np.max(idcs) == 2:
+            assert(len(coords) == 5)
+            # intersection at a single point or at two points; regardless, we tesselate into the
+            # original triangle only; however, we have to figure out which side is LHS and RHS
+            if idcs[-1] == idcs[-2]:
+                # intersecting at a point; we determine if this is LHS/RHS by checking the
+                # (near-vertex) points that were given anyway
+                t = [coords[-2], coords[-1], coords[idcs[-1]]]
+                if np.cross(coords[-2] - coords[-1], coords[idcs[-1]] - coords[-1]) <= 0:
+                    return (np.zeros([3,2,0]), np.reshape([[1,0],[0,1],[0,0]], (3,2,1)))
+                else:
+                    return (np.reshape([[1,0],[0,1],[0,0]], (3,2,1)), np.zeros([3,2,0]))
+            else:
+                # intersecting at two points; we determine LHS/RHS by whether the points are
+                # ordered as in the triangle
+                if (idcs[-2] + 1) % 3 == idcs[-1]:
+                    return (np.reshape([[1,0],[0,1],[0,0]], (3,2,1)), np.zeros([3,2,0]))
+                else:
+                    return (np.zeros([3,2,0]), np.reshape([[1,0],[0,1],[0,0]], (3,2,1)))
         # fix the paths and coords matrices
         pidcs = [[i0 for (i0,i1) in zip(pii[:-1],pii[1:]) if i0 != i1] + [pii[-1]]
                  for p in pidcs
@@ -3412,7 +3431,13 @@ class Path(ObjectWithMetaData):
         # now go through the triangles and look for edges that indicate direction
         tskip = tris
         (lhs, rhs) = (set([]), set([]))
+        qq = 0
         while len(tskip) > 0:
+            qq = qq + 1
+            if qq % 1000 == 0:
+                sys.stdout.write('%6d:\t%s\n' % (qq, tskip))
+                sys.stdout.flush()
+                if qq > 1000: raise ValueError('???')
             tris = tskip
             tskip = set([])
             for abc in tris:
