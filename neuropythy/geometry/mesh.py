@@ -3075,8 +3075,20 @@ class Path(ObjectWithMetaData):
                 for (q,qq) in zip([u,v],   uv):   q.append(qq)
                 for (q,qq) in zip([wu,wv], w[k]): q.append(qq)
             else: raise ValueError('address contained all-zero weights')
-            mtx[u[-1],v[-1]] += 1
-            ff = None if lastf is None or vtx is None else (u[-2], v[-2], vtx)
+            if u[-1] != v[-1]: mtx[u[-1],v[-1]] += 1
+            if lastf is None or vtx is None: ff = None
+            elif u[-2] == v[-2]:
+                # the last edge was actually a point; a couple possibilities: this point ii is...
+                # (1) in the adjacent face (i.e., f contains u[-2])
+                # (2) on the opposite edge but in the next face (nz == 1 and u[-2] not in f)
+                # [3] equivalent to u[-2] (in which case condition (1) is also true)
+                if   u[-2] in f: ff = f
+                elif nz == 1:    ff = (u[-2], f[k[1]], f[k[0]])
+                else: raise ValueError('point followed by non-deducible face')
+            elif vtx == u[-2] or vtx == v[-2]:
+                raise ValueError('Unexpected condition deducing triangle: u[-2] or v[-2] equal vtx')
+            else: ff = (u[-2], v[-2], vtx)
+            assert(ff is None or len(np.unique(ff)) == 3)
             fs.append(ff)
             ps.append(tuple(pcur))
             pcur = [ii]
@@ -3346,7 +3358,8 @@ class Path(ObjectWithMetaData):
                         (0 if not z[0] else 1 if not z[1] else 2) if s == 2 else
                         None)
                        for (z,s) in [(z0,s0), (z1,s1)]]
-            if e0 is None or e1 is None: raise ValueError('path-piece does not start/end on edge')
+            if e0 is None or e1 is None:
+                raise ValueError('path-piece does not start/end on edge')
             # find fractional distance from first to second vertex
             (w0,w1) = (bcx[0, np.mod(e0 + 1, 3)], bcx[-1, np.mod(e1 + 1, 3)])
             # put these in the on_edges
