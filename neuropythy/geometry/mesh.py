@@ -1623,7 +1623,7 @@ class Mesh(VertexSet):
             try:    face_id = np.asarray(self.container(data), n_jobs=n_jobs)
             except: face_id = np.asarray(self.container(data))
             tx = np.full((3, dims, n), np.nan)
-            oks = np.where(np.logical_not(face_id == None))[0]
+            oks = np.where(np.logical_not(np.equal(face_id, None)))[0]
             okfids = face_id[oks].astype('int')
             tx[:,:,oks] = np.transpose(
                 np.reshape(coords[:,idxfs[:,okfids].flatten()], (dims, 3, oks.shape[0])),
@@ -3047,7 +3047,7 @@ class Path(ObjectWithMetaData):
         maxv = np.max(faces) + 1
         mtx = sps.dok_matrix((maxv,maxv))
         for (ii,f,w) in zip(range(n), faces.T, coords.T):
-            zs = np.isclose(w,0)
+            zs = np.isclose(w, 0, atol=1e-5)
             nz = np.sum(zs)
             pcur.append(ii)
             if nz == 0: # inside the triangle--no crossings
@@ -3245,9 +3245,9 @@ class Path(ObjectWithMetaData):
         def bc_conv(f0, x0, ftarg):
             r = np.zeros(len(x0))
             for (f,x) in zip(f0,x0):
-                if   np.isclose(x, 0): continue
-                elif f not in ftarg:   raise ValueError('Non-zero bc-conv value')
-                else:                  r[f == ftarg] = x
+                if   np.isclose(x, 0, atol=1e-5): continue
+                elif f not in ftarg:              raise ValueError('Non-zero bc-conv value')
+                else:                             r[f == ftarg] = x
             return r
         # walk along edge data; mostly this isn't too hard
         (fs,ps) = edge_data[4:6]
@@ -3434,10 +3434,6 @@ class Path(ObjectWithMetaData):
         qq = 0
         while len(tskip) > 0:
             qq = qq + 1
-            if qq % 1000 == 0:
-                sys.stdout.write('%6d:\t%s\n' % (qq, tskip))
-                sys.stdout.flush()
-                if qq > 1000: raise ValueError('???')
             tris = tskip
             tskip = set([])
             for abc in tris:
