@@ -115,7 +115,7 @@ def alignment_matrix_2D(u, v):
     alignment_matrix_2D(u, v) yields a 2x2 numpy array that rotates the vector u to the vector v
     around the origin.
     '''
-    return rotation_matrix_2D(vector_angle_2D(u, v, direction=True))
+    return rotation_matrix_2D(vector_angle(u, v, direction=True))
 
 def point_on_line(ab, c):
     '''
