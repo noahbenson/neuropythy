@@ -9,33 +9,11 @@ For additional documentation, in particular usage documentation, see
 [the OSF wiki](https://osf.io/knb5g/wiki/home/) for
 [Benson and Winawer, (2018)](https://doi.org/10.1101/325597).
 
+**Note: See Warning regarding Licenses at the bottom of this README.**
+
 ## Author ##########################################################################################
 Noah C. Benson &lt;<nben@nyu.edu>&gt;
 
-## A Warning about Licenses ########################################################################
-Versions of neuropythy prior to version 1.0 have all used the GPLv3 license. Starting with version
-1.0, however, neuropythy will be licensed under one of the following licenses:
- * MongoDB's [Server Side Public License](https://www.mongodb.com/licensing/server-side-public-license)
- * A GPL or GPL-like license with the [Commons Clause](https://commonsclause.com/)
- * [GNU Affero General Public License, v3.0](https://www.gnu.org/licenses/agpl-3.0.html)
- * Another similar license
-
-As of neuropythy version 0.9.1, the author has not yet decided which license to use, but has
-concluded that neuropythy should be licensed in such a way that prevents free commercial use of the
-library; i.e., it should not be legal to download neuropythy, run it in a webserver, and charge
-users for that service without making the service itself open-source.
-
-If you wish to use neuropythy in any commercial software, you must do one of the following:
- * Use a version of neuropythy prior to version 1.0 (all of which will remain licensed under the GPL
-   alone);
- * Depending on the license eventually adopted by neuropythy, it may be possible to use neuropythy
-   commercially as long as all related source-code for the service is also made freely available
-   (see the SSPL license in particular);
- * Obtain a custom license for neuropythy from the author.
- 
-For details of the license included with neuropythy, see the License section at the bottom of this
-README file.
- 
 ## Installation ####################################################################################
 
 The neuropythy library is available on [PyPI](https://pypi.python.org/pypi/neuropythy) and can be
@@ -351,6 +329,37 @@ To cite Neuropythy, please reference the following:
    organization of striate cortex is well predicted by surface topology. *Curr. Biol.*
    **22**(21):2081-5. doi:[10.1016/j.cub.2012.09.014](https://dx.doi.org/10.1016/j.cub.2012.09.014).
    PMC:[3494819](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3494819/).
+
+## A Warning about Licenses ########################################################################
+Versions of neuropythy prior to version 1.0 have all employed the GPLv3 license. Starting with
+version 1.0, however, neuropythy will use a new license. This change will not affect anyone using
+neuropythy for non-commercial purposes; the goal of this move is to ensure that private entities and
+corporations use the software in a scientifically responsible way. As an example, under the GPL, it
+is legal for a private company to duplicate neuropythy, alter it in scientifically incorrect ways,
+then to sell this incorrect version of neuropythy as a service to scientists or clinicians without
+ever disclosing their changes. To prevent these kinds of misuse, the author is considering the
+following licenses:
+ * A GPL or GPL-like license with the [Commons Clause](https://commonsclause.com/)
+ * [GNU Affero General Public License, v3.0](https://www.gnu.org/licenses/agpl-3.0.html)
+ * MongoDB's [Server Side Public License](https://www.mongodb.com/licensing/server-side-public-license)
+ * Another similar license
+
+As of neuropythy version 0.9.1, the author has not yet decided which license to use, and is
+considering the pros and cons of many different licenses. If you have experience in this matter or
+advice regarding choosing a license, please [get in touch](mailto:nben@nyu.edu)!
+
+To be clear: this change will not interfere with any scientific or personal use of neuropythy, nor
+does it forbid commercial use outright. If you wish to use neuropythy in commercial software, you
+must only do one of the following: 
+ * Use a version of neuropythy prior to version 1.0 (all of which will remain licensed under the GPL
+   alone);
+ * Depending on the license eventually adopted by neuropythy, it may be possible to use neuropythy
+   commercially as long as all changes to neuropythy (AGPL) or all related source-code for the
+   service (SSPL) is also made freely available;
+ * Obtain a custom license for neuropythy from the author.
+
+The license below is current for versions of neuropythy prior to 1.0, including the current
+version.
 
 ## License #########################################################################################
 
