@@ -8,8 +8,8 @@ from .. import io as nyio
 from ..util import (config, is_image, to_credentials, file_map)
 
 # this isn't required, but if we can load it we will use it for auto-downloading subject data
-try:    import s3fs
-except: s3fs = None
+try:              import s3fs
+except Exception: s3fs = None
 
 ####################################################################################################
 # Subject Directory and where to find Subjects
@@ -74,7 +74,7 @@ def add_subject_path(path, index=None):
                 sd.insert(index, path)
             config['hcp_subject_paths'] = sd
             return True
-        except:
+        except Exception:
             return False
 
 def find_subject_path(sid):
@@ -103,7 +103,7 @@ def find_subject_path(sid):
     pth = os.path.join(_auto_download_options['subjects_path'], sub)
     if os.path.isdir(pth): return pth
     try: os.makedirs(os.path.abspath(pth), 0o755)
-    except: return None
+    except Exception: return None
     return pth
 
 if config['hcp_subject_paths'] is None:
@@ -128,7 +128,7 @@ def to_subject_id(s):
         raise ValueError('invalid type for subject id: %s' % str(type(s)))
     if pimms.is_str(s):
         try: s = os.path.expanduser(s)
-        except: pass
+        except Exception: pass
         if os.path.isdir(s): s = s.split(os.sep)[-1]
     s = int(s)
     if s > 999999 or s < 100000:
@@ -1874,7 +1874,7 @@ def auto_download(status,
                 f = os.path.split(f)[-1]
                 if len(f) == 6 and f[0] != '0':
                     try: sids.add(int(f))
-                    except: pass
+                    except Exception: pass
             _auto_download_options['structure'] = True
             _auto_download_options['subjects_path'] = subjects_path
             _auto_download_options['overwrite'] = overwrite
@@ -1923,7 +1923,7 @@ if config['hcp_auto_download'] is not False:
         if config['hcp_auto_database']: args['database']      = config['hcp_auto_database']
         if config['hcp_auto_path']:     args['subjects_path'] = config['hcp_auto_path']
         auto_download(True, **args)
-    except:
+    except Exception:
         logging.warn('Could not initialize HCP auto-downloading from configuration data.')
 def _auto_downloadable(sid):
     if _auto_download_options is None: return False
@@ -2097,7 +2097,7 @@ def subject_filemap(sid, subject_path=None):
         else: sdir = os.path.expanduser(os.path.join(subject_path, str(sid)))
     elif pimms.is_str(sid):
         try: sid = os.path.expanduser(sid)
-        except: pass
+        except Exception: pass
         sdir = sid if os.path.isdir(sid) else find_subject_path(sid)
         sid  = int(sdir.split(os.sep)[-1])
     else: raise ValueError('Cannot understand HCP subject ID %s' % sid)
