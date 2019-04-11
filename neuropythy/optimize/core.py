@@ -248,8 +248,8 @@ class PotentialLambda(PotentialFunction):
     def jacfn(j): return j
     def value(self, x): return self.valfn(x)
     def jacobian(self, x, into=None):
-        try:    return self.jacfn(x, into)
-        except: return self.jacfn(x)
+        try:              return self.jacfn(x, into)
+        except Exception: return self.jacfn(x)
 @pimms.immutable
 class PotentialConstant(PotentialFunction):
     def __init__(self, c):
@@ -876,7 +876,7 @@ def row_norms(ii, f=Ellipsis, squared=False):
         (n,m) = ii
         # matrix shape given
         ii = np.reshape(np.arange(n*m), (n,m))
-    except: ii = np.asarray(ii)
+    except Exception: ii = np.asarray(ii)
     f = to_potential(f)
     if is_const_potential(f):
         q = flattest(f.c)
@@ -896,7 +896,7 @@ def col_norms(ii, f=Ellipsis, squared=False):
         (n,m) = ii
         # matrix shape given
         ii = np.reshape(np.arange(n*m), (n,m))
-    except: ii = np.asarray(ii)
+    except Exception: ii = np.asarray(ii)
     f = to_potential(f)
     if is_const_potential(f):
         q = flattest(f.c)
@@ -935,8 +935,8 @@ class PotentialPiecewise(PotentialFunction):
     def pieces(ps):
         r = []
         for p in ps:
-            try:    ((mn, mx), f) = p
-            except: (mn,  mx,  f) = p
+            try:              ((mn, mx), f) = p
+            except Exception: (mn,  mx,  f) = p
             if mx < mn: raise ValueError('given piece has mn > mx: %s' % p)
             f = to_potential(f)
             r.append(((mn,mx),f))
