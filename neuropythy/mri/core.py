@@ -779,8 +779,8 @@ class Cortex(geo.Topology):
         fids = np.concatenate((fids, fids))
         faces = np.concatenate((self.tess.indexed_faces, self.tess.indexed_faces), axis=-1)
         face_centers = np.hstack((wsrf.face_centers, psrf.face_centers))
-        try:    shash = spspace.cKDTree(face_centers.T)
-        except: shash = spspace.KDTree(face_centers.T)
+        try:              shash = spspace.cKDTree(face_centers.T)
+        except Exception: shash = spspace.KDTree(face_centers.T)
         (whsh, phsh) = [s.face_hash for s in (wsrf, psrf)]
         # Okay, for each voxel (xyz), we want to find the closest face centers; from those
         # centers, we find the ones for which the nearest point in the plane of the face to the
@@ -875,8 +875,8 @@ def _vertex_to_voxel_linear_interpolation(hemi, gray_indices, image_shape, voxel
     fids = np.concatenate((range(hemi.tess.face_count), range(hemi.tess.face_count)))
     faces = np.concatenate((hemi.tess.indexed_faces, hemi.tess.indexed_faces), axis=-1)
     face_centers = np.hstack((hemi.white_surface.face_centers, hemi.pial_surface.face_centers))
-    try:    shash = spspace.cKDTree(face_centers.T)
-    except: shash = spspace.KDTree(face_centers.T)
+    try:              shash = spspace.cKDTree(face_centers.T)
+    except Exception: shash = spspace.KDTree(face_centers.T)
     (whsh, phsh) = [getattr(hemi, '%s_surface' % s).face_hash for s in ['white', 'pial']]
     # Okay, for each voxel (xyz), we want to find the closest face centers; from those centers, we
     # find the ones for which the nearest point in the plane of the face to the voxel lies inside
