@@ -3270,7 +3270,7 @@ class Path(ObjectWithMetaData):
         def bc_conv(f0, x0, ftarg):
             r = np.zeros(len(x0))
             for (f,x) in zip(f0,x0):
-                if np.isclose(x, 0, atol=1e-5): continue
+                if np.isclose(x, 0, atol=1e-4): continue
                 elif f in ftarg: r[f == ftarg] = x
                 else: raise ValueError('Non-zero bc-conv value',
                                        dict(edge_data=edge_data, addresses=addresses, closed=closed,
@@ -3328,10 +3328,15 @@ class Path(ObjectWithMetaData):
         for (ii,x) in enumerate(coords):
             if idcs[ii] < ii: continue
             dists = np.sqrt(np.sum((coords[ii:] - x)**2, axis=1))
-            idcs_eq = np.where(np.isclose(dists, 0, atol=1e-5))[0]
+            idcs_eq = np.where(np.isclose(dists, 0, atol=1e-4))[0]
             idcs[idcs_eq + ii] = n
             n += 1
             ridcs.append(ii)
+        # if we overwrote the last one, we actually want to keep it
+        if np.sum(idcs == idcs[-1]) > 1:
+            qii = ridcs[idcs[-1]]
+            coords[qii] = coords[-1]
+            bccoords[qii] = bccoords[-1]
         if n > 64: warnings.warn('tesselating face with %d points: poor performance is likely' % n)
         elif np.max(idcs) < 4:
             assert(len(coords) > 4)
@@ -3367,7 +3372,10 @@ class Path(ObjectWithMetaData):
             # make sure first/last are on an edge and the rest aren't
             bcx = bccoords[pii]
             if np.sum(np.isclose(bcx[1:-1], 0, atol=1e-5)) > 0:
-                raise ValueError('path middle touches edge')
+                raise ValueError('path middle touches edge',
+                                 dict(coords0=coords0, bccoords0=bccoords0,
+                                      coords=coords, bccoords=bccoords,
+                                      pii=pii, pidcs=pidcs, idcs=idcs, ridcs=ridcs))
             (p0,p1) = bcx[[0,-1]]
             (z0,z1) = [np.isclose(p,0,atol=1e-4) for p in (p0,p1)]
             (s0,s1) = [np.sum(z)                 for z in (z0,z1)]
@@ -3376,7 +3384,10 @@ class Path(ObjectWithMetaData):
                         None)
                        for (z,s) in [(z0,s0), (z1,s1)]]
             if e0 is None or e1 is None:
-                raise ValueError('path-piece does not start/end on edge')
+                raise ValueError('path-piece does not start/end on edge',
+                                 dict(coords0=coords0, bccoords0=bccoords0,
+                                      coords=coords, bccoords=bccoords,
+                                      pii=pii, pidcs=pidcs, idcs=idcs, ridcs=ridcs))
             # find fractional distance from first to second vertex
             (w0,w1) = (bcx[0, np.mod(e0 + 1, 3)], bcx[-1, np.mod(e1 + 1, 3)])
             # put these in the on_edges
@@ -3503,7 +3514,13 @@ class Path(ObjectWithMetaData):
         # of the tesselated triangles are inside/outside the mesh
         (lhs,rhs,lfs,rfs) = ([],[],[],[])
         for (abc,bcxs) in six.iteritems(intersected_face_paths):
-            (ll,rr) = Path.tesselate_triangle_paths(bcxs)
+            try: (ll,rr) = Path.tesselate_triangle_paths(bcxs)
+            except ValueError as e:
+                if len(e.args) > 1 and isinstance(e.args[1], dict):
+                    e.args[1]['abc'] = abc
+                    e.args[1]['bcxs'] = bcxs
+                    e.args[1]['idx'] = len(lhs)
+                raise e
             if len(ll) == 0 or len(rr) == 0: continue
             lhs.append(ll)
             rhs.append(rr)
