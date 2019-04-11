@@ -23,7 +23,7 @@ def loadrc(filename):
     with open(filename, 'r') as fl:
         dat = json.load(fl)
     try: dat = dict(dat)
-    except: raise ValueError('Given file %s does not contain a dictionary' % filename)
+    except Exception: raise ValueError('Given file %s does not contain a dictionary' % filename)
     return dat
 def saverc(filename, dat, overwrite=False):
     '''
@@ -39,7 +39,7 @@ def saverc(filename, dat, overwrite=False):
         raise ValueError('Given filename %s already exists' % filename)
     if not pimms.is_map(dat):
         try: dat = dict(dat)
-        except: raise ValueError('Given config data must be a dictionary')
+        except Exception: raise ValueError('Given config data must be a dictionary')
     with open(filename, 'w') as fl:
         json.dump(dat, fl, sort_keys=True)
     return filename
@@ -192,13 +192,13 @@ class config(object):
                 # check the default_value...
                 if default_value is not None:
                     try: return _check_path(default_value)
-                    except: pass
+                    except Exception: pass
                 return None
             path = os.path.expanduser(os.path.expandvars(path))
             if not os.path.exists(path): raise ValueError('Provided file not found: %s' % path)
             path = os.path.abspath(path)
-            try:    return path if filter is None else filter(path)
-            except: return fail_value
+            try:              return path if filter is None else filter(path)
+            except Exception: return fail_value
         return config.declare(name, rc_name=rc_name, environ_name=environ_name, filter=_check_path,
                               default_value=None)
     @staticmethod
@@ -259,11 +259,11 @@ class config(object):
             if envname in os.environ:
                 val = os.environ[envname]
                 try: val = json.loads(val)
-                except: pass # it's a string if it can't be json'ed
+                except Exception: pass # it's a string if it can't be json'ed
             # if there's a filter, run it
             if fltfn is not None:
                 try: val = fltfn(val)
-                except: val = dval # failure--reset to default
+                except Exception: val = dval # failure--reset to default
             config._vals[name] = val
         return config._vals[name]
     @staticmethod
@@ -302,7 +302,7 @@ def str_to_credentials(s):
     try:
         js = json.loads(s)
         return to_credentials(s)
-    except: pass
+    except Exception: pass
     # must be '<key>\n<secret>' or '<key>:<secret>'
     dat = s.split('\n')
     if len(dat) == 1: dat = s.split(':')
@@ -323,8 +323,8 @@ def load_credentials(flnm):
     flnm = os.path.expanduser(os.path.expandvars(flnm))
     with open(flnm, 'r') as fl: dat = fl.read(1024 * 8)
     # see if its a 2-line file:
-    try:    return str_to_credentials(dat)
-    except: raise ValueError('File %s does not contain a valid credential string' % flnm)
+    try:              return str_to_credentials(dat)
+    except Exception: raise ValueError('File %s does not contain a valid credential string' % flnm)
 def to_credentials(arg):
     '''
     to_credentials(arg) converts arg into a pair (key, secret) if arg can be coerced into such a
@@ -338,11 +338,12 @@ def to_credentials(arg):
       * A string that separates the key and secret by a "\n", e.g., "mykey\nmysecret"
     '''
     if pimms.is_str(arg):
-        try:    return load_credentials(arg)
-        except: pass
-        try:    return str_to_credentials(arg)
-        except: raise ValueError('String "%s" is neither a file containing credentials nor a valid'
-                                 ' credentials string itself.' % arg)
+        try: return load_credentials(arg)
+        except Exception: pass
+        try: return str_to_credentials(arg)
+        except Exception:
+            raise ValueError('String "%s" is neither a file containing credentials nor a valid'
+                             ' credentials string itself.' % arg)
     elif pimms.is_map(arg) and 'key' in arg and 'secret' in arg: return (arg['key'], arg['secret'])
     elif pimms.is_vector(arg, str) and len(arg) == 2: return tuple(arg)
     else: raise ValueError('given argument cannot be coerced to credentials: %s' % arg)
@@ -395,8 +396,8 @@ def detect_credentials(config_name, extra_environ=None, filenames=None,
     for ee in extra_environ:
         if pimms.is_str(ee):
             if ee in os.environ:
-                try:    return to_credentials(q)
-                except: pass
+                try:              return to_credentials(q)
+                except Exception: pass
         elif pimms.is_vector(ee, str) and len(ee) == 2:
             if ee[0] in os.environ and ee[1] in os.environ:
                 (k,s) = [os.environ[q] for q in ee]
@@ -409,8 +410,8 @@ def detect_credentials(config_name, extra_environ=None, filenames=None,
     for flnm in filenames:
         flnm = os.expanduser(os.expandvars(flnm))
         if os.path.isfile(flnm):
-            try:    return to_credentials(flnm)
-            except: pass
+            try:              return to_credentials(flnm)
+            except Exception: pass
     # okay... let's check the AWS credentials file, if it exists
     if pimms.is_str(aws_profile_name): aws_profile_name = [aws_profile_name]
     elif aws_profile_name is None or len(aws_profile_name) == 0: aws_profile_name = None
@@ -427,8 +428,8 @@ def detect_credentials(config_name, extra_environ=None, filenames=None,
                     aws_access_key_id     = cc.get(awsprof, 'aws_access_key_id')
                     aws_secret_access_key = cc.get(awsprof, 'aws_secret_access_key')
                     return (aws_access_key_id, aws_secret_access_key)
-                except: pass
-        except: pass
+                except Exception: pass
+        except Exception: pass
     # no match!
     if default_value is None:
         return None
