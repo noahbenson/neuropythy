@@ -26,7 +26,7 @@ def calc_worklog(stdout=Ellipsis, stderr=Ellipsis, verbose=False):
     calc_worklog constructs the worklog from the stdout, stderr, stdin, and verbose arguments.
     '''
     try: cols = int(os.environ['COLUMNS'])
-    except: cols = 80
+    except Exception: cols = 80
     return pimms.worklog(columns=cols, stdout=stdout, stderr=stderr, verbose=verbose)
 @pimms.calc('subject')
 def calc_subject(argv, worklog):
@@ -46,13 +46,13 @@ def calc_subject(argv, worklog):
         if sub is not None:
             worklog('Using FreeSurfer subject: %s' % sub.path)
             return sub
-    except: pass
+    except Exception: pass
     try:
         sub = hcp_subject(subject_id)
         if sub is not None:
             worklog('Using HCP subject: %s' % sub.path)
             return sub
-    except: pass
+    except Exception: pass
     raise ValueError('Could not load subject %s' % subject_id)
 @pimms.calc('atlas_map', 'atlas_subject')
 def calc_atlases(worklog, atlas_subject_id='fsaverage'):
@@ -81,11 +81,11 @@ def calc_atlases(worklog, atlas_subject_id='fsaverage'):
         names (such as 'eccen' or 'maxprob') to the property vectors imported from the appropriate
         files.
     '''
-    try:    sub = freesurfer_subject(atlas_subject_id)
-    except: sub = None
+    try:              sub = freesurfer_subject(atlas_subject_id)
+    except Exception: sub = None
     if sub is None:
         try: sub = hcp_subject(atlas_subject_id)
-        except: sub = None
+        except Exception: sub = None
     if sub is None: raise ValueError('Could not load atlas subject %s' % atlas_subject_id)
     worklog('Using Atlas subject: %s' % sub.path)
     # Now find the requested atlases
@@ -197,7 +197,8 @@ def calc_atlas_projections(subject_cortices, atlas_cortices, atlas_map, worklog,
             else:
                 if atl[1][0] == 'v': atl[1] = atl[1][1:]
                 try: atl = (atl[0], tuple([int(x) for x in re.split(r'[-_.]+', atl[1])]))
-                except: raise ValueError('Could not parse atlas version string: %s' % atl[1])
+                except Exception:
+                    raise ValueError('Could not parse atlas version string: %s' % atl[1])
         elif pimms.is_int(atl[1]):  atl = (atl[0], (atl[1],))
         elif pimms.is_real(atl[1]): atl = (atl[0], (int(atl[1]), int(10*(atl[1] - int(atl[1]))),))
         elif pimms.is_vector(atl[1], int): atl = (atl[0], tuple(atl[1]))
@@ -332,7 +333,7 @@ atlas_cmdline_abbrevs = {'output_format':    'f',
 def _format_afferent_doc(docstr, abbrevs=None, cols=80):
     try:
         (ln1, docs) = docstr.split('\n\n')
-    except: return ''
+    except Exception: return ''
     anm0 = ln1.split(' (')[0]
     anm = anm0.replace('_', '-')
     header = '  --' + anm
