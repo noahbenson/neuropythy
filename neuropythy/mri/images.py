@@ -24,8 +24,9 @@ def to_image_header(img):
         raise ValueError('to_image_header: only nibabel obejcts can be coerced to headers')
     if type(img).__name__.endswith('Header'): return img
     # if not a header given, must be an image given:
-    try:    return img.header
-    except: raise ValueError('to_image_header: can only convert nibabel image or header objects')
+    try: return img.header
+    except Exception:
+        raise ValueError('to_image_header: can only convert nibabel image or header objects')
 
 # ImageType Classes ################################################################################
 # These classes define how images are interpreted and loaded; they are intended to be static.
@@ -56,7 +57,7 @@ class ImageType(object):
           then the header-data overrides the array; if neither, then np.float32.
         '''
         try:    dataobj = dataobj.dataobj
-        except: pass
+        except Exception: pass
         dtype = np.asarray(dataobj).dtype if dataobj else self.default_type()
         if   hdat and 'type'  in hdat: dtype = np.dtype(hdat['type'])
         elif hdat and 'dtype' in hdat: dtype = np.dtype(hdat['dtype'])
@@ -76,7 +77,7 @@ class ImageType(object):
         # make a numpy array of the appropriate dtype
         dtype = self.parse_type(hdat, dataobj=dataobj)
         try:    dataobj = dataobj.dataobj
-        except: pass
+        except Exception: pass
         if   dataobj: arr = np.asarray(dataobj).astype(dtype)
         elif ish:     arr = np.zeros(ish,       dtype=dtype)
         else:         arr = np.zeros([1,1,1,0], dtype=dtype)
@@ -131,28 +132,28 @@ class ImageType(object):
         hdr = to_image_header(img)
         d = {}
         # basic stuff (most headers should have these)
-        try:    d['affine'] = hdr.get_best_affine()
-        except:
+        try: d['affine'] = hdr.get_best_affine()
+        except Exception:
             try:    d['affine'] = hdr.get_affine()
-            except: pass
-        try:    d['voxel_size'] = hdr.get_zooms()
-        except: pass
-        try:    d['voxel_type'] = hdr.get_data_dtype()
-        except: pass
-        try:    d['image_shape'] = hdr.get_data_shape()
-        except: pass
+            except Exception: pass
+        try: d['voxel_size'] = hdr.get_zooms()
+        except Exception: pass
+        try: d['voxel_type'] = hdr.get_data_dtype()
+        except Exception: pass
+        try: d['image_shape'] = hdr.get_data_shape()
+        except Exception: pass
         # less basic stuff (some have these)
-        try:    d['bytes_per_voxel'] = hdr.get_data_bytespervox()
-        except: pass
-        try:    d['image_bytes'] = hdr.get_data_size()
-        except: pass
-        try:    d['image_offset'] = hdr.get_data_offset()
-        except: pass
+        try: d['bytes_per_voxel'] = hdr.get_data_bytespervox()
+        except Exception: pass
+        try: d['image_bytes'] = hdr.get_data_size()
+        except Exception: pass
+        try: d['image_offset'] = hdr.get_data_offset()
+        except Exception: pass
         try:
             (m,b) = hdr.get_slope_inter()
             d['data_slope']  = m
             d['data_offset'] = b
-        except: pass
+        except Exception: pass
         # that's it
         return d
 class MGHImageType(ImageType):
@@ -182,19 +183,19 @@ class MGHImageType(ImageType):
         d = super(self, MGHImageType).meta_data(img)
         hdr = to_image_header(img)
         try:    d['vox2ras'] = hdr.get_vox2ras()
-        except: pass
+        except Exception: pass
         try:    d['ras2vox'] = hdr.get_ras2vox()
-        except: pass
+        except Exception: pass
         try:    d['vox2ras_tkr'] = hdr.get_vox2ras_tkr()
-        except: pass
+        except Exception: pass
         try:    d['footer_offset'] = hdr.get_footer_offset()
-        except: pass
+        except Exception: pass
         try:
             zooms = hdr.get_zooms()
             (zooms, tr) = (zooms, None) if len(zooms) == 3 else (zooms[:3], zooms[3])
             d['voxel_size']     = pimms.quant(zooms, 'mm')
             d['slice_duration'] = pimms.quant(tr, 'ms') if tr is not None else None
-        except: pass
+        except Exception: pass
         return d
 class Nifti1ImageType(ImageType):
     @classmethod
@@ -210,55 +211,55 @@ class Nifti1ImageType(ImageType):
         from nibabel.nifti1 import (slice_order_codes, unit_codes)
         d = super(self, Nifti1ImageType).meta_data(img)
         hdr = to_image_header(img)
-        try:    d['dimension_information'] = hdr.get_dim_info()
-        except: pass
-        try:    d['intent'] = hdr.get_intent()
-        except: pass
-        try:    d['slice_count'] = hdr.get_n_slices()
-        except: pass
-        try:    (sunit, tunit) = hdr.get_xyzt_units()
-        except: (sunit, tunit) = ('unknown', 'unknown')
+        try: d['dimension_information'] = hdr.get_dim_info()
+        except Exception: pass
+        try: d['intent'] = hdr.get_intent()
+        except Exception: pass
+        try: d['slice_count'] = hdr.get_n_slices()
+        except Exception: pass
+        try: (sunit, tunit) = hdr.get_xyzt_units()
+        except Exception: (sunit, tunit) = ('unknown', 'unknown')
         if sunit != 'unknown':
             try: d['voxel_size'] = pimms.quant(d['voxel_size'], sunit)
-            except: pass
+            except Exception: pass
         try:
             sd = hdr.get_slice_duration()
             if tunit != 'unknown': sd = pimms.quant(sd, tunit)
             d['slice_duration'] = sd
-        except: pass
+        except Exception: pass
         try:
             (q,qc) = hdr.get_qform(True)
             d['qform_code'] = qc
             d['qform'] = q
-        except: pass
+        except Exception: pass
         try:
             (s,sc) = hdr.get_sform(True)
             d['sform_code'] = sc
             d['sform'] = s
-        except: pass
+        except Exception: pass
         try:
             sc = hdr['slice_code']
             if sc != 0: d['slice_order'] = slice_order_codes.label[sc]
-        except: pass
+        except Exception: pass
         try:
             ts = hdr.get_slice_times()
             ts = np.asarray([np.nan if t is None else t for t in ts])
             if tunit != 'unknown': ts = pimms.quant(ts, tunit)
             d['slice_times'] = ts
-        except: pass
+        except Exception: pass
         try:    d['header_size'] = hdr['sizeof_hdr']
-        except: pass
+        except Exception: pass
         try:    d['calibration'] = (hdr['cal_min'], hdr['cal_max'])
-        except: pass
+        except Exception: pass
         try:
             t0 = hdr['toffset']
             if tunits != 'unknown': t0 = pimms.quant(t0, tunits)
             d['time_offset'] = t0
-        except: pass
+        except Exception: pass
         try:    d['description'] = hdr['descrip']
-        except: pass
+        except Exception: pass
         try:    d['auxiliary_filename'] = hdr['aux_file']
-        except: pass
+        except Exception: pass
         return d
     @classmethod
     def unit_to_name(self, u):
@@ -280,36 +281,36 @@ class Nifti1ImageType(ImageType):
             try:
                 hdr.set_dim_info(*d[k])
                 break
-            except: pass
+            except Exception: pass
         try:    hdr.set_intent(d['intent'])
-        except: pass
+        except Exception: pass
         # xyzt_units:
-        try:    sunit = self.unit_to_name(pimms.unit(d['voxel_size']))
-        except:
-            try:    sunit = self.unit_to_name(pimms.unit(d['voxel_unit']))
-            except: sunit = 'unknown'
-        try:    tunit = self.unit_to_name(pimms.unit(d['slice_duration']))
-        except:
-            try:    tunit = self.unit_to_name(pimms.unit(d['time_unit']))
-            except: tunit = 'unknown'
-        try:    hdr.set_xyzt_units(sunit, tunit)
-        except: pass
+        try: sunit = self.unit_to_name(pimms.unit(d['voxel_size']))
+        except Exception:
+            try: sunit = self.unit_to_name(pimms.unit(d['voxel_unit']))
+            except Exception: sunit = 'unknown'
+        try: tunit = self.unit_to_name(pimms.unit(d['slice_duration']))
+        except Exception:
+            try: tunit = self.unit_to_name(pimms.unit(d['time_unit']))
+            except Exception: tunit = 'unknown'
+        try: hdr.set_xyzt_units(sunit, tunit)
+        except Exception: pass
         # qform and sform
         try:
-            try:    q = to_affine(d['qform'])
-            except: q = hdr.get_best_affine()
+            try: q = to_affine(d['qform'])
+            except Exception: q = hdr.get_best_affine()
             qc = d.get('qform_code', 'unknown')
             hdr.set_qform(q, qc)
-        except: pass
+        except Exception: pass
         try:
-            try:    s = to_affine(d['sform'])
-            except: s = hdr.get_best_affine()
+            try: s = to_affine(d['sform'])
+            except Exception: s = hdr.get_best_affine()
             sc = d.get('sform_code', 'unknown')
             hdr.set_sform(s, sc)
-        except: pass
+        except Exception: pass
         # slice code
         try:    hdr['slice_code'] = slice_order_codes[d['slice_order']]
-        except: pass
+        except Exception: pass
         # slice duration
         try:
             dur = d['slice_duration']
@@ -317,7 +318,7 @@ class Nifti1ImageType(ImageType):
                 if tunit == 'unknown': dur = pimms.mag(dur)
                 else: dur = pimms.mag(dur, tunit)
             hdr.set_slice_duration(dur)
-        except: pass
+        except Exception: pass
         # slice timing
         try:
             ts = d['slice_times']
@@ -325,16 +326,16 @@ class Nifti1ImageType(ImageType):
                 if tunit == 'unknown': ts = pimms.mag(ts)
                 else: ts = pimms.mag(ts, tunit)
             hdr.set_slice_duration([None if np.isnan(t) else t for t in ts])
-        except: pass
+        except Exception: pass
         # slope / intercept
         try:    hdr.set_slope_inter(d.get('data_slope', None), d.get('data_offset', None))
-        except: pass
+        except Exception: pass
         # calibration
         try:
             (cmn, cmx) = d['calibration']
             hdr['cal_min'] = cmn
             hdr['cal_max'] = cmx
-        except: pass
+        except Exception: pass
         # time offset
         try:
             t0 = d['time_offset']
@@ -342,13 +343,13 @@ class Nifti1ImageType(ImageType):
                 if tunits != 'unknown': t0 = pimms.mag(t0, tunits)
                 else: t0 = pimms.mag(t0)
             hdr['toffset'] = t0
-        except: pass
+        except Exception: pass
         # description
         try:    hdr['descrip'] = d['description']
-        except: pass
+        except Exception: pass
         # auxiliary filename
         try:    hdr['aux_file'] = d['auxiliary_filename']
-        except: pass
+        except Exception: pass
         return img
 class Nifti2ImageType(Nifti1ImageType):
     @classmethod
@@ -410,25 +411,25 @@ class PARRECImageType(ImageType):
             (bvals,bvec) = hdr.get_bvals_bvecs()
             d['b_values'] = bvals
             d['b_vectors'] = bvecs
-        except: pass
+        except Exception: pass
         try:
             (m,b) = hdr.get_data_scaling()
             d['data_slope'] = m
             d['data_offset'] = b
-        except: pass
+        except Exception: pass
         # get_def(name)?
         try:    d['echo_train_length'] = hdr.get_echo_train_length()
-        except: pass
+        except Exception: pass
         try:    d['record_shape'] = hdr.get_record_shape()
-        except: pass
+        except Exception: pass
         try:    d['slice_orientation'] = hdr.get_slice_orientation()
-        except: pass
+        except Exception: pass
         try:    d['sorted_slice_indices'] = hdr.get_sorted_slice_indices()
-        except: pass
+        except Exception: pass
         try:    d['volume_labels'] = hdr.get_volume_labels()
-        except: pass
+        except Exception: pass
         try:    d['water_fat_shift'] = hdr.get_water_fat_shift()
-        except: pass
+        except Exception: pass
         return d
 class EcatImageType(ImageType):
     @classmethod
@@ -444,9 +445,9 @@ class EcatImageType(ImageType):
         d = super(self, EcatImageType).meta_data(img)
         hdr = to_image_header(img)
         try: d['filetype'] = hdr.get_filetype()
-        except: pass
+        except Exception: pass
         try: d['patient_orientation'] = hdr.get_patient_orient()
-        except: pass
+        except Exception: pass
         return d
 
 image_types = (Nifti1ImageType, Nifti2ImageType, MGHImageType,
@@ -472,9 +473,9 @@ def to_image_type(image_type):
         raise ValueError('"%s" is not a valid image-type name or alias' % image_type)
     for x in (image_type, type(image_type)):
         try:    return image_types_by_image_type[x]
-        except: pass
+        except Exception: pass
         try:    return image_types_by_header_type[x]
-        except: pass
+        except Exception: pass
     raise ValueError('Unsupported image type: %s' % image_type)
 def to_image_meta_data(img):
     '''
@@ -484,8 +485,8 @@ def to_image_meta_data(img):
     Note that obj may also be a mapping object, in which case it is returned verbatim.
     '''
     if pimms.is_map(img): return img
-    try:    hdr = img.header
-    except: hdr = img
+    try: hdr = img.header
+    except Exception: hdr = img
     intype = to_image_type(hdr)
     return intype.meta_data(hdr)
 def to_image(img, image_type=None, meta_data=None, **kwargs):
@@ -521,12 +522,12 @@ def to_image(img, image_type=None, meta_data=None, **kwargs):
         else: raise ValueError('cannot parse more than 3 elements from image tuple')
     else: (aff,mdat) = (None,None)
     # see if the img argument is an image object
-    try:    (img,aff0,mdat0) = (img.dataobj, img.affine, to_image_meta_data(img))
-    except: (aff0,mdat0) = (None, {})
+    try: (img,aff0,mdat0) = (img.dataobj, img.affine, to_image_meta_data(img))
+    except Exception: (aff0,mdat0) = (None, {})
     # check that the affine wasn't given as the meta-data (e.g. (img,aff) instead of (img,mdat))
     if aff is None and mdat is not None:
         try:    (aff, mdat) = (to_affine(mdat, 3), {})
-        except: pass
+        except Exception: pass
     # parse the meta-data that has been given
     mdat = dict(pimms.merge(mdat0, {} if mdat is None else mdat, meta_data))
     # if there is an explicit affine, we put it into mdat now
