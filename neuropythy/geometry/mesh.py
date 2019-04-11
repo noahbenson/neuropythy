@@ -26,8 +26,8 @@ from ..util import (ObjectWithMetaData, to_affine, zinv, is_image, is_address, a
 from ..io   import (load, importer, exporter)
 from functools import reduce
 
-try:    from StringIO import StringIO
-except: from io import StringIO
+try:              from StringIO import StringIO
+except Exception: from io import StringIO
 
 @pimms.immutable
 class VertexSet(ObjectWithMetaData):
@@ -3270,9 +3270,11 @@ class Path(ObjectWithMetaData):
         def bc_conv(f0, x0, ftarg):
             r = np.zeros(len(x0))
             for (f,x) in zip(f0,x0):
-                if   np.isclose(x, 0, atol=1e-5): continue
-                elif f not in ftarg:              raise ValueError('Non-zero bc-conv value')
-                else:                             r[f == ftarg] = x
+                if np.isclose(x, 0, atol=1e-5): continue
+                elif f in ftarg: r[f == ftarg] = x
+                else: raise ValueError('Non-zero bc-conv value',
+                                       dict(edge_data=edge_data, addresses=addresses, closed=closed,
+                                            f0=f0, x0=x0, ftarg=ftarg, f=f, x=x))
             return r
         # walk along edge data; mostly this isn't too hard
         (fs,ps) = edge_data[4:6]
@@ -3287,7 +3289,7 @@ class Path(ObjectWithMetaData):
             bcs = np.asarray([bc_conv(faces[p], coords[p], f) for p in ps]).T[:2]
             bcs.setflags(write=False)
             return bcs
-        return pyr.pmap({f: tuple([to_bcs(f,p) for p in ps])  for (f,ps) in six.iteritems(idx)})
+        return pyr.pmap({f: tuple([to_bcs(f,p) for p in ps]) for (f,ps) in six.iteritems(idx)})
     @staticmethod
     def tesselate_triangle_paths(paths):
         '''
