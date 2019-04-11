@@ -79,7 +79,7 @@ def add_subject_path(path, index=0):
                 sd.insert(index, path)
             config['freesurfer_subject_paths'] = sd
             return True
-        except:
+        except Exception:
             return False
 
 if config['freesurfer_subject_paths'] is None:
@@ -414,7 +414,7 @@ def subject(name, meta_data=None, check_path=True):
             # we can use the benson and winawer 2018 dataset
             import neuropythy as ny
             try: return ny.data['benson_winawer_2018'].subjects['fsaverage']
-            except: pass # error message below is more accurate...
+            except Exception: pass # error message below is more accurate...
         if subpath is None:
             raise ValueError('Could not locate subject with name \'%s\'' % name)
         elif check_path:
@@ -471,10 +471,10 @@ def tkr_vox2ras(img, zooms=None):
         # let's assume that they passed shape, zooms
         shape = img
     else:
-        try:    img = img.header
-        except: pass
-        try:    (shape, zooms) = (img.get_data_shape(), img.get_zooms())
-        except: raise ValueError('single argument must be nibabel image or header')
+        try:              img = img.header
+        except Exception: pass
+        try:              (shape, zooms) = (img.get_data_shape(), img.get_zooms())
+        except Exception: raise ValueError('single argument must be nibabel image or header')
     # Okay, we have shape and zooms...
     zooms = zooms[0:3]
     shape = shape[0:3]
