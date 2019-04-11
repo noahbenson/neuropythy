@@ -257,7 +257,7 @@ def load_json(filename, to='auto'):
     if pimms.is_str(filename):
         try:
             with gzip.open(filename, 'rt') as fl: dat = json.load(fl)
-        except:
+        except Exception:
             with open(filename, 'rt') as fl: dat = json.load(fl)
     else:
         dat = json.load(filename)
