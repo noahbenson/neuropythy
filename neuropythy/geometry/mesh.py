@@ -3296,6 +3296,7 @@ class Path(ObjectWithMetaData):
                  for path in paths]
         # for starters, we want to build up a matrix of all the individual reified coordinates
         bccoords = np.hstack([[[1,0,0],[0,1,0],[0,0,1]], np.hstack(paths)]) # first three are A,B,C
+        bccoords0 = np.array(bccoords)
         coords = a21*bccoords[0] + b21*bccoords[1] + c21*bccoords[2] # reify all
         (coords, bccoords) = [x.T for x in (coords, bccoords)]
         # turn paths into indices instead of coords
@@ -3316,7 +3317,7 @@ class Path(ObjectWithMetaData):
             n += 1
             ridcs.append(ii)
         if n > 64: warnings.warn('tesselating face with %d points: poor performance is likely' % n)
-        elif np.max(idcs) == 2:
+        elif np.max(idcs) < 4:
             assert(len(coords) == 5)
             # intersection at a single point or at two points; regardless, we tesselate into the
             # original triangle only; however, we have to figure out which side is LHS and RHS
@@ -3352,7 +3353,7 @@ class Path(ObjectWithMetaData):
             if np.sum(np.isclose(bcx[1:-1], 0, atol=1e-5)) > 0:
                 raise ValueError('path middle touches edge')
             (p0,p1) = bcx[[0,-1]]
-            (z0,z1) = [np.isclose(p,0,atol=1e-5) for p in (p0,p1)]
+            (z0,z1) = [np.isclose(p,0,atol=1e-4) for p in (p0,p1)]
             (s0,s1) = [np.sum(z)                 for z in (z0,z1)]
             (e0,e1) = [((0 if     z[2] else 1 if     z[0] else 2) if s == 1 else
                         (0 if not z[0] else 1 if not z[1] else 2) if s == 2 else
@@ -3429,6 +3430,7 @@ class Path(ObjectWithMetaData):
             # every three must be a triangle
             for (u,v,th) in zip(nei, np.roll(nei, -1), dths):
                 abc = [a,u,v]
+                if a == u or u == v or v == a: raise ValueError('bad triangle in neighbor search')
                 # avoid colinear points and angles >= 180, i.e., any three points on the same edge
                 if np.isclose(th, [0,np.pi]).any() or th >= np.pi: continue
                 if any(np.sum(np.isin(abc, ee)) == 3 for ee in eidx): continue
@@ -3451,17 +3453,15 @@ class Path(ObjectWithMetaData):
             tskip = set([])
             for abc in tris:
                 (a,b,c) = abc
-                h = next((sgn*h
-                          for (sgn,u,v) in zip([1,1,1,-1,-1,-1], [a,b,c,a,b,c], [b,c,a,c,a,b])
-                          for h in [mtx[u,v]] if h != 0),
-                         None)
+                itlst = list(zip([1,1,1,-1,-1,-1], [a,b,c,a,b,c], [b,c,a,c,a,b]))
+                h = next((sgn*h for (sgn,u,v) in itlst for h in [mtx[u,v]] if h != 0), None)
                 if h is None:
                     tskip.add(abc)
                     continue
                 for (u,v) in zip(abc,(b,c,a)):
                     if mtx[v,u] == 0: mtx[v,u] = h
-                if h == 1: lhs.add(abc)
-                else:      rhs.add(abc)
+                (lhs if h == 1 else rhs).add(abc)
+            if tskip == tris: raise ValueError('infinite loop: %s' % tskip)
         # Convert them back to addresses; we only want first 2 BC coordinates for return value
         bccoords = bccoords[:,:2]
         return tuple([np.transpose(ll, (1,2,0)) if len(ll) > 0 else np.array(ll)
