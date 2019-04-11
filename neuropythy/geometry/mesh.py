@@ -3333,7 +3333,7 @@ class Path(ObjectWithMetaData):
             n += 1
             ridcs.append(ii)
         # if we overwrote the last one, we actually want to keep it
-        if np.sum(idcs == idcs[-1]) > 1:
+        if np.sum(idcs[3:] == idcs[-1]) > 1:
             qii = ridcs[idcs[-1]]
             coords[qii] = coords[-1]
             bccoords[qii] = bccoords[-1]
@@ -3443,6 +3443,7 @@ class Path(ObjectWithMetaData):
         tris = set([])
         neis = {u:set([]) for u in range(n)}
         for (u,v) in seg_idcs:
+            if u == v: continue
             neis[u].add(v)
             neis[v].add(u)
         for (a,nei) in six.iteritems(neis):
@@ -3457,7 +3458,12 @@ class Path(ObjectWithMetaData):
             # every three must be a triangle
             for (u,v,th) in zip(nei, np.roll(nei, -1), dths):
                 abc = [a,u,v]
-                if a == u or u == v or v == a: raise ValueError('bad triangle in neighbor search')
+                if a == u or u == v or v == a:
+                    raise ValueError('bad triangle in neighbor search',
+                                     dict(bccoords0=bccoords0, coords0=coords0,
+                                          bccoords=bccoords, coords=coords,
+                                          pidcs=pidcs, idcs=idcs, ridcs=ridcs,
+                                          a=a, nei=nei, ths=ths, tris=tris, seg_idcs=seg_idcs))
                 # avoid colinear points and angles >= 180, i.e., any three points on the same edge
                 if np.isclose(th, [0,np.pi]).any() or th >= np.pi: continue
                 if any(np.sum(np.isin(abc, ee)) == 3 for ee in eidx): continue
