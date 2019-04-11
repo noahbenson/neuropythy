@@ -13,15 +13,15 @@ from   .core      import (library_path, curry, ObjectWithMetaData, AutoDict, dat
 from   .conf      import to_credentials
 
 # Not required, but try to load it anyway:
-try:    import s3fs
-except: s3fs = None
+try:              import s3fs
+except Exception: s3fs = None
 
 def is_url(url):
     '''
     is_url(p) yields True if p is a valid URL and False otherwise.
     '''
     try: return bool(urllib.request.urlopen(url))
-    except: return False
+    except Exception: return False
 def url_download(url, topath=None, create_dirs=True):
     '''
     url_download(url) yields the contents of the given url as a byte-string.
@@ -220,7 +220,7 @@ class PseudoDir(ObjectWithMetaData):
         if os.path.exists(cpath): return True
         with tarfile.open(tarpath, 'r') as tfl:
             try: return bool(tfl.getmember(path))
-            except: return False
+            except Exception: return False
     @staticmethod
     def _tar_getpath(tarpath, cache_path, path):
         cpath = os.path.join(cache_path, path)
@@ -627,7 +627,7 @@ class FileMap(ObjectWithMetaData):
             filtfn = inst['filt'] if 'filt' in args else lambda x,y:x
             dat = loadfn(lpth, args)
             dat = filtfn(dat, args)
-        except: dat = None
+        except Exception: dat = None
         # check for miss instructions if needed
         if dat is None and 'miss' in args:
             miss = args['miss']
