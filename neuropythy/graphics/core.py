@@ -245,7 +245,7 @@ try:
         'log_radius':       (cmap_log_radius,       (np.log(0.25), np.log(40.0))),
         'log_cmag':         (cmap_log_cmag,         (np.log(0.5), np.log(32.0)))}
     for (k,(cmap,_)) in six.iteritems(colormaps): matplotlib.cm.register_cmap(k, cmap)
-except: pass
+except Exception: pass
 
 def to_rgba(val):
     '''
@@ -255,7 +255,7 @@ def to_rgba(val):
     '''
     if pimms.is_npmatrix(val) and val.shape[1] == 4: return val
     try: return np.asarray(matplotlib.colors.to_rgba(val))
-    except: return np.asarray([matplotlib.colors.to_rgba(u) for u in val])
+    except Exception: return np.asarray([matplotlib.colors.to_rgba(u) for u in val])
 def color_overlap(color1, *args):
     '''
     color_overlap(color1, color2...) yields the rgba value associated with overlaying color2 on top
@@ -716,7 +716,7 @@ def cortex_plot_colors(the_map,
         clr = matplotlib.colors.to_rgba(color)
         # This is an rgb color to plot...
         color = np.ones((the_map.vertex_count,4)) * matplotlib.colors.to_rgba(clr)
-    except: pass
+    except Exception: pass
     if pimms.is_vector(color) or pimms.is_str(color):
         # it's a property that gets interpreted via the colormap
         p = the_map.property(color)
@@ -737,7 +737,7 @@ def cortex_plot_colors(the_map,
             underlay = apply_cmap(the_map.prop('curvature'), cmap_curvature, vmin=-1, vmax=1)
         else:
             try: underlay = np.ones((the_map.vertex_count, 4)) * to_rgba(underlay)
-            except: raise ValueError('plot underlay failed: must be a color or curvature')
+            except Exception: raise ValueError('plot underlay failed: must be a color or curvature')
     # okay, let's check on alpha...
     if alpha is not None:
         if pimms.is_number(alpha): alpha = np.full(color.shape[0], alpha)
@@ -952,7 +952,7 @@ try:
                       ' be set by neuropythy; however, if you click the reset (home) button in' +
                       ' the upper-left corner of the figure, the requested view will be fixed.')
         return f
-except: pass
+except Exception: pass
 
 def cortex_plot(mesh, *args, **opts):
     '''
