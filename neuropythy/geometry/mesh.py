@@ -3298,6 +3298,7 @@ class Path(ObjectWithMetaData):
         bccoords = np.hstack([[[1,0,0],[0,1,0],[0,0,1]], np.hstack(paths)]) # first three are A,B,C
         bccoords0 = np.array(bccoords)
         coords = a21*bccoords[0] + b21*bccoords[1] + c21*bccoords[2] # reify all
+        coords0 = np.array(coords)
         (coords, bccoords) = [x.T for x in (coords, bccoords)]
         # turn paths into indices instead of coords
         (pidcs,k) = ([],3) # 3 is the first non-corner index in bccoords/coords
@@ -3318,7 +3319,7 @@ class Path(ObjectWithMetaData):
             ridcs.append(ii)
         if n > 64: warnings.warn('tesselating face with %d points: poor performance is likely' % n)
         elif np.max(idcs) < 4:
-            assert(len(coords) == 5)
+            assert(len(coords) > 4)
             # intersection at a single point or at two points; regardless, we tesselate into the
             # original triangle only; however, we have to figure out which side is LHS and RHS
             if idcs[-1] == idcs[-2]:
