@@ -909,7 +909,7 @@ class Mesh(VertexSet):
         '''
         if not isinstance(tris, Tesselation):
             try: tris = Tesselation(tris)
-            except: raise ValueError('mesh.tess must be a Tesselation object')
+            except Exception: raise ValueError('mesh.tess must be a Tesselation object')
         return tris.persist()
 
     # The immutable values:
@@ -1037,15 +1037,15 @@ class Mesh(VertexSet):
         '''
         mesh.face_hash yields the scipy spatial hash of triangle centers in the given mesh.
         '''
-        try:    return space.cKDTree(face_centers.T)
-        except: return space.KDTree(face_centers.T)
+        try:              return space.cKDTree(face_centers.T)
+        except Exception: return space.KDTree(face_centers.T)
     @pimms.value
     def vertex_hash(coordinates):
         '''
         mesh.vertex_hash yields the scipy spatial hash of the vertices of the given mesh.
         '''
-        try:    return space.cKDTree(coordinates.T)
-        except: return space.KDTree(coordinates.T)
+        try:              return space.cKDTree(coordinates.T)
+        except Exception: return space.KDTree(coordinates.T)
 
     # requirements/validators
     @pimms.require
@@ -1147,8 +1147,8 @@ class Mesh(VertexSet):
         # gradually increase until we find the container triangle; if k passes the max, then
         # we give up and assume no triangle is the container
         if k >= 288: return None
-        try:    (d,near) = self.facee_hash.query(x, k=k, n_jobs=n_jobs)
-        except: (d,near) = self.facee_hash.query(x, k=k)
+        try:              (d,near) = self.facee_hash.query(x, k=k, n_jobs=n_jobs)
+        except Exception: (d,near) = self.facee_hash.query(x, k=k)
         near = [n for n in near if n not in searched]
         searched = searched.union(near)
         tri_no = next((kk for kk in near if self.is_point_in_face(kk, x)), None)
@@ -1161,8 +1161,8 @@ class Mesh(VertexSet):
         mesh to the given point pt. If pt is an (n x dims) matrix of points, an id is given
         for each column of pt.
         '''
-        try:    (d,near) = self.vertex_hash.query(pt, k=1, n_jobs=n_jobs)
-        except: (d,near) = self.vertex_hash.query(pt, k=1)
+        try:              (d,near) = self.vertex_hash.query(pt, k=1, n_jobs=n_jobs)
+        except Exception: (d,near) = self.vertex_hash.query(pt, k=1)
         return near
 
     def point_in_plane(self, tri_no, pt):
@@ -1204,8 +1204,8 @@ class Mesh(VertexSet):
             r = self.nearest_data([pt], k=k, n_jobs=n_jobs)[0];
             return (r[0][0], r[1][0], r[2][0])
         pt = pt.T if pt.shape[0] == self.coordinates.shape[0] else pt
-        try:    (d, near) = self.face_hash.query(pt, k=k, n_jobs=n_jobs)
-        except: (d, near) = self.face_hash.query(pt, k=k)
+        try:              (d, near) = self.face_hash.query(pt, k=k, n_jobs=n_jobs)
+        except Exception: (d, near) = self.face_hash.query(pt, k=k)
         ids = [tri_no if tri_no is not None else self._find_triangle_search(x, 2*k, set(near_i))
                for (x, near_i) in zip(pt, near)
                for tri_no in [next((k for k in near_i if self.is_point_in_face(k, x)), None)]]
@@ -1231,8 +1231,8 @@ class Mesh(VertexSet):
         if len(x.shape) == 1: return self.nearest_vertex([x], n_jobs=n_jobs)[0]
         if x.shape[0] == self.coordinates.shape[0]: x = x.T
         n = self.coordinates.shape[1]
-        try:    (_, nei) = self.vertex_hash.query(x, k=1, n_jobs=n_jobs)
-        except: (_, nei) = self.vertex_hash.query(x, k=1)
+        try:              (_, nei) = self.vertex_hash.query(x, k=1, n_jobs=n_jobs)
+        except Exception: (_, nei) = self.vertex_hash.query(x, k=1)
         return nei
 
     def distance(self, pt, k=2, n_jobs=1):
@@ -1268,8 +1268,8 @@ class Mesh(VertexSet):
                 res = np.full(len(sub_pts), None, dtype=np.object)
                 if k != cur_k and cur_k > max_k: return res
                 if near is None:
-                    try:    near = self.face_hash.query(sub_pts, k=cur_k, n_jobs=n_jobs)[1]
-                    except: near = self.face_hash.query(sub_pts, k=cur_k)[1]
+                    try:              near = self.face_hash.query(sub_pts, k=cur_k, n_jobs=n_jobs)[1]
+                    except Exception: near = self.face_hash.query(sub_pts, k=cur_k)[1]
                 # we want to try the nearest then recurse on those that didn't match...
                 guesses = near[:, top_i]
                 in_tri_q = self.is_point_in_face(guesses, sub_pts)
@@ -1611,8 +1611,8 @@ class Mesh(VertexSet):
         coords = self.coordinates
         dims = coords.shape[0]
         if len(data.shape) == 1:
-            try:    face_id = self.container(data, n_jobs=n_jobs)
-            except: face_id = self.container(data)
+            try:              face_id = self.container(data, n_jobs=n_jobs)
+            except Exception: face_id = self.container(data)
             if face_id is None:
                 return {'faces':np.array([0,0,0]), 'coordinates':np.full(2,np.nan)}
             tx = coords[:, idxfs[:,face_id]].T
@@ -1620,8 +1620,8 @@ class Mesh(VertexSet):
         else:
             data = data if data.shape[1] == 3 or data.shape[1] == 2 else data.T
             n = data.shape[0]
-            try:    face_id = np.asarray(self.container(data), n_jobs=n_jobs)
-            except: face_id = np.asarray(self.container(data))
+            try:              face_id = np.asarray(self.container(data), n_jobs=n_jobs)
+            except Exception: face_id = np.asarray(self.container(data))
             tx = np.full((3, dims, n), np.nan)
             oks = np.where(np.logical_not(np.equal(face_id, None)))[0]
             okfids = face_id[oks].astype('int')
@@ -2389,16 +2389,16 @@ def deduce_chirality(obj):
     '''
     # few simple tests:
     try: return obj.chirality
-    except: pass
+    except Exception: pass
     try: return obj.meta_data['chirality']
-    except: pass
+    except Exception: pass
     try: return obj.meta_data['hemi']
-    except: pass
+    except Exception: pass
     try: return obj.meta_data['hemisphere']
-    except: pass
+    except Exception: pass
     if obj is None or obj is Ellipsis: return 'lr'
     try: return to_hemi_str(obj)
-    except: pass
+    except Exception: pass
     return None
 
 @importer('map_projection', ('mp.json', 'mp.json.gz', 'map.json', 'map.json.gz',
@@ -2456,7 +2456,7 @@ def load_projections_from_path(p):
          for h in ('lh','rh','lr')})
 # just the neuropythy lib-dir projections:
 try: npythy_map_projections = load_projections_from_path(projections_libdir)
-except:
+except Exception:
     warnings.warn('Error raised while loading neuropythy libdir map projections')
     npythy_map_projections = pyr.m(lh=pyr.m(), rh=pyr.m(), lr=pyr.m())
 # all the map projections:
@@ -2569,8 +2569,8 @@ def map_projection(name=None, chirality=Ellipsis,
     else: raise ValueError('Could not understand map_projection hemi argument: %s' % hemi)
     hemi = to_hemi_str(hemi)
     # name might be an affine matrix
-    try:    aff = to_affine(name)
-    except: aff = None
+    try:              aff = to_affine(name)
+    except Exception: aff = None
     if pimms.is_matrix(aff):
         # see if this is an affine matrix
         aff = np.asarray(aff)
@@ -2595,8 +2595,9 @@ def map_projection(name=None, chirality=Ellipsis,
         if   name         in map_projections[hemi]: mp = map_projections[hemi][name]
         elif name.lower() in map_projections[hemi]: mp = map_projections[hemi][name.lower()]
         else:
-            try:    mp = load_map_projection(name, chirality=hemi)
-            except: raise ValueError('could neither find nor load projection %s (%s)' % (name,hemi))
+            try: mp = load_map_projection(name, chirality=hemi)
+            except Exception:
+                raise ValueError('could neither find nor load projection %s (%s)' % (name,hemi))
         # update parameters if need-be:
         if len(kw) > 0: mp = mp.copy(**kw)
     elif name is None:
@@ -2680,7 +2681,7 @@ def to_map_projection(arg, hemi=Ellipsis, chirality=Ellipsis,
             try:
                 (hemtmp, arg) = (to_hemi_str(h), a)
                 if hemi is None: hemi = hemtmp
-            except: pass
+            except Exception: pass
         # otherwise, strings alone might be map projection names or filenames
         mp = map_projection(arg, hemi)
     else: raise ValueError('Cannot interpret argument to to_map_projection')
@@ -3074,7 +3075,9 @@ class Path(ObjectWithMetaData):
                     else:              (uv,vtx) = (f[k],      sdif[0])
                 for (q,qq) in zip([u,v],   uv):   q.append(qq)
                 for (q,qq) in zip([wu,wv], w[k]): q.append(qq)
-            else: raise ValueError('address contained all-zero weights')
+            else: raise ValueError('address contained all-zero weights',
+                                   dict(faces=faces, coords=coords, ii=ii, f=f, w=w, pcur=pcur,
+                                        u=u, v=v, vtx=vtx))
             if u[-1] != v[-1]: mtx[u[-1],v[-1]] += 1
             if lastf is None or vtx is None: ff = None
             elif u[-2] == v[-2]:
@@ -3084,9 +3087,16 @@ class Path(ObjectWithMetaData):
                 # [3] equivalent to u[-2] (in which case condition (1) is also true)
                 if   u[-2] in f: ff = f
                 elif nz == 1:    ff = (u[-2], f[k[1]], f[k[0]])
-                else: raise ValueError('point followed by non-deducible face')
+                else: raise ValueError('point followed by non-deducible face',
+                                       dict(faces=faces, coords=coords, ii=ii, f=f, w=w, pcur=pcur,
+                                            u=u, v=v, vtx=vtx))
             elif vtx == u[-2] or vtx == v[-2]:
-                raise ValueError('Unexpected condition deducing triangle: u[-2] or v[-2] equal vtx')
+                if nz == 2:
+                    # we're still at the same point;
+                    ff = f
+                else: raise ValueError(
+                        'Unexpected condition deducing triangle: u[-2] or v[-2] equal vtx',
+                        dict(faces=faces,coords=coords,ii=ii,f=f,w=w,pcur=pcur,u=u,v=v,vtx=vtx))
             else: ff = (u[-2], v[-2], vtx)
             assert(ff is None or len(np.unique(ff)) == 3)
             fs.append(ff)
@@ -3112,12 +3122,15 @@ class Path(ObjectWithMetaData):
                     f0ii = np.where(f0 == f0but1[0])[0]
                     if np.isclose(x0[foii], 0): fs[0] = f1
                     else: fs[0] = f0
-                else: raise ValueError('closed path does not start/end correctly')
+                else: raise ValueError('closed path does not start/end correctly',
+                                       dict(faces=faces, coords=coords, u=u, v=v, vtx=vtx,
+                                            pcur=pcur, f0=f0, f1=f1, x0=x0, x1=x1))
                 ps[0] = tuple(pcur)
             elif len(tmp) == 1:
                 fs[0] = (u[-1], v[-1], tmp[0])
                 ps[0] = tuple(pcur)[:-1] + ps[0]
-            else: raise ValueError('closed path does not start/end in same face')
+            else: raise ValueError('closed path does not start/end in same face',
+                                   dict(faces=faces, coords=coords, u=u, v=v, vtx=vtx))
         else:
             fs[0] = None
             ps[0] = None
@@ -4071,9 +4084,9 @@ def to_tess(obj):
     else:
         # couple things to try: (1) might specify a tess face matrix, (2) might be a mesh-like obj
         try:    return tess(obj)
-        except: pass
+        except Exception: pass
         try:    return to_mesh(obj).tess
-        except: pass
+        except Exception: pass
     raise ValueError('Could not convert argument to tesselation object')
 def to_mesh(obj):
     '''
@@ -4124,7 +4137,7 @@ def load_gifti(filename, to='auto'):
             (cor, tri) = (pset[0].data, tris[0].data)
             # okay, try making it:
             try: return Mesh(tri, cor)
-            except: pass
+            except Exception: pass
         elif len(pset) == 1 and len(tris) == 0:
             # just a pointset
             return pset[0].data
