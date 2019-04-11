@@ -63,7 +63,7 @@ def reload_neuropythy():
 
 from   .util       import (config, is_image, library_path, to_affine, is_address, address_data,
                            is_curve_spline, to_curve_spline, curve_spline, flattest,
-                           is_list, is_tuple, to_hemi_str)
+                           is_list, is_tuple, to_hemi_str, is_dataframe, to_dataframe, auto_dict)
 from   .io         import (load, save, to_nifti)
 from   .mri        import (is_subject, is_cortex, to_cortex, to_image)
 from   .vision     import (retinotopy_data, empirical_retinotopy_data, predicted_retinotopy_data,
@@ -89,7 +89,7 @@ try:
 except: pass
 
 # Version information...
-__version__ = '0.9.1'
+__version__ = '0.9.2'
 
 
 
