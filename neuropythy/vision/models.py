@@ -464,8 +464,8 @@ class RegisteredRetinotopyModel(RetinotopyModel):
         '''
         if len(args) == 1:
             # see if we can cast it to something; first a mesh...
-            try:    m = geo.to_mesh(args[0])
-            except: m = None
+            try:              m = geo.to_mesh(args[0])
+            except Exception: m = None
             if m is not None:
                 if geo.is_flatmap(m):
                     (x,y) = m.coordinates
@@ -477,8 +477,8 @@ class RegisteredRetinotopyModel(RetinotopyModel):
                     res[:, fm.labels] = (c2a if len(c2a) == len(res) else c2a.T)
                     return res
             # next, try a cortex
-            try:    c = mri.to_cortex(args[0])
-            except: c = None
+            try:              c = mri.to_cortex(args[0])
+            except Exception: c = None
             if c is not None:
                 m = self.map_projection(c)
                 res = np.zeros((3, c.vertex_count))
