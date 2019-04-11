@@ -283,6 +283,7 @@ def to_dataframe(d, **kw):
       standard keyword arguments.
     '''
     import pandas
+    if pimms.is_itable(d): d = d.dataframe
     if is_dataframe(d): return d if len(kw) == 0 else pandas.DataFrame(d, **kw)
     if is_tuple(d) and len(d) == 2 and pimms.is_map(d[1]):
         try: return to_dataframe(d[0], **pimms.merge(d[1], kw))
