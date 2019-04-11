@@ -42,7 +42,7 @@ def guess_import_format(filename, **kwargs):
     for (k,(_,_,sniff)) in six.iteritems(importers):
         try:
             if sniff(filename, **kwargs): return k
-        except: pass
+        except Exception: pass
     return None
 def load(filename, format=None, **kwargs):
     '''
@@ -68,8 +68,8 @@ def load(filename, format=None, **kwargs):
         if format is None:
             # try formats and see if one works!
             for (k,(f,_,_)) in six.iteritems(importers):
-                try:    return f(filename, **kwargs)
-                except: pass
+                try:              return f(filename, **kwargs)
+                except Exception: pass
             raise ValueError('Could not deduce format of file %s' % filename)
     format = format.lower()
     if format not in importers:
@@ -161,7 +161,7 @@ def guess_export_format(filename, data, **kwargs):
     for (k,(_,_,sniff)) in six.iteritems(exporters):
         try:
             if sniff(filename, data, **kwargs): return k
-        except: pass
+        except Exception: pass
     return None
 def save(filename, data, format=None, **kwargs):
     '''
