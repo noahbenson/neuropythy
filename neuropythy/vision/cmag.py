@@ -122,8 +122,8 @@ class FieldOfView(object):
     @pimms.value
     def spatial_hashes(coordinates, sigma_bins):
         import scipy, scipy.spatial
-        try:    from scipy.spatial import cKDTree as shash
-        except: from scipy.spatial import KDTree  as shash
+        try:              from scipy.spatial import cKDTree as shash
+        except Exception: from scipy.spatial import KDTree  as shash
         return tuple([shash(coordinates[ii]) for ii in sigma_bins])
     # Methods
     def __call__(self, x, y=None):
@@ -235,8 +235,8 @@ class ArealCorticalMagnification(object):
     @pimms.value
     def spatial_hash(coordinates):
         import scipy, scipy.spatial
-        try:    from scipy.spatial import cKDTree as shash
-        except: from scipy.spatial import KDTree  as shash
+        try:              from scipy.spatial import cKDTree as shash
+        except Exception: from scipy.spatial import KDTree  as shash
         return shash(coordinates)
     # Static helper function
     @staticmethod
@@ -491,7 +491,7 @@ def neighborhood_cortical_magnification(mesh, coordinates):
                     isects_vis = np.asarray(geo.line_segment_intersection_2D(line, segs_vis))
                     # okay, these will all be nan but two of them; they are the points we care about
                     isect_idcs = np.unique(np.where(np.logical_not(np.isnan(isects_vis)))[1])
-                except:
+                except Exception:
                     isect_idcs = []
                 if len(isect_idcs) != 2:
                     res[idx,dirno] = np.nan
@@ -667,7 +667,7 @@ def path_cortical_magnification(mesh, path, mask=None, return_all=False,
             try:
                 addr  = vis_reg.address(x_vis)
                 x_srf = srf_reg.unaddress(addr)
-            except:
+            except Exception:
                 if len(ss_vis) > 1:
                     vis_steps.append(ss_vis)
                     srf_steps.append(ss_srf)
