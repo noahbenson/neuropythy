@@ -124,8 +124,8 @@ def extract_retinotopy_argument(obj, retino_type, arg, default='any'):
     if len(values) != n:
         found = False
         # could be that we were given a mesh data-field for a map
-        try:    values = values[obj.labels]
-        except: values = None
+        try:              values = values[obj.labels]
+        except Exception: values = None
         if values is None:
             raise RuntimeError('%s data: length %s should be %s' % (retino_type, len(values), n))
     return values
@@ -351,19 +351,19 @@ def retinotopy_data(m, source='any'):
     (z, prefix, suffix) = (None, None, None)
     if wild:
         try: z = as_retinotopy(m, 'visual')
-        except: pass
+        except Exception: pass
     for fix in fixes:
         if z: break
         try:
             z = as_retinotopy(m, 'visual', prefix=(fix + '_'))
             prefix = fix + '_'
-        except: pass
+        except Exception: pass
     for fix in fixes:
         if z: break
         try:
             z = as_retinotopy(m, 'visual', suffix=('_' + fix))
             suffix = fix + '_'
-        except: pass
+        except Exception: pass
     # if none of those worked, try with no prefix/suffix
     if not z:
         try:
@@ -371,14 +371,14 @@ def retinotopy_data(m, source='any'):
             z = as_retinotopy(m, 'visual', prefix=pref)
             prefix = pref
             check_fields = extra_fields['model'] + extra_fields['empirical']
-        except:
+        except Exception:
             raise
             try:
                 suff = source if source.startswith('_') else ('_' + source)
                 z = as_retinotopy(m, 'visual', suffix=suff)
                 suffix = suff
                 check_fields = extra_fields['model'] + extra_fields['empirical']
-            except: pass
+            except Exception: pass
     # if still not z... we couldn't figure it out
     if not z: raise ValueError('Could not find an interpretation for source %s' % source)
     # okay, we found it; make it into a dict
@@ -552,7 +552,7 @@ def get_default_schira_model():
                     center_right=[58.58000, -61.84000, -52.39000],
                     radius=np.pi/2.5,
                     method='orthographic'))
-        #except: raise
+        #except Exception: raise
     return _default_schira_model
 
 _retinotopy_model_paths = [os.path.join(library_path(), 'models')]
@@ -1173,7 +1173,7 @@ def calc_initial_state(cortex, model, empirical_retinotopy, resample=Ellipsis, p
             mdl_ctx = getattr(nyfs.subject(model_reg), ch)
             nativ = mdl_ctx.registrations['native']
             prior = mdl_ctx.registrations[prior]
-        except: raise ValueError('Could not find given prior %s' % prior)
+        except Exception: raise ValueError('Could not find given prior %s' % prior)
         addr = nativ.address(native_mesh)
         preregmesh = native_mesh.copy(coordinates=prior.unaddress(addr))
         # and now, resampling...
