@@ -283,6 +283,72 @@ def save_json(filename, obj, normalize=True):
             with open(filename, 'wt') as fl: json.dump(dat, fl)
     else: json.dump(dat, filename)
     return filename
+@importer('csv', ('csv', 'csv.gz', 'csv.bz2', 'csv.lzma'))
+def load_csv(filename, **kw):
+    '''
+    load_csv(filename) yields a pandas dataframe of the contents of the CSV file. If pandas cannot
+      be loaded, then an error is raised.
+
+    All optional arguments are passed along to the pandas.read_csv function.
+    '''
+    import pandas
+    if any(filename.endswith(s) for s in ('.gz', '.bz2', '.lzma')):
+        with gzip.open(filename, 'rt') as fl: data = pandas.read_csv(fl, **kw)
+    else:
+        with open(filename, 'rt') as fl: data = pandas.read_csv(fl, **kw)
+    return data    
+@exporter('csv', ('csv', 'csv.gz', 'csv.bz2', 'csv.lzma'))
+def save_csv(filename, dat, **kw):
+    '''
+    save_csv(filename, d) writes a pandas dataframe d to a CSV file with the given name. If pandas
+      cannot be loaded, then an error is raised. If d is not a dataframe, to_dataframe() is called
+      on it.
+
+    All optional arguments are passed along to the pandas.DataFrame.to_csv function.
+    '''
+    import pandas
+    from neuropythy.util import to_dataframe
+    d = to_dataframe(dat)
+    if any(filename.endswith(s) for s in ('.gz', '.bz2', '.lzma')):
+        with gzip.open(filename, 'wt', newlines='') as fl: d.to_csv(fl, **kw)
+    else:
+        with open(filename, 'wt', newlines='') as fl: d.to_csv(fl, **kw)
+    return data
+@importer('tsv', ('tsv', 'tsv.gz', 'tsv.bz2', 'tsv.lzma'))
+def load_tsv(filename, sep='\t', **kw):
+    '''
+    load_tsv(filename) yields a pandas dataframe of the contents of the TSV file. If pandas cannot
+      be loaded, then an error is raised.
+
+    All optional arguments are passed along to the pandas.read_csv function. Note that this function
+    is identical to the load_csv() function except that it has a default sep value of '\t' instead
+    of ','.
+    '''
+    import pandas
+    if any(filename.endswith(s) for s in ('.gz', '.bz2', '.lzma')):
+        with gzip.open(filename, 'rt') as fl: data = pandas.read_csv(fl, sep=sep, **kw)
+    else:
+        with open(filename, 'rt') as fl: data = pandas.read_csv(fl, sep=sep, **kw)
+    return data
+@exporter('tsv', ('tsv', 'tsv.gz', 'tsv.bz2', 'tsv.lzma'))
+def save_tsv(filename, dat, sep='\t', **kw):
+    '''
+    save_tsv(filename, d) writes a pandas dataframe d to a TSV file with the given name. If pandas
+      cannot be loaded, then an error is raised. If d is not a dataframe, to_dataframe() is called
+      on it.
+
+    All optional arguments are passed along to the pandas.DataFrame.to_csv function. Note that this
+    function is identical to save_csv() except that it has a default sep value of '\t' instead of
+    ','.
+    '''
+    import pandas
+    from neuropythy.util import to_dataframe
+    d = to_dataframe(dat)
+    if any(filename.endswith(s) for s in ('.gz', '.bz2', '.lzma')):
+        with gzip.open(filename, 'wt', newlines='') as fl: d.to_csv(fl, sep=sep, **kw)
+    else:
+        with open(filename, 'wt', newlines='') as fl: d.to_csv(fl, sep=sep, **kw)
+    return data
 
 # Nifti!
 @importer('nifti', ('nii', 'nii.gz', 'nii.bz2', 'nii.lzma'))

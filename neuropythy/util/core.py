@@ -113,6 +113,7 @@ class ObjectWithMetaData(object):
                     del md[k]
                     continue
                 try:    md[k] = normalize(md[k])
+                except KeyboardInterrupt: raise
                 except: del md[k]
             params['meta_data'] = md
         else: params = normalize(params)
@@ -174,6 +175,7 @@ def normalize(data):
     elif pimms.is_scalar(data):
         # we have an object of some type we don't really recognize
         try:    m = data.normalize()
+        except KeyboardInterrupt: raise
         except: raise ValueError('Failed to run obj.normalize() on unrecognized obj: %s' % data)
         if not pimms.is_map(m): raise ValueError('obj.normalize() returned non-map; obj: %s' % data)
         m = dict(m)
@@ -264,6 +266,39 @@ def to_affine(aff, dims=None):
         arg = (dims, dims,dims+1, dims+1,dims+1)
         raise ValueError('%dD affine matrix must be %dx%d or %dx%d' % arg)
     return aff
+def is_dataframe(d):
+    '''
+    is_dataframe(d) yields True if d is a pandas DataFrame object and False otherwise; if
+      pandas cannot be loaded, this yields None.
+    '''
+    try: import pandas
+    except KeyboardInterrupt: raise
+    except: return None
+    return isinstance(d, pandas.DataFrame)
+def to_dataframe(d, **kw):
+    '''
+    to_dataframe(d) attempts to coerce the object d to a pandas DataFrame object. If d is a
+      tuple of 2 items whose second argument is a dictionary, then the dictionary will be taken
+      as arguments for the dataframe constructor. These arguments may alternately be given as
+      standard keyword arguments.
+    '''
+    import pandas
+    if is_dataframe(d): return d if len(kw) == 0 else pandas.DataFrame(d, **kw)
+    if is_tuple(d) and len(d) == 2 and pimms.is_map(d[1]):
+        try: return to_dataframe(d[0], **pimms.merge(d[1], kw))
+        except KeyboardInterrupt: raise
+        except: pass
+    # try various options:
+    try: return pandas.DataFrame(d, **kw)
+    except KeyboardInterrupt: raise
+    except: pass
+    try: return pandas.DataFrame.from_records(d, **kw)
+    except KeyboardInterrupt: raise
+    except: pass
+    try: return pandas.DataFrame.from_dict(d, **kw)
+    except KeyboardInterrupt: raise
+    except: pass
+    raise ValueError('Coersion to dataframe failed for object %s' % d)    
 
 class AutoDict(dict):
     '''
@@ -279,6 +314,24 @@ class AutoDict(dict):
         value = self.on_miss()
         self[key] = value
         return value
+def auto_dict(ival=None, miss=None):
+    '''
+    auto_dict() yields an auto-dict that vivifies value of {} on miss.
+    auto_dict(ival) uses the given dict ival as an initializer.
+    auto_dict(ival, miss) uses the given miss function.
+    auto_dict(None, miss) is equivalent to auto_dict() with the given miss function.
+
+    If the miss argument (also a named parameter, miss) is an empty list, an empty dict, or an
+    empty set, then the miss is taken to be an anonymous lambda function that returns an empty
+    item of the same type.
+    '''
+    if ival is None: d = AutoDict()
+    else: d = AutoDict(ival)
+    if miss == {} or miss is None: return d
+    elif miss == []: d.on_miss = lambda:[]
+    elif miss == set([]): d.on_miss = lambda:set([])
+    else: d.on_miss = miss
+    return d
 
 def simplex_summation_matrix(simplices, weight=None, inverse=False):
     '''
@@ -583,6 +636,7 @@ def zinv(x, null=0):
         x = x.copy()
         x.data = zinv(x.data)
         try: x.eliminate_zeros()
+        except KeyboardInterrupt: raise
         except: pass
         return x
     else:
@@ -738,6 +792,7 @@ def tangent(x, null=(-np.inf, np.inf), rtol=default_rtol, atol=default_atol):
     if rtol is None: rtol = default_rtol
     if atol is None: atol = default_atol
     try:    (nln,nlp) = null
+    except KeyboardInterrupt: raise
     except: (nln,nlp) = (null,null)
     x = np.mod(x + pi, tau) - pi
     ii = None if nln is None else np.where(np.isclose(x, neghpi, rtol=rtol, atol=atol))
@@ -761,6 +816,7 @@ def cotangent(x, null=(-np.inf, np.inf), rtol=default_rtol, atol=default_atol):
     if rtol is None: rtol = default_rtol
     if atol is None: atol = default_atol
     try:    (nln,nlp) = null
+    except KeyboardInterrupt: raise
     except: (nln,nlp) = (null,null)
     x = np.mod(x + hpi, tau) - hpi
     ii = None if nln is None else np.where(np.isclose(x, 0,  rtol=rtol, atol=atol))
@@ -788,6 +844,7 @@ def secant(x, null=(-np.inf, np.inf), rtol=default_rtol, atol=default_atol):
     if rtol is None: rtol = default_rtol
     if atol is None: atol = default_atol
     try:    (nln,nlp) = null
+    except KeyboardInterrupt: raise
     except: (nln,nlp) = (null,null)
     x = np.mod(x + pi, tau) - pi
     ii = None if nln is None else np.where(np.isclose(x, neghpi, rtol=rtol, atol=atol))
@@ -815,6 +872,7 @@ def cosecant(x, null=(-np.inf, np.inf), rtol=default_rtol, atol=default_atol):
     if rtol is None: rtol = default_rtol
     if atol is None: atol = default_atol
     try:    (nln,nlp) = null
+    except KeyboardInterrupt: raise
     except: (nln,nlp) = (null,null)
     x = np.mod(x + hpi, tau) - hpi # center on pi/2 so that 0 and pi are easy to detect
     ii = None if nln is None else np.where(np.isclose(x, 0,  rtol=rtol, atol=atol))
@@ -841,6 +899,7 @@ def arcsine(x, null=(-np.inf, np.inf)):
         return x
     else: x = np.asarray(x)
     try:    (nln,nlp) = null
+    except KeyboardInterrupt: raise
     except: (nln,nlp) = (null,null)
     ii = None if nln is None else np.where(x < -1)
     jj = None if nlp is None else np.where(x > 1)
@@ -862,6 +921,7 @@ def arccosine(x, null=(-np.inf, np.inf)):
     if sps.issparse(x): x = x.toarray()
     else:               x = np.asarray(x)
     try:    (nln,nlp) = null
+    except KeyboardInterrupt: raise
     except: (nln,nlp) = (null,null)
     ii = None if nln is None else np.where(x < -1)
     jj = None if nlp is None else np.where(x > 1)
