@@ -54,8 +54,8 @@ def reload_neuropythy():
     '''
     import sys, six
     if not six.PY2:
-        try:    from importlib import reload
-        except: from imp import reload
+        try:              from importlib import reload
+        except Exception: from imp import reload
     for mdl in submodules:
         if mdl in sys.modules:
             sys.modules[mdl] = reload(sys.modules[mdl])
@@ -86,7 +86,7 @@ from . import hcp
 try:
     from .graphics import cortex_plot
     from .         import graphics
-except: pass
+except Exception: pass
 
 # Version information...
 __version__ = '0.9.2'
