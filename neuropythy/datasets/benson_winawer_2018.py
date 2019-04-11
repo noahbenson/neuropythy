@@ -321,7 +321,7 @@ class BensonWinawer2018Dataset(Dataset):
         cachefl = os.path.join(cache_directory, 'v123_table.p')
         if os.path.isfile(cachefl):
             try: return pimms.load(cachefl)
-            except:
+            except Exception:
                 msg = 'neuropythy: Could not load existing v123_table cache file: %s' % cache_file
                 warnings.warn(msg)
         # go through, building up arrays of arrays that we will concatenate at the end
@@ -368,7 +368,7 @@ class BensonWinawer2018Dataset(Dataset):
         if not os.path.isfile(cachefl):
             # try to write out the cache file
             try: pimms.save(cachefl, data)
-            except: pass
+            except Exception: pass
         return data
     
 # we wrap this in a lambda so that it gets loaded when requested (in case the config changes between
