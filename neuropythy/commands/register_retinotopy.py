@@ -243,21 +243,21 @@ _retinotopy_parser = pimms.argv_parser(_retinotopy_parser_instructions)
 
 def _guess_surf_file(fl):
     # MGH/MGZ files
-    try:    return fsmgh.load(fl).get_data().flatten()
-    except: pass
+    try: return fsmgh.load(fl).get_data().flatten()
+    except Exception: pass
     # FreeSurfer Curv files
-    try:    return fsio.read_morph_data(fl)
-    except: pass
+    try: return fsio.read_morph_data(fl)
+    except Exception: pass
     # Nifti files
-    try:    return np.squeeze(nib.load(fl).get_data())
-    except: raise ValueError('Could not determine filetype for: %s' % fl)
+    try: return np.squeeze(nib.load(fl).get_data())
+    except Exception: raise ValueError('Could not determine filetype for: %s' % fl)
 def _guess_vol_file(fl):
     # MGH/MGZ files
     try: return fsmgh.load(fl)
-    except: pass
+    except Exception: pass
     # Nifti Files
     try: return nib.load(fl)
-    except: raise ValueError('Could not determine filetype for: %s' % fl)
+    except Exception: raise ValueError('Could not determine filetype for: %s' % fl)
 
 @pimms.calc('subject', 'model', 'options', 'note', 'error',
             'no_vol_export',     
@@ -329,7 +329,7 @@ def calc_arguments(args):
         add_subject_path(opts['subjects_dir'])
     # Get the subject now
     try: sub = subject(args[0])
-    except: error('Failed to load subject %s' % args[0])
+    except Exception: error('Failed to load subject %s' % args[0])
     # and the model
     if len(args) > 1:       mdl_name = args[1]
     elif opts['model_sym']: mdl_name = 'schira'
@@ -339,7 +339,7 @@ def calc_arguments(args):
             model = {h:retinotopy_model(mdl_name).persist() for h in ['lh', 'rh']}
         else:
             model = {h:retinotopy_model(mdl_name, hemi=h).persist() for h in ['lh', 'rh']}
-    except: error('Could not load retinotopy model %s' % mdl_name)
+    except Exception: error('Could not load retinotopy model %s' % mdl_name)
 
     # Now, we want to run a few filters on the options
     # Parse the simple numbers
@@ -384,32 +384,32 @@ def calc_retinotopy(note, error, subject, clean, run_lh, run_rh,
         # load the properties or find them in the auto-properties
         if ang:
             try: props['polar_angle'] = _guess_surf_file(ang)
-            except: error('could not load surface file %s' % ang)
+            except Exception: error('could not load surface file %s' % ang)
         elif tht:
             try:
                 tmp = _guess_surf_file(tht)
                 props['polar_angle'] = 90.0 - 180.0 / np.pi * tmp
-            except: error('could not load surface file %s' % tht)
+            except Exception: error('could not load surface file %s' % tht)
         else:
             props['polar_angle'] = empirical_retinotopy_data(hemi, 'polar_angle')
         if ecc:
             try: props['eccentricity'] = _guess_surf_file(ecc)
-            except: error('could not load surface file %s' % ecc)
+            except Exception: error('could not load surface file %s' % ecc)
         elif rho:
             try:
                 tmp = _guess_surf_file(rhp)
                 props['eccentricity'] = 180.0 / np.pi * tmp
-            except: error('could not load surface file %s' % rho)
+            except Exception: error('could not load surface file %s' % rho)
         else:
             props['eccentricity'] = empirical_retinotopy_data(hemi, 'eccentricity')
         if wgt:
             try: props['weight'] = _guess_surf_file(wgt)
-            except: error('could not load surface file %s' % wgt)
+            except Exception: error('could not load surface file %s' % wgt)
         else:
             props['weight'] = empirical_retinotopy_data(hemi, 'weight')
         if rad:
             try: props['radius'] = _guess_surf_file(rad)
-            except: error('could not load surface file %s' % rad)
+            except Exception: error('could not load surface file %s' % rad)
         else:
             props['radius'] = empirical_retinotopy_data(hemi, 'radius')
         # Check for inverted rh
@@ -461,7 +461,7 @@ def calc_registrations(note, error, cortices, model, model_sym,
                                          max_steps=max_steps,
                                          max_step_size=max_step_size,
                                          yield_imap=True)
-        except: #error('Exception caught while setting-up register_retinotopy (%s)' % h)
+        except Exception: #error('Exception caught while setting-up register_retinotopy (%s)' % h)
             raise
     return {'registrations': pyr.pmap(res)}
 @pimms.calc('surface_files')
