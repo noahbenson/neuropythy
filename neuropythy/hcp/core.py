@@ -92,7 +92,7 @@ class Subject(mri.Subject):
                         if len(fromdat) == 0: continue
                         # convert to x/y for interpolation (avoid circular angle mean issues)
                         try: (x,y) = nyvis.as_retinotopy(fromdat, 'geographical', prefix=rp)
-                        except: continue
+                        except Exception: continue
                         del fromdat[rp + 'polar_angle']
                         del fromdat[rp + 'eccentricity']
                         fromdat['x'] = x
@@ -142,7 +142,7 @@ class Subject(mri.Subject):
         '''
         if sid is None: return None
         try: sid = int(sid)
-        except: raise ValueError('Subject IDs must be 6-digit ints or strings representing them')
+        except Exception: raise ValueError('Subject IDs must be 6-digit ints or strings')
         if sid < 100000 or sid > 999999: raise ValueError('Subject IDs must be 6 digits')
         return sid
     @pimms.param
@@ -177,7 +177,7 @@ class Subject(mri.Subject):
         def _ctx_loader(k):
             def _f():
                 try: return Subject._cortex_from_hemimap(sid, k, hmaps[k])
-                except: return None
+                except Exception: return None
             return _f
         hemmap0 = pimms.lazy_map({k:_ctx_loader(k) for k in six.iterkeys(hmaps)})
         # one special thing: we can auto-load retinotopy from another hemisphere and interpolate it
@@ -249,7 +249,7 @@ def subject(sid, subjects_path=None, meta_data=None, default_alignment='MSMAll')
         if os.path.isdir(str(sid)):
             (fdir, fnm) = os.path.split(str(sid))
             try: sid = to_subject_id(fnm)
-            except: sid = None
+            except Exception: sid = None
             pth = fdir
         else:
             sid = to_subject_id(sid)
