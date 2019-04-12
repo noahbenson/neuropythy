@@ -3363,15 +3363,26 @@ class Path(ObjectWithMetaData):
                  for pii in [idcs[p]]]
         coords   = coords[ridcs]
         bccoords = bccoords[ridcs]
-        # we'll need to know what points are along what edge as part of this: we'll collect the point
-        # indices here--doing so is easier with the barycentric than the reified coordinates, so
-        # we'll use those and reify the coordinates as we go
+        # we'll need to know what points are along what edge as part of this: we'll collect the
+        # point indices here--doing so is easier with the barycentric than the reified
+        # coordinates, so we'll use those and reify the coordinates as we go
         internal_paths = [[],[]] # [0] is start, [1] is end; we use coordinate ids
         on_edges = ([],[],[])
         for pii in pidcs:
-            # make sure first/last are on an edge and the rest aren't
+            # make sure first/last are on an edge and the rest aren't; note that it's okay, though,
+            # to have points along the edge that we enter/exit on
             bcx = bccoords[pii]
-            if np.sum(np.isclose(bcx[1:-1], 0, atol=1e-5)) > 0:
+            x   = coords[pii]
+            zz = np.isclose(bcx, 0, atol=1e-5)
+            (k0,ke) = (1, len(bcx) - 2)
+            for (k_, _k, dr) in zip([k0,ke], [ke,k0], [1,-1]):
+                while dr*k_ < dr*_k and np.sum(zz[k_]) > 0:
+                    wz = np.where(zz[k_])[0]
+                    if len(wz) == 0 or not zz[k_-dr, wz].any(): break
+                    k_ = k_ + dr
+                if dr == 1: k0 = k_
+                else:       ke = k_
+            if np.sum(np.isclose(bcx[k0:ke], 0, atol=1e-5)) > 0:
                 raise ValueError('path middle touches edge',
                                  dict(coords0=coords0, bccoords0=bccoords0,
                                       coords=coords, bccoords=bccoords,
