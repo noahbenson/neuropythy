@@ -1769,6 +1769,135 @@ def retinotopy_comparison(arg1, arg2, arg3=None,
             result[resprop + '_radii_error'] = aerr * gsrad_inv
     return pimms.itable(result)
 
+def visual_isolines(hemi, retinotopy='any', visual_area=Ellipsis, mask=None, surface='midgray',
+                    weights=Ellipsis, min_weight=0.05,
+                    eccentricity_range=None, polar_angle_range=None,
+                    eccentricity_lines=8, polar_angle_lines=8,
+                    max_step_scale=1.0/16.0):
+    '''
+    visual_isolines(hemi) yields a dictionary of the iso-angle and iso-eccentricity lines for the
+      given hemisphere hemi. The returned structure depends on the optional arguments and is
+      documented below.
+    visual_isolines(hemi, retino) uses the retinotopy found by retinotopy_data(hemi, retino).
+    
+    The following optional arguments may be given:
+      * visual_area (default: Ellipsis) specifies the property that should be used as the visual
+        area labels; if Ellipsis, then uses any visual area property found in the retinotopy data
+        and otherwise uses none; if set to None, then the visual area is always ignored. Note that
+        visual area values of 0 are ignored as well.
+      * mask (default: None) specifies an additional mask that should be applied; when visual_area
+        is None or not found, then this is the only masking that is performed.
+      * weights (default: Ellipsis) specifies the property that should be used as the weights on
+        the polar angle and eccentricity data; if Ellipsis, indicates that the variance explained or
+        weight property found in the retinotopy data should be used if any.
+      * min_weight (default: 0.05) specifies the minimum weight that should be included.
+      * polar_angle_range (default: None) may speficy the (min,max) polar angle to include.
+      * eccentricity_range (default: None) may specify the max or (min,max) eccentricity to include.
+      * eccentricity_lines (default: 8) specifies the eccentricity values at which to draw
+        iso-eccentricity lines. If this is an integer, it specifies that these should be chosen
+        using even spacing along the inverse CDF of the eccentricity values above the weight
+        threshold.
+      * polar_angle_lines (default: 8) specifies the polar angle values at which to draw the
+        iso-angular lines. If this is an integer, it specifies that these should be chosen using
+        even spacing along the inverse CDF of the eccentricity values above the weight threshold.
+      * surface (default: 'midgray') specifies the surface to use for calculating surface
+        coordinates if hemi is a topology and not a mesh.
+
+    Return value:
+      The return value of this function is a nested dictionary structure. If a visual area property
+      is used, then the first level of keys are the visual areas (excluding 0) that are found.
+      After this level, the next level's keys are 'polar_angle' and 'eccentricity' with the
+      following level's keys indicating the polar angle or eccentricity value that was used. These
+      internal dicts of iso-angle keys map to values that are lists of lines (there may be many
+      contiguous lines at one angle); each line is given by a map of addresses and other meta-data
+      about the line.
+    '''
+    from neuropythy import (to_mask, retinotopy_data, isolines, is_cortex)
+    from neuropythy.util import curry
+    # first off, apply the mask if specified:
+    if mask is not None: mask = to_mask(hemi, mask)
+    else: mask = hemi.tess.indices
+    # now, get the retinotopy
+    retino = retinotopy_data(hemi, retinotopy)
+    if   visual_area is Ellipsis: visual_area = retino.get('visual_area', None)
+    elif visual_area is not None: visual_area = hemi.property(visual_area, mask=mask, null=0)
+    # if there is a visual area, we just recurse setting these values as a mask
+    if visual_area is not None:
+        vas = np.unique(visual_area)
+        kw = dict(weights=weights, min_weight=min_weight,
+                  eccentricity_lines=eccentricity_lines, polar_angle_lines=polar_angle_lines)
+        return pimms.lazy_map({va:curry(visual_isolines, hemi, retinotopy,
+                                        mask=(visual_area,va), visual_area=None, **kw)
+                               for va in vas if va != 0})
+    # If there are weights, figure them out and apply them to the mask
+    ve = 'variance_explained'
+    weights = (retino[ve] if weights is Ellipsis and ve in retino   else
+               None       if weights is Ellipsis or weights is None else
+               hemi.property(weights))
+    if weights is not None and min_weight is not None:
+        mask = np.intersect1d(mask, np.where(weights >= min_weight)[0])
+    # make sure polar angle and eccen are in retino:
+    (ang,ecc) = as_retinotopy(retino, 'visual')
+    retino['polar_angle'] = ang
+    retino['eccentricity'] = ecc
+    # if there's a surface to get...
+    mesh = hemi.surfaces[surface] if is_cortex(hemi) else hemi
+    # when we calculate the isolines we use this function which also adds in the polar angles and
+    # eccentricities of the addressed lines
+    def calc_isolines(hemi, dat, ln, mask=None):
+        addrs = isolines(hemi, dat, ln, mask=mask, yield_addresses=True)
+        (angs,eccs) = [[hemi.interpolate(addr, retino[nm]) for addr in addrs]
+                       for nm in ('polar_angle', 'eccentricity')]
+        vxys = [np.asarray([e*np.cos(t), e*np.sin(t)])
+                for (a,e) in zip(angs,eccs) for t in [np.pi/180.0*(90.0 - a)]]
+        sxys = [mesh.unaddress(addr) for addr in addrs]
+        # trim/cut where needed
+        if max_step_scale is not None: 
+            iiss = []
+            for (vxy,ecc) in zip(vxys, eccs):
+                dists = np.sqrt(np.sum((vxy[:,:-1] - vxy[:,1:])**2, 0))
+                es = np.mean([ecc[:-1], ecc[1:]], 0)
+                mx = max_step_scale * es
+                bd = dists > mx
+                ok = np.where(~bd)[0]
+                bd = np.where(bd)[0]
+                (oi,bi) = (0,0)
+                iis = []
+                while True:
+                    if   oi >= len(ok): break
+                    elif bi >= len(bd):
+                        iis.append(ok[oi:])
+                        break
+                    elif ok[oi] < bd[bi]:
+                        n = bd[bi] - ok[oi]
+                        iis.append(ok[oi:(oi+n)])
+                        oi += n
+                    else: bi += ok[oi] - bd[bi]
+                iiss.append(iis)
+            # okay, fix all the lists...
+            (angs,eccs) = [[u[ii]   for (u,iis) in zip(q,iiss) for ii in iis] for q in (angs,eccs)]
+            (vxys,sxys) = [[u[:,ii] for (u,iis) in zip(q,iiss) for ii in iis] for q in (vxys,sxys)]
+            addrs = [{k:addr[k][:,ii] for k in ('faces','coordinates')}
+                     for (addr,iis) in zip(addrs,iiss) for ii in iis]
+        return pimms.persist({'addresses': addrs, 'polar_angles': angs, 'eccentricities':eccs,
+                              'visual_coordinates': vxys, 'surface_coordinates': sxys})
+    # okay, we are operating over just the mask we have plus polar angle/eccentricity ranges
+    r = {}
+    for (p,dat,lns,rng) in zip(['polar_angle','eccentricity'],
+                               as_retinotopy(retino, 'visual'),
+                               [polar_angle_lines, eccentricity_lines],
+                               [polar_angle_range, eccentricity_range]):
+        # if there's a range, add it to the mask (locally in the loop: mask -> ii)
+        if rng is None: ii = mask
+        else:
+            (mn,mx) = rng if pimms.is_vector(rng) else (np.min(dat),rng)
+            ii = np.intersect1d(mask, np.where((dat < mn) | (dat > mx))[0])
+        # first, figure out the lines themselves
+        if pimms.is_int(lns): lns = np.percentile(dat[ii], np.linspace(0, 100, 2*lns + 1)[1::2])
+        # now grab them from the hemisphere...
+        r[p] = pimms.lazy_map({ln:curry(calc_isolines, hemi, dat, ln, mask=ii) for ln in lns})
+    return pyr.pmap(r)
+
 def clean_retinotopy_potential(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=Ellipsis,
                                surface='midgray', min_weight=Ellipsis, min_eccentricity=0.75,
                                measurement_uncertainty=0.3, measurement_knob=1,
