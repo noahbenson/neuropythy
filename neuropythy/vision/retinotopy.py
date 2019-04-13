@@ -1824,11 +1824,14 @@ def visual_isolines(hemi, retinotopy='any', visual_area=Ellipsis, mask=None, sur
     # if there is a visual area, we just recurse setting these values as a mask
     if visual_area is not None:
         vas = np.unique(visual_area)
-        kw = dict(weights=weights, min_weight=min_weight,
-                  eccentricity_lines=eccentricity_lines, polar_angle_lines=polar_angle_lines)
-        return pimms.lazy_map({va:curry(visual_isolines, hemi, retinotopy,
-                                        mask=(visual_area,va), visual_area=None, **kw)
-                               for va in vas if va != 0})
+        kw = dict(weights=weights, min_weight=min_weight, surface=surface, visual_area=None,
+                  eccentricity_lines=eccentricity_lines, polar_angle_lines=polar_angle_lines,
+                  eccentricity_range=eccentricity_range, polar_angle_range=polar_angle_range,
+                  max_step_scale=max_step_scale)
+        def recurse(va):
+            vamask = to_mask(hemi, (visual_area, va))
+            return visual_isolines(hemi, retinotopy, mask=np.intersect1d(mask, vamask), **kw)
+        return pimms.lazy_map({va:curry(recurse, va) for va in vas if va != 0})
     # If there are weights, figure them out and apply them to the mask
     ve = 'variance_explained'
     weights = (retino[ve] if weights is Ellipsis and ve in retino   else
@@ -1883,19 +1886,25 @@ def visual_isolines(hemi, retinotopy='any', visual_area=Ellipsis, mask=None, sur
                               'visual_coordinates': vxys, 'surface_coordinates': sxys})
     # okay, we are operating over just the mask we have plus polar angle/eccentricity ranges
     r = {}
-    for (p,dat,lns,rng) in zip(['polar_angle','eccentricity'],
-                               as_retinotopy(retino, 'visual'),
+    (ang,ecc) = as_retinotopy(retino, 'visual')
+    if eccentricity_range is not None:
+        rng     = eccentricity_range
+        (mn,mx) = rng if pimms.is_vector(rng) else (np.min(ecc), rng)
+        mask    = np.setdiff1d(mask, np.where((ecc < mn) | (ecc > mx))[0])
+    if polar_angle_range is not None:
+        rng     = polar_angle_range
+        (mn,mx) = rng if pimms.is_vector(rng) else (np.min(ang), rng)
+        # we need to center the angle on this range here
+        aa = np.mean(rng)
+        aa = np.mod(ang + aa, 360) - aa
+        mask = np.setdiff1d(mask, np.where((aa < mn) | (aa > mx))[0])
+    for (p,dat,lns,rng) in zip(['polar_angle','eccentricity'], [ang,ecc],
                                [polar_angle_lines, eccentricity_lines],
                                [polar_angle_range, eccentricity_range]):
-        # if there's a range, add it to the mask (locally in the loop: mask -> ii)
-        if rng is None: ii = mask
-        else:
-            (mn,mx) = rng if pimms.is_vector(rng) else (np.min(dat),rng)
-            ii = np.intersect1d(mask, np.where((dat < mn) | (dat > mx))[0])
         # first, figure out the lines themselves
-        if pimms.is_int(lns): lns = np.percentile(dat[ii], np.linspace(0, 100, 2*lns + 1)[1::2])
+        if pimms.is_int(lns): lns = np.percentile(dat[mask], np.linspace(0, 100, 2*lns + 1)[1::2])
         # now grab them from the hemisphere...
-        r[p] = pimms.lazy_map({ln:curry(calc_isolines, hemi, dat, ln, mask=ii) for ln in lns})
+        r[p] = pimms.lazy_map({ln:curry(calc_isolines, hemi, dat, ln, mask=mask) for ln in lns})
     return pyr.pmap(r)
 
 def clean_retinotopy_potential(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=Ellipsis,
