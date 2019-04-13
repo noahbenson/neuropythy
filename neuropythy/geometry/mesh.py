@@ -389,61 +389,64 @@ def to_property(obj, prop=None,
                            for k in prop])
     elif not pimms.is_vector(prop):
         raise ValueError('prop must be a property name or a vector or a combination of these')
-    if dtype is Ellipsis:  dtype = np.asarray(prop).dtype
-    if not np.isnan(null): prop  = np.asarray([np.nan if x == null else x for x in prop])
-    prop = np.asarray(prop, dtype=dtype)
-    # Next, do the same for weight:
+    else: prop = np.asarray(prop)
+    if dtype is Ellipsis:  dtype = prop.dtype
+    # Go ahead and process the weights
     if pimms.is_str(weights):
         if obj is None: raise ValueError('a weight name but no data object given to to_property')
         else: weights = obj[weights]
     weights_orig = weights
-    if weights is None or weight_min is None:
-        low_weight = []
+    if weights is None or weight_min is None: low_weight = np.asarray([], dtype=np.int)
     else:
         if weight_transform is Ellipsis:
             weights = np.array(weights, dtype=np.float)
             weights[weights < 0] = 0
-            weights[np.isclose(weights, 0)] = 0
         elif weight_transform is not None:
             weight = weight_transform(np.asarray(weights))
         if not pimms.is_vector(weights, 'real'):
             raise ValueError('weights must be a real-valued vector or property name for such')
-        low_weight = [] if weight_min is None else np.where(weights <= weight_min)[0]
-    # Next, find the mask; these are values that can be included theoretically;
-    all_vertices = np.asarray(range(len(prop)), dtype=np.int)
-    where_nan = np.where(np.isnan(prop))[0]
-    where_inf = np.where(np.isinf(prop))[0]
-    where_ok  = reduce(np.setdiff1d, [all_vertices, where_nan, where_inf])
-    # look at the valid_range...
-    where_inv = [] if valid_range is None else \
-                where_ok[(prop[where_ok] < valid_range[0]) | (prop[where_ok] > valid_range[1])]
-    # Whittle down the mask to what we are sure is in the spec:
-    where_nan = np.union1d(where_nan, where_inv)
+        low_weight = (np.asarray([], dtype=np.int) if weight_min is None else
+                      np.where(weights < weight_min)[0])
+    # we can also process the outliers
+    outliers = np.asarray([], dtype=np.int) if outliers is None else np.arange(len(prop))[outliers]
+    outliers = np.union1d(outliers, low_weight) # low-weight vertices are treated as outliers
     # make sure we interpret mask correctly...
     mask = to_mask(obj, mask, indices=True)
-    mask = np.setdiff1d(all_vertices if mask is None else all_vertices[mask], where_nan)
-    # Find the outliers: values specified as outliers or inf values; will build this as we go
-    outliers = [] if outliers is None else all_vertices[outliers]
-    outliers = np.intersect1d(outliers, mask) # outliers not in the mask don't matter anyway
-    outliers = np.union1d(outliers, low_weight) # low-weight vertices are treated as outliers
-    # If there's a data range argument, deal with how it affects outliers
-    if data_range is not None:
-        if hasattr(data_range, '__iter__'):
-            outliers = np.union1d(outliers, mask[np.where(prop[mask] < data_range[0])[0]])
-            outliers = np.union1d(outliers, mask[np.where(prop[mask] > data_range[1])[0]])
-        else:
-            outliers = np.union1d(outliers, mask[np.where(prop[mask] < 0)[0]])
-            outliers = np.union1d(outliers, mask[np.where(prop[mask] > data_range)[0]])
-    # no matter what, trim out the infinite values (even if inf was in the data range)
-    outliers = np.union1d(outliers, mask[np.where(np.isinf(prop[mask]))[0]])
-    # Okay, mark everything in the prop:
-    unmask = np.setdiff1d(all_vertices, mask)
-    where_nan = np.asarray(np.union1d(where_nan,unmask), dtype=np.int)
-    outliers = np.asarray(outliers, dtype=np.int)
-    if len(where_nan) + len(outliers) > 0:
-        prop = np.array(prop)
-        prop[where_nan] = null
-        prop[outliers]  = clipped
+    # Now process the property depending on whether the type is numeric or not
+    if pimms.is_array(prop, 'number'):
+        if pimms.is_array(prop, 'int'): prop = np.array(prop, dtype=np.float)
+        else: prop = np.array(prop) # complex or reals can support nan
+        if not np.isnan(null): prop[prop == null] = np.nan
+        mask_nan = np.isnan(prop)
+        mask_inf = np.isinf(prop)
+        where_nan = np.where(mask_nan)[0]
+        where_inf = np.where(mask_inf)[0]
+        where_ok  = np.where(np.logical_not(mask_nan | mask_inf))[0]
+        # look at the valid_range...
+        if valid_range is None: where_inv = np.asarray([], dtype=np.int)
+        else: where_inv = where_ok[(prop[where_ok] < valid_range[0]) |
+                                   (prop[where_ok] > valid_range[1])]
+        where_nan = np.union1d(where_nan, where_inv)
+        mask = np.setdiff1d(mask, where_nan)
+        # Find the outliers: values specified as outliers or inf values; will build this as we go
+        outliers = np.intersect1d(outliers, mask) # outliers not in the mask don't matter anyway
+        # If there's a data range argument, deal with how it affects outliers
+        if data_range is not None:
+            if not pimms.is_vector(data_range): data_range = (0, data_range)
+            mii = mask[(prop[mask] < data_range[0]) | (frop[mask] > data_range[1])]
+            outliers = np.union1d(outliers, mii)
+        # no matter what, trim out the infinite values (even if inf was in the data range)
+        outliers = np.union1d(outliers, mask[np.isinf(prop[mask])])
+        # Okay, mark everything in the prop:
+        unmask = np.setdiff1d(np.arange(len(prop), dtype=np.int), mask)
+        if len(outliers) > 0:  prop[outliers]  = clipped
+        if len(unmask) > 0: prop[unmask] = null
+        prop = prop.astype(dtype)
+    elif len(mask) < len(prop) or len(outliers) > 0:
+        # not a number array; we cannot do fancy trimming of values
+        tmp = np.full(len(prop), null, dtype=dtype)
+        tmp[mask] = prop[mask]
+        if len(outliers) > 0: tmp[outliers] = clipped
     if yield_weight:
         if weights is None or not pimms.is_vector(weights): weights = np.ones(len(prop))
         else: weights = np.array(weights, dtype=np.float)
@@ -2882,10 +2885,19 @@ class Topology(VertexSet):
           * n_jobs (default: 1) is passed along to the cKDTree.query method, so may be set to an
             integer to specify how many processors to use, or may be -1 to specify all processors.
         '''
-        if not isinstance(topo, Topology):
-            raise ValueError('Topologies can only be interpolated with other topologies')
+        if is_address(topo):
+            # we can use any surface since it's a mesh
+            try: mesh = next(six.itervalues(self.registrations))
+            except Exception: mesh = None
+            try: mesh = next(six.itervalues(self.surfaces)) if mesh is None else mesh
+            except Exception: mesh = None
+            if mesh is None: raise ValueError('could not find mesh!')
+            return mesh.interpolate(topo, data, mask=mask, weights=weights,
+                                    method=method, n_jobs=n_jobs)
+        elif not isinstance(topo, Topology):
+            raise ValueError('Topologies can only be interpolated at a topology or an address')
         if registration is None:
-            reg_names = [k for k in topo.registrations.iterkeys() if k in self.registrations
+            reg_names = [k for k in six.iterkeys(topo.registrations) if k in self.registrations
                          if k != 'native']
             # we want to apply some bit of ordering... fsaverage should be first if available, or
             # fs_LR for HCP subjects...
@@ -3109,15 +3121,16 @@ class Path(ObjectWithMetaData):
         # joined to the last elements; in an open loop they are discarded and the last element is
         # set to None
         if closed:
-            tmp = np.setdiff1d((u[0],v[0]), (u[-1],v[-1]))
+            tmp = np.setdiff1d((u[0],v[0]), (u[-1],v[-1])) if len(u) > 1 else []
             if len(tmp) == 0:
                 (f0,f1) = faces[:,[0,-1]].T
                 (x0,x1) = coords[:,[0,-1]].T
                 # most likely we start/end in same face but exit/enter through one edge
                 f0but1 = np.setdiff1d(f0,f1)
                 if len(f0but1) == 0:
-                    fs[0] = f0
-                    pcur = (ps[-1][-1],) + ps[0]
+                    if len(fs) > 0: fs[0] = f0
+                    if len(ps) > 0: pcur = (ps[-1][-1],) + ps[0]
+                    else:           pcur = pcur + [pcur[0]]
                 elif len(f0but1) == 1:
                     f0ii = np.where(f0 == f0but1[0])[0]
                     if np.isclose(x0[foii], 0): fs[0] = f1
@@ -3125,7 +3138,7 @@ class Path(ObjectWithMetaData):
                 else: raise ValueError('closed path does not start/end correctly',
                                        dict(faces=faces, coords=coords, u=u, v=v, vtx=vtx,
                                             pcur=pcur, f0=f0, f1=f1, x0=x0, x1=x1))
-                ps[0] = tuple(pcur)
+                if len(ps) > 0: ps[0] = tuple(pcur)
             elif len(tmp) == 1:
                 fs[0] = (u[-1], v[-1], tmp[0])
                 ps[0] = tuple(pcur)[:-1] + ps[0]
@@ -3142,8 +3155,8 @@ class Path(ObjectWithMetaData):
         for (uu,vv) in zip(ii[k], jj[k]):
             wu[u == uu] = 0.25
             wv[v == vv] = 0.25
-        fs = np.roll(fs, -1, axis=0)
-        ps = np.roll(ps, -1, axis=0)
+        fs = np.roll(fs, -1, axis=0) if len(fs) > 0 else np.zeros((0,3), dtype=np.int)
+        ps = np.roll(ps, -1, axis=0) if len(ps) > 0 else np.array([],    dtype=np.object)
         if not closed: (wu,wv) = [np.asarray(w) * 0.5 for w in (wu,wv)]
         return tuple(map(pimms.imm_array, (u,v,wu,wv,fs,ps)))
     @pimms.value
@@ -3270,8 +3283,11 @@ class Path(ObjectWithMetaData):
         def bc_conv(f0, x0, ftarg):
             r = np.zeros(len(x0))
             for (f,x) in zip(f0,x0):
-                if np.isclose(x, 0, atol=1e-4): continue
-                elif f in ftarg: r[f == ftarg] = x
+                # if the node is not found we use a much more tolerant version of the error--such a
+                # situation likely indicates a rounding error at an exact node crossing
+                if   np.isclose(x, 0, atol=1e-5): continue
+                elif f in ftarg:                  r[f == ftarg] = x
+                elif np.isclose(x, 0, atol=1e-3): continue
                 else: raise ValueError('Non-zero bc-conv value',
                                        dict(edge_data=edge_data, addresses=addresses, closed=closed,
                                             f0=f0, x0=x0, ftarg=ftarg, f=f, x=x))
@@ -3289,7 +3305,10 @@ class Path(ObjectWithMetaData):
             bcs = np.asarray([bc_conv(faces[p], coords[p], f) for p in ps]).T[:2]
             bcs.setflags(write=False)
             return bcs
-        return pyr.pmap({f: tuple([to_bcs(f,p) for p in ps]) for (f,ps) in six.iteritems(idx)})
+        try: return pyr.pmap({f: tuple([to_bcs(f,p) for p in ps]) for (f,ps) in six.iteritems(idx)})
+        except ValueError as e:
+            if len(e.args) > 1 and isinstance(e.args[1], dict): e.args[1]['idx'] = idx
+            raise
     @staticmethod
     def tesselate_triangle_paths(paths):
         '''
@@ -3963,20 +3982,19 @@ def isolines(obj, prop, val,
     wmtx = sps.lil_matrix((N, N), dtype='float')
     emtx = sps.dok_matrix((N*N, N*N), dtype='bool')
     for (ii,fl) in zip([ii1,ii2], [True,False]):
-        tmp = np.array(lt)
-        tmp[:,~ii] = False
+        tmp = np.array(lt.T)
+        tmp[~ii,:] = False
         if fl:
-            w = fs.T[tmp.T]
-            tmp[:,ii] = ~tmp[:,ii]
-            (u,v) = np.reshape(fs.T[tmp.T], (-1,2)).T
+            w = fs.T[tmp]
+            tmp[ii] = ~tmp[ii]
+            (u,v) = np.reshape(fs.T[tmp], (-1,2)).T
         else:
-            (u,v) = np.reshape(fs.T[tmp.T], (-1,2)).T
-            tmp[:,ii] = ~tmp[:,ii]
-            w = fs.T[tmp.T]
+            (u,v) = np.reshape(fs.T[tmp], (-1,2)).T
+            tmp[ii] = ~tmp[ii]
+            w = fs.T[tmp]
         (pu,pv,pw) = [p[q] for q in (u,v,w)]
         # the line is from somewhere on (u,w) to somewhere on (v,w)
-        if pu[0] > pw[0]: (wu,wv) = [(val - pw) / (px - pw) for px in (pu,pv)]
-        else:             (wu,wv) = [(pw - val) / (pw - px) for px in (pu,pv)]
+        (wu, wv) = [(val - pw) / (px - pw) for px in (pu,pv)]
         # put these in the weight matrix
         wmtx[u,w] = wu
         wmtx[v,w] = wv
@@ -4018,14 +4036,15 @@ def isolines(obj, prop, val,
     # at times, and the duplicates can be eliminated with just a slice
     addrs = []
     for (lbl,(us,vs,ws)) in six.iteritems(lines):
-        qs = [np.setdiff1d([u1,v1], [u0,v0])[0]
-              for (u0,v0,u1,v1) in zip(us[:-1],vs[:-1],us[1:],vs[1:])]
-        fs = np.asarray([us[:-1], qs, vs[:-1]], dtype=np.int)
-        fs = np.vstack([[row, row] for row in fs.T]).T
+        (u0s,v0s,u1s,v1s) = (us[:-1],vs[:-1],us[1:],vs[1:])
+        qs = [np.setdiff1d([u1,v1], [u0,v0])[0] for (u0,v0,u1,v1) in zip(u0s,v0s,u1s,v1s)]
+        fs = np.asarray([u0s, qs, v0s], dtype=np.int)
+        fend = (u1s[-1], np.setdiff1d(fs[:,-1], (u1s[-1],v1s[-1])), v1s[-1])
+        fs = np.hstack([fs, np.reshape(fend, (3,1))])
         # convert faces back to labels
         fs = np.asarray([obj.labels[f] for f in fs])
-        ws = flattest(list(zip(ws[:-1], ws[1:])))
-        ws = np.pad([ws], ((0,1),(0,0)), 'constant')
+        # make the weights
+        ws = np.asarray([ws, 0*ws])
         addrs.append({'faces': fs, 'coordinates': ws})
     addrs = list(sorted(addrs, key=lambda a:a['faces'].shape[0]))
     # if obj is a topology or addresses were requested, return them now
