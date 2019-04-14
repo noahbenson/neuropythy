@@ -3,56 +3,209 @@
 # Cortical magnification caclculation code and utilities.
 # by Noah C. Benson
 
-import pimms
-import numpy               as np
-import numpy.linalg        as npla
+import os, sys, six, pimms
+import numpy            as np
+import numpy.linalg     as npla
+import pyrsistent       as pyr
 
 from .. import geometry as geo
 from .. import mri      as mri
 
-from   neuropythy.util     import (zinv, simplex_summation_matrix)
+from   neuropythy.util     import (zinv, simplex_summation_matrix, curry, to_hemi_str)
 from   .retinotopy         import (extract_retinotopy_argument, retinotopy_data, as_retinotopy)
 
-def disk_projection_cmag(mesh, retinotopy='any', surface=None):
+def mag_data(hemi, retinotopy='any', surface='midgray', mask=None,
+             weights=Ellipsis, weight_min=0, weight_transform=Ellipsis,
+             visual_area=None, visual_area_mask=Ellipsis,
+             eccentricity_range=None, polar_angle_range=None):
     '''
-    disk_projection_cmag(mesh) yields the cortical magnification based on the projection of disks
-      on the cortical surface into the visual field.
+    mag_data(hemi) yields a map of visual/cortical magnification data for the given hemisphere.
+    mag_data(mesh) uses the given mesh.
+    mag_data([arg1, arg2...]) maps over the given hemisphere or mesh arguments.
+    mag_data(subject) is equivalent to mag_data([subject.lh, subject.rh]).
+    mag_data(mdata) for a valid magnification data map mdata (i.e., is_mag_data(mdata) is True or
+      mdata is a lazy map with integer keys) always yields mdata without considering any additional
+      arguments.
+
+    The data structure returned by magdata is a lazy map containing the keys:
+      * 'surface_coordinates': a (2 x N) or (3 x N) matrix of the mesh coordinates in the mask
+        (usually in mm).
+      * 'visual_coordinates': a (2 x N) matrix of the (x,y) visual field coordinates (in degrees).
+      * 'surface_areas': a length N vector of the surface areas of the faces in the mesh.
+      * 'visual_areas': a length N vector of the areas of the faces in the visual field.
+      * 'mesh': the full mesh from which the surface coordinates are obtained.
+      * 'submesh': the submesh of mesh of just the vertices in the mask (may be identical to mesh).
+      * 'mask': the mask used.
+      * 'retinotopy_data': the full set of retinotopy_data from the hemi/mesh; note that this will
+        include the key 'weights' of the weights actually used and 'visual_area' of the found or
+        specified visual area.
+      * 'masked_data': the subsampled retinotopy data from the hemi/mesh.
+    Note that if a visual_area property is found or provided (see options below), instead of
+    yielding a map of the above, a lazy map whose keys are the visual areas and whose values are the
+    maps described above is yielded instead.
+
+    The following named options are accepted (in order):
+      * retinotopy ('any') specifies the value passed to the retinotopy_data function to obtain the
+        retinotopic mapping data; this may be a map of such data.
+      * surface ('midgray') specifies the surface to use.
+      * mask (None) specifies the mask to use.
+      * weights, weight_min, weight_transform (Ellipsis, 0, Ellipsis) are used as in the
+        to_property() function  in neuropythy.geometry except weights, which, if equal to Ellipsis,
+        attempts to use the weights found by retinotopy_data() if any.
+      * visual_area (Ellipsis) specifies the property to use for the visual area label; Ellipsis is
+        equivalent to whatever visual area label is found by the retinotopy_data() function if any.
+      * visual_area_mask (Ellipsis) specifies which visual areas to include in the returned maps,
+        assuming a visual_area property is found; Ellipsis is equivalent to everything but 0; None
+        is equivalent to everything.
+      * eccentricity_range (None) specifies the eccentricity range to include.
+      * polar_angle_range (None) specifies the polar_angle_range to include.
     '''
+    if is_mag_data(hemi): return hemi
+    elif pimms.is_lazy_map(hemi) and pimms.is_vector(hemi.keys(), 'int'): return hemi
+    if mri.is_subject(hemi): hemi = (hemi.lh. hemi.rh)
+    if pimms.is_vector(hemi):
+        return tuple([mag_data(h, retinotopy=retinotopy, surface=surface, mask=mask,
+                               weights=weights, weight_min=weight_min,
+                               weight_transform=weight_transform, visual_area=visual_area,
+                               visual_area_mask=visual_area_mask,
+                               eccentricity_range=eccentricity_range,
+                               polar_angle_range=polar_angle_range)
+                      for h in hemi])
+    # get the mesh
+    mesh = geo.to_mesh((hemi, surface))
     # First, find the retino data
-    if pimms.is_str(retinotopy):
-        retino = retinotopy_data(mesh, retinotopy)
-    else:
-        retino = retinotopy
-    # Convert from polar angle/eccen to longitude/latitude
+    retino = retinotopy_data(hemi, retinotopy)
+    # we can process the rest the mask now, including weights and ranges
+    if weights is Ellipsis: weights = retino.get('variance_explained', None)
+    mask = hemi.mask(mask, indices=True)
+    (arng,erng) = (polar_angle_range, eccentricity_range)
+    (ang,ecc) = (retino['polar_angle'], retino['eccentricity'])
+    if pimms.is_str(arng):
+        tmp = to_hemi_str(arng)
+        arng = (-180,0) if tmp == 'rh' else (0,180) if tmp == 'lh' else (-180,180)
+    elif arng is None:
+        tmp = ang[mask]
+        tmp = tmp[np.isfinite(tmp)]
+        arng = (np.min(tmp), np.max(tmp))
+    if erng is None:
+        tmp = ecc[mask]
+        tmp = tmp[np.isfinite(tmp)]
+        erng = (0, np.max(tmp))
+    elif pimms.is_scalar(erng): erng = (0, erng)
+    (ang,wgt) = hemi.property(retino['polar_angle'], weights=weights, weight_min=weight_min,
+                              weight_transform=weight_transform, yield_weight=True)
+    ecc = hemi.property(retino['eccentricity'], weights=weights, weight_min=weight_min,
+                        weight_transform=weight_transform, data_range=erng)
+    # apply angle range if given
+    ((mn,mx),mid) = (arng, np.mean(arng))
+    oks = mask[np.isfinite(ang[mask])]
+    u = ang[oks]
+    u = np.mod(u + 180 - mid, 360) - 180 + mid
+    ang[oks[np.where((mn <= u) & (u < mx))[0]]] = np.inf
+    # mark/unify the out-of-range ones
+    bad = np.where(np.isinf(ang) | np.isinf(ecc))[0]
+    ang[bad] = np.inf
+    ecc[bad] = np.inf
+    wgt[bad] = 0
+    wgt *= zinv(np.sum(wgt[mask]))
+    # get visual and surface coords
     vcoords = np.asarray(as_retinotopy(retino, 'geographical'))
-    # note the surface coordinates
-    if surface is None:
-        tess = mesh.tess
-        scoords = mesh.coordinates
-    elif pimms.is_str(surface):
-        if not isinstance(mesh, mri.Cortex):
-            raise ValueError('named surfaces can only be used with cortex objects')
-        surface = surface.lower()
-        if   surface in ['white']:                         mesh = mesh.white_surface
-        elif surface in ['middle', 'midgray', 'mid-gray']: mesh = mesh.midgray_surface
-        elif surface in ['pial']:                          mesh = mesh.pial_surface
-        elif surface in mesh.surfaces:                     mesh = mesh.surfaces[surface]
-        else: raise ValueError('Unrecognized surface: %s' % surface)
-        scoords = mesh.coordinates
-        tess = mesh.tess
-    elif isinstance(surface, geo.Mesh):
-        tess = mesh.tess
-        scoords = surface.coordinates
-        if scoords.shape[1] > tess.vertex_count:
-            scoords = scoords[:, surface.tess.index(tess.labels)]
-    else: raise ValueError('Could not understand surface option')
-    faces = tess.indexed_faces
-    # okay, we have the data organized into scoords, vcoords, and faces;
-    # let's get sfx and vfx (surface face coords and visual face coords)
-    (sfx,vfx) = [np.asarray([x[:,ii] for ii in faces]) for x in (scoords,vcoords)]
-    # TODO
-    raise ValueError('Not yet implemented')
-    
+    scoords = mesh.coordinates
+    # now figure out the visual area so we can call down if we need to
+    if visual_area is Ellipsis: visual_area = retino.get('visual_area', None)
+    if visual_area is not None: retino['visual_area'] = visual_area
+    if wgt is not None: retino['weights'] = wgt
+    rdata = pimms.persist(retino)
+    # calculate the range area
+    (tmn,tmx) = [np.pi/180.0 * u for u in arng]
+    if tmx - tmn >= 2*np.pi: (tmn,tmx) = (-np.pi,np.pi)
+    (emn,emx) = erng
+    rarea = 0.5 * (emx*emx - emn*emn) * (tmx - tmn)
+    # okay, we have the data organized; we can do the calculation based on this, but we may have a
+    # visual area mask to apply as well; here's how we do it regardless of mask
+    def finish_mag_data(mask):
+        if len(mask) == 0: return None
+        # now that we have the mask, we can subsample
+        submesh = mesh.submesh(mask)
+        mdata = pyr.pmap({k:(v[mask]   if pimms.is_vector(v) else
+                             v[:,mask] if pimms.is_matrix(v) else
+                             None)
+                          for (k,v) in six.iteritems(rdata)})
+        fs = submesh.tess.indexed_faces
+        (vx, sx)  = [x[:,mask]                        for x in (vcoords, scoords)]
+        (vfx,sfx) = [np.asarray([x[:,f] for f in fs]) for x in (vx,      sx)]
+        (va, sa)  = [geo.triangle_area(*x)            for x in (vfx, sfx)]
+        return pyr.m(surface_coordinates=sx, visual_coordinates=vx,
+                     surface_areas=sa,       visual_areas=va,
+                     mesh=mesh,              submesh=submesh,
+                     retinotopy_data=rdata,  masked_data=mdata,
+                     mask=mask,              area_of_range=rarea)
+    # if there's no visal area, we just use the mask as is
+    if visual_area is None: return finish_mag_data(mask)
+    # otherwise, we return a lazy map of the visual area mask values
+    visual_area = hemi.property(visual_area, mask=mask, null=0, dtype=np.int)
+    vam = (np.unique(visual_area)                    if visual_area_mask is None     else
+           np.setdiff1d(np.unique(visual_area), [0]) if visual_area_mask is Ellipsis else
+           np.unique(list(visual_area_mask)))
+    return pimms.lazy_map({va: curry(finish_mag_data, mask[visual_area[mask] == va])
+                           for va in vam})
+def is_mag_data(mdat):
+    '''
+    is_mag_data(dat) yields True if the given data is a valid set of magnification data and False
+      otherwise.
+
+    Note that this does not return True for all valid return values of the mag_data() function:
+    specifically, if the mag_data() function yields a list of mag-data maps or a lazy-map of the
+    mag-data maps split out by visual area, then this will return False. This function only returns
+    True for a map of mag data itself.
+    '''
+    if not pimms.is_map(mdat): return False
+    for k in ['surface_coordinates', 'visual_coordinates', 'mesh', 'submesh', 'mask',
+              'retinotopy_data', 'masked_data', 'surface_areas', 'visual_areas']:
+        if k not in mdat: return False
+    return True
+
+def disk_vmag(hemi, retinotopy='any', to=None, **kw):
+    '''
+    disk_vmag(mesh) yields the visual magnification based on the projection of disks on the cortical
+      surface into the visual field.
+
+    All options accepted by mag_data() are accepted by disk_vmag().
+    '''
+    mdat = mag_data(hemi, retinotopy=retinotopy, **kw)
+    if pimms.is_vector(mdat): return tuple([face_vmag(m, to=to) for m in mdat])
+    elif pimms.is_vector(mdat.keys(), 'int'):
+        return pimms.lazy_map({k: curry(lambda k: face_vmag(mdat[k], to=to), k)
+                               for k in six.iterkeys(mdat)})
+    #TODO: implement the disk_vmag calculation using mdat
+    # convert to the appropriate type according to the to param
+    raise NotImplementedError()
+
+def face_vmag(hemi, retinotopy='any', to=None, **ks):
+    '''
+    face_vmag(mesh) yields the visual magnification based on the projection of individual faces on
+      the cortical surface into the visual field.
+    face_vmag(mdat) uses the given magnification data mdat (as returned from mag_data()); if valid
+      magnification data is passed then all options related to the mag_data() function are ignored.
+
+    All options accepted by mag_data() are accepted by disk_vmag().
+
+    The additional optional arguments are also accepted:
+      * to (default: None) specifies that the resulting data should be transformed in some way;
+        these transformations are:
+          * None or 'data': returns the full magnification data without transformation;
+          * 'faces': returns a property of the visual magnification value of each face;
+          * 'vertices': returns a property of the visual magnification value of each vertex, as
+            determined by averaging the magnification 
+    '''
+    mdat = mag_data(hemi, retinotopy=retinotopy, **kw)
+    if pimms.is_vector(mdat): return tuple([face_vmag(m, to=to) for m in mdat])
+    elif pimms.is_map(mdat.keys(), 'int'):
+        return pimms.lazy_map({k: curry(lambda k: face_vmag(mdat[k], to=to), k)
+                               for k in six.iterkeys(mdat)})
+    #TODO: implement the face_vmag calculation using mdat
+    # convert to the appropriate type according to the to param
+    raise NotImplementedError()
 
 @pimms.immutable
 class FieldOfView(object):
@@ -321,6 +474,57 @@ def areal_cmag(mesh, retinotopy='any', mask=None, surface_area=None, weight=None
                                       weight=(None if wgt is None else wgt[ii]),
                                       nnearest=nnearest)
 
+def isoline_vmag(hemi, isolines=None, surface='midgray', min_length=2, **kw):
+    '''
+    isoline_vmag(hemi) calculates the visual magnification function f using the default set of
+      iso-lines (as returned by neuropythy.vision.visual_isolines()). The hemi argument may
+      alternately be a mesh object.
+    isoline_vmag(hemi, isolns) uses the given iso-lines rather than the default ones.
+    
+    The return value of this funciton is a dictionary whose keys are 'tangential', 'radial', and
+    'areal', and whose values are the estimated visual magnification functions. These functions
+    are of the form f(x,y) where x and y can be numbers or arrays in the visual field.
+    '''
+    from neuropythy.util import (curry, zinv)
+    from neuropythy.mri import is_cortex
+    from neuropythy.vision import visual_isolines
+    from neuropythy.geometry import to_mesh
+    # if there's no isolines, get them
+    if isolines is None: isolines = visual_isolines(hemi, **kw)
+    # see if the isolines is a lazy map of visual areas; if so return a lazy map recursing...
+    if pimms.is_vector(isolines.keys(), 'int'):
+        f = lambda k: isoline_vmag(isolines[k], surface=surface, min_length=min_length)
+        return pimms.lazy_map({k:curry(f, k) for k in six.iterkeys(isolines)})
+    mesh = to_mesh((hemi, surface))
+    # filter by min length
+    if min_length is not None:
+        isolines = {k: {kk: {kkk: [vvv[ii] for ii in iis] for (kkk,vvv) in six.iteritems(vv)}
+                        for (kk,vv) in six.iteritems(v)
+                        for iis in [[ii for (ii,u) in enumerate(vv['polar_angles'])
+                                     if len(u) >= min_length]]
+                        if len(iis) > 0}
+                    for (k,v) in six.iteritems(isolines)}
+    (rlns,tlns) = [isolines[k] for k in ['eccentricity', 'polar_angle']]
+    if len(rlns) < 2: raise ValueError('fewer than 2 iso-eccentricity lines found')
+    if len(tlns) < 2: raise ValueError('fewer than 2 iso-angle lines found')
+    # grab the visual/surface lines
+    ((rvlns,tvlns),(rslns,tslns)) = [[[u for lns in six.itervalues(xlns) for u in lns[k]]
+                                      for xlns in (rlns,tlns)]
+                                     for k in ('visual_coordinates','surface_coordinates')]
+    # calculate some distances
+    (rslen,tslen) = [[np.sqrt(np.sum((sx[:,:-1] - sx[:,1:])**2, 0)) for sx in slns]
+                     for slns in (rslns,tslns)]
+    (rvlen,tvlen) = [[np.sqrt(np.sum((vx[:,:-1] - vx[:,1:])**2, 0)) for vx in vlns]
+                     for vlns in (rvlns,tvlns)]
+    (rvxy, tvxy)  = [[0.5*(vx[:,:-1] + vx[:,1:]) for vx in vlns] for vlns in (rvlns,tvlns)]
+    (rvlen,tvlen,rslen,tslen) = [np.concatenate(u) for u in (rvlen,tvlen,rslen,tslen)]
+    (rvxy,tvxy)   = [np.hstack(vxy) for vxy in (rvxy,tvxy)]
+    (rvmag,tvmag) = [vlen * zinv(slen) for (vlen,slen) in zip([rvlen,tvlen],[rslen,tslen])]
+    return {k: {'visual_coordinates':vxy, 'visual_magnification': vmag,
+                'visual_lengths': vlen, 'surface_lengths': slen}
+            for (k,vxy,vmag,vlen,slen) in zip(['radial','tangential'], [rvxy,tvxy],
+                                              [rvmag,tvmag], [rvlen,tvlen], [rslen,tslen])}
+
 # Three methods to calculate cortical magnification:
 # (1) local projection of the triangle neighborhood then comparison of path across it in the visual
 #     field versus on the cortical surface
@@ -514,348 +718,3 @@ def neighborhood_cortical_magnification(mesh, coordinates):
                     res[idx,dirno] = len_srf / len_vis
     # That's it!
     return res
-
-def path_cortical_magnification(mesh, path, mask=None, return_all=False,
-                                polar_angle='polar_angle', eccentricity='eccentricity'):
-    '''
-    path_cortical_magnification(mesh, path) yields the length of the given path along the cortical
-      surface divided by the length of the given path in visual space. The path must be an n x 2
-      matrix of (x,y) valuesin the visual field.
-
-    The following options are accepted:
-      * mask (default: None) may be a boolean mask of vertices to include in the calculation.
-    '''
-    ang = extract_retinotopy_argument(mesh, 'polar_angle', polar_angle, default='predicted')
-    ecc = extract_retinotopy_argument(mesh, 'eccentricity', eccentricity, default='predicted')
-    srf = mesh.coordinates.T
-    ids = np.asarray(range(len(srf)))
-    atol = 1e-6
-    if mask is not None:
-        msk = np.where(mask)[0]
-        ids = ids[msk]
-        ang = ang[msk]
-        ecc = ecc[msk]
-        srf = srf[msk]
-    # edit out values we can't use
-    okays = [k for (k,i,a,e) in zip(range(len(ids)), ids, ang, ecc)
-             if np.issubdtype(type(a), np.number)
-             if np.issubdtype(type(e), np.number)]
-    if len(okays) != len(ids):
-        ids = ids[okays]
-        ang = ang[okays]
-        ecc = ecc[okays]
-        srf = srf[okays]
-    # okay; now we have the subset we can use; lets get the appropriate triangles...
-    okays = set(ids)
-    tris = np.asarray([f for f in mesh.tess.indexed_faces.T if all(a in okays for a in f)]).T
-    # in case anything wasn't connected by triangle:
-    okays = set(np.unique(tris))
-    idcs = [k for (k,i) in enumerate(ids) if i in okays]
-    ids = ids[idcs]
-    ang = ang[idcs]
-    ecc = ecc[idcs]
-    srf = srf[idcs]
-    okays = {i:k for (k,i) in enumerate(ids)}
-    # now we can recreate the triangles with proper id's
-    tris = np.asarray([[okays[a] for a in f] for f in tris.T]).T
-    # get the x/y coordinates in visual space
-    vis_coords = ecc * np.asarray([np.cos(np.pi/180*(90-ang)), np.sin(np.pi/180*(90-ang))])
-    # okay, setup the topology/registrations
-    tess = geo.Tesselation(tris)
-    srf_reg = tess.make_mesh(srf.T)
-    vis_reg = tess.make_mesh(vis_coords)
-    # Now the Great Work begins...
-    # Find the triangle id's of the containers of the points first
-    tids = vis_reg.container(path.T)
-    # now step along the triangles starting at the first point...
-    steps = []
-    ss = []
-    pth = path.T
-    # to do this we want to have an index of edges to triangles that neighbor them
-    edge_idx = {}
-    for (tid,(a,b,c)) in enumerate(vis_reg.tess.faces.T):
-        for edge in map(tuple, map(sorted, [(a,b), (c,a), (b,c)])):
-            if edge not in edge_idx: edge_idx[edge] = set([])
-            edge_idx[edge].add(tid)
-    # we may need this to find arbitrary intersections:
-    all_edges = edge_idx.keys()
-    all_segs = np.asarray([vis_reg.coordinates[:,us] for us in np.transpose(all_edges)])
-    for (tid,next_tid,pt,next_pt) in zip(tids, np.roll(tids,-1), pth, np.roll(pth,-1,axis=0)):
-        # This could be the last point or there could be a break;
-        # We handle breaks as separate paths
-        if tid is None or (next_pt == pth[0]).all():
-            if tid is not None: ss.append(pt)
-            if len(ss) > 1: steps.append(ss)
-            ss = []
-            continue
-        # goal is to travel through triangles on our way to next_pt
-        pt0 = pt
-        ss.append(pt)
-        # here is the line segment we want to intersect with things
-        seg = (pt, next_pt)
-        while not geo.point_in_triangle(vis_reg.coordinates[:,vis_reg.tess.faces[:,tid]].T,next_pt):
-            # otherwise, we need to find the next neighboring triangle:
-            vtcs   = vis_reg.tess.faces[:,tid]
-            tpts   = vis_reg.coordinates[:,vtcs]
-            tsegs  = (tpts, np.roll(tpts, -1, axis=1))
-            tedges = [tuple(sorted([u,v])) for (u,v) in zip(vtcs, np.roll(vtcs, -1))]
-            tid0 = tid
-            tid0_set = set([tid0])
-            projdir = next_pt - pt
-            isect = np.asarray(geo.segment_intersection_2D((pt, next_pt), tsegs))
-            # there should be 1 or 2 intersections; 1 if this is the first/last step,
-            # 2 if there is a triangle crossed by the step
-            isect_idcs = np.where(np.isfinite(isect[0]))[0]
-            isect = isect.T
-            # take only the point closest to the destination that is not the source
-            isect_idcs = sorted([(d,i) for (i,x) in enumerate(isect) for d in [np.dot(x-pt,projdir)]
-                                 if d > 0 and not np.isclose(d, 0, atol=atol)],
-                                key=lambda i: i[0])
-            if len(isect_idcs) > 0:
-                isect_idcs = isect_idcs[0][1]
-                pt = isect[isect_idcs]
-                isect_edge = tuple(sorted(vtcs[[isect_idcs, (isect_idcs + 1) % 3]]))
-                # we have the old point and the new point
-                tid = next((t for t in edge_idx[isect_edge] if t != tid), None)
-                if tid is not None: ss.append(pt)
-                # okay, it's possible that we've found a null triangle; in this case, we
-                # want to continue at the next closest intersection point on the path to
-                # the next_pt; to do this, we have to look for intersections among allll
-                # of the segments in the mesh
-            else:
-                tid = None
-            if tid is None:
-                if len(ss) > 1: steps.append(ss)
-                ss = []
-                isect = np.asarray(geo.segment_intersection_2D((pt0, next_pt), all_segs)).T
-                # we want to ignore intersections in the current triangle tid0
-                isect_idcs = [idc for idc in np.where(np.logical_not(np.isnan(isect[:,0])))[0]
-                              if edge_idx[all_edges[idc]] != tid0_set]
-                if len(isect_idcs) == 0:
-                    # nothing left but the last point
-                    break
-                isect = isect[isect_idcs]
-                pts_by_nearness = sorted(
-                    [(i,isct,d) for (i,isct) in enumerate(isect) for d in [np.dot(isct-pt, projdir)]
-                     if d > 0 and not np.isclose(d, 0)],
-                    key=lambda a: a[2])
-                if len(pts_by_nearness) > 0:
-                    pt_id = pts_by_nearness[0][0]
-                    pt = isect[pt_id]
-                    tid = list(edge_idx[tuple(sorted(all_edges[isect_idcs[pt_id]]))] - tid0_set)[0]
-                if pt is None or tid is None or tid == tid0:
-                    # This happens if the triangles are basically adjacent but not technically
-                    # connected; 
-                    pt = pt0
-                    tid = next_tid
-            # if tid is still None, something's basically gone wrong with the mesh here
-            if tid is None:
-                if len(ss) > 1: steps.append(ss)
-                ss = []
-                break
-        # We exited out of the loop, so we've reached the triangle containing next_pt;
-        # we don't need to add it to 
-    # Okay, at this point we have a set of paths
-    if len(steps) == 0: raise ValueError('No triangles found intersecting path!')
-    # convert the visual path to the surface path
-    vis_steps = []
-    srf_steps = []
-    for uss in steps:
-        ss_srf = []
-        ss_vis = []
-        for x_vis in uss:
-            try:
-                addr  = vis_reg.address(x_vis)
-                x_srf = srf_reg.unaddress(addr)
-            except Exception:
-                if len(ss_vis) > 1:
-                    vis_steps.append(ss_vis)
-                    srf_steps.append(ss_srf)
-                ss_vis = []
-                ss_srf = []
-            else:
-                ss_vis.append(x_vis)
-                ss_srf.append(x_srf)
-        if len(ss_vis) > 1:
-            vis_steps.append(ss_vis)
-            srf_steps.append(ss_srf)
-            ss_vis = []
-            ss_srf = []
-
-    # for each path calculate its length in both spaces
-    srf_ds = [[npla.norm(x0 - x1) for (x0,x1) in zip(srf_path[:-1], srf_path[1:])]
-              for srf_path in srf_steps]
-    vis_ds = [[npla.norm(x0 - x1) for (x0,x1) in zip(vis_path[:-1], vis_path[1:])]
-              for vis_path in vis_steps]
-    srf_d = np.sum(np.hstack(srf_ds))
-    vis_d = np.sum(np.hstack(vis_ds))
-    #return (srf_ds, vis_ds)
-    if return_all:
-        return (srf_steps, vis_steps)
-    else:
-        return np.inf if np.isclose(vis_d, 0) else srf_d/vis_d
-    
-
-def isoangular_path(mesh, pathtype, val, mask=None, min_segment_length=4,
-                    polar_angle='polar_angle', eccentricity='eccentricity'):
-    '''
-    isoangular_path(mesh, pathtype, val) yields a list of isoangular paths, each of whichs is given
-      as a tuple (spath, vpath) of the points along the cortical surface (spath, n x 3) and the
-      points in the visual field (vpath, n x 2).  The path must be specified as either 'angle' or
-      'eccen' followed by a polar angle or eccentricity value.
-
-    The following options are accepted:
-      * mask (default: None) may be a boolean mask of vertices to include in the calculation.
-      * min_segment_length (default: 4) the minimum number of faces that need to be included in a
-        path segment in order to be included in the result.
-    '''
-    ang = extract_retinotopy_argument(mesh, 'polar_angle', polar_angle, default='predicted')
-    ecc = extract_retinotopy_argument(mesh, 'eccentricity', eccentricity, default='predicted')
-    srf = mesh.coordinates.T
-    ids = np.asarray(range(len(srf)))
-    if mask is not None:
-        msk = np.where(mask)[0]
-        ids = ids[msk]
-        ang = ang[msk]
-        ecc = ecc[msk]
-        srf = srf[msk]
-    # edit out values we can't use
-    okays = [k for (k,i,a,e) in zip(range(len(ids)), ids, ang, ecc)
-             if np.issubdtype(type(a), np.number)
-             if np.issubdtype(type(e), np.number)]
-    if len(okays) != len(ids):
-        ids = ids[okays]
-        ang = ang[okays]
-        ecc = ecc[okays]
-        srf = srf[okays]
-    # okay; now we have the subset we can use; lets get the appropriate triangles...
-    okays = set(ids)
-    tris = np.asarray([f for f in mesh.tess.indexed_faces.T if all(a in okays for a in f)]).T
-    # in case anything wasn't connected by triangle:
-    okays = set(np.unique(tris))
-    idcs = [k for (k,i) in enumerate(ids) if i in okays]
-    ids = ids[idcs]
-    ang = ang[idcs]
-    ecc = ecc[idcs]
-    srf = srf[idcs]
-    okays = {i:k for (k,i) in enumerate(ids)}
-    # now we can recreate the triangles with proper id's
-    tris = np.asarray([[okays[a] for a in f] for f in tris.T]).T
-    # get the x/y coordinates in visual space
-    vis_coords = ecc * np.asarray([np.cos(np.pi/180*(90-ang)), np.sin(np.pi/180*(90-ang))])
-    vis_coords = vis_coords.T
-    # okay, setup the topology/registrations
-    tess = geo.Tesselation(tris)
-    srf_reg = tess.make_mesh(srf.T)
-    vis_reg = tess.make_mesh(vis_coords)
-    # now the Great Work begins...
-    # Find all triangles that intersect this particular angle line
-    pathtype = pathtype.lower()
-    trisect = None
-    if pathtype in ['angle', 'polar_angle', 'radial', 'rad']:
-        vals = ang
-    elif pathtype in ['eccen', 'eccentricity', 'tangential', 'tan']:
-        vals = ecc
-    else:
-        raise ValueError('Unrecognized pathtype: %s' % pathtype)
-    angsides = (np.sign(vals - val) + 1).astype(np.bool)
-    angsides = angsides.astype(np.int)
-    tris = tris.T
-    trisides = np.sum([angsides[tt] for tt in tris.T], axis=0)
-    trii = np.intersect1d(np.where(trisides > 0)[0], np.where(trisides < 3)[0])
-    # Make an adjacency list of these intersecting triangles
-    tadj = {}
-    tmp = {}
-    for (u,v,i) in zip(np.hstack((tris[trii,0], tris[trii,0], tris[trii,1])),
-                       np.hstack((tris[trii,1], tris[trii,2], tris[trii,2])),
-                       np.hstack((trii, trii, trii))):
-        # if (u/v) doesn't cross the iso-line, ignore it
-        if angsides[u] == angsides[v] or vals[u] == val or vals[v] == val:
-            continue
-        elif (v,u) in tmp:
-            k = tmp[(v,u)]
-            del tmp[(v,u)]
-            tadj[(i,k)] = (u,v)
-            tadj[(k,i)] = (u,v)
-        else:
-            tmp[(u,v)] = i
-    # Okay, now we stitch these together into segments; this is basically a union-find problem
-    seg = {ti:[ti] for ti in trii} # cluster end triangle
-    cls = {ti:ti   for ti in trii}
-    def _find(k):
-        kc = cls[k]
-        if k == kc or cls[kc] == kc: return kc
-        kcc = _find(kc)
-        cls[k] = kcc
-        return kcc
-    def _union(u, v):
-        uc = _find(u)
-        vc = _find(v)
-        if uc == vc: return
-        us = seg[uc]
-        vs = seg[vc]
-        (u0,ue) = (us[0],us[-1])
-        (v0,ve) = (vs[0],vs[-1])
-        # either u or v must be adjacent to the end of the other
-        if   u0 == u and v0 == v: (a,b) = (reversed(us), vs)
-        elif u0 == u and ve == v: (a,b) = (reversed(us), reversed(vs))
-        elif ue == u and v0 == v: (a,b) = (us,           vs)
-        elif ue == u and ve == v: (a,b) = (us,           reversed(vs))
-        else: return # nothing joined; can't connect at intersection
-        a = list(a)
-        b = list(b)
-        for bb in b: a.append(bb)
-        seg[uc] = a
-        seg[vc] = a
-        cls[vc] = uc
-        cls[u] = uc
-        cls[v] = uc
-    for (ti, tj) in tadj.iterkeys(): _union(ti, tj)
-    for ti       in trii: _find(ti)
-    # Okay, we should have the segments now...
-    clarr = np.asarray([cls[ti] for ti in trii])
-    seg_ids = np.unique(clarr)
-    seg_vis = []
-    seg_srf = []
-    if min_segment_length < 2: min_segment_length = 2
-    srf_coords = srf_reg.coordinates
-    for sid in seg_ids:
-        s = seg[sid]
-        if len(s) < min_segment_length: continue
-        # Okay, we want to walk through the triangles in order; make a list of the ordered edges
-        # handle the first triangle/segment start point
-        (u,v) = tadj[(s[0], s[1])]
-        w = np.setdiff1d(tris[s[0]], (u,v))[0]
-        if vals[w] == val:
-            pts_vis = [vis_coords[w]]
-            pts_srf = [srf_coords[w]]
-        else:
-            if angsides[w] != angsides[v]: u = v
-            w_frac = (vals[w] - val) / (vals[w] - vals[u])
-            u_frac = 1.0 - w_frac
-            pts_vis = [w_frac*vis_coords[w] + u_frac*vis_coords[u]]
-            pts_srf = [w_frac*srf_coords[w] + u_frac*srf_coords[u]]
-        # Okay, walk along the adjacent edges
-        for (s0,s1) in zip(s[:-1], s[1:]):
-            (u,v) = tadj[(s0,s1)]
-            v_frac = (vals[v] - val) / (vals[v] - vals[u])
-            u_frac = 1.0 - v_frac
-            pts_vis.append(v_frac*vis_coords[v] + u_frac*vis_coords[u])
-            pts_srf.append(v_frac*srf_coords[v] + u_frac*srf_coords[u])
-        # And finally handle the end-point
-        (u,v) = tadj[(s[-2], s[-1])]
-        w = np.setdiff1d(tris[s[-1]], (u,v))[0]
-        if vals[w] == val:
-            pts_vis.append(vis_coords[w])
-            pts_srf.append(srf_coords[w])
-        else:
-            if angsides[w] != angsides[v]: u = v
-            w_frac = (vals[w] - val) / (vals[w] - vals[u])
-            u_frac = 1.0 - w_frac
-            pts_vis.append(w_frac*vis_coords[w] + u_frac*vis_coords[u])
-            pts_srf.append(w_frac*srf_coords[w] + u_frac*srf_coords[u])
-        # Just append these points
-        seg_vis.append(pts_vis)
-        seg_srf.append(pts_srf)
-    # That's it!
-    return (seg_srf, seg_vis)
