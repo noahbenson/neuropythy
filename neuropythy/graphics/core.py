@@ -12,7 +12,7 @@ import neuropythy.mri      as mri
 import neuropythy.io       as nyio
 import os, sys, six, itertools, atexit, shutil, tempfile, warnings, pimms
 
-from ..util            import (times, zdivide, plus, minus)
+from ..util            import (times, zdivide, plus, minus, to_hemi_str)
 from ..vision          import (visual_area_names, visual_area_numbers)
 
 # 2D Graphics ######################################################################################
@@ -820,15 +820,18 @@ cortex_plot_3D = _ipyvolume_load_error
 try:
     import ipyvolume as ipv
 
-    def cortex_plot_3D(mesh,
+    def cortex_plot_3D(obj,
                        color=None, cmap=None, vmin=None, vmax=None, alpha=None,
-                       underlay='curvature', mask=None, hemi=None, surface='white',
+                       underlay='curvature', mask=None, hemi=None, surface='inflated',
                        figure=Ellipsis, width=600, height=600,
                        view=None, camera_distance=100, camera_fov=None, camera_up=None):
         '''
-    cortex_plot_3D(mesh) yields a PySurfer Brain object for the given 3D cortical mesh. Mesh may
-      alternately be a pair (lmesh, rmesh) or a subject object, in which case a paired Brain object
-      is returned.
+    cortex_plot_3D(hemi) plots the inflated surface of the given cortex object hemi and returns the
+      ipyvolume figure object.
+    cortex_plot_3D(mesh) plots the given mesh.
+    cortex_plot_3D((hemi1, hemi2...)) plots all the given hemispheres or meshes.
+    cortex_plot_3D(mesh) yields a PySurfer Brain object for the given 3D cortical mesh.
+    cortex_plot_3D(subject) is equivalent to cortex_plot_3D((subject.lh, subject.rh)).
 
     The following options are accepted:
       * color (default: None) specifies the color to plot for each vertex; this argument may take a
@@ -872,23 +875,18 @@ try:
         orthographic position looking at the mesh.
     '''
         # First, see if we've been passed a cortex or subject object...
-        if isinstance(mesh, mri.Cortex):
-            mesh = [mesh.surface(surface)]
-        elif isinstance(mesh, mri.Subject):
-            if hemi is None or (pimms.is_str(hemi) and hemi.lower() in ('lr', 'both', 'all')):
-                mesh = (mesh.lh.surface(surface), mesh.rh.surface(surface))
-            elif pimms.is_str(hemi):
-                mesh = mesh.hemis[hemi]
-                mesh = [mesh.surface(surface)]
-            else:
-                mesh = [mesh.hemis[h] for h in hemi]
-                mesh = [mesh.surface(surface) for m in mesh]
-        elif isinstance(mesh, geo.Mesh):
-            mesh = [mesh]
-        elif pimms.is_vector(mesh):
-            if pimms.is_str(hemi):
-                if   hemi.lower() == 'lh': mesh = mesh[0]
-                elif hemi.lower() == 'rh': mesh = mesh[1]
+        mesh = []
+        for arg in (obj if pimms.is_vector(obj) else [obj]):
+            if   geo.is_mesh(arg): mesh.append(arg)
+            elif geo.is_topo(arg): mesh.append(to_mesh((mesh, surface)))
+            elif mri.is_subject(arg):
+                for h in (hemi if pimms.is_vector(hemi) else [hemi]):
+                    if geo.is_topo(h) or geo.is_mesh(h): hh = [h]
+                    elif h in arg.hemis: hh = [arg.hemis[h]]
+                    else:
+                        h = to_hemi_str(h)
+                        hh = [arg.lh, arg.rh] if h == 'lr' else [arg.hemis[h]]
+                    for hh in h: mesh.append(to_mesh((hh, surface)))
         # process the colors
         rgba = np.concatenate(
             [cortex_plot_colors(m, color=color, cmap=cmap, vmin=vmin, vmax=vmax,
