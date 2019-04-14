@@ -107,7 +107,7 @@ setup(
                       'nibabel>=2.0',
                       'pyrsistent>=0.11',
                       'pint>=0.7',
-                      'pimms>=0.3.3',
+                      'pimms>=0.3.5',
                       'py4j>=0.10'],
     extras_require={
         'HCP':        ['s3fs>=0.1.5', 'h5py>=2.8.0'],
