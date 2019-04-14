@@ -311,6 +311,22 @@ def as_retinotopy(data, output_style='visual', units=Ellipsis, prefix=None, suff
     f = _retinotopy_style_fns[output_style]
     return f(theta, rho)
 
+retinotopic_property_aliases = {
+    'radius': [
+        (set(['radius', 'size', 'sigma', 'rad', 'sz', 'sig',
+              'prf_radius', 'prf_size', 'prf_sigma', 'prf_rad', 'prf_sz', 'prf_sig',
+              'prfradius', 'prfsize', 'prfsigma', 'prfrad', 'prfsz', 'prfsig']),
+         lambda r: r),
+        (set(['fwhm']), lambda fwhm: fwhm / (2.0 * np.sqrt(2.0 * np.log(2.0))))],
+    'variange_explained': [
+        (set(['variance_explained', 'varexp', 'varexpl', 'vexpl', 'weight',
+              'coefficient_of_determination', 'cod', 
+              'r2', 'rsquared', 'r_squared', 'rsqr', 'rsq']),
+         lambda x: x)],
+    'visual_area': [
+        (set(['visual_area', 'visual_roi', 'visual_label',
+              'varea', 'vroi', 'vlabel', 'visarea', 'visroi', 'vislabel', 'vislbl']),
+         lambda x: x)]}
 def retinotopy_data(m, source='any'):
     '''
     retinotopy_data(m) yields a dict containing a retinotopy dataset with the keys 'polar_angle',
@@ -322,15 +338,14 @@ def retinotopy_data(m, source='any'):
       either 'empirical', 'model', or 'any'; or it may be a prefix/suffix beginning/ending with
       an _ character.
     '''
-    if isinstance(m, geo.VertexSet): return retinotopy_data(m.properties, source=source)
+    if pimms.is_map(source):
+        if all(k in source for k in ['polar_angle', 'eccentricity']): return source
+    if geo.is_vset(m): return retinotopy_data(m.properties, source=source)
     source = source.lower()
     model_rets = ['predicted', 'model', 'template', 'atlas', 'inferred']
     empir_rets = ['empirical', 'measured', 'prf', 'data']
     wild = False
-    extra_fields = {'empirical': [('variance_explained', ['varexp', 'vexpl', 'weight']),
-                                  ('radius', ['size', 'prf_size', 'prf_radius'])],
-                    'model':     [('visual_area', ['visual_roi', 'visual_label']),
-                                  ('radius', ['size', 'radius', 'prf_size', 'prf_radius'])]}
+    extra_fields = {'empirical':('radius','variance_explained'), 'model':('radius','visual_area')}
     check_fields = []
     if source in empir_rets:
         fixes = empir_rets
@@ -385,14 +400,18 @@ def retinotopy_data(m, source='any'):
     res = {'polar_angle': z[0], 'eccentricity': z[1]}
     # check for extra fields if relevant
     pnames = {k.lower():k for k in m} if check_fields else {}
-    for (fname, aliases) in check_fields:
-        for f in [fname] + aliases:
-            if prefix: f = prefix + f
-            if suffix: f = f + suffix
-            f = f.lower()
-            if f in pnames:
-                res[fname] = m[pnames[f]]
-                break
+    for fname in set(check_fields):
+        for (aliases, trfn) in retinotopic_property_aliases.get(fname, []):
+            if trfn is None: trfn = lambda x:x
+            for f in aliases:
+                if prefix: f = prefix + f
+                if suffix: f = f + suffix
+                f = f.lower()
+                if f in pnames:
+                    res[fname] = trfn(m[pnames[f]])
+                    trfn = None
+                    break
+            if trfn is None: break
     # That's it
     return res
 
@@ -1812,7 +1831,7 @@ def visual_isolines(hemi, retinotopy='any', visual_area=Ellipsis, mask=None, sur
       contiguous lines at one angle); each line is given by a map of addresses and other meta-data
       about the line.
     '''
-    from neuropythy import (to_mask, retinotopy_data, isolines, is_cortex)
+    from neuropythy import (to_mask, retinotopy_data, isolines, is_cortex, to_mesh)
     from neuropythy.util import curry
     # first off, apply the mask if specified:
     if mask is not None: mask = to_mask(hemi, mask)
@@ -1844,7 +1863,7 @@ def visual_isolines(hemi, retinotopy='any', visual_area=Ellipsis, mask=None, sur
     retino['polar_angle'] = ang
     retino['eccentricity'] = ecc
     # if there's a surface to get...
-    mesh = hemi.surfaces[surface] if is_cortex(hemi) else hemi
+    mesh = to_mesh((hemi, surface))
     # when we calculate the isolines we use this function which also adds in the polar angles and
     # eccentricities of the addressed lines
     def calc_isolines(hemi, dat, ln, mask=None):
@@ -1991,9 +2010,7 @@ def clean_retinotopy_potential(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=
         If any knob is set to None, then its value is 0 instead of 2**k.
     '''
     import neuropythy.optimize as op
-    mesh = (hemi.surfaces[surface] if geo.is_topo(hemi) and pimms.is_str(surface) else
-            surface                if geo.is_mesh(surface)                        else
-            hemi)
+    mesh = geo.to_mesh((hemi, surface))
     if mask is Ellipsis:
         if mesh.coordinates.shape[0] == 2: mask = mesh.indices
         else: mask = mri.to_flatmap('occipital_pole', hemi, radius=np.pi/2.75).labels
