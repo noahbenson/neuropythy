@@ -22,7 +22,7 @@ from .util  import (triangle_area, triangle_address, alignment_matrix_3D, rotati
 from ..util import (ObjectWithMetaData, to_affine, zinv, is_image, is_address, address_data, curry,
                     curve_spline, CurveSpline, chop, zdivide, flattest, inner, config, library_path,
                     dirpath_to_list, to_hemi_str, is_tuple, is_list, is_set, close_curves,
-                    normalize, denormalize, AutoDict)
+                    normalize, denormalize, AutoDict, auto_dict)
 from ..io   import (load, importer, exporter)
 from functools import reduce
 
@@ -433,7 +433,7 @@ def to_property(obj, prop=None,
         # If there's a data range argument, deal with how it affects outliers
         if data_range is not None:
             if not pimms.is_vector(data_range): data_range = (0, data_range)
-            mii = mask[(prop[mask] < data_range[0]) | (frop[mask] > data_range[1])]
+            mii = mask[(prop[mask] < data_range[0]) | (prop[mask] > data_range[1])]
             outliers = np.union1d(outliers, mii)
         # no matter what, trim out the infinite values (even if inf was in the data range)
         outliers = np.union1d(outliers, mask[np.isinf(prop[mask])])
@@ -681,6 +681,20 @@ class Tesselation(VertexSet):
         edge with edge index i.
         '''
         return tuple([edge_face_index[e] for e in zip(*edges)])
+    @pimms.value
+    def face_neighbors(edge_faces, face_count):
+        '''
+        tess.face_neighbors is a tuple that contains one element per face; each element
+        tess.face_neighbors[i] is a tuple of the 0-3 face indices of the faces that are adjacent to
+        the face with index i.
+        '''
+        q = [[] for _ in range(face_count)]
+        for fs in edge_faces:
+            if len(fs) == 2:
+                (a,b) = fs
+                q[a].append(b)
+                q[b].append(a)
+        return tuple([tuple(qq) for qq in q])
     @pimms.value
     def vertex_index(indices, labels):
         '''
@@ -4155,12 +4169,54 @@ def to_mesh(obj):
       * a tuple (faces, coords) where faces is a triangle matrix and coords is a coordinate matrix;
         note that if neither matrix is of integer type, then the latter ordering (which is the same
         as that accepted by the mesh() function) is assumed.
+      * a tuple (topo, regname) specifying the registration name to use (note that regname may
+        optionally start with 'reg:' which is ignored).
+      * a tuple (cortex, surfname) specifying the surface name to use. Note that surfname may
+        optionally start with 'surf:' or 'reg:', both of which are used only to determine whether
+        to lookup a registration or a surface. If no 'surf:' or 'reg:' is given as a prefix, then
+        a surface is tried first followed by a registration. The surface name 'sphere' is
+        automatically translated to 'reg:native' and any surface name of the form '<name>_sphere' is
+        automatically translated to 'reg:<name>'.
+      * a tuple (topo/cortex, mesh) results in the mesh being returned.
+      * a tuple (mesh, string) or (mesh, None) results in mesh with the second argument ignored.
+      * a tuple (mesh1, mesh2) results in mesh2 with mesh1 ignored.
+
+    Note that some of the behavior described above is desirable because of a common use case of the
+    to_mesh function. When another function f accepts as arguments both a hemi/topology object as
+    well as an optional surface argument, the purpose is often to obtain a specific mesh from the
+    topology but to allow the user to specify which or to pass their own mesh.
     '''
-    if is_mesh(obj): return obj
+    if   is_mesh(obj): return obj
     elif pimms.is_vector(obj) and len(obj) == 2:
-        (f,x) = obj
-        if pimms.is_matrix(x, 'int') and not pimms.is_matrix(f, 'int'): (f,x) = (x,f)
-        return mesh(f, x)
+        (a,b) = obj
+        if   pimms.is_matrix(a, 'int') and pimms.is_matrix(b, 'real'): return mesh(a, b)
+        elif pimms.is_matrix(b, 'int') and pimms.is_matrix(a, 'real'): return mesh(b, a)
+        elif is_mesh(a) and (b is None or pimms.is_str(b)): return a
+        elif is_mesh(a) and is_mesh(b): return b
+        elif is_topo(a):
+            from neuropythy import is_cortex
+            if   is_mesh(b):          return b
+            elif not pimms.is_str(b): raise ValueError('to_mesh: non-str surf/reg name: %s' % (b,))
+            (b0, lb) = (b, b.lower())
+            # check for translations of the name first:
+            s = b[4:] if lb.startswith('reg:') else b[5:] if lb.startswith('surf:') else b
+            ls = s.lower()
+            if ls.endswith('_sphere'): b = ('reg:' + s[:-7])
+            elif ls == 'sphere': b = 'reg:native'
+            lb = b.lower()
+            # we try surfaces first (if a is a cortex and has surfaces)
+            if is_cortex(a) and not lb.startswith('reg:'):
+                (s,ls) = (b[5:],lb[5:]) if lb.startswith('surf:') else (b,lb)
+                if   s  in a.surfaces: return a.surfaces[s]
+                elif ls in a.surfaces: return a.surfaces[ls]
+            # then check registrations
+            if not lb.startswith('surf:'):
+                (s,ls) = (b[4:],lb[4:]) if lb.startswith('reg:') else (b,lb)
+                if   s  in a.registrations: return a.registrations[s]
+                elif ls in a.registrations: return a.registrations[ls]
+            # nothing found
+            raise ValueError('to_mesh: mesh named "%s" not found in topology %s' % (b0, a))
+        else: raise ValueError('to_mesh: could not deduce meaning of row: %s' % (obj,))
     else: raise ValueError('Could not deduce how object can be convertex into a mesh')
 
 # The Gifti importer goes here because it relies on Mesh
