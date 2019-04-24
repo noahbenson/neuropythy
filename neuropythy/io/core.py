@@ -312,7 +312,7 @@ def save_csv(filename, dat, **kw):
     if any(filename.endswith(s) for s in ('.gz', '.bz2', '.lzma')):
         with gzip.open(filename, 'wt', newlines='') as fl: d.to_csv(fl, **kw)
     else:
-        with open(filename, 'wt', newlines='') as fl: d.to_csv(fl, **kw)
+        with open(filename, 'wt') as fl: d.to_csv(fl, **kw)
     return data
 @importer('tsv', ('tsv', 'tsv.gz', 'tsv.bz2', 'tsv.lzma'))
 def load_tsv(filename, sep='\t', **kw):
@@ -347,7 +347,7 @@ def save_tsv(filename, dat, sep='\t', **kw):
     if any(filename.endswith(s) for s in ('.gz', '.bz2', '.lzma')):
         with gzip.open(filename, 'wt', newlines='') as fl: d.to_csv(fl, sep=sep, **kw)
     else:
-        with open(filename, 'wt', newlines='') as fl: d.to_csv(fl, sep=sep, **kw)
+        with open(filename, 'wt') as fl: d.to_csv(fl, sep=sep, **kw)
     return data
 
 # Nifti!
