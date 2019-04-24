@@ -1931,7 +1931,7 @@ def clean_retinotopy_potential(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=
                                visual_area=None, map_visual_areas=Ellipsis,
                                visual_area_field_signs=Ellipsis,
                                measurement_uncertainty=0.3, measurement_knob=1,
-                               magnification_knob=0, fieldsign_knob=12, edge_knob=0):
+                               magnification_knob=0, fieldsign_knob=6, edge_knob=0):
     '''
     clean_retinotopy_potential(hemi) yields a retinotopic potential function for the given
       hemisphere that, when minimized, should yeild a cleaned/smoothed version of the retinotopic
@@ -2170,7 +2170,7 @@ def clean_retinotopy(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=Ellipsis,
                      visual_area=Ellipsis, map_visual_areas=Ellipsis,
                      visual_area_field_signs=Ellipsis,
                      measurement_uncertainty=0.3, measurement_knob=1,
-                     magnification_knob=0, fieldsign_knob=12, edge_knob=0,
+                     magnification_knob=0, fieldsign_knob=6, edge_knob=0,
                      yield_report=False, steps=100, rounds=4, output_style='visual',
                      jitter=None, average=None):
 
@@ -2234,7 +2234,8 @@ def clean_retinotopy(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=Ellipsis,
             if average is not None and ii % average_mod == average_phase:
                 X = np.array([X[k] if len(nn) == 0 else np.mean(X[list(nn)],0)
                               for (k,nn) in enumerate(submesh.tess.indexed_neighborhoods)])
-            X = f.minimize(X, method=mtd, options=dict(maxiter=steps, disp=False)).x
+            rr = f.minimize(X, method=mtd, options=dict(maxiter=steps, disp=False))
+            X = rr.x
         X = np.reshape(X, X0.shape)
         if X.shape[0] != 2: X = X.T
         for (u,v) in zip([x,y], X): u[tess.index(submesh.labels)] = v
