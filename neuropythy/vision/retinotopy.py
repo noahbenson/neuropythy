@@ -318,7 +318,7 @@ retinotopic_property_aliases = {
               'prfradius', 'prfsize', 'prfsigma', 'prfrad', 'prfsz', 'prfsig']),
          lambda r: r),
         (set(['fwhm']), lambda fwhm: fwhm / (2.0 * np.sqrt(2.0 * np.log(2.0))))],
-    'variange_explained': [
+    'variance_explained': [
         (set(['variance_explained', 'varexp', 'varexpl', 'vexpl', 'weight',
               'coefficient_of_determination', 'cod', 
               'r2', 'rsquared', 'r_squared', 'rsqr', 'rsq']),
@@ -1928,6 +1928,8 @@ def visual_isolines(hemi, retinotopy='any', visual_area=Ellipsis, mask=None, sur
 
 def clean_retinotopy_potential(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=Ellipsis,
                                surface='midgray', min_weight=Ellipsis, min_eccentricity=0.75,
+                               visual_area=None, map_visual_areas=Ellipsis,
+                               visual_area_field_signs=Ellipsis,
                                measurement_uncertainty=0.3, measurement_knob=1,
                                magnification_knob=0, fieldsign_knob=12, edge_knob=0):
     '''
@@ -1984,6 +1986,16 @@ def clean_retinotopy_potential(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=
       * weight (default: Ellipsis) specifies the weight to use; the default indicates that the
         weight found in the retinotopy data, if any, should be used. If None, then all values
         in the mask are equally weighted.
+      * visual_area (default: Ellipsis) specifies the visual area labels to use; the default
+        indicates that the visual area property found in the retinotopy data should be used, if any.
+        If None then no visual area splitting is done. This property is only important if 
+        map_visual_areas is not False or None; otherwise it is ignored.
+      * map_visual_areas (default: Ellipsis) specifies whether the return value should be a lazy map
+        whose keys are visual area labels and whose values are recursed calls to this function for
+        only the subset of the mesh with the associated label. May be False or None to specify that
+        a single potential should be yielded. May be a list of labels to specify that only those
+        visual areas should be mapped; the default value (Ellipsis) uses all labels in visual_areas
+        except for 0.
       * min_weight (default: Ellipsis) specifies the minimum weight to include, after the
         weights have been normalized such that sum(weights) == 1. If the value is a list or
         tuple containing a single item [p] then p is taken to be a percentile below which
@@ -2009,27 +2021,66 @@ def clean_retinotopy_potential(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=
         where w = (2**km + 2**kg + 2**ks + 2**ke)
         If any knob is set to None, then its value is 0 instead of 2**k.
     '''
+    from neuropythy.util import curry
     import neuropythy.optimize as op
+    # first, get the mesh and the retinotopy data
     mesh = geo.to_mesh((hemi, surface))
-    if mask is Ellipsis:
-        if mesh.coordinates.shape[0] == 2: mask = mesh.indices
-        else: mask = mri.to_flatmap('occipital_pole', hemi, radius=np.pi/2.75).labels
-    else: mask = hemi.mask(mask, indices=True)
     rdat = (retinotopy_data(mesh) if retinotopy is Ellipsis   else
             retinotopy            if pimms.is_map(retinotopy) else
             retinotopy_data(mesh, retinotopy))
-    wght = (rdat.get('variance_explained') if weight is Ellipsis else
-            rdat.get(weight)               if weight in rdat     else
-            hemi.property(weight)          if weight is not None else
+    lbls = (rdat.get('visual_area') if visual_area is Ellipsis else
+            None                    if visual_area is None     else
+            hemi.property(visual_area))
+    wght = (rdat.get('variance_explained') if weight is Ellipsis                      else
+            weight                         if pimms.is_vector(weight)                 else
+            rdat.get(weight)               if pimms.is_str(weight) and weight in rdat else
+            hemi.property(weight)          if weight is not None                      else
             None)
+    # figure out the mask
+    if mask is Ellipsis:
+        if mesh.coordinates.shape[0] == 2: mask = mesh.indices
+        else: mask = geo.to_flatmap('occipital_pole', hemi, radius=np.pi/2.75).labels
+    else: mask = hemi.mask(mask, indices=True)
+    global_field_sign = None
+    # if we are splitting on visual area, we should do that here:
+    if map_visual_areas and lbls is not None:
+        # get the visual areas
+        vas = (np.unique(lbls)                    if map_visual_areas == 'all'           else
+               np.setdiff1d(np.unique(lbls), [0]) if map_visual_areas in [True,Ellipsis] else
+               np.unique(map_visual_areas))
+        # we also want to have the field-sign map handy if provided
+        if visual_area_field_signs is None: visual_area_field_signs = {}
+        elif visual_area_field_signs is Ellipsis: visual_area_field_signs = {1:-1, 2:1, 3:-1, 4:1}
+        # special case when map_visual_areas is an integer/string (label)
+        if pimms.is_int(map_visual_areas) or pimms.is_str(map_visual_areas):
+            mask = np.intersect1d(mask, np.where(lbls == map_visual_areas)[0])
+            global_field_sign = visual_area_field_signs.get(map_visual_areas)
+        else: # otherwise we return a lazy map
+            kw = dict(retinotopy=rdat, mask=mask, weight=wght,
+                      surface=surface, min_weight=min_weight, min_eccentricity=min_eccentricity,
+                      visual_area=lbls, measurement_uncertainty=measurement_uncertainty,
+                      measurement_knob=measurement_knob,
+                      magnification_knob=magnification_knob, fieldsign_knob=fieldsign_knob,
+                      edge_knob=edge_knob, visual_area_field_signs=visual_area_field_signs)
+            return pimms.lazy_map(
+                {lbl: curry(clean_retinotopy_potential, hemi, map_visual_areas=lbl, **kw)
+                 for lbl in vas})
     # fix rdat, weight, and mesh to match the mask
+    (supermesh, orig_mask) = (mesh, mask)
     rdat = {k:(v[mask] if len(v) > len(mask) else v) for (k,v) in six.iteritems(rdat)}
-    mesh = mesh.submesh(mask)
-    n    = mesh.vertex_count # number vertices
-    N    = 2*n # number parameters
-    if wght is None:            wght = np.ones(n)
-    elif len(wght) > len(mask): wght = np.array(wght)[mask]
-    else:                       wght = np.array(wght)
+    mesh = supermesh.submesh(mask)
+    # possible that the mask got further downsampled:
+    mask = supermesh.tess.index(mesh.labels)
+    if len(mask) == len(orig_mask): smsk = np.arange(len(mask))
+    else:
+        tmp = set(mask)
+        smsk = np.asarray([k for (k,u) in enumerate(orig_mask) if u in tmp])
+    n = mesh.vertex_count # number vertices
+    N = 2*n # number parameters
+    if wght is None:                  wght = np.ones(n)
+    elif len(wght) == len(orig_mask): wght = np.array(wght)[smsk]
+    elif len(wght) > n:               wght = np.array(wght)[mask]
+    else:                             wght = np.array(wght)
     wght[~np.isfinite(wght)] = 0
     if min_eccentricity < 0 or np.isclose(min_eccentricity, 0):
         raise ValueError('min_eccentricity should be small but must be > 0')
@@ -2041,12 +2092,14 @@ def clean_retinotopy_potential(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=
     # [1] Deviation from measurements:
     # These are the initial measurements we will use
     xy0     = np.array(as_retinotopy(rdat, 'geographical')).T
+    if len(xy0) == len(orig_mask): xy0 = xy0[smsk]
+    elif len(xy0) > n:             xy0 = xy0[mask]
     (x0,y0) = xy0.T
     xy0     = xy0.flatten()
     ecc0    = np.sqrt(x0**2 + y0**2)
     ii      = np.where(ecc0 > min_eccentricity)[0]
     minw    = (0                             if min_weight is None          else
-               np.percentile(wght[ii], 0.05) if min_weight is Ellipsis      else
+               np.percentile(wght[ii], 5)    if min_weight is Ellipsis      else
                min_weight                    if pimms.is_number(min_weight) else
                0                             if np.std(wght[ii]) < 0.00001  else
                np.percentile(wght[ii], min_weight[0]))
@@ -2088,8 +2141,13 @@ def clean_retinotopy_potential(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=
     vsgns   = op.sign(vmf)
     f_magn  = (1.0 / m) * op.sum((vms - vsgns[t]*vme)**2 + (vmt - vsgns[s]*vme)**2)
     # [3] we want a special function for faces whose vmags are different signs
-    f_sign  = op.compose(op.piecewise(0, ((-np.inf, 0), -op.identity)), vms*vmt)
-    f_sign  = (1.0 / m) * op.sum(f_sign)
+    if global_field_sign is None:
+        f_sign = op.compose(op.piecewise(0, ((-np.inf, 0), -op.identity)), vms*vmt)
+        f_sign = (1.0 / m) * op.sum(f_sign)
+    else:
+        vmfsgn = vmf * global_field_sign
+        f_sign = op.compose(op.piecewise(0, ((-np.inf, 0), -op.identity)), vmfsgn)
+        f_sign = (1.0 / m) * op.sum(f_sign)
     # and the edge potential...
     ex      = 0.5*(x[u] + x[v])
     ey      = 0.5*(y[u] + y[v])
@@ -2101,13 +2159,16 @@ def clean_retinotopy_potential(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=
         for knob in (measurement_knob, magnification_knob, fieldsign_knob, edge_knob)]
     fs = (k_meas*f_meas, k_magn*f_magn, k_sign*f_sign, k_edge*f_edge)
     f = (fs[0] + fs[1] + fs[2] + fs[3]) / (k_meas + k_magn + k_sign + k_edge)
+    xy0 = np.reshape(xy0, (-1,2))
     object.__setattr__(f, 'meta_data',
                        pyr.m(f_meas=f_meas, f_magn=f_magn, f_sign=f_sign, f_edge=f_edge,
-                             mesh=mesh, X0=np.reshape(xy0, (-1,2))))
+                             mesh=mesh, X0=xy0))
     return f
 
 def clean_retinotopy(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=Ellipsis,
                      surface='midgray', min_weight=Ellipsis, min_eccentricity=0.75,
+                     visual_area=Ellipsis, map_visual_areas=Ellipsis,
+                     visual_area_field_signs=Ellipsis,
                      measurement_uncertainty=0.3, measurement_knob=1,
                      magnification_knob=0, fieldsign_knob=12, edge_knob=0,
                      yield_report=False, steps=100, rounds=4, output_style='visual',
@@ -2142,6 +2203,7 @@ def clean_retinotopy(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=Ellipsis,
         if len(average) == 1: average = average + (3,)
         (average_mod, average_phase) = average
     else: average = None
+    if visual_area_field_signs is None: visual_area_field_signs = {}
     # First, make the potential function:
     f = clean_retinotopy_potential(hemi, retinotopy=retinotopy, mask=mask, weight=weight,
                                    surface=surface, min_weight=min_weight,
@@ -2149,23 +2211,32 @@ def clean_retinotopy(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=Ellipsis,
                                    measurement_uncertainty=measurement_uncertainty,
                                    measurement_knob=measurement_knob,
                                    magnification_knob=magnification_knob,
-                                   fieldsign_knob=fieldsign_knob, edge_knob=edge_knob)
-    # The initial parameter vector is stored in the meta-data:
-    X0 = f.meta_data['X0']
-    submesh = f.meta_data['mesh']
-    X = X0
-    for ii in range(rounds):
-        mtd = 'L-BFGS-B' if (ii % 2) == 0 else 'TNC'
-        if jitter is not None and ii % jitter_mod == jitter_phase:
-            ec = np.sqrt(np.sum(X**2, axis=1))
-            th = (np.random.rand(len(ec)) - 0.5)*2*np.pi
-            r  = np.random.exponential(ec*jitter_scale)
-            X = X + np.transpose([r*np.cos(th), r*np.sin(th)])
-        if average is not None and ii % average_mod == average_phase:
-            X = np.array([X[k] if len(nn) == 0 else np.mean(X[list(nn)],0)
-                          for (k,nn) in enumerate(submesh.tess.indexed_neighborhoods)])
-        X = f.minimize(X, method=mtd, options=dict(maxiter=steps, disp=False)).x
-    X = np.reshape(X, X0.shape)
-    if X.shape[0] != 2: X = X.T
-    return as_retinotopy({'x':X[0], 'y':X[1]}, output_style)
+                                   fieldsign_knob=fieldsign_knob, edge_knob=edge_knob,
+                                   visual_area=visual_area, map_visual_areas=map_visual_areas,
+                                   visual_area_field_signs=visual_area_field_signs)
+    # at this point, it's possible that we got a lazy map back; if so we're going to want to iterate
+    # through it; otherwise, we'll want to just iterate through the single return value...
+    m = f if pimms.is_map(f) else {None: f}
+    (x,y) = np.full((2, hemi.vertex_count), np.nan) # the output x/y prf centers
+    tess = hemi if geo.is_tess(hemi) else hemi.tess
+    for (k,f) in six.iteritems(f):
+        # The initial parameter vector is stored in the meta-data:
+        X0 = f.meta_data['X0']
+        submesh = f.meta_data['mesh']
+        X = X0
+        for ii in range(rounds):
+            mtd = 'L-BFGS-B' if (ii % 2) == 0 else 'TNC'
+            if jitter is not None and ii % jitter_mod == jitter_phase:
+                ec = np.sqrt(np.sum(X**2, axis=1))
+                th = (np.random.rand(len(ec)) - 0.5)*2*np.pi
+                r  = np.random.exponential(ec*jitter_scale)
+                X = X + np.transpose([r*np.cos(th), r*np.sin(th)])
+            if average is not None and ii % average_mod == average_phase:
+                X = np.array([X[k] if len(nn) == 0 else np.mean(X[list(nn)],0)
+                              for (k,nn) in enumerate(submesh.tess.indexed_neighborhoods)])
+            X = f.minimize(X, method=mtd, options=dict(maxiter=steps, disp=False)).x
+        X = np.reshape(X, X0.shape)
+        if X.shape[0] != 2: X = X.T
+        for (u,v) in zip([x,y], X): u[tess.index(submesh.labels)] = v
+    return as_retinotopy({'x':x, 'y':y}, output_style)
 
