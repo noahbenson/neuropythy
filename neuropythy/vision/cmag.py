@@ -404,13 +404,18 @@ class ArealCorticalMagnification(object):
         return self.spatial_hash.query(x, n)
     def __call__(self, x, y=None):
         (d,ii) = self.nearest(x, y)
-        carea = self.surface_area[ii.flatten()]
+        n = self.spatial_hash.n
+        bd = (ii == n)
+        ii[bd] = 0
+        carea = np.reshape(self.surface_area[ii.flatten()], ii.shape)
+        carea[bd] = np.nan
+        d[bd] = np.nan
         if len(d.shape) == 1:
-            varea = np.pi * d[-1]**2
-            carea = np.sum(carea)
+            varea = np.pi * np.nanmax(d)**2
+            carea = np.nansum(carea)
         else:
-            varea = np.pi * d[:,-1]**2
-            carea = np.sum(np.split(carea, d.shape[0]), axis=1)
+            varea = np.pi * np.nanmax(d, axis=1)**2
+            carea = np.nansum(carea, axis=1)
         return carea / varea
     def visual_pooling_area(self, x, y=None):
         (d,ii) = self.nearest(x, y)
@@ -431,10 +436,8 @@ def areal_cmag(mesh, retinotopy='any', mask=None, surface_area=None, weight=None
     vector or an (n x 2) matrix. The yielded value(s) will always be in units mm^2 / deg^2.
 
     The following options may be provided (also in argument order):
-      * retinotopy (default: 'any') specifies the retinotopy data to be used; if this is a string,
-        then runs retinotopy_data(obj, retinotopy) and uses the result, otherwise runs
-        retinotopy_data(retinotopy) and uses the result; note that this must have a radius parameter
-        as well as polar angle and eccentricity or equivalent parameters that specify the pRF center
+      * retinotopy (default: 'any') specifies the retinotopy data to be used; this is passed to
+        the retinotopy_data function with the mesh.
       * mask (default: None) specifies the mask that should be used; this is interpreted by a call
         to mesh.mask(mask)
       * surface_area (default: 'midgray_surface_area') specifies the vertex area property that
@@ -447,27 +450,25 @@ def areal_cmag(mesh, retinotopy='any', mask=None, surface_area=None, weight=None
         where n is the number of vertices included in the mask
     '''
     # First, find the retino data
-    if pimms.is_str(retinotopy):
-        retino = retinotopy_data(mesh, retinotopy)
-    else:
-        retino = retinotopy_data(retinotopy)
+    retino = retinotopy_data(mesh, retinotopy)
     # Convert from polar angle/eccen to longitude/latitude
     (ang,ecc) = as_retinotopy(retino, 'visual')
     # get the surface area
     if surface_area is None: surface_area = 'midgray_surface_area'
     if pimms.is_str(surface_area):
         if surface_area in retino: surface_area = retino[surface_area]
-        elif isinstance(mesh, geo.VertexSet): surface_area = mesh.property(surface_area)
-        else: surface_area = mesh[surface_area]
+        elif geo.is_vset(mesh):    surface_area = mesh.property(surface_area)
+        else:                      surface_area = mesh[surface_area]
     # get the weight
     if weight is not None:
         if pimms.is_str(weight):
-            if weight in retino: weight = retino[weight]
-            elif isinstance(mesh, geo.VertexSet): weight = mesh.property(weight)
-            else: weight = mesh[weight]
+            if weight in retino:    weight = retino[weight]
+            elif geo.is_vset(mesh): weight = mesh.property(weight)
+            else:                   weight = mesh[weight]
     wgt = next((retino[q] for q in ('variance_explained', 'weight') if q in retino), None)
     # Get the indices we care about
     ii = geo.to_mask(mesh, mask, indices=True)
+    ii = ii[np.isfinite(ang[ii]) & np.isfinite(ecc[ii])]
     # get our nnearest
     if nnearest is None: nnearest = int(np.ceil(np.sqrt(len(ii)) * np.log(len(ii))))
     return ArealCorticalMagnification(ang[ii], ecc[ii], surface_area[ii],
