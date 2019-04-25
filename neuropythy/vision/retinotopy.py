@@ -2219,7 +2219,7 @@ def clean_retinotopy(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=Ellipsis,
     m = f if pimms.is_map(f) else {None: f}
     (x,y) = np.full((2, hemi.vertex_count), np.nan) # the output x/y prf centers
     tess = hemi if geo.is_tess(hemi) else hemi.tess
-    for (k,f) in six.iteritems(f):
+    for (k,f) in six.iteritems(m):
         # The initial parameter vector is stored in the meta-data:
         X0 = f.meta_data['X0']
         submesh = f.meta_data['mesh']
