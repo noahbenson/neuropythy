@@ -1007,3 +1007,129 @@ def cortex_plot(mesh, *args, **opts):
         return cortex_plot_3D(mesh, *args, **opts)
     else:
         return cortex_plot_2D(mesh, *args, **opts)
+
+class ROIDrawer:
+    '''
+    ROIDrawer(axes, mproj) creates a new ROIDrawer class that interacts with the plot on
+      the given axes to save the lines drawn on the plot as a neuropythy path trace, which
+      is available from the roiDrawer object as roiDrawer.trace once the user is finished.
+    ROIDrawer(axes, fmap) extracts the map projection from the meta-data in the given
+      flatmap; note that if the projection is not encoded in the flatmap's meta-data, an
+      error will be raised.
+    
+    All arguments and keyword arguments following the first two are passed verbatim to the
+    axes.plot() function, which is used for plotting the drawn lines.
+    '''
+    def __init__(self, axes, mp, closed=True, event_handlers=None, plot_list=None, *args, **kw):
+        from neuropythy import (to_map_projection, is_map_projection, is_vset)
+        # Assumption: the axes have already been plotted, so there's no need to do any
+        # plotting here, aside from the lines we're about to draw
+        self.axes = axes
+        # get the map projection
+        if is_vset(mp) and 'projection' in mp.meta_data: mp = mp.meta_data['projection']
+        elif not is_map_projection(mp): mp = to_map_projection(mp)
+        self.map_projection = mp
+        # draw the initial lines
+        if len(args) == 0 and len(kw) == 0: args = ['k.-']
+        self.line = axes.plot([], [], *args, **kw)[0]
+        self.xs = list(self.line.get_xdata())
+        self.ys = list(self.line.get_ydata())
+        self.connections = [
+            self.line.figure.canvas.mpl_connect('button_press_event', self.on_button),
+            self.line.figure.canvas.mpl_connect('key_press_event', self.on_key),
+            self.line.figure.canvas.mpl_connect('close_event', self.on_close)]
+        self.trace = Ellipsis
+        self.closed = closed
+        self.event_handlers = None
+        self.plot_list = plot_list
+        self.current_plot = 0
+    def end(self, success=True):
+        from neuropythy import path_trace
+        # we've finished; clean up and make the line
+        if success:
+            if len(self.xs) < 1: raise ValueError('Drawn line has no points')
+            pts = np.transpose([self.xs, self.ys])
+            self.trace = path_trace(self.map_projection, pts, closed=self.closed)
+        else: self.trace = None
+        for conn in self.connections:
+            self.line.figure.canvas.mpl_disconnect(conn)
+        # redraw the final version:
+        if self.closed:
+            self.xs.append(self.xs[0])
+            self.ys.append(self.ys[0])
+            self.line.set_data(self.xs, self.ys)
+            self.line.figure.canvas.draw()
+        plt.close(self.line.figure)
+        # clear everything
+        self.connection = None
+        self.line = None
+        self.xs = None
+        self.ys = None
+    def on_close(self, event):
+        self.end(success=False)
+    def on_key(self, event):
+        import matplotlib.collections
+        if event.inaxes != self.line.axes: return
+        if event.key == 'tab':
+            # we go to the next plot...
+            if not self.plot_list: return
+            self.plot_list[self.current_plot].set_visible(False)
+            self.current_plot = (self.current_plot + 1) % len(self.alternates)
+            a = self.alternates[self.current_plot]
+            if isinstance(a, matplotlib.collections.TriMesh): a.set_visible(False)
+            else: self.alternates[self.current_plot] = a(self.axes)
+            a.figure.canvas.draw()
+    def on_button(self, event):
+        endkeys = ['shift+control', 'shift+ctrl', 'control+shift', 'ctrl+shift']
+        if self.line is None: return
+        if event.inaxes != self.line.axes: return
+        # if shift is down, we delete the last point
+        if event.key == 'shift':
+            if len(self.xs) == 0: return
+            self.xs = self.xs[:-1]
+            self.ys = self.ys[:-1]
+        elif event.key in endkeys:
+            # we abort!
+            self.end(success=False)
+            return
+        elif (event.key is not None and self.event_handlers is not None and
+              event.key in self.event_handlers):
+            self.event_handlers[event.key](self, event)
+            return
+        else: # add the points
+            self.xs.append(event.xdata)
+            self.ys.append(event.ydata)
+        # redraw the line regardless
+        self.line.set_data(self.xs, self.ys)
+        self.line.figure.canvas.draw()
+        if event.dblclick or event.key in ['control', 'ctrl']:
+            self.end(success=True)
+
+def trace_roi(hemi, map_proj, closed=True, event_handlers=None, alternate_plots=None, **kw):
+    '''
+    trace_roi(hemi, map_proj) yields an ROIDrawer object that controls the tracing of lines around
+      an ROI in a 2D matplotlib plot. After the ROI has been drawn in the plot, the resulting path
+      trace can be obtained via the roi_drawer.trace object.
+
+    ROI tracing is very simple: any point in the plot is appended to the path as it is clicked; in
+    order to eliminate the previous point, hold shift while clicking. To end the path, hold control
+    while clicking. To abort the path, hold both shift and control while clicking. (Double-clicking
+    should be equivalent to control-clicking, but this does not work in all setups.) In order to use
+    the ROI tracing, `%matplotlib notebook` is recommended.
+
+    The trace_roi() function accepts all options that can be passed to cortex_plot() as well as the
+    following options:
+      * closed (default: True) specifies whether the path-trace that is constructed should be closed
+        (True) or open (False).
+      * event_handlers (default: None) specifies additional event handlers (named by key) for the
+        ROIDrawer().
+      * alternate_plots (default: None) specifies a list of alternate plotting functions that must
+        accept the axes as an argument (these are cycled with tab-click). Alternately, these may be
+        matplotlib TriMesh objects that are simply made visible.
+    '''
+    if event_handlers is None: event_handlers = {}
+    if alternate_plots is None: alternate_plots = []
+    # if if there are alternate plots, go ahead and set them up:
+    if alternate_plots:
+        pass
+        
