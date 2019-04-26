@@ -525,8 +525,8 @@ class Subject(ObjectWithMetaData):
         # Figure out the dtype
         if dtype is None:
             # check the input...
-            dtype = (np.float32 if any(d and pimms.is_array(d, np.inexact) for d in data) else
-                     np.int32)
+            floatq = any(d is not None and pimms.is_array(d, np.inexact) for d in data)
+            dtype = np.float32 if floatq else np.int32
         shape = self.image_dimensions if shape is None else shape
         # make our output array
         dims = shape + (frames,) if frames > 1 and len(shape) < 4 else shape
