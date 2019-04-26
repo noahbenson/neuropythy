@@ -3,11 +3,12 @@
 # This file defines the general tools that are available as part of neuropythy.
 
 from .core     import (ObjectWithMetaData, normalize, denormalize,
-                       to_hemi_str, to_affine, is_dataframe, to_dataframe, simplex_summation_matrix,
-                       simplex_averaging_matrix, is_image, is_image_header, curry,
+                       to_hemi_str, to_affine, simplex_averaging_matrix, simplex_summation_matrix,
+                       is_dataframe, to_dataframe, dataframe_select, dataframe_except,
+                       is_image, is_image_header, curry,
                        numel, rows, part, hstack, vstack, repmat, replace_close, chop,
                        flatter, flattest, is_tuple, is_list, is_set,
-                       plus, cplus, minus, cminus, times, ctimes,
+                       plus, cplus, minus, cminus, times, ctimes, 
                        inv, zinv, divide, cdivide, zdivide, czdivide, power, cpower, inner,
                        sine, cosine, tangent, cotangent, secant, cosecant,
                        arcsine, arccosine, arctangent,

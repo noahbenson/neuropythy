@@ -292,7 +292,57 @@ def to_dataframe(d, **kw):
     except Exception: pass
     try: return pandas.DataFrame.from_dict(d, **kw)
     except Exception: pass
-    raise ValueError('Coersion to dataframe failed for object %s' % d)    
+    raise ValueError('Coersion to dataframe failed for object %s' % d)
+def dataframe_select(df, *cols, **filters):
+    '''
+    dataframe_select(df, k1=v1, k2=v2...) yields df after selecting all the columns in which the
+      given keys (k1, k2, etc.) have been selected such that the associated columns in the dataframe
+      contain only the rows whose cells match the given values.
+    dataframe_select(df, col1, col2...) selects the given columns.
+    dataframe_select(df, col1, col2..., k1=v1, k2=v2...) selects both.
+    
+    If a value is a tuple/list of 2 elements, then it is considered a range where cells must fall
+    between the values. If value is a tuple/list of more than 2 elements or is a set of any length
+    then it is a list of values, any one of which can match the cell.
+    '''
+    ii = np.ones(len(df), dtype='bool')
+    for (k,v) in six.iteritems(filters):
+        vals = df[k].values
+        if   pimms.is_set(v):                    jj = np.isin(vals, list(v))
+        elif pimms.is_vector(v) and len(v) == 2: jj = (v[0] <= vals) & (vals < v[1])
+        elif pimms.is_vector(v):                 jj = np.isin(vals, list(v))
+        else:                                    jj = (vals == v)
+        ii = np.logical_and(ii, jj)
+    if len(ii) != np.sum(ii): df = df.loc[ii]
+    if len(cols) > 0: df = df[list(cols)]
+    return df
+def dataframe_except(df, *cols, **filters):
+    '''
+    dataframe_except(df, k1=v1, k2=v2...) yields df after selecting all the columns in which the
+      given keys (k1, k2, etc.) have been selected such that the associated columns in the dataframe
+      contain only the rows whose cells match the given values.
+    dataframe_except(df, col1, col2...) selects all columns except for the given columns.
+    dataframe_except(df, col1, col2..., k1=v1, k2=v2...) selects on both conditions.
+    
+    The dataframe_except() function is identical to the dataframe_select() function with the single
+    difference being that the column names provided to dataframe_except() are dropped from the
+    result while column names passed to dataframe_select() are kept.
+
+    If a value is a tuple/list of 2 elements, then it is considered a range where cells must fall
+    between the values. If value is a tuple/list of more than 2 elements or is a set of any length
+    then it is a list of values, any one of which can match the cell.
+    '''
+    ii = np.ones(len(df), dtype='bool')
+    for (k,v) in six.iteritems(filters):
+        vals = df[k].values
+        if   pimms.is_set(v):                    jj = np.isin(vals, list(v))
+        elif pimms.is_vector(v) and len(v) == 2: jj = (v[0] <= vals) & (vals < v[1])
+        elif pimms.is_vector(v):                 jj = np.isin(vals, list(v))
+        else:                                    jj = (vals == v)
+        ii = np.logical_and(ii, jj)
+    if len(ii) != np.sum(ii): df = df.loc[ii]
+    if len(cols) > 0: df = df.drop(list(cols), axis=1, inplace=False)
+    return df
 
 class AutoDict(dict):
     '''
