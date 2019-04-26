@@ -298,7 +298,7 @@ def load_csv(filename, **kw):
         with open(filename, 'rt') as fl: data = pandas.read_csv(fl, **kw)
     return data    
 @exporter('csv', ('csv', 'csv.gz', 'csv.bz2', 'csv.lzma'))
-def save_csv(filename, dat, **kw):
+def save_csv(filename, dat, index=False, **kw):
     '''
     save_csv(filename, d) writes a pandas dataframe d to a CSV file with the given name. If pandas
       cannot be loaded, then an error is raised. If d is not a dataframe, to_dataframe() is called
@@ -310,10 +310,10 @@ def save_csv(filename, dat, **kw):
     from neuropythy.util import to_dataframe
     d = to_dataframe(dat)
     if any(filename.endswith(s) for s in ('.gz', '.bz2', '.lzma')):
-        with gzip.open(filename, 'wt', newlines='') as fl: d.to_csv(fl, **kw)
+        with gzip.open(filename, 'wt', newlines='') as fl: d.to_csv(fl, index=index, **kw)
     else:
-        with open(filename, 'wt') as fl: d.to_csv(fl, **kw)
-    return data
+        with open(filename, 'wt') as fl: d.to_csv(fl, index=index, **kw)
+    return dat
 @importer('tsv', ('tsv', 'tsv.gz', 'tsv.bz2', 'tsv.lzma'))
 def load_tsv(filename, sep='\t', **kw):
     '''
@@ -331,7 +331,7 @@ def load_tsv(filename, sep='\t', **kw):
         with open(filename, 'rt') as fl: data = pandas.read_csv(fl, sep=sep, **kw)
     return data
 @exporter('tsv', ('tsv', 'tsv.gz', 'tsv.bz2', 'tsv.lzma'))
-def save_tsv(filename, dat, sep='\t', **kw):
+def save_tsv(filename, dat, sep='\t', index=False, **kw):
     '''
     save_tsv(filename, d) writes a pandas dataframe d to a TSV file with the given name. If pandas
       cannot be loaded, then an error is raised. If d is not a dataframe, to_dataframe() is called
@@ -345,10 +345,10 @@ def save_tsv(filename, dat, sep='\t', **kw):
     from neuropythy.util import to_dataframe
     d = to_dataframe(dat)
     if any(filename.endswith(s) for s in ('.gz', '.bz2', '.lzma')):
-        with gzip.open(filename, 'wt', newlines='') as fl: d.to_csv(fl, sep=sep, **kw)
+        with gzip.open(filename, 'wt', newlines='') as fl: d.to_csv(fl, sep=sep, index=index, **kw)
     else:
-        with open(filename, 'wt') as fl: d.to_csv(fl, sep=sep, **kw)
-    return data
+        with open(filename, 'wt') as fl: d.to_csv(fl, sep=sep, index=index, **kw)
+    return dat
 
 # Nifti!
 @importer('nifti', ('nii', 'nii.gz', 'nii.bz2', 'nii.lzma'))
