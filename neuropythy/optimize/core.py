@@ -17,7 +17,7 @@ from   ..                import mri      as mri
 from   ..util            import (numel, rows, part, hstack, vstack, repmat, flatter, flattest,
                                  times, plus, minus, zdivide, zinv, power, ctimes, cpower, inner,
                                  cplus, sine, cosine, tangent, cosecant, secant, cotangent,
-                                 arctangent)
+                                 divide, arctangent)
 from   ..geometry        import (triangle_area)
 
 # Helper Functions #################################################################################
@@ -215,6 +215,12 @@ def is_potential(f):
     is_potential(f) yields True if f is a potential function and False otherwise.
     '''
     return isinstance(f, PotentialFunction)
+def safe_into(into, term):
+    if into is None: return term
+    into0 = into
+    into += term
+    if into is into0: return into
+    else: return term
 @pimms.immutable
 class PotentialIdentity(PotentialFunction):
     '''
@@ -223,9 +229,7 @@ class PotentialIdentity(PotentialFunction):
     def __init__(self): pass
     def value(self, params): return np.asarray(params)
     def jacobian(self, params, into=None):
-        if into is None: into =  sps.eye(numel(params))
-        else:            into += sps.eye(numel(params))
-        return into
+        return safe_into(into, sps.eye(numel(params)))
 identity = PotentialIdentity()
 def is_identity_potential(f):
     '''
@@ -307,7 +311,7 @@ def to_potential(f):
     elif f is Ellipsis:   return identity
     elif pimms.is_array(f, 'number'): return const_potential(f)
     elif isinstance(f, tuple) and len(f) == 2: return PotentialLambda(f[0], f[1])
-    else: raise ValueError('Could not convert object to potential function')
+    else: raise ValueError('Could not convert object of type %s to potential function' % type(f))
 @pimms.immutable
 class PotentialComposition(PotentialFunction):
     def __init__(self, g, h):
@@ -324,9 +328,7 @@ class PotentialComposition(PotentialFunction):
         dzh = self.h.jacobian(params)
         zg  = self.g.value(zh)
         dzg = self.g.jacobian(zh)
-        if into is None: into =  inner(dzg, dzh)
-        else:            into += inner(dzg, dzh)
-        return into
+        return safe_into(into, inner(dzg, dzh))
 def compose(*args):
     '''
     compose(g, h...) yields a potential function f that is the result of composing together all the
@@ -342,9 +344,7 @@ class PotentialPart(PotentialFunction):
     @pimms.param
     def output_indices(ii):
         ii = flattest(ii)
-        if (np.issubdtype(ii.dtype, np.dtype('bool').type) or
-            np.logical_or(ii == True, ii == False).all()):
-            ii = np.where(ii)[0]
+        if (np.issubdtype(ii.dtype, np.dtype('bool').type)): ii = np.where(ii)[0]
         return pimms.imm_array(ii)
     @pimms.param
     def input_len(m):
@@ -353,7 +353,7 @@ class PotentialPart(PotentialFunction):
         return int(m)
     @pimms.value
     def jacobian_matrix(output_indices, input_len):
-        m = np.max(output_indices) + 1 if input_len is None else input_len
+        m = (np.max(output_indices) + 1) if input_len is None else input_len
         n = len(output_indices)
         return sps.csr_matrix((np.ones(n), (np.arange(n), output_indices)), shape=(n,m))
     def value(self, params):
@@ -365,9 +365,7 @@ class PotentialPart(PotentialFunction):
         if jm.shape[1] != len(params):
             jm = jm.copy()
             jm.resize((jm.shape[0], len(params)))
-        if into is None: into =  jm
-        else:            into += jm
-        return into
+        return safe_into(into, jm)
 def part(f, ii):
     '''
     part(u, ii) for constant or constant potential u yields a constant-potential form of u[ii].
@@ -390,15 +388,9 @@ class PotentialPlusPotential(PotentialFunction):
         return self.g.value(params) + self.h.value(params)
     def jacobian(self, params, into=None):
         dg = self.g.jacobian(params, into=into)
-        if into is None: into = dg
-        dh = self.h.jacobian(params, into=into)
-        if   dg is into and dh is into: pass
-        elif dg is into: into += dh
-        elif dh is into: into += dg
-        else:
-            into = dg
-            into += dh
-        return into
+        dh = self.h.jacobian(params, into=dg)
+        if   dh is dg: return dh
+        else:          return dh + dg
 @pimms.immutable
 class PotentialPlusConstant(PotentialFunction):
     def __init__(self, f, c):
@@ -430,12 +422,7 @@ class PotentialTimesPotential(PotentialFunction):
         dg = self.g.jacobian(params)
         h  = self.h.value(params)
         dh = self.h.jacobian(params)
-        if into is None:
-            into = cplus(times(dg, h), times(dh, g))
-        else:
-            into += times(dg, h)
-            into += times(dh, g)
-        return into
+        return safe_into(into, cplus(times(dg, h), times(dh, g)))
     def __call__(self, params):
         g  = self.g.value(params)
         dg = self.g.jacobian(params)
@@ -456,9 +443,7 @@ class PotentialTimesConstant(PotentialFunction):
         return z * self.c
     def jacobian(self, params, into=None):
         dz = self.f.jacobian(params)
-        if into is None: into =  times(dz, self.c)
-        else:            into += times(dz, self.c)
-        return into
+        return safe_into(into, times(dz, self.c))
 @pimms.immutable
 class PotentialPowerConstant(PotentialFunction):
     def __init__(self, f, c):
@@ -475,9 +460,11 @@ class PotentialPowerConstant(PotentialFunction):
         z  = self.f.value(params)
         dz = self.f.jacobian(params)
         c  = self.c
-        if into is None: into =  times(dz, c * z**(c-1))
-        else:            into += times(dz, c * z**(c-1))
-        return into
+        cc = self.c - 1
+        if cc <= 0:
+            cc = -cc
+            z = zinv(z)
+        return safe_into(into, times(dz, c * z**cc))
     def __call__(self, params):
         z  = self.f.value(params)
         dz = self.f.jacobian(params)
@@ -503,9 +490,7 @@ class ConstantPowerPotential(PotentialFunction):
     def jacobian(self, params, into=None):
         ctoz = self.value(params)
         dz = self.f.jacobian(params)
-        if into is None: into =  times(dz, self.log_c * ctoz)
-        else:            into += times(dz, self.log_c * ctoz)
-        return into
+        return safe_into(into, times(dz, self.log_c * ctoz))
 def exp(x):
     x = to_potential(x)
     if is_const_potential(x): return PotentialConstant(np.exp(x.c))
@@ -533,9 +518,7 @@ class PotentialPowerPotential(PotentialFunction):
         zh  = self.h.value(params)
         dzh = self.h.jacobian(params)
         z   = zg ** zh
-        if into is None: into =  times(plus(times(dzg, zh, inv(zg)), times(dzh, np.log(zg))), z)
-        else:            into += times(plus(times(dzg, zh, inv(zg)), times(dzh, np.log(zg))), z)
-        return into
+        return safe_into(into, times(plus(times(dzg, zh, inv(zg)), times(dzh, np.log(zg))), z))
 def power(x,y):
     x = to_potential(x)
     y = to_potential(y)
@@ -560,20 +543,18 @@ class PotentialLog(PotentialFunction):
         z = self.f.value(params)
         if self.base is None: return np.log(z)
         b = self.base.value(params)
-        return np.log(z, b)
+        return np.log(z)/np.log(b)
     def jacobian(self, params, into=None):
         z  = self.f.value(params)
         dz = self.f.jacobian(params)
-        if base is None:
+        if self.base is None:
             dz = divide(dz, z)
         else:
             b = self.base.value(params)
             db = self.base.jacobian(params)
             logb = np.log(b)
             dz = dz / logb - times(np.log(z), db) / (b * logb * logb)
-        if into is None: into =  dz
-        else:            into += dz
-        return into
+        return safe_into(into, dz)
 def log(x, base=None):
     x = to_potential(x)
     xc = is_const_potential(x)
@@ -582,8 +563,8 @@ def log(x, base=None):
         else:  return PotentialLog(x)
     base = to_potential(base)
     bc = is_const_potential(base)
-    if xc and bc: return PotentialConstant(np.log(x.c, b.c))
-    else:         return PotentialLog(x, b)
+    if xc and bc: return PotentialConstant(np.log(x.c, bc.c))
+    else:         return PotentialLog(x, base)
 def log2(x):  return log(x, 2)
 def log10(x): return log(x, 10)
 @pimms.immutable
@@ -605,9 +586,7 @@ class PotentialSum(PotentialFunction):
         w = self.weights
         if w is None: q = dz.sum(axis=0)
         else:         q = times(dz, w).sum(axis=0)
-        if into is None: into =  q
-        else:            into += q
-        return into
+        return safe_into(into, q)
 def sum(x, weights=None):
     '''
     sum(x) yields either a potential-sum object if x is a potential function or the sum of x if x
@@ -684,9 +663,7 @@ class CosPotential(PotentialFunction):
     def jacobian(self, x, into=None):
         x = flattest(x)
         z = sps.diags(-sine(x))
-        if into is None: into =  z
-        else:            into += z
-        return into
+        return safe_into(into, z)
 @pimms.immutable
 class SinPotential(PotentialFunction):
     '''
@@ -697,9 +674,7 @@ class SinPotential(PotentialFunction):
     def jacobian(self, x, into=None):
         x = flattest(x)
         z = sps.diags(cosine(x))
-        if into is None: into =  z
-        else:            into += z
-        return into
+        return safe_into(into, z)
 @pimms.immutable
 class TanPotential(PotentialFunction):
     '''
@@ -710,9 +685,7 @@ class TanPotential(PotentialFunction):
     def jacobian(self, x, into=None):
         x = flattest(x)
         z = sps.diags(secant(x)**2)
-        if into is None: into =  z
-        else:            into += z
-        return into
+        return safe_into(into, z)
 @pimms.immutable
 class SecPotential(PotentialFunction):
     '''
@@ -723,9 +696,7 @@ class SecPotential(PotentialFunction):
     def jacobian(self, x, into=None):
         x = flattest(x)
         z = sps.diags(secant(x)*tangent(x))
-        if into is None: into =  z
-        else:            into += z
-        return into
+        return safe_into(into, z)
 @pimms.immutable
 class CscPotential(PotentialFunction):
     '''
@@ -736,9 +707,7 @@ class CscPotential(PotentialFunction):
     def jacobian(self, x, into=None):
         x = flattest(x)
         z = sps.diags(-cosecant(x)*cotangent(x))
-        if into is None: into =  z
-        else:            into += z
-        return into
+        return safe_into(into, z)
 @pimms.immutable
 class CotPotential(PotentialFunction):
     '''
@@ -748,9 +717,7 @@ class CotPotential(PotentialFunction):
     def value(self, x): return cotangent(x)
     def jacobian(self, x, into=None):
         x = flattest(x)
-        if into is None: into =  -cosecant(x)**2
-        else:            into += -cosecant(x)**2
-        return into
+        return safe_into(into, -cosecant(x)**2)
 def cos(x):
     x = to_potential(x)
     if is_const_potential(x): return PotentialConstant(cosine(x.c))
@@ -792,9 +759,7 @@ class ArcSinPotential(PotentialFunction):
         x = flattest(x)[None]
         z = 1.0 / np.sqrt(1.0 - x**2)
         z = sps.diags(z)
-        if into is None: into =  z
-        else:            into += z
-        return into
+        return safe_into(into, z)
 @pimms.immutable
 class ArcCosPotential(PotentialFunction):
     '''
@@ -806,9 +771,7 @@ class ArcCosPotential(PotentialFunction):
         x = flattest(x)[None]
         z = -1.0 / np.sqrt(1.0 - x**2)
         z = sps.diags(z)
-        if into is None: into =  z
-        else:            into += z
-        return into
+        return safe_into(into, z)
 @pimms.immutable
 class ArcTanPotential(PotentialFunction):
     '''
@@ -820,9 +783,7 @@ class ArcTanPotential(PotentialFunction):
         x = flattest(x)[None]
         z = 1.0 / (1.0 + x**2)
         z = sps.diags(z)
-        if into is None: into =  z
-        else:            into += z
-        return into
+        return safe_into(into, z)
 @pimms.immutable
 class ArcTan2Potential(PotentialFunction):
     '''
@@ -839,17 +800,15 @@ class ArcTan2Potential(PotentialFunction):
         y = self.y.value(params)
         x = self.x.value(params)
         return arctangent(y, x)
-    def jacobian(self, x, into=None):
+    def jacobian(self, params, into=None):
         y  = self.y.value(params)
         x  = self.x.value(params)
         dy = self.y.jacobian(params)
         dx = self.x.jacobian(params)
         if   dy.shape[0] == 1 and dx.shape[0] > 1: dy = repmat(dy, dx.shape[0], 1)
         elif dx.shape[0] == 1 and dy.shape[0] > 1: dx = repmat(dx, dy.shape[0], 1)
-        dz = divide(times(dy, x) - times(dx, y), np.sqrt(x**2 + y**2))
-        if into is None: into =  z
-        else:            into += z
-        return into
+        dz = zdivide(times(dy, x) - times(dx, y), x**2 + y**2)
+        return safe_into(into, dz)
 def asin(x):
     x = to_potential(x)
     if is_const_potential(x): return PotentialConstant(arcsine(x.c))
@@ -981,11 +940,9 @@ class PotentialPiecewise(PotentialFunction):
             zs.append(vj)
             ii = np.delete(ii, k)
             params = np.delete(params, k)
-        (rs,cs,zs) = [np.concatenate(us) for us in (rs,cs,zs)]
+        (rs,cs,zs) = [np.concatenate(us) if len(us) > 0 else [] for us in (rs,cs,zs)]
         dz = sps.csr_matrix((zs, (rs,cs)), shape=(n,n))
-        if into is None: into =  dz
-        else:            into += dz
-        return into
+        return safe_into(into, dz)
 def piecewise(dflt, *spec):
     '''
     piecewise(g, ((mn1, mx1), f1), ((mn2, mx2), f2), ...) yields a potential function f(x) that, for
@@ -1079,9 +1036,7 @@ class ErfPotential(PotentialFunction):
         x = flattest(x)
         z = ErfPotential.coef * np.exp(-x**2)
         z = sps.diags(z)
-        if into is None: into =  z
-        else:            into += z
-        return into
+        return safe_into(into, z)
 def erf(f=Ellipsis):
     '''
     erf(x) yields a potential function that calculates the error function over the input x. If x is
@@ -1124,9 +1079,7 @@ class AbsPotential(PotentialFunction):
         x = flattest(x)
         z = np.sign(x)
         z = sps.diags(z)
-        if into is None: into =  z
-        else:            into += z
-        return into
+        return safe_into(into, z)
 def abs(f=Ellipsis):
     '''
     abs() yields a potential function equivalent to the absolute value of the input.
@@ -1192,9 +1145,7 @@ class TriangleSignedArea2DPotential(PotentialFunction):
         n = p.shape[2]
         ii = (np.arange(n) * np.ones([6, n])).T.flatten()
         z = sps.csr_matrix((z.flatten(), (ii, np.arange(len(ii)))), shape=(n, m))
-        if into is None: into =  z
-        else:            intp += z
-        return into
+        return safe_into(into, z)
 def signed_face_areas(faces, axis=1):
     '''
     signed_face_areas(faces) yields a potential function f(x) that calculates the signed area of
@@ -1252,9 +1203,7 @@ class TriangleArea2DPotential(PotentialFunction):
         n = p.shape[2]
         ii = (np.arange(n) * np.ones([6, n])).T.flatten()
         z = sps.csr_matrix((z.flatten(), (ii, np.arange(len(ii)))), shape=(n, m))
-        if into is None: into =  z
-        else:            intp += z
-        return into
+        return safe_into(into, z)
 def face_areas(faces, axis=1):
     '''
     face_areas(faces) yields a potential function f(x) that calculates the unsigned area of each
