@@ -58,7 +58,7 @@ class ImageType(object):
         '''
         try:    dataobj = dataobj.dataobj
         except Exception: pass
-        dtype = np.asarray(dataobj).dtype if dataobj else self.default_type()
+        dtype = np.asarray(dataobj).dtype if dataobj is not None else self.default_type()
         if   hdat and 'type'  in hdat: dtype = np.dtype(hdat['type'])
         elif hdat and 'dtype' in hdat: dtype = np.dtype(hdat['dtype'])
         return dtype
@@ -78,9 +78,9 @@ class ImageType(object):
         dtype = self.parse_type(hdat, dataobj=dataobj)
         try:    dataobj = dataobj.dataobj
         except Exception: pass
-        if   dataobj: arr = np.asarray(dataobj).astype(dtype)
-        elif ish:     arr = np.zeros(ish,       dtype=dtype)
-        else:         arr = np.zeros([1,1,1,0], dtype=dtype)
+        if   dataobj is not None: arr = np.asarray(dataobj).astype(dtype)
+        elif ish:                 arr = np.zeros(ish,       dtype=dtype)
+        else:                     arr = np.zeros([1,1,1,0], dtype=dtype)
         # reshape to the requested shape if need-be
         if ish and ish != arr.shape: arr = np.reshape(arr, ish)
         # then reshape to a valid (4D) shape
@@ -510,6 +510,7 @@ def to_image(img, image_type=None, meta_data=None, **kwargs):
     keys).
     '''
     # quick cleanup of args:
+    if not pimms.is_map(meta_data): meta_data = to_image_meta_data(meta_data)
     meta_data = pimms.merge({} if meta_data is None else meta_data, kwargs)
     if image_type is None: image_type = 'nifti1'
     # deduce image type
