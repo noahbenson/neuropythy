@@ -1930,8 +1930,8 @@ def clean_retinotopy_potential(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=
                                surface='midgray', min_weight=Ellipsis, min_eccentricity=0.75,
                                visual_area=None, map_visual_areas=Ellipsis,
                                visual_area_field_signs=Ellipsis,
-                               measurement_uncertainty=0.3, measurement_knob=1,
-                               magnification_knob=0, fieldsign_knob=6, edge_knob=0):
+                               measurement_uncertainty=0.4, measurement_knob=1,
+                               magnification_knob=2, fieldsign_knob=8, edge_knob=0):
     '''
     clean_retinotopy_potential(hemi) yields a retinotopic potential function for the given
       hemisphere that, when minimized, should yeild a cleaned/smoothed version of the retinotopic
@@ -2049,7 +2049,7 @@ def clean_retinotopy_potential(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=
                np.setdiff1d(np.unique(lbls), [0]) if map_visual_areas in [True,Ellipsis] else
                np.unique(map_visual_areas))
         # we also want to have the field-sign map handy if provided
-        if visual_area_field_signs is None: visual_area_field_signs = {}
+        if   visual_area_field_signs is None:     visual_area_field_signs = {}
         elif visual_area_field_signs is Ellipsis: visual_area_field_signs = {1:-1, 2:1, 3:-1, 4:1}
         # special case when map_visual_areas is an integer/string (label)
         if pimms.is_int(map_visual_areas) or pimms.is_str(map_visual_areas):
@@ -2121,25 +2121,28 @@ def clean_retinotopy_potential(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=
     mnden   = 0.0001
     (e,s,t) = np.transpose([(i,e[0],e[1]) for (i,e) in enumerate(mesh.tess.edge_faces)
                             if len(e) == 2 and selen[i] > mnden
-                            if sarea[e[0]] > mnden and sarea[e[1]] > mnden])    
+                            if sarea[e[0]] > mnden and sarea[e[1]] > mnden])
     m       = len(e)
     (fis,q) = np.unique(np.concatenate([s,t]), return_inverse=True)
     (s,t)   = np.reshape(q, (2,-1))
     faces   = faces[fis]
     sarea   = sarea[fis]
     selen   = selen[e]
+    selen2  = selen**2
     (u,v)   = mesh.tess.indexed_edges[:,e]
     # we will use visual mag instead of cortical mag: this way we aren't worried about
     # varea going to 0 and creating a singularity, and it should have a linear 
     # relationship with eccentricity
     velen2  = (x[u] - x[v])**2 + (y[u] - y[v])**2
-    vme     = velen2 / selen**2 # visual magnification: edges
+    vme     = velen2 / selen2 # visual magnification: edges
     varea   = op.signed_face_areas(faces)
     vmf     = varea / sarea # visual magnification: faces
     vms     = vmf[s]
     vmt     = vmf[t]
     vsgns   = op.sign(vmf)
-    f_magn  = (1.0 / m) * op.sum((vms - vsgns[t]*vme)**2 + (vmt - vsgns[s]*vme)**2)
+    #f_magn  = (1.0 / m) * op.sum((vms - vme*vsgns[t])**2 + (vmt - vme*vsgns[s])**2)
+    #vmfmu   = op.sqrt(op.abs(vms*vmt))
+    f_magn  = (1.0 / m) * (op.sum((vms - vmt)**2))# + op.sum((vmfmu - velen2)**2))
     # [3] we want a special function for faces whose vmags are different signs
     if global_field_sign is None:
         f_sign = op.compose(op.piecewise(0, ((-np.inf, 0), -op.identity)), vms*vmt)
@@ -2169,10 +2172,10 @@ def clean_retinotopy(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=Ellipsis,
                      surface='midgray', min_weight=Ellipsis, min_eccentricity=0.75,
                      visual_area=Ellipsis, map_visual_areas=Ellipsis,
                      visual_area_field_signs=Ellipsis,
-                     measurement_uncertainty=0.3, measurement_knob=1,
-                     magnification_knob=0, fieldsign_knob=6, edge_knob=0,
-                     yield_report=False, steps=100, rounds=4, output_style='visual',
-                     jitter=None, average=None):
+                     measurement_uncertainty=0.4, measurement_knob=1,
+                     magnification_knob=2, fieldsign_knob=8, edge_knob=0, rt_knob=None,
+                     yield_report=False, steps=400, rounds=5, output_style='visual',
+                     jitter=None, average=(5,1)):
 
     '''
     clean_retinotopy(hemi) attempts to cleanup the retinotopic maps on the given cortical mesh by
@@ -2205,15 +2208,19 @@ def clean_retinotopy(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=Ellipsis,
     else: average = None
     if visual_area_field_signs is None: visual_area_field_signs = {}
     # First, make the potential function:
-    f = clean_retinotopy_potential(hemi, retinotopy=retinotopy, mask=mask, weight=weight,
-                                   surface=surface, min_weight=min_weight,
-                                   min_eccentricity=min_eccentricity,
-                                   measurement_uncertainty=measurement_uncertainty,
-                                   measurement_knob=measurement_knob,
-                                   magnification_knob=magnification_knob,
-                                   fieldsign_knob=fieldsign_knob, edge_knob=edge_knob,
-                                   visual_area=visual_area, map_visual_areas=map_visual_areas,
-                                   visual_area_field_signs=visual_area_field_signs)
+    pfn_kw = dict(retinotopy=retinotopy, mask=mask, weight=weight, surface=surface,
+                  min_weight=min_weight, min_eccentricity=min_eccentricity,
+                  measurement_uncertainty=measurement_uncertainty,
+                  measurement_knob=measurement_knob, magnification_knob=magnification_knob,
+                  fieldsign_knob=fieldsign_knob, edge_knob=edge_knob, visual_area=visual_area,
+                  map_visual_areas=map_visual_areas,
+                  visual_area_field_signs=visual_area_field_signs)
+    if rt_knob is None: pfn = clean_retinotopy_potential
+    else:
+        from neuropythy.vision.cmag import rtmag_potential
+        pfn = rtmag_potential
+        pfn_kw['rt_knob'] = rt_knob
+    f = pfn(hemi, **pfn_kw)
     # at this point, it's possible that we got a lazy map back; if so we're going to want to iterate
     # through it; otherwise, we'll want to just iterate through the single return value...
     m = f if pimms.is_map(f) else {None: f}
@@ -2237,7 +2244,7 @@ def clean_retinotopy(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=Ellipsis,
             rr = f.minimize(X, method=mtd, options=dict(maxiter=steps, disp=False))
             X = rr.x
         X = np.reshape(X, X0.shape)
-        if X.shape[0] != 2: X = X.T
+        if X.shape[1] == 2: X = X.T
         for (u,v) in zip([x,y], X): u[tess.index(submesh.labels)] = v
     return as_retinotopy({'x':x, 'y':y}, output_style)
 
