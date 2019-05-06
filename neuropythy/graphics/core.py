@@ -1038,10 +1038,16 @@ class ROIDrawer:
             self.line.figure.canvas.mpl_connect('button_press_event', self.on_button),
             self.line.figure.canvas.mpl_connect('key_press_event', self.on_key),
             self.line.figure.canvas.mpl_connect('close_event', self.on_close)]
-        self.trace = Ellipsis
+        # get rid of the mesh for path traces (because we don't want to export meshes on accident)
+        if mp.mesh is not None: mp = mp.copy(mesh=None)
+        self.trace = geo.PathTrace(mp, np.zeros((2,0)), closed=closed,
+                                   meta_data={'roi_drawer':self})
         self.closed = closed
-        self.event_handlers = None
+        self.event_handlers = event_handlers
         self.plot_list = plot_list
+        if plot_list is not None and len(plot_list) > 0:
+            for p in plot_list[1:]: p.set_visible(False)
+            p[0].set_visible(True)
         self.current_plot = 0
     def end(self, success=True):
         from neuropythy import path_trace
@@ -1049,7 +1055,10 @@ class ROIDrawer:
         if success:
             if len(self.xs) < 1: raise ValueError('Drawn line has no points')
             pts = np.transpose([self.xs, self.ys])
-            self.trace = path_trace(self.map_projection, pts, closed=self.closed)
+            # remove us from the trace meta-data if we're in it
+            rd = self.trace.meta_data.get('roi_drawer')
+            if rd is self: self.trace.meta_data = self.trace.meta_data.discard('roi_drawer')
+            self.trace.persist()
         else: self.trace = None
         for conn in self.connections:
             self.line.figure.canvas.mpl_disconnect(conn)
@@ -1074,10 +1083,11 @@ class ROIDrawer:
             # we go to the next plot...
             if not self.plot_list: return
             self.plot_list[self.current_plot].set_visible(False)
-            self.current_plot = (self.current_plot + 1) % len(self.alternates)
-            a = self.alternates[self.current_plot]
-            if isinstance(a, matplotlib.collections.TriMesh): a.set_visible(False)
-            else: self.alternates[self.current_plot] = a(self.axes)
+            tmp = self.current_plot
+            self.current_plot = (self.current_plot + 1) % len(self.plot_list)
+            a = self.plot_list[self.current_plot]
+            if isinstance(a, matplotlib.collections.TriMesh): a.set_visible(True)
+            else: self.plot_list[self.current_plot] = a(self.axes)
             a.figure.canvas.draw()
     def on_button(self, event):
         endkeys = ['shift+control', 'shift+ctrl', 'control+shift', 'ctrl+shift']
@@ -1104,12 +1114,15 @@ class ROIDrawer:
         self.line.figure.canvas.draw()
         if event.dblclick or event.key in ['control', 'ctrl']:
             self.end(success=True)
+        # and update the trace
+        trace.points = np.asarray([self.xs, self.ys])
 
-def trace_roi(hemi, map_proj, closed=True, event_handlers=None, alternate_plots=None, **kw):
+def trace_roi(hemi, map_proj, axes, closed=True, event_handlers=None, plot_list=None, **kw):
     '''
-    trace_roi(hemi, map_proj) yields an ROIDrawer object that controls the tracing of lines around
-      an ROI in a 2D matplotlib plot. After the ROI has been drawn in the plot, the resulting path
-      trace can be obtained via the roi_drawer.trace object.
+    trace_roi(hemi, map_proj, axes) creates an ROIDrawer object that controls the tracing of lines
+      around an ROI in a 2D matplotlib plot and returns a not-yet-persistent immutable PathTrace
+      object with the ROIDrawer in its meta_data. The path trace is persisted as soon as the user
+      finished drawing their line; if the line is canceled, then the trace is never persisted.
 
     ROI tracing is very simple: any point in the plot is appended to the path as it is clicked; in
     order to eliminate the previous point, hold shift while clicking. To end the path, hold control
@@ -1123,13 +1136,20 @@ def trace_roi(hemi, map_proj, closed=True, event_handlers=None, alternate_plots=
         (True) or open (False).
       * event_handlers (default: None) specifies additional event handlers (named by key) for the
         ROIDrawer().
-      * alternate_plots (default: None) specifies a list of alternate plotting functions that must
-        accept the axes as an argument (these are cycled with tab-click). Alternately, these may be
-        matplotlib TriMesh objects that are simply made visible.
+      * plot_list (default: None) specifies a list of alternate TriMesh objects that can be plotted
+        cyclically when the user presses tab. TriMesh objects can be created by pyplot.triplot and
+        pyplot.tripcolor, which are used by the neuropythy cortex_plot function as well. If the
+        plot_list is not empty, then the first item of the list is immediately plotted on the axes.
+        Unlike in the ROIDrawer function itself, the plot_list may contain maps whose keys are
+        the various arguments (aside from the initial mesh argument) to cortex_plot.
     '''
-    if event_handlers is None: event_handlers = {}
-    if alternate_plots is None: alternate_plots = []
-    # if if there are alternate plots, go ahead and set them up:
-    if alternate_plots:
-        pass
+    # okay, first off, if the plot_list has maps in it, we convert them using cortex_plot:
+    if plot_list is not None:
+        fmap = mp(hemi)
+        plot_list = [cortex_plot(fmap, axes=ax, **p) if pimms.is_map(p) else p for p in plot_list]
+    # next, make the roi drawer
+    rd = ROIDrawer(axes, map_proj, closed=closed,
+                   event_handlers=event_handlers, plot_list=plot_list)
+    return rd.trace
+
         
