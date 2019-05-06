@@ -13,5 +13,5 @@ from .retinotopy import (empirical_retinotopy_data, predicted_retinotopy_data, r
                          predict_pRF_radius, fit_pRF_radius, occipital_flatmap,
                          clean_retinotopy_potential, clean_retinotopy, visual_isolines)
 from .cmag       import (mag_data, is_mag_data, neighborhood_cortical_magnification,
-                         cmag, areal_cmag, field_of_view, isoline_vmag)
+                         cmag, areal_cmag, field_of_view, isoline_vmag, disk_vmag)
 
