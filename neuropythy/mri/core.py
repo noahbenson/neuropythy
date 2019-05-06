@@ -578,9 +578,10 @@ class Subject(ObjectWithMetaData):
         if hemi is None: hemi = 'both'
         hemi = hemi.lower()
         if hemi in ['both', 'lr', 'all', 'auto']:
-            return tuple([self.image_to_cortex(image, surface=surface, hemi=h, affine=affine,
-                                               method=method, fill=fill, dtype=dtype, weights=weights)
-                          for h in ['lh', 'rh']])
+            return tuple(
+                [self.image_to_cortex(image, surface=surface, hemi=h, affine=affine,
+                                      method=method, fill=fill, dtype=dtype, weights=weights)
+                 for h in ['lh', 'rh']])
         else:
             hemi = getattr(self, hemi)
             return hemi.from_image(image, surface=surface, affine=affine,

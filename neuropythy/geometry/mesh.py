@@ -22,7 +22,7 @@ from .util  import (triangle_area, triangle_address, alignment_matrix_3D, rotati
 from ..util import (ObjectWithMetaData, to_affine, zinv, is_image, is_address, address_data, curry,
                     curve_spline, CurveSpline, chop, zdivide, flattest, inner, config, library_path,
                     dirpath_to_list, to_hemi_str, is_tuple, is_list, is_set, close_curves,
-                    normalize, denormalize, AutoDict, auto_dict)
+                    normalize, denormalize, AutoDict, auto_dict, times)
 from ..io   import (load, importer, exporter)
 from functools import reduce
 
@@ -1018,10 +1018,9 @@ class Mesh(VertexSet):
         number of faces in the mesh.
         '''
         X = face_coordinates
-        X = np.asarray([x * (zs / (xl + np.logical_not(zs)))
+        X = np.asarray([x * zinv(xl)
                         for x  in [X[1] - X[0], X[2] - X[1], X[0] - X[2]]
-                        for xl in [np.sqrt(np.sum(x**2, axis=0))]
-                        for zs in [np.isclose(xl, 0)]])
+                        for xl in [np.sqrt(np.sum(x**2, axis=0))]])
         dps = np.asarray([np.sum(x1*x2, axis=0) for (x1,x2) in zip(X, -np.roll(X, 1, axis=0))])
         dps.setflags(write=False)
         return dps
