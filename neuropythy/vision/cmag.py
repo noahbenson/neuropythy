@@ -318,7 +318,7 @@ def disk_vmag(hemi, retinotopy='any', to=None, **kw):
     mdat = mag_data(hemi, retinotopy=retinotopy, **kw)
     if pimms.is_vector(mdat): return tuple([face_vmag(m, to=to) for m in mdat])
     elif pimms.is_vector(mdat.keys(), 'int'):
-        return pimms.lazy_map({k: curry(lambda k: face_vmag(mdat[k], to=to), k)
+        return pimms.lazy_map({k: curry(lambda k: disk_vmag(mdat[k], to=to), k)
                                for k in six.iterkeys(mdat)})
     # for disk cmag we start by making sets of circular points around each vertex
     msh  = mdat['submesh']
@@ -393,7 +393,7 @@ def disk_vmag(hemi, retinotopy='any', to=None, **kw):
     # convert to the appropriate type according to the to param
     #raise NotImplementedError()
 
-def face_vmag(hemi, retinotopy='any', to=None, **ks):
+def face_vmag(hemi, retinotopy='any', to=None, **kw):
     '''
     face_vmag(mesh) yields the visual magnification based on the projection of individual faces on
       the cortical surface into the visual field.
