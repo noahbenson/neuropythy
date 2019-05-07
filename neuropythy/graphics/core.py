@@ -1047,7 +1047,7 @@ class ROIDrawer:
         self.plot_list = plot_list
         if plot_list is not None and len(plot_list) > 0:
             for p in plot_list[1:]: p.set_visible(False)
-            p[0].set_visible(True)
+            plot_list[0].set_visible(True)
         self.current_plot = 0
     def end(self, success=True):
         from neuropythy import path_trace
@@ -1112,10 +1112,10 @@ class ROIDrawer:
         # redraw the line regardless
         self.line.set_data(self.xs, self.ys)
         self.line.figure.canvas.draw()
+        # and update the trace
+        self.trace.points = np.asarray([self.xs, self.ys])
         if event.dblclick or event.key in ['control', 'ctrl']:
             self.end(success=True)
-        # and update the trace
-        trace.points = np.asarray([self.xs, self.ys])
 
 def trace_roi(hemi, map_proj, axes, closed=True, event_handlers=None, plot_list=None, **kw):
     '''
@@ -1145,8 +1145,12 @@ def trace_roi(hemi, map_proj, axes, closed=True, event_handlers=None, plot_list=
     '''
     # okay, first off, if the plot_list has maps in it, we convert them using cortex_plot:
     if plot_list is not None:
-        fmap = mp(hemi)
-        plot_list = [cortex_plot(fmap, axes=ax, **p) if pimms.is_map(p) else p for p in plot_list]
+        if geo.is_flatmap(hemi):                  fmap = hemi
+        elif geo.is_flatmap(map_proj):            fmap = map_proj
+        elif not geo.is_map_projection(map_proj): fmap = geo.to_map_projection(map_proj)(hemi)
+        else:                                     fmap = map_proj(hemi)
+        plot_list = [cortex_plot(fmap, axes=axes, **p) if pimms.is_map(p) else p
+                     for p in plot_list]
     # next, make the roi drawer
     rd = ROIDrawer(axes, map_proj, closed=closed,
                    event_handlers=event_handlers, plot_list=plot_list)
