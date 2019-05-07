@@ -2689,6 +2689,7 @@ def to_map_projection(arg, hemi=Ellipsis, chirality=Ellipsis,
     hemi = deduce_chirality(hemi)
     mp = None
     if   is_map_projection(arg): mp = arg
+    elif is_flatmap(arg) and 'projection' in arg.meta_data: mp = arg.meta_data['projection']
     elif pimms.is_str(arg):
         # first see if there's a hemi appended
         if ':' in arg:
