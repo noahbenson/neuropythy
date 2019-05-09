@@ -717,7 +717,8 @@ class Cortex(geo.Topology):
         if pimms.is_str(name):
             if name.lower() == 'midgray' and 'midgray' not in self.surfaces:
                 return self.midgray_surface # in case it's been provided via overloading
-            return self.surfaces[name]
+            elif name in self.surfaces: return self.surfaces[name]
+            else: return geo.to_mesh((self, name))
         elif pimms.is_vector(name, 'real') and len(name) == 1:
             x0 = self.white_surface.coordinates
             dx = self.white_to_pial_vectors
