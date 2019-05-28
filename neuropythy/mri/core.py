@@ -16,7 +16,7 @@ import os, sys, types, six, pimms
 from itertools import chain
 
 from ..util import (ObjectWithMetaData, to_affine, is_image, is_address, is_tuple, address_data,
-                    curry, to_hemi_str, is_pseudo_path, pseudo_path)
+                    curry, to_hemi_str, is_pseudo_path, pseudo_path, to_pseudo_path)
 
 @pimms.immutable
 class Subject(ObjectWithMetaData):
