@@ -1445,7 +1445,7 @@ def data_struct(*args, **kw):
     data_struct(args...) collapses all arguments (which must be maps) and keyword arguments
       right-to-left into a single mapping and uses this mapping to create a DataStruct object.
     '''
-    m = pimms.merge(*args, **kw)
+    m = pimms.merge(*(args + (kw,)))
     return DataStruct(**m)
 
 def tmpdir(prefix='npythy_tempdir_', delete=True):
