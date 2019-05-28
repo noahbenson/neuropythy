@@ -94,7 +94,7 @@ class config(object):
         return config._rc
     _vars = {}
     @staticmethod
-    def declare(name, rc_name=None, environ_name=None, filter=None, default_value=None):
+    def declare(name, rc_name=None, environ_name=None, filter=None, merge=None, default_value=None):
         '''
         config.declare(name) registers a configurable variable with the given name to the neuropythy
           configuration system. This allows the variable to be looked up in the neuropythy RC-file
@@ -113,6 +113,10 @@ class config(object):
             os.environ dictionary; if None, then uses ('NPYTHY_' + name.upper()).
           * filter (default: None) specifies a function f that is passed the provided value u; the 
             resulting config value is f(u).
+          * merge (default: None) specifies how the environment variable should be merged with the
+            value found in the rc file if both are defined. If this value is None or False, then the
+            environment variable value always overrides the rc-file value; otherwise, this must be
+            a function f(rc_value, environ_value) and it must return the value that should be used.
           * default_value (default: None) specifies the default value the configuration item should
             take if not provided.
         '''
@@ -120,10 +124,11 @@ class config(object):
         if environ_name is None: environ_name = 'NPYTHY_' + name.upper()
         # okay, see if the name exists
         if name in config._vars: raise ValueError('Multiple config items declared for %s' % name)
-        config._vars[name] = (rc_name, environ_name, filter, default_value)
+        if merge is False: merge = None
+        config._vars[name] = (rc_name, environ_name, filter, default_value, merge)
         return True
     @staticmethod
-    def declare_credentials(name, rc_name=None, environ_name=None, default_value=None,
+    def declare_credentials(name, rc_name=None, environ_name=None, default_value=None, merge=None,
                             extra_environ=None, filenames=None, aws_profile_name=None):
         '''
         config.declare_credentials(name) registers a configurable variable with the given name to
@@ -147,6 +152,7 @@ class config(object):
         The following optional arguments from config.declare() are accepted and passed along to it:
           * rc_name
           * environ_name
+          * merge
 
         See also help(config.declare) and help(detect_credentials).
         '''
@@ -165,10 +171,11 @@ class config(object):
                               rc_name=rc_name,
                               environ_name=environ_name,
                               filter=_check_creds,
+                              merge=merge,
                               default_value=None)
     @staticmethod
     def declare_path(name, 
-                     rc_name=None, environ_name=None, filter=None, default_value=None,
+                     rc_name=None, environ_name=None, filter=None, default_value=None, merge=None,
                      fail_value=None):
         '''
         config.declare_path(...) is equivalent to config.declare(...) except that it requires in
@@ -200,10 +207,10 @@ class config(object):
             try:              return path if filter is None else filter(path)
             except Exception: return fail_value
         return config.declare(name, rc_name=rc_name, environ_name=environ_name, filter=_check_path,
-                              default_value=None)
+                              default_value=None, merge=merge)
     @staticmethod
     def declare_dir(name, 
-                    rc_name=None, environ_name=None, filter=None,
+                    rc_name=None, environ_name=None, filter=None, merge=None,
                     default_value=None, fail_value=None, use_temp=False):
         '''
         config.declare_dir(...) is equivalent to config.declare_path(...) except that it
@@ -214,11 +221,11 @@ class config(object):
                 raise ValueError('Path exists but is not a directory: %s' % path)
             return path if filter is None else filter(path)
         return config.declare_path(name, rc_name=rc_name, environ_name=environ_name,
-                                   filter=_check_dir, default_value=default_value,
+                                   filter=_check_dir, default_value=default_value, merge=merge,
                                    fail_value=fail_value)
     @staticmethod
     def declare_file(name, 
-                     rc_name=None, environ_name=None, filter=None,
+                     rc_name=None, environ_name=None, filter=None, merg=None,
                      default_value=None, fail_value=None):
         '''
         config.declare_file(...) is equivalent to config.declare_path(...) except that it
@@ -229,11 +236,11 @@ class config(object):
                 raise ValueError('Path exists but is not a file: %s' % path)
             return path if filter is None else filter(path)
         return config.declare_path(name, rc_name=rc_name, environ_name=environ_name,
-                                   filter=_check_file, default_value=default_value,
+                                   filter=_check_file, default_value=default_value, merge=merge,
                                    fail_value=fail_value)
     @staticmethod
     def declare_json(name,
-                     rc_name=None, environ_name=None, filter=None,
+                     rc_name=None, environ_name=None, filter=None, merge=None,
                      default_value=None, fail_value=None):
         '''
         config.declare_json(...) is equivalent to config.declare_file(...) except that it
@@ -244,22 +251,24 @@ class config(object):
             with open(path, 'r') as fl: dat = json.load(fl)
             return dat if filter is None else filter(dat)
         return config.declare_file(name, rc_name=rc_name, environ_name=environ_name,
-                                   filter=_check_hson, default_value=default_value,
+                                   filter=_check_hson, default_value=default_value, merge=merge,
                                    fail_value=fail_value)
     _vals = {}
     @staticmethod
     def _getitem(self, name):
         if name not in config._vars: raise KeyError(name)
         if name not in config._vals:
-            (rcname, envname, fltfn, dval) = config._vars[name]
+            (rcname, envname, fltfn, dval, merge) = config._vars[name]
             val = dval
             rcdat = config.rc()
-            # see if it's in the rc-file first, then the environment
-            if rcname  in rcdat: val = rcdat[rcname]
+            # see where it's defined:
             if envname in os.environ:
                 val = os.environ[envname]
                 try: val = json.loads(val)
                 except Exception: pass # it's a string if it can't be json'ed
+                # it could be in both env and rc: use merge if needed
+                if merge is not None and rcname in rcdat: val = merge(rcdat[rcname], val)
+            elif rcname in rcdat: val = rcdat[rcname]
             # if there's a filter, run it
             if fltfn is not None:
                 try: val = fltfn(val)
@@ -270,7 +279,7 @@ class config(object):
     def _setitem(self, name, val):
         if name not in config._vars:
             raise ValueError('Configurable neuropythy key "%s" not declared' % name)
-        (rcname, envname, fltfn, dval) = config._vars[name]
+        (rcname, envname, fltfn, dval, merge) = config._vars[name]
         self._vals[name] = val if fltfn is None else fltfn(val)
     @staticmethod
     def _iter(self): return six.iterkeys(self._vars)
