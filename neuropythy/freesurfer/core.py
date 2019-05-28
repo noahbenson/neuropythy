@@ -15,20 +15,69 @@ from .. import mri      as mri
 from .. import io       as nyio
 #import ..io as nyio
 
-from ..util import (config, library_path)
+from ..util import (config, library_path, curry, pseudo_path, is_pseudo_path, data_struct,
+                    label_indices, label_index, to_label_index, is_tuple, file_map, to_pseudo_path)
+
+####################################################################################################
+# FreeSurfer home and where to find FreeSurfer LUTs and such
+# some functions to load in the color luts:
+@nyio.importer('FreeSurferLUT', 'LUT.txt')
+def load_LUT(filename, to='data'):
+    '''
+    load_LUT(filename) loads the given filename as a FreeSurfer LUT.
+
+    The optional argument to (default: 'data') specifies how the LUT should be interpreted; it can
+    be any of the following:
+      * 'data' specifies that a dataframe should be returned.
+    '''
+    from neuropythy.util import to_dataframe
+    import pandas
+    # start by slurping in the text:
+    dat = pandas.read_csv(filename, comment='#', sep='\s+', names=['id', 'name', 'r','g','b','a'])
+    # if all the alpha values are 0, we set them to 1 (not sure why freesurfer does this)
+    dat['a'] = 255 - dat['a']
+    if pimms.is_str(to): to = to.lower()
+    if   to is None: return dat
+    elif to == 'data':
+        df = to_dataframe({'id': dat['id'].values, 'name': dat['name'].values})
+        df['color'] = dat.apply(lambda r: [r[k]/255.0 for k in ['r','g','b','a']], axis=1)
+        df.set_index('id', inplace=True)
+        return df
+    else: raise ValueError('Unknown to argument: %s' % to)
+# A function to load in default data from the freesurfer home: e.g., the default LUTs
+def _load_fshome(path):
+    luts = {'aseg': 'ASegStatsLUT.txt',
+            'wm':   'WMParcStatsLUT.txt',
+            'all':  'FreeSurferColorLUT.txt'}
+    luts = {k: curry(load_LUT, os.path.join(path, v)) for (k,v) in six.iteritems(luts)}
+    luts = pimms.lazy_map(luts)
+    # put these into the label indices
+    global label_indices
+    label_indices['freesurfer']      = label_index(luts['all'])
+    label_indices['freesurfer_aseg'] = label_index(luts['aseg'])
+    label_indices['freesurfer_wm']   = label_index(luts['wm'])
+    return data_struct(luts=luts, path=path)
+config.declare_dir('freesurfer_home', environ_name='FREESURFER_HOME', filter=_load_fshome)
 
 ####################################################################################################
 # Subject Directory and where to find Subjects
-def to_subject_paths(paths):
+def to_subject_paths(paths, previous_paths=None):
     '''
     to_subject_paths(paths) accepts either a string that is a :-separated list of directories or a
-     list of directories and yields a list of all the existing directories.
+      list of directories and yields a list of all the existing directories.
     '''
     if paths is None: return []
     if pimms.is_str(paths): paths = paths.split(':')
     paths = [os.path.expanduser(p) for p in paths]
+    if previous_paths is not None: paths = previous_paths + paths
     return [p for p in paths if os.path.isdir(p)]
-config.declare('freesurfer_subject_paths', environ_name='SUBJECTS_DIR', filter=to_subject_paths)
+def freesurfer_paths_merge(p0, p1):
+    '''
+    freesurfer_paths_merge(p0, p1) yields to_subject_paths(p0) + to_subject_paths(p1).
+    '''
+    return to_subject_paths(p0) + to_subject_paths(p1)
+config.declare('freesurfer_subject_paths', environ_name='SUBJECTS_DIR', filter=to_subject_paths,
+               merge=freesurfer_paths_merge)
 
 def subject_paths():
     '''
@@ -87,18 +136,22 @@ if config['freesurfer_subject_paths'] is None:
     add_subject_path('/Applications/freesurfer/subjects')
     add_subject_path('/opt/freesurfer/subjects')
 # Regardless, make sure we check the FreeSurfer home
-if 'FREESURFER_HOME' in os.environ:
-    add_subject_path(os.path.join(os.environ['FREESURFER_HOME'], 'subjects'), None)
+if config['freesurfer_home'] is not None:
+    add_subject_path(os.path.join(config['freesurfer_home'].path, 'subjects'), None)
 
 def is_freesurfer_subject_path(path):
     '''
     is_freesurfer_subject_path(path) yields True if the given path appears to be a valid freesurfer
       subject path and False otherwise.
+    is_freesurfer_subject_path(pdir) performs the same check for the given pseudo-dir object pdir.
+
     A path is considered to be freesurfer-subject-like if it contains the directories mri/, surf/,
-    and label/.
+    and label/. 
     '''
-    if not os.path.isdir(path): return False
-    else: return all(os.path.isdir(os.path.join(path, d)) for d in ['mri', 'surf', 'label'])
+    needed = ['mri', 'surf', 'label']
+    if   is_pseudo_path(path): return all(path.find(d) is not None for d in needed)
+    elif os.path.isdir(path): return all(os.path.isdir(os.path.join(path, d)) for d in needed)
+    else:                     return False
 
 def find_subject_path(sub, check_path=True):
     '''
@@ -130,263 +183,476 @@ def find_subject_path(sub, check_path=True):
                 sub)
 
 # Used to load immutable-like mgh objects
-def _load_imm_mgh(flnm):
+def _load_imm_mgh(pdir, flnm):
+    flnm = pdir.local_path(flnm)
     img = fsmgh.load(flnm)
     img.get_data().setflags(write=False)
     return img
 
-# A freesurfer.Subject is much like an mri.Subject, but its dependency structure all comes from the
-# path rather than data provided to the constructor:
-@pimms.immutable
-class Subject(mri.Subject):
+####################################################################################################
+# Filemap
+# This is the FreeSurfer file-map data, as neuropythy understands it.
+def _load_label(flnm,u):
+    (a,b) = nyio.load(flnm, 'freesurfer_label', to='all')
+    a.setflags(write=False)
+    b.setflags(write=False)
+    return (a,b)
+def _load_annot(flnm,u):
+    (a,b) = nyio.load(flnm, 'freesurfer_annot', to='all')
+    a.setflags(write=False)
+    return (a,b.persist())
+def _load_surfx(flnm,u):
+    x = fsio.read_geometry(flnm)[0].T
+    x.setflags(write=False)
+    return x
+def _load_prop(flnm,u):
+    x = fsio.read_morph_data(flnm)
+    x.setflags(write=False)
+    return x
+def _load_tris(flnm,u):
+    x = fsio.read_geometry(flnm)[1]
+    x.setflags(write=False)
+    return x
+def _load_geo(flnm,u):
+    (x,t) = fsio.read_geometry(flnm)[:2]
+    x = x.T
+    x.setflags(write=False)
+    t.setflags(write=False)
+    return (x,t)    
+freesurfer_subject_data_hierarchy = [['image'], ['raw_image'],
+                                     ['hemi', 'surface'], ['hemi', 'tess'],
+                                     ['hemi', 'registration'],
+                                     ['hemi', 'property'],
+                                     ['hemi', 'label'], ['hemi', 'alt_label'],
+                                     ['hemi', 'weight'], ['hemi', 'alt_weight'],
+                                     ['hemi', 'annot'], ['hemi', 'alt_annot']]
+freesurfer_subject_filemap_instructions = [
+    'mri', [
+        'rawavg.mgz',              ({'raw_image':'rawavg'},
+                                    {'image':'raw'}),                     
+        'orig.mgz',                ({'raw_image':'orig'},
+                                    {'image':'original'}),                
+        'orig_nu.mgz',             ({'raw_image':'orig_nu'},
+                                    {'image':'conformed'}),               
+        'nu.mgz',                  ({'raw_image':'nu'},
+                                    {'image':'uniform'}),                 
+        'T1.mgz',                  ({'raw_image':'T1'},
+                                    {'image':'intensity_normalized'}),    
+        'brainmask.auto.mgz',      ({'raw_image':'brainmask.auto'},
+                                    {'image':'auto_masked_brain'}),       
+        'brainmask.mgz',           ({'raw_image':'brainmask'},
+                                    {'image':'masked_brain'}),            
+        'norm.mgz',                ({'raw_image':'norm'},
+                                    {'image':'normalized'}),              
+        'aseg.auto_noCCseg.mgz',   {'raw_image':'aseg.auto_noCCseg'},
+        'aseg.auto.mgz',           ({'raw_image':'aseg.auto'},
+                                    {'image':'auto_segmentation'}),       
+        'aseg.presurf.hypos.mgz',  {'raw_image':'aseg.presurf.hypos'},
+        'aseg.presurf.mgz',        ({'raw_image':'aseg.presurf'},
+                                    {'image':'presurface_segmentation'}), 
+        'brain.mgz',               ({'raw_image':'brain'},
+                                    {'image':'brain'}),                   
+        'brain.finalsurfs.mgz',    {'raw_image':'brain.finalsurfs'},
+        'wm.seg.mgz',              {'raw_image':'wm.seg'},
+        'wm.asegedit.mgz',         {'raw_image':'wm.asegedit'},
+        'wm.mgz',                  ({'raw_image':'wm'},
+                                    {'image':'white_matter'}),            
+        'filled.mgz',              {'raw_image':'filled'},
+        'T2.mgz',                  ({'raw_image':'T2'},
+                                    {'image':'T2'}),                      
+        'ribbon.mgz',              ({'raw_image':'ribbon'},
+                                    {'image':'ribbon'}),                  
+        'aparc+aseg.mgz',          ({'raw_image':'aparc+aseg'},
+                                    {'image':'Desikan06_parcellation'}),  
+        'aparc.DKTatlas+aseg.mgz', ({'raw_image':'aparc.DKTatlas+aseg'},
+                                    {'image':'DKT40_parcellation'}),      
+        'aparc.a2009s+aseg.mgz',   ({'raw_image':'aparc.a2009s+aseg'},
+                                    {'image':'Destrieux09_parcellation'},
+                                    {'image':'parcellation'}),
+        'ctrl_pts.mgz',            {'raw_image':'ctrl_pts'},
+        'lh.ribbon.mgz',           ({'raw_image':'lh.ribbon'},
+                                    {'image':'lh_ribbon'}),               
+        'rh.ribbon.mgz',           ({'raw_image':'rh.ribbon'},
+                                    {'image':'rh_ribbon'}),               
+        'wmparc.mgz',              ({'raw_image':'wmparc'},
+                                    {'image':'white_parcellation'}),      
+        'aseg.mgz',                ({'raw_image':'aseg'},
+                                    {'image':'segmentation'})],
+    'surf', [
+        'lh.area',           ({'hemi':'lh',  'property':'white_surface_area'},
+                              {'hemi':'rhx', 'property':'white_surface_area'}),
+        'lh.area.mid',       ({'hemi':'lh',  'property':'midgray_surface_area'},
+                              {'hemi':'lh',  'property':'surface_area'},
+                              {'hemi':'rhx', 'property':'midgray_surface_area'},
+                              {'hemi':'rhx', 'property':'surface_area'}),
+        'lh.area.pial',      ({'hemi':'lh',  'property':'pial_surface_area', 'load':_load_prop},
+                              {'hemi':'rhx', 'property':'pial_surface_area', 'load':_load_prop}),
+        'lh.avg_curv',       ({'hemi':'lh',  'property':'atlas_curvature'},
+                              {'hemi':'rhx', 'property':'atlas_curvature'}),
+        'lh.curv',           ({'hemi':'lh',  'property':'white_curvature'},
+                              {'hemi':'lh',  'property':'curvature'},
+                              {'hemi':'rhx', 'property':'white_curvature'},
+                              {'hemi':'rhx', 'property':'curvature'}),
+        'lh.curv.pial',      ({'hemi':'lh',  'property':'pial_curvature', 'load':_load_prop},
+                              {'hemi':'rhx', 'property':'pial_curvature', 'load':_load_prop}),
+        'lh.jacobian_white', ({'hemi':'lh',  'property':'jacobian_norm'},
+                              {'hemi':'rhx', 'property':'jacobian_norm'}),
+        'lh.inflated',       {'hemi':'lh',  'surface':'inflated', 'load':_load_surfx},
+        'lh.orig',           {'hemi':'lh',  'surface':'white_original', 'load':_load_surfx},
+        'lh.pial',           {'hemi':'lh',  'surface':'pial', 'load':_load_surfx},
+        'lh.smoothwm',       {'hemi':'lh',  'surface':'white_smooth', 'load':_load_surfx},
+        'lh.sphere',         ({'hemi':'lh',  'surface':'sphere', 'load':_load_surfx},
+                              {'hemi':'lh',  'registration':'native', 'load':_load_surfx}),
+        'lh.sphere.reg',     {'hemi':'lh',  'registration':'fsaverage', 'load':_load_surfx},
+        'lh.white',          ({'hemi':'lh',  'surface':'white',
+                               'load':_load_geo, 'filt':lambda u:u[0]},
+                              {'hemi':'lh',  'tess':'white',
+                               'load':_load_geo, 'filt':lambda u:u[1]}),
+        'lh.sulc',           ({'hemi':'lh',  'property':'convexity'},
+                              {'hemi':'rhx', 'property':'convexity'}),
+        'lh.thickness',      ({'hemi':'lh',  'property':'thickness'},
+                              {'hemi':'rhx', 'property':'thickness'}),
+        'rh.area',           ({'hemi':'rh',  'property':'white_surface_area'},
+                              {'hemi':'lhx', 'property':'white_surface_area'}),
+        'rh.area.mid',       ({'hemi':'rh',  'property':'midgray_surface_area'},
+                              {'hemi':'rh',  'property':'surface_area'},
+                              {'hemi':'lhx', 'property':'midgray_surface_area'},
+                              {'hemi':'lhx', 'property':'surface_area'}),
+        'rh.area.pial',      ({'hemi':'rh',  'property':'pial_surface_area', 'load':_load_prop},
+                              {'hemi':'lhx', 'property':'pial_surface_area', 'load':_load_prop}),
+        'rh.avg_curv',       ({'hemi':'rh',  'property':'atlas_curvature'},
+                              {'hemi':'lhx', 'property':'atlas_curvature'}),
+        'rh.curv',           ({'hemi':'rh',  'property':'white_curvature'},
+                              {'hemi':'rh',  'property':'curvature'},
+                              {'hemi':'lhx', 'property':'white_curvature'},
+                              {'hemi':'lhx', 'property':'curvature'}),
+        'rh.curv.pial',      ({'hemi':'rh',  'property':'pial_curvature', 'load':_load_prop},
+                              {'hemi':'lhx', 'property':'pial_curvature', 'load':_load_prop}),
+        'rh.inflated',       ({'hemi':'rh',  'surface':'inflated', 'load':_load_surfx},
+                              {'hemi':'lhx', 'surface':'inflated', 'load':_load_surfx}),
+        'rh.jacobian_white', ({'hemi':'rh',  'property':'jacobian_norm'},
+                              {'hemi':'lhx', 'property':'jacobian_norm'}),
+        'rh.orig',           ({'hemi':'rh',  'surface':'white_original', 'load':_load_surfx},
+                              {'hemi':'lhx', 'surface':'white_original', 'load':_load_surfx}),
+        'rh.pial',           ({'hemi':'rh',  'surface':'pial', 'load':_load_surfx},
+                              {'hemi':'lhx', 'surface':'pial', 'load':_load_surfx}),
+        'rh.smoothwm',       ({'hemi':'rh',  'surface':'white_smooth', 'load':_load_surfx},
+                              {'hemi':'lhx', 'surface':'white_smooth', 'load':_load_surfx}),
+        'rh.sphere',         ({'hemi':'rh',  'surface':'sphere', 'load':_load_surfx},
+                              {'hemi':'rh',  'registration':'native', 'load':_load_surfx},
+                              {'hemi':'lhx', 'surface':'sphere', 'load':_load_surfx},
+                              {'hemi':'lhx', 'registration':'native', 'load':_load_surfx}),
+        'rh.sphere.reg',     ({'hemi':'rh',  'registration':'fsaverage', 'load':_load_surfx},
+                              {'hemi':'lhx', 'registration':'fsaverage', 'load':_load_surfx}),
+        'rh.sulc',           ({'hemi':'rh',  'property':'convexity'},
+                              {'hemi':'lhx', 'property':'convexity'}),
+        'rh.thickness',      ({'hemi':'rh',  'property':'thickness'},
+                              {'hemi':'lhx', 'property':'thickness'}),
+        'rh.white',          ({'hemi':'rh',  'surface':'white',
+                               'load':_load_geo, 'filt':lambda u:u[0]},
+                              {'hemi':'rh',  'tess':'white',
+                               'load':_load_geo, 'filt':lambda u:u[1]},
+                              {'hemi':'lhx', 'surface':'white',
+                               'load':_load_geo, 'filt':lambda u:u[0]},
+                              {'hemi':'lhx', 'tess':'white',
+                               'load':_load_geo, 'filt':lambda u:u[1]}),
+        # a few other registrations that we recognize
+        'lh.fsaverage_sym.sphere.reg',        {'hemi':'lh',  'registration':'fsaverage_sym',
+                                               'load':_load_surfx},
+        #'rh.fsaverage_sym.sphere.reg',        {'hemi':'lhx', 'registration':'fsaverage_sym',
+        #                                       'load':_load_surfx},
+        'lh.benson14_retinotopy.sphere.reg',  ({'hemi':'lh', 'registration':'benson14_retinotopy',
+                                                'load':_load_surfx},
+                                               {'hemi':'lh', 'registration':'benson14',
+                                                'load':_load_surfx}),
+        'rh.benson14_retinotopy.sphere.reg',  ({'hemi':'rh', 'registration':'benson14_retinotopy',
+                                                'load':_load_surfx},
+                                               {'hemi':'rh', 'registration':'benson14',
+                                                'load':_load_surfx}),
+        'lh.benson17_retinotopy.sphere.reg',  ({'hemi':'lh', 'registration':'benson17_retinotopy',
+                                                'load':_load_surfx},
+                                               {'hemi':'lh', 'registration':'benson17',
+                                                'load':_load_surfx}),
+        'rh.benson17_retinotopy.sphere.reg',  ({'hemi':'rh', 'registration':'benson17_retinotopy',
+                                                'load':_load_surfx},
+                                               {'hemi':'rh', 'registration':'benson17',
+                                                'load':_load_surfx})],
+    'xhemi', [
+        'surf', [
+            #'rh.fsaverage_sym.sphere.reg',        {'hemi':'lhx', 'registration':'fsaverage_sym',
+            #                                   'load':_load_surfx},
+            'lh.fsaverage_sym.sphere.reg',    {'hemi':'rh',  'registration':'fsaverage_sym',
+                                               'load':_load_surfx},
+            'lh.inflated',   {'hemi':'rhx',  'surface':'inflated', 'load':_load_surfx},
+            'lh.orig',       {'hemi':'rhx',  'surface':'white_original', 'load':_load_surfx},
+            'lh.pial',       {'hemi':'rhx',  'surface':'pial', 'load':_load_surfx},
+            'lh.smoothwm',   {'hemi':'rhx',  'surface':'white_smooth', 'load':_load_surfx},
+            'lh.sphere',     ({'hemi':'rhx',  'surface':'sphere', 'load':_load_surfx},
+                              {'hemi':'rhx',  'registration':'native', 'load':_load_surfx}),
+            'lh.sphere.reg', {'hemi':'rhx',  'registration':'fsaverage', 'load':_load_surfx},
+            'lh.white',      ({'hemi':'rhx',  'surface':'white',
+                               'load':_load_geo, 'filt':lambda u:u[0]},
+                              {'hemi':'rhx',  'tess':'white',
+                               'load':_load_geo, 'filt':lambda u:u[1]}),
+            'rh.inflated',   {'hemi':'lhx',  'surface':'inflated', 'load':_load_surfx},
+            'rh.orig',       {'hemi':'lhx',  'surface':'white_original', 'load':_load_surfx},
+            'rh.pial',       {'hemi':'lhx',  'surface':'pial', 'load':_load_surfx},
+            'rh.smoothwm',   {'hemi':'lhx',  'surface':'white_smooth', 'load':_load_surfx},
+            'rh.sphere',     ({'hemi':'lhx',  'surface':'sphere', 'load':_load_surfx},
+                             {'hemi':'lhx',  'registration':'native', 'load':_load_surfx}),
+            'rh.sphere.reg', {'hemi':'lhx',  'registration':'fsaverage', 'load':_load_surfx},
+            'rh.white',      ({'hemi':'lhx',  'surface':'white',
+                               'load':_load_geo, 'filt':lambda u:u[0]},
+                              {'hemi':'lhx',  'tess':'white',
+                               'load':_load_geo, 'filt':lambda u:u[1]})]],
+    'label', [
+        # cortex labels:
+        'lh.cortex.label',           ({'hemi':'lh',  'label':'cortex', 'load':_load_label},
+                                      {'hemi':'rhx', 'label':'cortex', 'load':_load_label}),
+        'rh.cortex.label',           ({'hemi':'rh',  'label':'cortex', 'load':_load_label},
+                                      {'hemi':'lhx', 'label':'cortex', 'load':_load_label}),
+        # the annotation files:
+        'lh.BA_exvivo.annot',        ({'hemi':'lh',  'annot':'brodmann_area_wide',
+                                       'load':_load_annot},
+                                      {'hemi':'rhx', 'annot':'brodmann_area_wide',
+                                       'load':_load_annot}),
+        'lh.BA_exvivo.thresh.annot', ({'hemi':'lh',  'annot':'brodmann_area', 'load':_load_annot},
+                                      {'hemi':'rhx', 'annot':'brodmann_area', 'load':_load_annot}),
+        'lh.BA.annot',               ({'hemi':'lh',  'alt_annot':'brodmann_area_wide',
+                                       'load':_load_annot},
+                                      {'hemi':'rhx', 'alt_annot':'brodmann_area_wide',
+                                       'load':_load_annot}),
+        'lh.BA.thresh.annot',        ({'hemi':'lh',  'alt_annot':'brodmann_area',
+                                       'load':_load_annot},
+                                      {'hemi':'rhx', 'alt_annot':'brodmann_area',
+                                       'load':_load_annot}),
+        'lh.aparc.annot',            ({'hemi':'lh',  'annot':'Desikan06_parcellation',
+                                       'load':_load_annot},
+                                      {'hemi':'rhx', 'annot':'Desikan06_parcellation',
+                                       'load':_load_annot}),
+        'lh.aparc.a2009s.annot',     ({'hemi':'lh',  'annot':'Destrieux09_parcellation',
+                                       'load':_load_annot},
+                                      {'hemi':'lh',  'annot':'parcellation', 'load':_load_annot},
+                                      {'hemi':'rhx', 'annot':'Destrieux09_parcellation',
+                                       'load':_load_annot},
+                                      {'hemi':'rhx', 'annot':'parcellation', 'load':_load_annot}),
+        'lh.aparc.DKTatlas.annot',   ({'hemi':'lh',  'annot':'DKT40_parcellation',
+                                       'load':_load_annot},
+                                      {'hemi':'rhx', 'annot':'DKT40_parcellation',
+                                       'load':_load_annot}),
+        'lh.BA_exvivo.annot',        ({'hemi':'lh',  'annot':'brodmann_area_wide',
+                                       'load':_load_annot},
+                                      {'hemi':'rhx', 'annot':'brodmann_area_wide',
+                                       'load':_load_annot}),
+        'lh.BA_exvivo.thresh.annot', ({'hemi':'lh',  'annot':'brodmann_area', 'load':_load_annot},
+                                      {'hemi':'rhx', 'annot':'brodmann_area', 'load':_load_annot}),
+        'lh.BA.annot',               ({'hemi':'lh',  'alt_annot':'brodmann_area_wide',
+                                       'load':_load_annot},
+                                      {'hemi':'rhx', 'alt_annot':'brodmann_area_wide',
+                                       'load':_load_annot}),
+        'lh.BA.thresh.annot',        ({'hemi':'lh',  'alt_annot':'brodmann_area',
+                                       'load':_load_annot},
+                                      {'hemi':'rhx', 'alt_annot':'brodmann_area',
+                                       'load':_load_annot}),
+        'lh.aparc.annot',            ({'hemi':'lh',  'annot':'Desikan06_parcellation',
+                                       'load':_load_annot},
+                                      {'hemi':'rhx', 'annot':'Desikan06_parcellation',
+                                       'load':_load_annot}),
+        'lh.aparc.a2009s.annot',     ({'hemi':'lh', 'annot':'Destrieux09_parcellation',
+                                       'load':_load_annot},
+                                      {'hemi':'lh', 'annot':'parcellation', 'load':_load_annot},
+                                      {'hemi':'rhx', 'annot':'Destrieux09_parcellation',
+                                       'load':_load_annot},
+                                      {'hemi':'rhx', 'annot':'parcellation', 'load':_load_annot}),
+        'lh.aparc.DKTatlas.annot',   ({'hemi':'lh',  'annot':'DKT40_parcellation',
+                                       'load':_load_annot},
+                                      {'hemi':'rhx', 'annot':'DKT40_parcellation',
+                                       'load':_load_annot}),
+        'rh.BA_exvivo.annot',        ({'hemi':'rh',  'annot':'brodmann_area_wide',
+                                       'load':_load_annot},
+                                      {'hemi':'lhx', 'annot':'brodmann_area_wide',
+                                       'load':_load_annot}),
+        'rh.BA_exvivo.thresh.annot', ({'hemi':'rh',  'annot':'brodmann_area', 'load':_load_annot},
+                                      {'hemi':'lhx', 'annot':'brodmann_area', 'load':_load_annot}),
+        'rh.BA.annot',               ({'hemi':'rh',  'alt_annot':'brodmann_area_wide',
+                                       'load':_load_annot},
+                                      {'hemi':'lhx', 'alt_annot':'brodmann_area_wide',
+                                       'load':_load_annot}),
+        'rh.BA.thresh.annot',        ({'hemi':'rh',  'alt_annot':'brodmann_area',
+                                       'load':_load_annot},
+                                      {'hemi':'lhx', 'alt_annot':'brodmann_area',
+                                       'load':_load_annot}),
+        'rh.aparc.annot',            ({'hemi':'rh',  'annot':'Desikan06_parcellation',
+                                       'load':_load_annot},
+                                      {'hemi':'lhx', 'annot':'Desikan06_parcellation',
+                                       'load':_load_annot}),
+        'rh.aparc.a2009s.annot',     ({'hemi':'rh',  'annot':'Destrieux09_parcellation',
+                                       'load':_load_annot},
+                                      {'hemi':'rh',  'annot':'parcellation', 'load':_load_annot},
+                                      {'hemi':'lhx', 'annot':'Destrieux09_parcellation',
+                                       'load':_load_annot},
+                                      {'hemi':'lhx', 'annot':'parcellation', 'load':_load_annot}),
+        'rh.aparc.DKTatlas.annot',   ({'hemi':'rh',  'annot':'DKT40_parcellation',
+                                       'load':_load_annot},
+                                      {'hemi':'lhx', 'annot':'DKT40_parcellation',
+                                       'load':_load_annot}),
+        'rh.BA_exvivo.annot',        ({'hemi':'rh',  'annot':'brodmann_area_wide',
+                                       'load':_load_annot},
+                                      {'hemi':'lhx', 'annot':'brodmann_area_wide',
+                                       'load':_load_annot}),
+        'rh.BA_exvivo.thresh.annot', ({'hemi':'rh',  'annot':'brodmann_area', 'load':_load_annot},
+                                      {'hemi':'lhx', 'annot':'brodmann_area', 'load':_load_annot}),
+        'rh.BA.annot',               ({'hemi':'rh',  'alt_annot':'brodmann_area_wide',
+                                       'load':_load_annot},
+                                      {'hemi':'lhx', 'alt_annot':'brodmann_area_wide',
+                                       'load':_load_annot}),
+        'rh.BA.thresh.annot',        ({'hemi':'rh',  'alt_annot':'brodmann_area',
+                                       'load':_load_annot},
+                                      {'hemi':'lhx', 'alt_annot':'brodmann_area',
+                                       'load':_load_annot}),
+        'rh.aparc.annot',            ({'hemi':'rh',  'annot':'Desikan06_parcellation',
+                                       'load':_load_annot},
+                                      {'hemi':'lhx', 'annot':'Desikan06_parcellation',
+                                       'load':_load_annot}),
+        'rh.aparc.a2009s.annot',     ({'hemi':'rh', 'annot':'Destrieux09_parcellation',
+                                       'load':_load_annot},
+                                      {'hemi':'rh', 'annot':'parcellation', 'load':_load_annot},
+                                      {'hemi':'lhx', 'annot':'Destrieux09_parcellation',
+                                       'load':_load_annot},
+                                      {'hemi':'lhx', 'annot':'parcellation', 'load':_load_annot}),
+        'rh.aparc.DKTatlas.annot',   ({'hemi':'rh',  'annot':'DKT40_parcellation',
+                                       'load':_load_annot},
+                                      {'hemi':'lhx', 'annot':'DKT40_parcellation',
+                                       'load':_load_annot})
+    ] + [
+        x
+        for (h,hx) in zip(['lh','rh'],['rhx','lhx']) for p in (True, False) for alt in (True,False)
+        for s in ['BA1', 'BA2', 'BA3a', 'BA3b', 'BA44', 'BA45', 'BA4a', 'BA4p', 'BA6',
+                  'MT', 'V1', 'V2', 'entorhinal', 'perirhinal']
+        for x in ['%s.%s%s.%slabel' % (h, s, '' if alt else '_exvivo', '' if p else 'thresh.'),
+                  ({'hemi':h, (('alt_' if alt else '') + ('weight' if p else 'label')):s,
+                    'load':_load_label},
+                  {'hemi':hx, (('alt_' if alt else '') + ('weight' if p else 'label')):s,
+                    'load':_load_label})]]]
+def subject_file_map(path):
     '''
-    A neuropythy.freesurfer.Subject is an instance of neuropythy.mri.Subject that depends only on
-    the path of the subject represented; all other data are automatically derived from this.
+    subject_file_map(path) yields a filemap object for the given freesurfer subject path.
     '''
-    def __init__(self, path, meta_data=None, check_path=True):
-        if check_path and not is_freesurfer_subject_path(path):
-            raise ValueError('given path does not appear to hold a freesurfer subject')
-        # get the name...
-        path = os.path.abspath(path)
-        name = os.path.split(path)[-1]
-        self.name = name
-        self.path = path
-        self.meta_data = meta_data
-        self.hemis = Subject.load_hemis(name, path)
-        self.images = Subject.load_images(name, path)
-        # these are the only actually required data for the constructor; the rest is values
-
-    # This [private] function and this variable set up automatic properties from the FS directory
-    # in order to be auto-loaded, a property must appear in this dictionary:
-    _auto_retino_names = pyr.pmap({
-        (tag + sep + name): (ptag + pname) for
-        (tag,ptag) in [('', ''),
-                       ('rf',         'rf_'        ), ('prf',        'prf_'       ),
-                       ('meas',       'measured_'  ), ('measured',   'measured_'  ),
-                       ('emp',        'empirical_' ), ('empirical',  'empirical_' ),
-                       ('trn',        'training_'  ), ('train',      'training_'  ),
-                       ('training',   'training_'  ), ('val',        'validation_'),
-                       ('valid',      'validation_'), ('validation', 'validation_'),
-                       ('test',       'validation_'), ('gold',       'gold_'      ),
-                       ('retinotopy', ''           ), ('retino',     ''           ),
-                       ('predict',    'predicted_' ), ('pred',       'predicted_' ),
-                       ('model',      'model_'     ), ('mdl',        'model_'     ),
-                       ('inferred',   'inferred_'  ), ('bayes',      'inferred_'  ),
-                       ('inf',        'inferred_'  ), ('benson14',   'benson14_'  ),
-                       ('benson17',   'benson17_'  ), ('atlas',      'atlas_'     ),
-                       ('template',   'template_'  )]
-        for sep in (['_', '.', '-'] if len(tag) > 0 else [''])
-        for (name, pname) in [
-                ('eccen',  'eccentricity'      ),
-                ('angle',  'polar_angle'       ),
-                ('theta',  'theta'             ),
-                ('rho',    'rho'               ),
-                ('prfsz',  'size'              ),
-                ('size',   'size'              ),
-                ('radius', 'radius'            ),
-                ('sigma',  'sigma'             ),
-                ('varex',  'variance_explained'),
-                ('vexpl',  'variance_explained'),
-                ('varexp', 'variance_explained'),
-                ('weight', 'weight'            ),
-                ('varea',  'visual_area'       ),
-                ('vsroi',  'visual_area'       ),
-                ('vroi',   'visual_area'       ),
-                ('vslab',  'visual_area'       )]})
-    _auto_properties = pyr.pmap({k: (a, lambda f: fsio.read_morph_data(f))
-                                 for d in [{'sulc':      'convexity',
-                                            'thickness': 'thickness',
-                                            'volume':    'volume',
-                                            'area':      'white_surface_area',
-                                            'area.mid':  'midgray_surface_area',
-                                            'area.pial': 'pial_surface_area',
-                                            'curv':      'curvature'},
-                                           _auto_retino_names]
-                                 for (k,a) in six.iteritems(d)})
-    _registration_aliases = {'benson14_retinotopy.v4_0': 'benson17'}
-    @staticmethod
-    def _cortex_from_path(subid, chirality, name, surf_path, data_path, data_prefix=Ellipsis):
-        '''
-        Subject._cortex_from_path(subid, chirality, name, spath, dpath) yields a Cortex object
-          that has been loaded from the given path. The given spath should be the path from which
-          to load the structural information (like lh.sphere and rh.white) while the dpath is the
-          path from which to load the non-structural information (like lh.thickness or rh.curv).
-        '''
-        # data prefix is ellipsis when we use the same as the chirality; unless the name ends with
-        # X, in which case, it's considered a reversed-hemisphere
-        chirality = chirality.lower()
-        if data_prefix is Ellipsis:
-            if name.lower().endswith('x'): data_prefix = 'rh' if chirality == 'lh' else 'lh'
-            else:                          data_prefix = chirality
-            # we can start by making a lazy-map of the auto-properties
-        def _make_prop_loader(flnm):
-            def _load_fn():
-                p = fsio.read_morph_data(flnm)
-                p.setflags(write=False)
-                return p
-            return _load_fn
-        def _make_mghprop_loader(flnm):
-            def _load_fn():
-                p = fsmgh.load(flnm).get_data().flatten()
-                p.setflags(write=False)
-                return p
-            return _load_fn
-        props = {}
-        for (k,(a,_)) in six.iteritems(Subject._auto_properties):
-            f = os.path.join(data_path, data_prefix + '.' + k)
-            if os.path.isfile(f):
-                props[a] = _make_prop_loader(f)
-        # That takes care of the defauly properties; now look for auto-retino properties
-        for flnm in os.listdir(data_path):
-            if flnm[0] == '.' or not flnm.startswith(data_prefix + '.'): continue
-            if flnm.endswith('.mgz') or flnm.endswith('.mgh'):
-                mid = flnm[3:-4]
-                loader = _make_mghprop_loader
-            else:
-                mid = flnm[3:]
-                loader = _make_prop_loader
-            if mid in Subject._auto_retino_names:
-                tr = Subject._auto_retino_names[mid]
-                props[tr] = loader(os.path.join(data_path, flnm))
-        props = pimms.lazy_map(props)
-        # we need a tesselation in order to make the surfaces or the cortex object
-        white_surf_name = os.path.join(surf_path, chirality + '.white')
-        # We need the tesselation at instantiation-time, so we can load it now
-        tess = geo.Tesselation(fsio.read_geometry(white_surf_name)[1], properties=props)
-        # start by creating the surface file names
-        def _make_surf_loader(flnm):
-            def _load_fn():
-                x = fsio.read_geometry(flnm)[0].T
-                x.setflags(write=False)
-                return x
-            return _load_fn
-        surfs = {}
-        for s in ['white', 'pial', 'inflated', 'sphere']:
-            surfs[s] = _make_surf_loader(os.path.join(surf_path, chirality + '.' + s))
-        surfs = pimms.lazy_map(surfs)
-        def _make_midgray():
-            x = np.mean([surfs['white'], surfs['pial']], axis=0)
-            x.setflags(write=False)
-            return x
-        surfs = surfs.set('midgray', _make_midgray)
-        # okay, now we can do the same for the relevant registrations; since the sphere registration
-        # is the same as the sphere surface, we can just copy that one over:
-        regs = {'native': lambda:surfs['sphere']}
-        # see if our subject id has special neuropythy datafiles...
-        surf_paths = [surf_path]
-        extra_path = os.path.join(library_path(), 'data', subid, 'surf')
-        regals = Subject._registration_aliases
-        if os.path.isdir(extra_path): surf_paths.insert(0, extra_path)
-        for surf_path in surf_paths:
-            for flnm in os.listdir(surf_path):
-                if flnm.startswith(chirality + '.') and flnm.endswith('.sphere.reg'):
-                    mid = flnm[(len(chirality)+1):-11]
-                    if mid == '': mid = 'fsaverage'
-                    elif mid in regals: mid = regals[mid]
-                    regs[mid] = _make_surf_loader(os.path.join(surf_path, flnm))
-        regs = pimms.lazy_map(regs)
-        # great; now we can actually create the cortex object itself
-        return mri.Cortex(chirality, tess, surfs, regs).persist()
-
-    @staticmethod
-    def load_hemis(name, path):
-        '''
-        Subject.load_hemis(name, path) yields a persistent map of hemisphere names ('lh', 'rh',
-          possibly others) for the given freesurfer subject sub. Other hemispheres may include lhx
-          and rhx (mirror-inverted hemisphere objects).
-        '''
-        surf_path = os.path.join(path, 'surf')
-        # basically, we want to create a lh and rh hemisphere object with automatically-loaded
-        # properties based on the above auto-property data
-        ctcs = {}
-        for h in ['lh', 'rh']:
-            ctcs[h] = Subject._cortex_from_path(name, h, h, surf_path, surf_path)
-        # we also want to check for the xhemi subject
-        xpath = os.path.join(path, 'xhemi', 'surf')
-        if os.path.isdir(xpath):
-            for (h,xh) in zip(['lh', 'rh'], ['rhx', 'lhx']):
-                ctcs[xh] = Subject._cortex_from_path(name, h, xh, xpath, surf_path)
-        # that's all!
-        return pimms.lazy_map(ctcs)
-    @staticmethod
-    def load_mgh_images(name, path):
-        '''
-        Subject.load_mgh_images(name, path) yields a persistent map of the MGHImage objects for all
-          the valid mgz files in the relevant subject's FreeSurfer mri/ directory (where the subject
-          directory is given by path).
-        '''
-        # These are just given their basic filenames; nothing fancy here
-        path = os.path.join(path, 'mri')
-        fls = [f
-               for p in [path, os.path.join(path, 'orig')]
-               if os.path.isdir(p)
-               for fname in os.listdir(p) for f in [os.path.join(p, fname)]
-               if f[0] != '.'
-               if len(f) > 4 and f[-4:].lower() in ['.mgz', '.mgh']
-               if os.path.isfile(f)]
-        def _make_loader(fname):
-            def _loader():
-                return _load_imm_mgh(fname)
-            return _loader
-        return pimms.lazy_map({os.path.split(flnm)[-1][:-4]: _make_loader(flnm) for flnm in fls})
-    @staticmethod
-    def load_images(name, path):
-        '''
-        Subject.load_images(name, path) yields a persistent map of MRImages tracked by the given
-          subject sub; in freesurfer subjects these are renamed and converted from their typical
-          freesurfer filenames (such as 'ribbon') to forms that conform to the neuropythy naming
-          conventions (such as 'gray_mask'). To access data by their original names, use the
-          Subject.load_mgh_images() function.
-        '''
-        ims = {}
-        mgh_images = Subject.load_mgh_images(name, path)
-        def _make_imm_mask(arr, val, eq=True):
-            arr = (arr == val) if eq else (arr != val)
-            arr.setflags(write=False)
-            return fsmgh.MGHImage(arr, mgh_images['ribbon'].affine, mgh_images['ribbon'].header)
-        # start with the ribbon:
-        ims['lh_gray_mask']  = lambda:_make_imm_mask(mgh_images['ribbon'].get_data(), 3)
-        ims['lh_white_mask'] = lambda:_make_imm_mask(mgh_images['ribbon'].get_data(), 2)
-        ims['rh_gray_mask']  = lambda:_make_imm_mask(mgh_images['ribbon'].get_data(), 42)
-        ims['rh_white_mask'] = lambda:_make_imm_mask(mgh_images['ribbon'].get_data(), 41)
-        ims['brain_mask']    = lambda:_make_imm_mask(mgh_images['ribbon'].get_data(), 0, False)
-        # next, do the standard ones:
-        def _make_accessor(nm): return lambda:mgh_images[nm]
-        for (tname, name) in zip(['original', 'normalized', 'segmentation', 'brain'],
-                                 ['orig',     'norm',       'aseg',         'brain']):
-            ims[tname] = _make_accessor(name)
-        # last, check for auto-retino-properties:
-        for k in six.iterkeys(mgh_images):
-            if k in Subject._auto_retino_names:
-                tr = Subject._auto_retino_names[k]
-                ims[tr] = _make_accessor(k)
-        return pimms.lazy_map(ims)
-    @pimms.value
-    def mgh_images(name, path):
-        '''
-        sub.mgh_images is a persistent map of MRImages, represented as MGHImage objects, tracked by
-        the given FreeSurfer subject sub.
-        '''
-        return Subject.load_mgh_images(name, path)
-    @pimms.value
-    def voxel_to_vertex_matrix(mgh_images):
-        '''
-        See neuropythy.mri.Subject.voxel_to_vertex_matrix.
-        '''
-        return pimms.imm_array(mgh_images['ribbon'].header.get_vox2ras_tkr())
-    @pimms.value
-    def voxel_to_native_matrix(mgh_images):
-        '''
-        See neuropythy.mri.Subject.voxel_to_native_matrix.
-        '''
-        return pimms.imm_array(mgh_images['ribbon'].header.get_affine())
-
+    return file_map(path, freesurfer_subject_filemap_instructions,
+                    data_hierarchy=freesurfer_subject_data_hierarchy)
+_registration_aliases = {'benson14_retinotopy.v4_0': 'benson17'}
+def cortex_from_filemap(fmap, chirality, name, subid=None):
+    '''
+    cortex_from_filemap(filemap, chirality, name) yields a cortex object from the given filemap;
+      if the chirality and name do not match, then the result must be an xhemi.
+    '''
+    chirality = chirality.lower()
+    name = name.lower()
+    # get the relevant hemi-data
+    hdat = fmap.data_tree.hemi[name]
+    # we need the tesselation at build-time, so let's create that now:
+    tris = hdat.tess['white']
+    # this tells us the max number of vertices
+    n = np.max(tris) + 1
+    # Properties: we want to merge a bunch of things together...
+    # for labels, weights, annots, we need to worry about loading alts:
+    def _load_with_alt(k, s0, sa, trfn):
+        try: u = s0.get(k, None)
+        except Exception: u = None
+        if u is None:
+            try: u = sa.get(k, None)
+            except Exception: u = None
+        if u is None: raise ValueError('Exception while loading property %s' % k)
+        else: return u if trfn is None else trfn(u)
+    def _lbltr(ll):
+        l = np.zeros(n, dtype='bool')
+        l[ll[0]] = True
+        l.setflags(write=False)
+        return l
+    def _wgttr(ll):
+        w = np.zeros(n, dtype='float')
+        w[ll[0]] = ll[1]
+        w.setflags(write=False)
+        return w
+    def _anotr(ll):
+        ll[0].setflags(write=False)
+        return ll[0]
+    p = {}
+    for k in six.iterkeys(hdat.label):
+        p[k+'_label'] = curry(_load_with_alt, k, hdat.label, hdat.alt_label, _lbltr)
+    for k in six.iterkeys(hdat.weight):
+        p[k+'_weight'] = curry(_load_with_alt, k, hdat.weight, hdat.alt_weight, _wgttr)
+    for k in six.iterkeys(hdat.annot):
+        p[k] = curry(_load_with_alt, k, hdat.annot, hdat.alt_annot, _anotr)
+    props = pimms.merge(hdat.property, pimms.lazy_map(p))
+    tess = geo.Tesselation(tris, properties=props)
+    def _make_midgray():
+        x = np.mean([hdat.surface['white'], hdat.surface['pial']], axis=0)
+        x.setflags(write=False)
+        return x
+    surfs = hdat.surface.set('midgray', _make_midgray)
+    # if this is a subject that exists in the library, we may want to add some files:
+    if subid is None:
+        pd = fmap.pseudo_paths[None]._path_data
+        subid = pd['pathmod'].split(fmap.actual_path)[1]
+    regs = hdat.registration
+    extra_path = os.path.join(library_path(), 'data', subid, 'surf')
+    if os.path.isdir(extra_path):
+        for flnm in os.listdir(extra_path):
+            if flnm.startswith(chirality + '.') and flnm.endswith('.sphere.reg'):
+                mid = flnm[(len(chirality)+1):-11]
+                if mid == '': mid = 'fsaverage'
+                else:         mid = _registration_aliases.get(mid, mid)
+                if mid not in regs:
+                    regs = regs.set(mid, curry(_load_surf, os.path.join(surf_path, flnm)))
+    # Okay, make the cortex object!
+    return mri.Cortex(chirality, tess, surfs, regs, meta_data={'file_map':fmap}).persist()
+def images_from_filemap(fmap):
+    '''
+    images_from_filemap(fmap) yields a persistent map of MRImages tracked by the given subject with
+      the given name and path; in freesurfer subjects these are renamed and converted from their
+      typical freesurfer filenames (such as 'ribbon') to forms that conform to the neuropythy naming
+      conventions (such as 'gray_mask'). To access data by their original names, use the filemap.
+    '''
+    ims = {}
+    raw_images = fmap.data_tree.raw_image
+    def _make_imm_mask(arr, val, eq=True):
+        rib = raw_images['ribbon']
+        arr = (arr == val) if eq else (arr != val)
+        arr.setflags(write=False)
+        return fsmgh.MGHImage(arr, rib.affine, rib.header)
+    # start with the ribbon:
+    ims['lh_gray_mask']  = lambda:_make_imm_mask(raw_images['ribbon'].get_data(), 3)
+    ims['lh_white_mask'] = lambda:_make_imm_mask(raw_images['ribbon'].get_data(), 2)
+    ims['rh_gray_mask']  = lambda:_make_imm_mask(raw_images['ribbon'].get_data(), 42)
+    ims['rh_white_mask'] = lambda:_make_imm_mask(raw_images['ribbon'].get_data(), 41)
+    ims['brain_mask']    = lambda:_make_imm_mask(raw_images['ribbon'].get_data(), 0, False)
+    # merge in with the typical images
+    return pimms.merge(fmap.data_tree.image, pimms.lazy_map(ims))
+def subject_from_filemap(fmap, name=None, meta_data=None, check_path=True):
+    # start by making a pseudo-dir:
+    if check_path and not is_freesurfer_subject_path(fmap.pseudo_paths[None]):
+        raise ValueError('given path does not appear to hold a freesurfer subject')
+    # we need to go ahead and load the ribbon...
+    imgs = images_from_filemap(fmap)
+    hems = pimms.lazy_map({h:curry(cortex_from_filemap, fmap, h, ch)
+                           for (h,ch) in zip(['lh','rhx','rh','lhx'], ['lh','lh','rh','rh'])})
+    rib = fmap.data_tree.raw_image['ribbon']
+    vox2nat = rib.affine
+    vox2vtx = rib.header.get_vox2ras_tkr()
+    meta_data = pimms.persist({} if meta_data is None else meta_data)
+    meta_data = meta_data.set('raw_images', fmap.data_tree.raw_image)
+    return mri.Subject(name=name, pseudo_path=fmap.pseudo_paths[None],
+                       hemis=hems, images=imgs,
+                       meta_data=meta_data,
+                       voxel_to_vertex_matrix=vox2vtx,
+                       voxel_to_native_matrix=vox2nat)
 @nyio.importer('freesurfer_subject', sniff=is_freesurfer_subject_path)
-def subject(name, meta_data=None, check_path=True):
+def subject(path, name=Ellipsis, meta_data=None, check_path=True, filter=None):
     '''
     subject(name) yields a freesurfer Subject object for the subject with the given name. Subjects
       are cached and not reloaded, so multiple calls to subject(name) will yield the same immutable
-      subject object..
+      subject object.
 
     Note that subects returned by freesurfer_subject() are always persistent Immutable objects; this
     means that you must create a transient version of the subject to modify it via the member
@@ -394,7 +660,16 @@ def subject(name, meta_data=None, check_path=True):
     using the copy method--see the pimms library documentation regarding immutable classes and
     objects.
 
+    If you wish to modify all subjects loaded by this function, you may set its attribute 'filter'
+    to a function or list of functions that take a single argument (a subject object) and returns a
+    single argument (a potentially-modified subject object).
+
+    The argument name may alternately be a pseudo_path object or a path that can be converted into a
+    pseudo_path object.
+
     The following options are accepted:
+      * name (default: Ellipsis) may optionally specify the subject's name; if Ellipsis, then
+        attempts to deduce the name from the initial argument (which may be a name or a path).
       * meta_data (default: None) may optionally be a map that contains meta-data to be passed along
         to the subject object (note that this meta-data will not be cached).
       * check_path (default: True) may optionally be set to False to ignore the requirement that a
@@ -403,34 +678,60 @@ def subject(name, meta_data=None, check_path=True):
         Additionally, check_path may be set to None instead of False, indicating that no checks or
         search should be performed; the string name should be trusted to be an exact relative or
         absolute path to a valid FreeSurfer subejct.
+      * filter (default: None) may optionally specify a filter that should be applied to the subject
+        before returning. This must be a function that accepts as an argument the subject object and
+        returns a (potentially) modified subject object. Filtered subjects are cached by the id
+        of the filters.
     '''
-    name = os.path.expanduser(os.path.expandvars(name))
-    if check_path is None:
-        sub = Subject(name, check_path=False)
-        if isinstance(sub, Subject): sub.persist()
+    # convert the path to a pseudo-dir; this may fail if the user is requesting a subject by name...
+    try: pdir = to_pseudo_path(path)
+    except Exception: pdir = None
+    if pdir is None: # search for a subject with this name
+        tmp = find_subject_path(path, check_path=check_path)
+        if tmp is not None:
+            pdir = to_pseudo_path(tmp)
+            path = tmp
+        elif path == 'fsaverage':
+            try:
+                import neuropythy as ny
+                return ny.data['benson_winawer_2018'].subjects['fsaverage']
+            except: pass
+    if pdir is None: raise ValueError('could not find freesurfer subject: %s' % path)
+    path = pdir.source_path
+    # okay, before we continue, lets check the cache...
+    if path in subject._cache: sub = subject._cache[sub]
     else:
-        subpath = find_subject_path(name, check_path=check_path)
-        if subpath is None and name == 'fsaverage':
-            # we can use the benson and winawer 2018 dataset
-            import neuropythy as ny
-            try: return ny.data['benson_winawer_2018'].subjects['fsaverage']
-            except Exception: pass # error message below is more accurate...
-        if subpath is None:
-            raise ValueError('Could not locate subject with name \'%s\'' % name)
-        elif check_path:
-            fpath = '/' + os.path.relpath(subpath, '/')
-            if fpath in subject._cache:
-                sub = subject._cache[fpath]
-            else:
-                sub = Subject(subpath)
-                if isinstance(sub, Subject): subject._cache[fpath] = sub.persist()
-        else:
-            sub = Subject(subpath, check_path=False)
-            if isinstance(sub, Subject): sub.persist()
-    return (None                     if sub is None           else
-            sub.with_meta(meta_data) if meta_data is not None else
-            sub)
+        # make the filemap
+        fmap = subject_file_map(pdir)
+        # extract the name if need-be
+        if name is Ellipsis:
+            import re
+            (pth,name) = (path, '.')
+            while name == '.': (pth, name) = pdir._path_data['pathmod'].split(pth)[-1]
+            name = name.split(':')[-1]
+            name = pdir._path_data['pathmod'].split(name)[1]
+            if '.tar' in name: name = name.split('.tar')[0]
+        # and make the subject!
+        sub = subject_from_filemap(fmap, name=name, check_path=check_path, meta_data=meta_data)
+        if mri.is_subject(sub):
+            sub.persist()
+            sub = sub.with_meta(file_map=fmap)
+            subject._cache[path] = sub
+    # okay, we have the initial subject; let's organize the filters
+    if pimms.is_list(subject.filter) or pimms.is_tuple(subject.filter): filts = list(subject.filter)
+    else: filts = []
+    if pimms.is_list(filter) or pimms.is_tuple(filter): filter = list(filter)
+    else: filter = []
+    filts = filts + filter
+    if len(filts) == 0: return sub
+    fids = tuple([id(f) for f in filts])
+    tup = fids + (path,)
+    if tup in subject._cache: return subject._cache[tup]
+    for f in filts: sub = f(sub)
+    if mri.is_subject(sub): subject._cache[tup] = sub
+    return sub
 subject._cache = {}
+subject.filter = None
 def forget_subject(sid):
     '''
     forget_subject(sid) causes neuropythy's freesurfer module to forget about cached data for the
@@ -444,11 +745,9 @@ def forget_subject(sid):
     sub = subject(sid)
     if sub.path in subject._cache:
         del subject._cache[sub.path]
-    else:
-        for (k,v) in six.iteritems(subject._cache):
-            if v is sub:
-                del subject._cache[k]
-                break
+    for (k,v) in six.iteritems(subject._cache):
+        if pimms.is_tuple(k) and k[-1] == sub.path:
+            del subject._cache[k]
     return None
 def forget_all():
     '''
@@ -675,19 +974,86 @@ def save_freesurfer_morph(filename, obj, face_count=0):
     fsio.write_morph_data(filename, obj, fnum=face_count)
     return filename
 @nyio.importer('freesurfer_label', ('label',))
-def load_freesurfer_label(filename, read_scalars=False):
+def load_freesurfer_label(filename, to='all'):
     '''
-    load_freesurfer_label(filename) is equivalent to nibabel.freesurfer.io.read_label(filename).
-    '''
-    return fsio.read_label(filename, read_scalars=read_scalars)
-@nyio.importer('freesurfer_annot', ('annot',))
-def load_freesurfer_annot(filename, orig_ids=False):
-    '''
-    load_freesurfer_annot(filename) is equivalent to nibabel.freesurfer.io.read_annot(filename).
-    '''
-    return fsio.read_annot(filename, orig_ids=orig_ids)
-    
+    load_freesurfer_label(filename) yields the boolean label property found in the given freesurfer
+      label file.
 
+    The return value is determined by the option `to`, which by default is 'all'. The following
+    values may be given:
+      * 'vertices' is equivalent to nibabel.freesurfer.io.read_label(filename) as is.
+      * 'all' is equivalent to nibabel.freesurfer.io.read_label(filename, read_scalars=True) as is.
+    '''
+    if to in [None,Ellipsis]: to = 'all'
+    to = to.lower()
+    if to == 'vertices': fsio.read_label(filename, read_scalars=False)
+    (ls,ps) = fsio.read_label(filename, read_scalars=True)
+    if to == 'all': return (ls,ps)
+    else: raise ValueError('could not parse to option: %s' % to)    
+@nyio.importer('freesurfer_annot', ('annot',))
+def load_freesurfer_annot(filename, to='property'):
+    '''
+    load_freesurfer_annot(filename) yields the result of loading an annotation file given by the
+      provided filename.
+
+    The precise return value is determined by the optional argument `to`; it is 'property' by
+    default but may be set to any of the following:
+      * 'raw': nibabel.freesurfer.io.read_annot(filename, orig_ids=False)
+      * 'raw_orig': nibabel.freesurfer.io.read_annot(filename, orig_ids=True)
+      * 'property': returns the label ids found in the file as a property array.
+      * 'index': returns the label_index object stored in the annotation file.
+      * 'all': returns (property, index).
+    '''
+    if to in [None,Ellipsis]: to = 'property'
+    to = to.lower()
+    if to == 'raw_orig': return fsio.read_annot(filename, orig_ids=True)
+    dat = fsio.read_annot(filename, orig_ids=False)
+    if to == 'raw': return dat
+    (ls,clrs,nms) = dat
+    nms = np.asarray([nm.decode('utf-8') for nm in nms])
+    lbls = clrs[:,-1]
+    clrs = clrs[:,:4]
+    clrs[:,3] = 255 - clrs[:,3]
+    clrs = clrs / 255.0
+    oks = ls >= 0
+    p = np.array(ls)
+    p[~oks] = 0
+    lils = np.arange(len(nms))
+    if to in ['property', 'prop', 'p', 'auto', 'automatic']: return p
+    elif to in ['index', 'label_index', 'lblidx', 'idx']: return label_index(lils, nms, clrs)
+    elif to in ['all', 'full']: return (p, label_index(lils, nms, clrs))
+    else: raise ValueError('bad to conversion: %s' % to)
+@nyio.exporter('freesurfer_annot', ('annot',))
+def save_freesurfer_annot(filename, obj, index=None):
+    '''
+    save_freesurfer_annot(filename, prop) saves the given integer property prop to the given
+      filename as a FreeSurfer annotation file.
+
+    The optional argument index specifies how the colortab and names of the property labels should
+    be handles. By default this is None, in which case names are generated using the formatter
+    'label%d' and color values are generated using the label_colors function. If index is not None,
+    then it is coerced to an index using the to_label_index() function, and the label index is
+    used to create the colortable and names.
+    '''
+    # first parse the index
+    if index is None:
+        if len(obj) == 2 and pimms.is_vector(obj[0]): (obj, index) = obj
+        else: index = label_index(obj)
+    index = to_label_index(index)
+    # okay, let's get the data in the right format
+    (u,ris) = np.unique(obj, return_inverse=True)
+    es = [index[l] for l in u]
+    clrs = np.round([np.asarray(e.color)*255 for e in es]).astype('int')
+    clrs[:,3] = 255 - clrs[:,3] # alpha -> transparency
+    nms  = [e.name for e in es]
+    lbls = [e.id for e in es]
+    fsio.write_annot(filename, ris, clrs, nms, fill_ctab=True)
+    return filename
     
-    
-    
+# A few annot labels we can just save:
+brodmann_label_index = label_index(
+    np.arange(15),
+    ['none', 'BA1', 'BA2', 'BA3a', 'BA3b', 'BA4a', 'BA4p', 'BA6', 'BA44', 'BA45', 'V1', 'V2', 'MT',
+     'perirhinal', 'enterorhinal'])
+label_indices['freesurfer_brodmann'] = brodmann_label_index.persist()
+

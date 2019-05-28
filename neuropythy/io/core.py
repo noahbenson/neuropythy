@@ -61,8 +61,10 @@ def load(filename, format=None, **kwargs):
     Keyword options may be passed to load; these must match those accepted by the given import
     function.
     '''
-    from neuropythy.util import ObjectWithMetaData
-    filename = os.path.expanduser(filename)
+    from neuropythy.util import (ObjectWithMetaData, to_pseudo_path)
+    # use the pseudo-path interface for the filename:
+    pdir = to_pseudo_path(filename)
+    filename = pdir.local_path()
     if format is None:
         format = guess_import_format(filename, **kwargs)
         if format is None:

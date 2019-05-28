@@ -16,7 +16,7 @@ import os, sys, types, six, pimms
 from itertools import chain
 
 from ..util import (ObjectWithMetaData, to_affine, is_image, is_address, is_tuple, address_data,
-                    curry, to_hemi_str)
+                    curry, to_hemi_str, is_pseudo_path, pseudo_path)
 
 @pimms.immutable
 class Subject(ObjectWithMetaData):
@@ -37,13 +37,14 @@ class Subject(ObjectWithMetaData):
     Subject respects laziness in the hemis and images classes, and this mechanism is recommended
     as a way to lazily load subject data (see pimms.lazy_map).
     '''
-    def __init__(self, name=None, path=None, hemis=None, images=None, meta_data=None,
+    def __init__(self, name=None, pseudo_path=None, hemis=None, images=None, meta_data=None,
                  voxel_to_vertex_matrix=None, voxel_to_native_matrix=None):
         self.name                   = name
-        self.path                   = path
+        self.pseudo_path             = pseudo_path
         self.hemis                  = hemis
         self.images                 = images
         self.voxel_to_vertex_matrix = voxel_to_vertex_matrix
+        self.voxel_to_native_matrix = voxel_to_native_matrix
         self.meta_data              = meta_data
 
     @pimms.param
@@ -54,12 +55,16 @@ class Subject(ObjectWithMetaData):
         if nm is None or pimms.is_str(nm): return nm
         else: raise ValueError('subject names must be strings or None')
     @pimms.param
-    def path(p):
+    def pseudo_path(pd):
+        if pd is None: return None
+        else: return to_pseudo_path(pd)
+    @pimms.value
+    def path(pseudo_path):
         '''
         sub.path is the path of the subject's data directory, if any.
         '''
-        if p is None or pimms.is_str(p): return p
-        else: raise ValueError('subject paths must be strings or None')
+        if pseudo_path is None: return None
+        return pseudo_path.source_path
     @pimms.param
     def hemis(h):
         '''
@@ -442,9 +447,24 @@ class Subject(ObjectWithMetaData):
         return self.repr
     def path_join(self, *args):
         '''
-        sub.path_join(args...) is equivalent to os.path.join(sub.path, args...).
+        sub.path_join(args...) is equivalent to sub.pseudo_path.join(sub.path, args...)
         '''
-        return os.path.join(sub.path, *args)
+        return self.pseudo_path.join(self.path, *args)
+    def load(self, filename, *args, **kw):
+        '''
+        sub.load(filename) attempts to load the given filename from the pseudo-path / directory
+          represented by the given subject sub. Note that additional arguments and keyword arguments
+          are passed verbatim to the neuropythy.load() function.
+
+        Note that the given filename must be a relative path. It may, however, be a list or tuple of
+        diretory names (as would be passed to os.path.join).
+        '''
+        from neuropythy.io import load
+        if self.pseudo_path is None:
+            raise ValueError('cannot load from subject without a pseudo_path')
+        if not pimms.is_str(filename): filename = self.pseudo_path.join(*filename)
+        flnm = self.pseudo_path.local_path(filename)
+        return load(flnm, *args, **kw)
     def cortex_to_image(self, data,
                         hemi=None, method='linear', fill=0, dtype=None, affine=None, shape=None):
         '''

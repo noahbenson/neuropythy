@@ -3,7 +3,7 @@
 # Utility for presenting a directory with a particular format as a data structure.
 # By Noah C. Benson
 
-import os, warnings, six, tarfile, atexit, shutil, posixpath, json, pimms
+import os, warnings, six, tarfile, atexit, shutil, posixpath, json, copy, pimms
 import numpy          as np
 import pyrsistent     as pyr
 from   posixpath  import join as urljoin, split as urlsplit, normpath as urlnormpath
@@ -84,6 +84,13 @@ def is_tarball_path(path):
     '''
     (tb,p) = split_tarball_path(path)
     return tb is not None
+def is_tarball_file(path):
+    '''
+    is_tarball_file(p) yields True if p is a valid path of a tarball file. Trailing :paths are not
+      allowed (see is_tarball_path).
+    '''
+    (tb,p) = split_tarball_path(path)
+    return tb is not None and p == ''
 osf_basepath = 'https://api.osf.io/v2/nodes/%s/files/%s/'
 def _osf_tree(proj, path=None, base='osfstorage'):
     if path is None: path = (osf_basepath % (proj, base))
@@ -113,14 +120,245 @@ def osf_crawl(k, *pths, **kw):
     if k.lower().startswith('osf:'): k = k[4:]
     k = k.lstrip('/')
     pths = [p.lstrip('/') for p in (k.split('/') + list(pths))]
-    (bpth, pths) = (pths[0], pths[1:])
+    (bpth, pths) = (pths[0].strip('/'), [p for p in pths[1:] if p != ''])
     if root is None: root = _osf_tree(bpth, base=base)
     return reduce(lambda m,k: m[k], pths, root)
-    
-@pimms.immutable
-class PseudoDir(ObjectWithMetaData):
+
+class BasicPath(object):
     '''
-    The PseudoDir class represents either directories themselves, tarballs, or URLs as if they were
+    BasicPath is the core path type that has utilities for handling various kinds of path
+    operations through the pseudo-path interface.
+    '''
+    def __init__(self, base_path, pathmod=posixpath, cache_path=None):
+        object.__setattr__(self, 'base_path', base_path)
+        object.__setattr__(self, 'pathmod', pathmod)
+        object.__setattr__(self, 'sep', pathmod.sep)
+        object.__setattr__(self, 'cache_path', cache_path)
+    def __setattr__(self, k, v): raise TypeError('path objects are immutable')
+    def join(self, *args):
+        args = [a for a in args if a != '']
+        if len(args) == 0: return ''
+        else: return self.pathmod.join(*args)
+    def osjoin(self, *args):
+        args = [a for a in args if a != '']
+        if len(args) == 0: return ''
+        else: return os.path.join(*args)
+    def posixjoin(self, *args):
+        args = [a for a in args if a != '']
+        if len(args) == 0: return ''
+        else: return posixpath.join(*args)
+    def split(self, *args): return self.pathmod.split(*args)
+    def to_ospath(self, path):
+        path = self.pathmod.normpath(path)
+        ps = []
+        while path != '':
+            (path,fl) = self.pathmod.split(path)
+            ps.append(fl)
+        return os.path.join(*reversed(ps))
+    def base_find(self, rpath):
+        '''
+        Checks to see if the given path exists/can be found at the given base source; does not check
+        the local cache and instead just checks the base source. If the file is not found, yields
+        None; otherwise yields the relative path from the base_path.
+        '''
+        # this base version of the function assumes that pathmod.exists is sufficient:
+        flnm = self.join(self.base_path, rpath)
+        if self.pathmod.exists(flnm): return rpath
+        else: return None
+    def ensure_path(self, rpath, cpath):
+        '''
+        Called whenever a cache-path is supplied to getpath and the file is not already found there;
+        must return a file path on the local filesystem.
+        '''
+        # for the base, we have no action here; for other types we may need to copy/download/extract
+        # something then return that path.
+        flnm = self.join(self.base_path, rpath)
+        if os.path.exists(flnm): return flnm
+        else: raise ValueError('ensure_path called for non-existant file: %s' % flnm)
+    def _make_cache_path(self): return tmpdir(delete=True)
+    def _cache_tarball(self, rpath, base_path=''):
+        if self.cache_path is None: object.__setattr__(self, 'cache_path', self._make_cache_path())
+        cpath = self.osjoin(self.cache_path, self.to_ospath(rpath))
+        if os.path.isdir(cpath):
+            (tbloc, tbinternal) = split_tarball_path(self.base_path)
+            if tbloc is None: (tbloc, cpath) = (cpath, cpath)
+            else:
+                if self.base_path is None or self.base_path == '':
+                    raise ValueError('attempting to cache unknown base file')
+                tbname = self.split(tbloc)[-1]
+                tbloc = cpath = self.osjoin(cpath, tbname)
+                base_path = self.osjoin(base_path, tbinternal)
+                if not os.path.exists(cpath): tbloc = self.ensure_path(rpath, cpath)
+        else: tbloc = cpath
+        return TARPath(tbloc, base_path, cache_path=cpath)
+    def _check_tarball(self, *path_parts):
+        rpath = self.join(*path_parts)
+        # start by checking our base path:
+        if self.base_path is not None and self.base_path != '':
+            (tbloc, tbinternal) = split_tarball_path(self.base_path)
+            if tbloc is not None:
+                if tbinternal == '':
+                    # we're fine; we just need to cache the current file...
+                    return (self._cache_tarball(''), rpath)
+                else:
+                    # We copy ourselves to handle this base-path
+                    tmp = copy.copy(self)
+                    object.__setattr__(tmp, 'base_path', tbloc)
+                    rpath = self.join(tbinternal, rpath)
+                    # we defer to this path object with the new relative path:
+                    return (tmp._cache_tarball(''), rpath)
+        # okay, next check the relative path
+        fpath = self.join('' if self.base_path is None else self.base_path, rpath)
+        (tbloc, tbinternal) = split_tarball_path(fpath)
+        if tbloc is not None:
+            tbp = self._cache_tarball(tbloc)
+            return (tbp, tbinternal)
+        # otherwise, we have no tarball on the path and just need to return ourselves as we are:
+        return (self, rpath)
+    def find(self, *path_parts):
+        yes = self.join(self.base_path, *path_parts)
+        (pp, rpath) = self._check_tarball(*path_parts)
+        # if that gave us back a different path object, we defer to it:
+        if pp is not self: return yes if pp.find(rpath) is not None else None
+        # check the cache path first
+        if self.cache_path is not None:
+            cpath = self.osjoin(self.cache_path, self.to_ospath(rpath))
+            if os.path.exists(cpath): return yes
+        # okay, check the base
+        return self.base_find(rpath)
+    def exists(self, *path_parts):
+        return self.find(*path_parts) is not None
+    def getpath(self, *path_parts):
+        (pp, rpath) = self._check_tarball(*path_parts)
+        # if that gave us back a different path object, we defer to it:
+        if pp is not self: return pp.getpath(rpath)
+        fpath = self.join(self.base_path, rpath)
+        # check the cache path first
+        rp = pp.find(rpath)
+        if rp is None: raise ValueError('getpath: path not found: %s' % fpath)
+        if self.cache_path is not None:
+            cpath = self.osjoin(self.cache_path, self.to_ospath(rp))
+            if os.path.exists(cpath): return cpath
+            return self.ensure_path(rp, cpath)
+        else: return self.ensure_path(rp, None)
+class OSPath(BasicPath):
+    def __init__(self, base_path, cache_path=None):
+        BasicPath.__init__(self, base_path, pathmod=os.path, cache_path=cache_path)
+    def to_ospath(self, path): return path
+class URLPath(BasicPath):
+    def __init__(self, base_path, cache_path=None):
+        BasicPath.__init__(self, base_path, pathmod=posixpath, cache_path=cache_path)
+    def base_find(self, rpath):
+        if is_url(self.join(self.base_path, rpath)): return rpath
+        else: return None
+    def ensure_path(self, rpath, cpath):
+        url = self.join(self.base_path, rpath)
+        return url_download(url, cpath)
+class OSFPath(BasicPath):
+    def __init__(self, base_path, cache_path=None):
+        BasicPath.__init__(self, base_path, pathmod=posixpath, cache_path=cache_path)
+        # if there's a tarball on the base path, we need to grab it instead of doing a typical
+        # osf_crawl
+        (tbloc, tbinternal) = split_tarball_path(base_path)
+        if tbloc == None: tree = osf_crawl(base_path)
+        else: tree = osf_crawl(tbloc)
+        object.__setattr__(self, 'osf_tree', tree)
+    def _find_url(self, rpath):
+        fl = self.osf_tree
+        parts = [s for s in rpath.split(self.sep) if s != '']
+        # otherwise walk the tree...
+        for pp in parts:
+            if   pp == '':                           continue
+            elif not pimms.is_str(fl) and pp in fl:  fl = fl[pp]
+            else:                                    return None
+        return fl
+    def base_find(self, rpath):
+        fl = self._find_url(rpath)
+        if fl is None: return None
+        else: return rpath
+    def ensure_path(self, rpath, cpath):
+        fl = self._find_url(rpath)
+        if not pimms.is_str(fl):
+            os.makedirs(cpath, mode=0o755)
+            return cpath
+        return url_download(fl, cpath)
+class S3Path(BasicPath):
+    def __init__(self, fs, base_path, cache_path=None):
+        BasicPath.__init__(self, base_path, pathmod=posixpath, cache_path=cache_path)
+        object.__setattr__(self, 's3fs', fs)
+    def base_find(self, rpath):
+        fpath = self.join(self.base_path, rpath)
+        if self.s3fs.exists(fpath): return rpath
+        else: return None
+    def ensure_path(self, rpath, cpath):
+        url = self.join(self.base_path, rpath)
+        self.s3fs.get(url, cpath)
+        return cpath
+class TARPath(OSPath):
+    def __init__(self, tarpath, basepath='', cache_path=None, tarball_name=None):
+        OSPath.__init__(self, basepath, cache_path=cache_path)
+        object.__setattr__(self, 'tarball_path', tarpath)
+        object.__setattr__(self, 'base_path', basepath)
+        if cache_path == tarpath:
+            # we need to prep the path
+            tarfl = os.path.split(tarpath)[1]
+            cpath = os.path.join(cache_path, 'contents')
+            tarpath = os.path.join(cache_path, tarfl)
+            if os.path.isfile(cache_path):
+                # we need to move things around
+                td = tmpdir(delete=True)
+                tmpfl = os.path.join(td,tarfl)
+                shutil.move(cache_path, tmpfl)
+                os.makedirs(cpath, mode=0o775)
+                shutil.move(tmpfl, tarpath)
+            object.__setattr__(self, 'tarball_path', tarpath)
+            object.__setattr__(self, 'cache_path', cpath)
+        # get the tarball 'name'
+        flnm = os.path.split(self.tarball_path if tarball_name is None else tarball_name)[-1]
+        tarball_name = flnm.split('.tar')[0]
+        object.__setattr__(self, 'tarball_name', tarball_name)
+    tarball_fileobjs = {}
+    @staticmethod
+    def tarball_fileobj(path):
+        if path not in TARPath.tarball_fileobjs:
+            TARPath.tarball_fileobjs[path] = tarfile.open(path, 'r')
+        return TARPath.tarball_fileobjs[path]
+    def base_find(self, rpath):
+        rpath = self.join(self.base_path, rpath)
+        # check the cache path for both this rpath and this rpath + tarball name:
+        cpath = self.join(self.cache_path, rpath)
+        if os.path.exists(cpath): return rpath
+        rpalt = self.join(self.tarball_name, rpath)
+        cpalt = self.join(self.cache_path, rpalt)
+        if os.path.exists(cpath): return rpalt
+        # okay, see if they're int he tarfile
+        tfl = TARPath.tarball_fileobj(self.tarball_path)
+        try: found = bool(tfl.getmember(rpath))
+        except Exception: found = False # might be that we need to prepend the tarball-name path
+        if found: return rpath
+        try: found = bool(tfl.getmember(rpalt))
+        except Exception: pass
+        if found: return rpalt
+        # could still have a ./ ...
+        rpath = self.join('.', rpath)
+        rpalt = self.join('.', rpalt)
+        try: found = bool(tfl.getmember(rpath))
+        except Exception: found = False # might be that we need to prepend the tarball-name path
+        if found: return rpath
+        try: found = bool(tfl.getmember(rpalt))
+        except Exception: pass
+        if found: return rpalt
+        else: return None
+    def ensure_path(self, rpath, cpath):
+        # we ignore cpath in this case
+        with tarfile.open(self.tarball_path, 'r') as tfl:
+            tfl.extract(rpath, self.cache_path)
+            return cpath
+
+@pimms.immutable
+class PseudoPath(ObjectWithMetaData):
+    '''
+    The PseudoPath class represents either directories themselves, tarballs, or URLs as if they were
     directories.
     '''
     def __init__(self, source_path, cache_path=None, delete=Ellipsis, credentials=None,
@@ -133,16 +371,16 @@ class PseudoDir(ObjectWithMetaData):
     @pimms.param
     def source_path(sp):
         '''
-        pseudo_dir.source_path is the source path of the the given pseudo-dir object.
+        pseudo_path.source_path is the source path of the the given pseudo-path object.
         '''
-        if sp is None: return os.path.join('/')
+        if sp is None: return os.path.join(os.path.sep)
         if not pimms.is_str(sp): raise ValueError('source_path must be a string/path')
         if is_url(sp) or is_s3_path(sp): return sp
         return os.path.expanduser(os.path.expandvars(sp))
     @pimms.param
     def cache_path(cp):
         '''
-        pseudo_dir.cache_path is the optionally provided cache path; this is the same as the
+        pseudo_path.cache_path is the optionally provided cache path; this is the same as the
         storage path unless this is None.
         '''
         if cp is None: return None
@@ -151,9 +389,9 @@ class PseudoDir(ObjectWithMetaData):
     @pimms.param
     def delete(d):
         '''
-        pseudo_dir.delete is True if the pseudo_dir self-deletes on Python exit and False otherwise;
+        pseudo_path.delete is True if the pseudo_path self-deletes on Python exit and False otherwise;
         if this is Ellipsis, then self-deletes only when the cache-directory is created by the
-        PseudoDir class and is a temporary directory (i.e., not explicitly provided).
+        PseudoPath class and is a temporary directory (i.e., not explicitly provided).
         '''
         if d in (True, False, Ellipsis): return d
         else: raise ValueError('delete must be True, False, or Ellipsis')
@@ -164,179 +402,77 @@ class PseudoDir(ObjectWithMetaData):
         '''
         if c is None: return None
         else: return to_credentials(c)
-    @staticmethod
-    def _url_to_ospath(path):
-        #if os.sep == posixpath.sep: return path
-        path = urlnormpath(path)
-        ps = []
-        while path != '':
-            (path,fl) = posixpath.split(path)
-            ps.append(fl)
-        return os.path.join(*reversed(ps))
-    @staticmethod
-    def _url_exists(urlbase, cache_path, path):
-        cpath = os.path.join(cache_path, PseudoDir._url_to_ospath(path))
-        if os.path.exists(cpath): return True
-        else: return is_url(urljoin(urlbase, path))
-    @staticmethod
-    def _url_getpath(urlbase, cache_path, path):
-        cpath = os.path.join(cache_path, PseudoDir._url_to_ospath(path))
-        if os.path.exists(cpath): return cpath
-        url = urljoin(urlbase, path)
-        return url_download(url, cpath)
-    @staticmethod
-    def _osf_exists(fls, osfbase, cache_path, path):
-        cpath = os.path.join(cache_path, PseudoDir._url_to_ospath(path))
-        if os.path.exists(cpath): return cpath
-        fl = fls
-        for pp in path.split('/'):
-            if   pimms.is_str(fl): return False
-            elif pp in fl:         fl = fl[pp]
-            else:                  return False
-        return True
-    @staticmethod
-    def _osf_getpath(fls, osfbase, cache_path, path):
-        cpath = os.path.join(cache_path, PseudoDir._url_to_ospath(path))
-        if os.path.exists(cpath): return cpath
-        fl = fls
-        for pp in path.split('/'): fl = fl[pp]
-        return url_download(fl, cpath)
-    @staticmethod
-    def _s3_exists(fs, urlbase, cache_path, path):
-        cpath = os.path.join(cache_path, PseudoDir._url_to_ospath(path))
-        if os.path.exists(cpath): return cpath
-        url = urljoin(urlbase, path)
-        return fs.exists(url)
-    @staticmethod
-    def _s3_getpath(fs, urlbase, cache_path, path):
-        cpath = os.path.join(cache_path, PseudoDir._url_to_ospath(path))
-        if os.path.exists(cpath): return cpath
-        url = urljoin(urlbase, path)
-        fs.get(url, cpath)
-        return cpath
-    @staticmethod
-    def _tar_exists(tarpath, cache_path, path):
-        cpath = os.path.join(cache_path, path)
-        if os.path.exists(cpath): return True
-        with tarfile.open(tarpath, 'r') as tfl:
-            try: return bool(tfl.getmember(path))
-            except Exception: return False
-    @staticmethod
-    def _tar_getpath(tarpath, cache_path, path):
-        cpath = os.path.join(cache_path, path)
-        if os.path.exists(cpath): return cpath
-        with tarfile.open(tarpath, 'r') as tfl: tfl.extract(path, cache_path)
-        return cpath
     @pimms.value
     def _path_data(source_path, cache_path, delete, credentials):
         need_cache = True
-        rpr = source_path
+        rpr = None
+        delete = True if delete is Ellipsis else delete
+        cp = {'cp':lambda:(tmpdir(delete=delete) if cache_path is None else cache_path)}
+        cp = pimms.lazy_map(cp)
         # Okay, it might be a directory, an Amazon S3 URL, a different URL, or a tarball
-        if os.path.isdir(source_path):
-            def exists_fn(p):  return os.path.exists(os.path.join(source_path, p))
-            def getpath_fn(p): return os.path.join(source_path, p)
-            rpr = os.path.normpath(source_path)
-            join_fn = os.path.join
-            need_cache = False
-            pathmod = os.path
-        elif is_tuple(source_path):
+        if is_tuple(source_path):
             (el0,pp) = (source_path[0], source_path[1:])
             if s3fs is not None and isinstance(el0, s3fs.S3FileSystem):
                 rpr = 'S3:/' + urljoin(*pp)
-                def ujn(p): return urljoin(*(pp + (p,)))
-                def exists_fn(p):  return PseudoDir._s3_exists(el0,  cache_path, ujn(p))
-                def getpath_fn(p): return PseudoDir._s3_getpath(el0, cache_path, ujn(p))
-                pathmod = posixpath
-            elif isinstance(el0, PseudoDir):
-                pd = el0._path_data
-                # we can use this dir's cache directory
-                need_cache = False
-                if cache_path is None: cache_path = el0.cache_path
-                (pathmod,efn,gfn,rpr) = [pd[k] for k in ('pathmod','exists','getpath','repr')]
-                def exists_fn(p):  return efn(pathmod.join(*(pp + (p,))))
-                def getpath_fn(p): return gfn(pathmod.join(*(pp + (p,))))
-                rpr = pathmod.join(*((rpr,) + pp))
+                base_path = urljoin(*pp)
+                pathmod = S3Path(el0, base_path, cache_path=cp['cp'])
+            elif is_pseudo_path(el0):
+                raise NotImplementedError('pseudo-path nests not yet supported')
+            else: raise ValueError('source_path tuples must start with S3FileSystem or PseudoPath')
+        elif os.path.isfile(source_path) and is_tarball_file(source_path):
+            base_path = ''
+            pathmod = TARPath(source_path, base_path, cache_path=cp['cp'])
+            rpr = os.path.normpath(source_path)
+        elif os.path.exists(source_path):
+            rpr = os.path.normpath(source_path)
+            base_path = source_path
+            pathmod = OSPath(source_path, cache_path=cache_path)
         elif is_s3_path(source_path):
             if s3fs is None: raise ValueError('s3fs module is not installed')
             elif credentials is None: fs = s3fs.S3FileSystem(anon=True)
             else: fs = s3fs.S3FileSystem(key=credentials[0], secret=credentials[1])
-            def exists_fn(p):  return PseudoDir._s3_exists(fs, source_path, cache_path, p)
-            def getpath_fn(p): return PseudoDir._s3_getpath(fs, source_path, cache_path, p)
-            pathmod = posixpath
+            base_path = source_path
+            pathmod = S3Path(fs, base_path, cache_path=cp['cp'])
+            rpr = source_path
         elif is_osf_path(source_path):
-            fs = osf_crawl(source_path)
-            def exists_fn(p):  return PseudoDir._osf_exists(fs, source_path, cache_path, p)
-            def getpath_fn(p): return PseudoDir._osf_getpath(fs, source_path, cache_path, p)
-            pathmod = posixpath
+            base_path = source_path
+            pathmod = OSFPath(base_path, cache_path=cp['cp'])
+            rpr = source_path
         elif is_url(source_path):
-            def exists_fn(pth):  return PseudoDir._url_exists(source_path,  cache_path, pth)
-            def getpath_fn(pth): return PseudoDir._url_getpath(source_path, cache_path, pth)
-            pathmod = posixpath
-        # Check if it's a "<tarball>:path", like subject10.tar.gz:subject10/"
+            base_path = source_path
+            pathmod = URLPath(base_path, cache_path=cp['cp'])
+            rpr = source_path
         elif is_tarball_path(source_path):
-            (tb,ip) = split_tarball_path(source_path)
-            if ip is None:
-                # tarball by itself
-                def exists_fn(p):  return PseudoDir._tar_exists(source_path,  cache_path, p)
-                def getpath_fn(p): return PseudoDir._tar_getpath(source_path, cache_path, p)
-            else:
-                # tarball with internal path
-                def exists_fn(p):  return PseudoDir._tar_exists(tb,  cache_path, os.path.join(ip,p))
-                def getpath_fn(p): return PseudoDir._tar_getpath(tb, cache_path, os.path.join(ip,p))
-            pathmod = os.path
-        # ok, don't know what it is...
+            # must be a a file starting with a tarball:
+            (tbloc, tbinternal) = split_tarball_path(source_path)
+            pathmod = TARPath(tbloc, tbinternal, cache_path=cp['cp'])
+            rpr = os.path.normpath(source_path)
+            base_path = ''
+            # ok, don't know what it is...
         else: raise ValueError('Could not interpret source path: %s' % source_path)
-        cache_path = tmpdir(delete=(True if delete is Ellipsis else delete)) if need_cache else None
-        # one final layer on the exist and getpath functions: we want to automatically interpret
-        # and expand internal tarball files as we go...
-        tarballs = {}
-        def tar_pdir(tb, path):
-            if tb in tarballs: return tarballs[tb]
-            ostb = tb if pathmod.sep == os.sep else PseudoDir._url_to_ospath(tb)
-            pd = PseudoDir(tb, cache_path=os.path.join(cache_path, '.extracted_tarballs', tb),
-                           delete=False, meta_data={'container_path':source_path})
-            tarballs[tb] = pd
-            return pd
-        def exists_tar_fn(p):
-            x = exists_fn(p)
-            if x: return True
-            # see if x has a tarball in it
-            (tb,pth) = split_tarball_path(p)
-            if tb is None or len(path) == 0: return False
-            if pathmod.sep != os.sep: pth = PseudoDir._url_to_ospath(pth)
-            # there is a tarball: we auto-extract it into a new pseudo-dir
-            tb = tar_pdir(tb, pth)
-            return tb._path_data['exists'](pth)
-        def getpath_tar_fn(p):
-            if exists_fn(p): return getpath_fn(p)
-            # see if x has a tarball in it
-            (tb,pth) = split_tarball_path(p)
-            if tb is None or len(path) == 0: return getpath_fn(p)
-            if pathmod.sep != os.sep: pth = PseudoDir._url_to_ospath(pth)
-            # there is a tarball: we auto-extract it into a new pseudo-dir
-            tb = tar_pdir(tb, pth)
-            return tb._path_data['getpath'](pth)
-        return pyr.pmap({'repr':    rpr,
-                         'exists':  exists_tar_fn,
-                         'getpath': getpath_tar_fn,
-                         'cache':   cache_path,
-                         'pathmod': pathmod})
-
+        return pyr.pmap({'repr':      rpr,
+                         'pathmod':   pathmod})
+    @pimms.require
+    def check_path_data(_path_data):
+        '''
+        Ensures that _path_data is created without error.
+        '''
+        return ('pathmod' in _path_data)
     @pimms.value
     def actual_cache_path(_path_data):
         '''
-        pdir.actual_cache_path is the cache path being used by the pseudo-dir pdir; this may differ
+        pdir.actual_cache_path is the cache path being used by the pseudo-path pdir; this may differ
           from the pdir.cache_path if the cache_path provided was None yet a temporary cache path
           was needed.
         '''
         return _path_data['cache']
     def __repr__(self):
         p = self._path_data['repr']
-        return "pseudo_dir('%s')" % p
+        return "pseudo_path('%s')" % p
     def join(self, *args):
         '''
         pdir.join(args...) is equivalent to os.path.join(args...) but always appropriate for the
-          kind of path represented by the pseudo-dir pdir.
+          kind of path represented by the pseudo-path pdir.
         '''
         join = self._path_data['pathmod'].join
         return join(*args)
@@ -346,23 +482,17 @@ class PseudoDir(ObjectWithMetaData):
           relative path if it can be found inside pdir; otherwise None is yielded. Note that this
           does not extract or download the path--it merely ensures that it exists.
         '''
-        data = self._path_data
-        exfn = data['exists']
-        join = data['pathmod'].join
-        path = join(*args)
-        return path if exfn(path) else None
+        pmod = self._path_data['pathmod']
+        return pmod.find(*args)
     def local_path(self, *args):
         '''
         pdir.local_path(paths...) is similar to os.path.join(pdir, paths...) except that it
-          additionally ensures that the path being requested is found in the pseudo-dir pdir then
+          additionally ensures that the path being requested is found in the pseudo-path pdir then
           ensures that this path can be found in a local directory by downloading or extracting it
           if necessary. The local path is yielded.
         '''
-        data = self._path_data
-        gtfn = data['getpath']
-        join = data['pathmod'].join
-        path = join(*args)
-        return gtfn(path)
+        pmod = self._path_data['pathmod']
+        return pmod.getpath(*args)
     def local_cache_path(self, *args):
         '''
         pdir.local_cache_path(paths...) is similar to os.path.join(pdir, paths...) except that it
@@ -370,19 +500,25 @@ class PseudoDir(ObjectWithMetaData):
           local_cache_path function differs from the local_path function in that, if no existing
           file is found at the given destination, no error is raised and the path is still returned.
         '''
-        # if the file exists in the pseudo-dir, just return the local path
+        # if the file exists in the pseudo-path, just return the local path
         if self.find(*args) is not None: return self.local_path(*args)
         cp = self._path_data['cache']
         if cp is None: cp = self.source_path
         return os.path.join(cp, *args)
-def pseudo_dir(source_path, cache_path=None, delete=Ellipsis, credentials=None, meta_data=None):
+def is_pseudo_path(pdir):
     '''
-    pseudo_dir(source_path) yields a pseudo-directory object that represents files in the given
+    is_pseudo_path(pdir) yields True if the given object pdir is a pseudo-path object and False
+      otherwise.
+    '''
+    return isinstance(pdir, PseudoPath)
+def pseudo_path(source_path, cache_path=None, delete=Ellipsis, credentials=None, meta_data=None):
+    '''
+    pseudo_path(source_path) yields a pseudo-pathectory object that represents files in the given
       source path.
 
-    Pseudo-dir objects act as an interface for loading data from abstract sources. The given source
+    pseudo-path objects act as an interface for loading data from abstract sources. The given source
     path may be either a directory, a (possibly zipped) tarball, or a URL. In all cases but the
-    local directory, the pseudo-dir object will quietly extract/download the requested files to a
+    local directory, the pseudo-path object will quietly extract/download the requested files to a
     cache directory as their paths are requested. This is managed through two methods:
       * find(args...) joins the argument list as in os.path.join, then, if the resulting file is
         found in the source_path, this (relative) path-name is returned; otherwise None is returned.
@@ -394,18 +530,30 @@ def pseudo_dir(source_path, cache_path=None, delete=Ellipsis, credentials=None, 
       * cache_path (default: None) specifies the cache directory in which to put any extracted or
         downloaded contents. If None, then a temporary directory is created and used. If the source
         path is a local directory, then the cache path is not needed and is instead ignored. Note
-        that if the cache path is not deleted, it can be reused across sessions--the pseudo-dir will
+        that if the cache path is not deleted, it can be reused across sessions--the pseudo-path will
         always check for files in the cache path before extracting or downloading them.
       * delete (default: Ellipsis) may be set to True or False to declare that the cache directory
         should be deleted at system exit (assuming a normal Python system exit). If Ellipsis, then
-        the cache_path is deleted only if it is created by the pseudo-dir object--given cache paths
+        the cache_path is deleted only if it is created by the pseudo-path object--given cache paths
         are never deleted.
       * credentials (default: None) may be set to a valid set of Amazon S3 credentials for use if
         the source path is an S3 path. The contents are passed through the to_credentials function.
-      * meta_data (default: None) specifies an optional map of meta-data for the pseudo-dir.
+      * meta_data (default: None) specifies an optional map of meta-data for the pseudo-path.
     '''
-    return PseudoDir(source_path, cache_path=cache_path, delete=delete, credentials=credentials,
+    return PseudoPath(source_path, cache_path=cache_path, delete=delete, credentials=credentials,
                      meta_data=meta_data)
+def to_pseudo_path(obj):
+    '''
+    to_pseudo_path(obj) yields a pseudo-path object that has been coerced from the given obj or
+      raises an exception. If the obj is a pseudo-path already, it is returned unchanged.
+    '''
+    if   is_pseudo_path(obj):   return obj
+    elif pimms.is_str(obj):    return pseudo_path(obj)
+    elif pimms.is_vector(obj):
+        if len(obj) > 0 and pimms.is_map(obj[-1]): (obj,kw) = (obj[:-1],obj[-1])
+        else: kw = {}
+        return pseudo_path(*obj, **kw)
+    else: raise ValueError('cannot coerce given object to a pseudo-path: %s' % obj)
     
 @pimms.immutable
 class FileMap(ObjectWithMetaData):
@@ -437,7 +585,7 @@ class FileMap(ObjectWithMetaData):
         elif is_s3_path(p):      return p
         elif is_url(p):          return p
         # could still be a tarball path
-        (tb,p) = split_tarball_path(path)
+        (tb,p) = split_tarball_path(p)
         if   tb is None: return None
         elif p  == '':   return os.path.abspath(tb)
         else:            return os.path.abspath(tb) + ':' + p
@@ -477,8 +625,10 @@ class FileMap(ObjectWithMetaData):
         '''
         filemap.path is the root path of the filemap object. 
         '''
+        p0 = 0
+        if is_pseudo_path(p): return p
         p = FileMap.valid_path(p)
-        if p is None: raise ValueError('Path must be a directory or a tarball')
+        if p is None: raise ValueError('Path must be a directory or a tarball: %s' % p0)
         else: return p
     @pimms.param
     def instructions(inst):
@@ -598,10 +748,18 @@ class FileMap(ObjectWithMetaData):
     def _parsed_instructions(instructions, data_hierarchy):
         return pimms.persist(FileMap.parse_instructions(instructions, data_hierarchy))
     @pimms.value
-    def actual_cache_path(cache_path, cache_delete, path, supplemental_paths):
+    def actual_path(path):
+        '''
+        filemap.actual_path is always a string path (even when filemap.path is a pseudo-path).
+        '''
+        if is_pseudo_path(path): return path.source_path
+        else: return path
+    @pimms.value
+    def actual_cache_path(cache_path, cache_delete, actual_path, supplemental_paths):
         '''
         filemap.actual_cache_path is the cache path used by the filemap, if needed.
         '''
+        path = actual_path
         if cache_path is not None: return cache_path
         if (is_url(path) or is_s3_path(path) or is_tarball_path(path) or
             any(is_url(s) or is_s3_path(s) or is_tarball_path(s)
@@ -620,36 +778,40 @@ class FileMap(ObjectWithMetaData):
         return True
     @staticmethod
     def _load(pdir, flnm, loadfn, *argmaps, **kwargs):
+        inst = pimms.merge(*(argmaps + (kwargs,)))
         try:
             lpth = pdir.local_path(flnm)
             args = pimms.merge(*argmaps, **kwargs)
             loadfn = inst['load'] if 'load' in args else loadfn
-            filtfn = inst['filt'] if 'filt' in args else lambda x,y:x
+            #filtfn = inst['filt'] if 'filt' in args else lambda x,y:x
             dat = loadfn(lpth, args)
-            dat = filtfn(dat, args)
-        except Exception: dat = None
+            #dat = filtfn(dat, args)
+        except Exception:
+            dat = None
+            raise
         # check for miss instructions if needed
-        if dat is None and 'miss' in args:
-            miss = args['miss']
-        elif pimms.is_str(miss) and miss.lower() in ('error','raise','exception'):
+        if dat is None and 'miss' in args: miss = args['miss']
+        else: miss = None
+        if pimms.is_str(miss) and miss.lower() in ('error','raise','exception'):
             raise ValueError('File %s failed to load' % flnm)
         elif miss is not None:
             dat = miss(flnm, args)
         return dat
     @staticmethod
-    def _parse_path(flnm, path, spaths, path_parameters, inst):
+    def _parse_path(flnm, spaths, path_parameters, inst):
         flnm = flnm.format(**pimms.merge(path_parameters, inst))
         p0 = None
         for k in six.iterkeys(spaths):
+            if k is None: continue
             if flnm.startswith(k + ':'):
                 (flnm, p0) = (flnm[(len(k)+1):], k)
                 break
         return (p0, flnm)
     @pimms.value
-    def psuedo_dirs(path, supplemental_paths, actual_cache_path):
+    def pseudo_paths(path, supplemental_paths, actual_cache_path):
         '''
-        fmap.pseudo_dirs is a mapping of pseduo-dirs in the file-map fmap. The primary path's
-        pseudo-dir is mapped to the key None.
+        fmap.pseudo_paths is a mapping of pseduo-dirs in the file-map fmap. The primary path's
+        pseudo-path is mapped to the key None.
         '''
         # we need to make cache paths for some of these...
         spaths = {}
@@ -660,15 +822,16 @@ class FileMap(ObjectWithMetaData):
                 cp = os.path.join(actual_cache_path, 'supp', s)
                 if not os.path.isdir(cp): os.makedirs(os.path.abspath(cp), 0o755)
                 n += 1
-            spaths[s] = pseudo_dir(p, delete=False, cache_path=cp)
+            spaths[s] = pseudo_path(p, delete=False, cache_path=cp)
         if actual_cache_path:
             if n > 0: cp = os.path.join(actual_cache_path, 'main')
             else:     cp = actual_cache_path
             if not os.path.isdir(cp): os.makedirs(os.path.abspath(cp), 0o755)
-        spaths[None] = pseudo_dir(path, delete=False, cache_path=cp)
+        spaths[None] = (path if is_pseudo_path(path) else
+                        pseudo_path(path,delete=False,cache_path=cp))
         return pyr.pmap(spaths)
     @pimms.value
-    def data_files(pseudo_dirs, path_parameters, load_function, meta_data, _parsed_instructions):
+    def data_files(pseudo_paths, path_parameters, load_function, meta_data, _parsed_instructions):
         '''
         filemap.data_files is a lazy map whose keys are filenames and whose values are the loaded
         files.
@@ -676,13 +839,14 @@ class FileMap(ObjectWithMetaData):
         (data_files, data_tree) = _parsed_instructions
         res = {}
         for (flnm, inst) in six.iteritems(data_files):
-            (pathnm, fn) = FileMap._parse_path(flnm, path, pseudo_dirs, path_parameters, inst)
+            (pathnm, fn) = FileMap._parse_path(flnm, pseudo_paths, path_parameters, inst)
             res[fn] = curry(FileMap._load,
-                            pseudo_dirs[pathnm], flnm, load_function,
+                            pseudo_paths[pathnm], flnm, load_function,
                             path_parameters, meta_data, inst)
         return pimms.lazy_map(res)
     @pimms.value
-    def data_tree(_parsed_instructions, path, supplemental_paths, path_parameters, data_files):
+    def data_tree(_parsed_instructions, pseudo_paths, supplemental_paths, path_parameters,
+                  data_files):
         '''
         filemap.data_tree is a lazy data-structure of the data loaded by the filemap's instructions.
         '''
@@ -690,6 +854,10 @@ class FileMap(ObjectWithMetaData):
         def visit_data(d):
             d = {k:visit_maps(v) for (k,v) in six.iteritems(d)}
             return data_struct(d)
+        def lookup(flnm, inst):
+            val = data_files[flnm]
+            filtfn = inst['filt'] if 'filt' in inst else lambda x:x
+            return filtfn(val)
         def visit_maps(m):
             r = {}
             anylazy = False
@@ -698,13 +866,17 @@ class FileMap(ObjectWithMetaData):
                 for k in kk:
                     if len(v) > 0 and '_relpath' in next(six.itervalues(v)):
                         (flnm,inst) = next(six.iteritems(v))
-                        flnm = FileMap._deduce_filename(flnm, path, supplemental_paths,
-                                                        path_parameters, inst)
-                        r[k] = curry(lambda flnm:data_files[flnm], flnm)
+                        flnm = FileMap._parse_path(flnm, pseudo_paths, path_parameters, inst)[1]
+                        r[k] = curry(lookup, flnm, inst)
                         anylazy = True
                     else: r[k] = visit_data(v)
             return pimms.lazy_map(r) if anylazy else pyr.pmap(r)
         return visit_data(data_tree)
+def is_file_map(fmap):
+    '''
+    if_file_map(fmap) yields True if the given object fmap is a file map object and False otherwise.
+    '''
+    return isinstance(fmap, FileMap)
 def file_map(path, instructions, **kw):
     '''
     file_map(path, instructions) yields a file-map object for the given path and instruction-set.
