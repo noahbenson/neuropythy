@@ -707,7 +707,7 @@ def subject(path, name=Ellipsis, meta_data=None, check_path=True, filter=None):
         if name is Ellipsis:
             import re
             (pth,name) = (path, '.')
-            while name == '.': (pth, name) = pdir._path_data['pathmod'].split(pth)[-1]
+            while name == '.': (pth, name) = pdir._path_data['pathmod'].split(pth)
             name = name.split(':')[-1]
             name = pdir._path_data['pathmod'].split(name)[1]
             if '.tar' in name: name = name.split('.tar')[0]
