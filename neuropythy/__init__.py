@@ -6,6 +6,7 @@
 submodules = ('neuropythy.util.conf',
               'neuropythy.util.core',
               'neuropythy.util.filemap',
+              'neuropythy.util.labels',
               'neuropythy.util',
               'neuropythy.java',
               'neuropythy.io.core',
@@ -63,13 +64,15 @@ def reload_neuropythy():
 
 from   .util       import (config, is_image, library_path, to_affine, is_address, address_data,
                            is_curve_spline, to_curve_spline, curve_spline, flattest,
-                           is_list, is_tuple, to_hemi_str, is_dataframe, to_dataframe, auto_dict)
+                           is_list, is_tuple, to_hemi_str, is_dataframe, to_dataframe, auto_dict,
+                           label_index, is_label_index, to_label_index)
+from   .util       import label_indices as labels
 from   .io         import (load, save, to_nifti)
 from   .mri        import (is_subject, is_cortex, to_cortex, to_image)
 from   .vision     import (retinotopy_data, empirical_retinotopy_data, predicted_retinotopy_data,
                            register_retinotopy, retinotopy_anchors, retinotopy_model,
                            neighborhood_cortical_magnification, as_retinotopy, retinotopy_data,
-                           retinotopy_comparison)
+                           retinotopy_comparison, as_retinotopy)
 from   .geometry   import (mesh, tess, topo, map_projection, path_trace, 
                            is_vset, is_mesh, is_tess, is_topo, is_flatmap,
                            is_map_projection, is_path, is_path_trace, close_path_traces,

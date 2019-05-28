@@ -36,6 +36,7 @@ cmap_log_eccentricity = _matplotlib_load_error
 cmap_radius = _matplotlib_load_error
 cmap_log_radius = _matplotlib_load_error
 cmap_log_cmag = _matplotlib_load_error
+label_cmap = _matplotlib_load_error
 
 try:
     import matplotlib, matplotlib.pyplot, matplotlib.tri, matplotlib.colors
@@ -245,6 +246,56 @@ try:
         'log_radius':       (cmap_log_radius,       (np.log(0.25), np.log(40.0))),
         'log_cmag':         (cmap_log_cmag,         (np.log(0.5), np.log(32.0)))}
     for (k,(cmap,_)) in six.iteritems(colormaps): matplotlib.cm.register_cmap(k, cmap)
+
+    def _diff_order(n):
+        u0 = np.arange(n)
+        d = int(np.ceil(np.sqrt(n)))
+        mtx = np.reshape(np.pad(u0, [(0,d*d-n)], 'constant', constant_values=[(0,-1)]), (d,d))
+        h = int((d+1)/2)
+        u = np.vstack([mtx[::2], mtx[1::2]]).T.flatten()
+        return u[u >= 0]
+    def label_cmap(colors, cmap=None, name=Ellipsis):
+        '''
+    label_cmap(n) yields a colormap with n color-steps that should be optimized such that each
+      colors is relatively different from its neighbors on the color spectrum. This is generally
+      well-suited for discrete catgory/label colormaps.
+
+    Note that this function uses a heuristic and is not guaranteed to be optimal in any way for any
+    value of n--but it generally works well enough for most common purposes.
+    
+    The following optional arguments may be given:
+      * cmap (default: None) specifies a colormap to use as a base. If this is None, then a varianct
+        of 'hsv' is used.
+      * name (default: None) specifies a name (string) that will be used for the colormap name; if
+        Ellipsis is given, then ('label%d' % colors) is used.
+    '''
+        if not pimms.is_int(colors):
+            (lbls,ris) = np.unique(colors, return_inverse=True)
+            if lbls[0] == 0:
+                lbls = lbls[1:]
+                cm   = label_cmap(len(lbls), cmap=cmap)
+                mx   = np.max(lbls)
+                clrs = cm(np.linspace(0, 1, len(lbls)))
+                return blend_cmap(name, [(0, [0,0,0,0])] + list(zip(lbls/mx, clrs)))
+        if name is Ellipsis: name = 'label%d' % colors
+        if pimms.is_str(cmap): cmap = getattr(mpl.cm, cmap)
+        # get a diff-ordering
+        u = _diff_order(colors)
+        cm = matplotlib.cm.hsv if cmap is None else cmap
+        clrs = cm(u / float(colors))
+        if cmap is None and len(clrs) > 9:
+            # we use the hsv-like map: equivalent to using hsv then modifying it with a saturation
+            # and value label-cmap; this shouldn't go too low to prevent colors getting washed out
+            d = int(np.ceil(np.sqrt(colors)))
+            uu = _diff_order(d) / float(d-1)
+            uu = (uu + 1) / 2
+            ii = np.where(uu == 1)[0][0]
+            uu = np.roll(uu, -ii, 0)
+            uu = np.asarray([[x]*d for x in uu]).flatten()[:colors]
+            # make sure the highest value comes first
+            clrs[:,:3] *= np.reshape(uu, (-1,1))
+        cm = blend_cmap(name, list(zip(np.linspace(0,1,colors), clrs)))
+        return cm
 except Exception: pass
 
 def to_rgba(val):
@@ -632,6 +683,7 @@ def apply_cmap(zs, cmap, vmin=None, vmax=None):
     apply_cmap(z, cmap) applies the given cmap to the values in z; if vmin and/or vmad are passed,
       they are used to scale z.
     '''
+    zs = np.asarray(zs, dtype='float')
     if vmin is None: vmin = np.min(zs)
     if vmax is None: vmax = np.max(zs)
     if pimms.is_str(cmap): cmap = matplotlib.cm.get_cmap(cmap)

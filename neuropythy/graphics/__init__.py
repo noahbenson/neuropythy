@@ -14,7 +14,7 @@ from .core import (
     cmap_theta_sym, cmap_theta_lh, cmap_theta_rh, cmap_theta,
     cmap_eccentricity, cmap_log_eccentricity,
     cmap_radius, cmap_log_radius,
-    cmap_log_cmag,
+    cmap_log_cmag, label_cmap,
     vertex_curvature_color, vertex_weight,
     vertex_angle, vertex_eccen, vertex_sigma, vertex_varea,
     vertex_angle_color, vertex_eccen_color, vertex_sigma_color, vertex_varea_color,

@@ -17,7 +17,9 @@ from .core     import (ObjectWithMetaData, normalize, denormalize,
                        to_curve_spline, CurveSpline,
                        DataStruct, data_struct, tmpdir, dirpath_to_list)
 from .conf     import (config, to_credentials, detect_credentials, load_credentials)
-from .filemap  import (FileMap, file_map, pseudo_dir, osf_crawl, url_download)
+from .filemap  import (FileMap, file_map, is_file_map, pseudo_path, is_pseudo_path, to_pseudo_path,
+                       osf_crawl, url_download)
+from .labels   import (label_colors, is_label_index, label_index, label_indices, to_label_index)
 
 
 

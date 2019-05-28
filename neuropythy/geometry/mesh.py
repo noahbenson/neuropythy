@@ -1071,7 +1071,8 @@ class Mesh(VertexSet):
         '''
         (d,n) = coordinates.shape
         if tess.vertex_count != n:
-            raise ValueError('mesh coordinate matrix size does not match vertex count')
+            msg = 'mesh coordinate matrix size %d does not match vertex count %d'
+            raise ValueError(msg % (n, tess.vertex_count))
         if d != 2 and d != 3:
             raise ValueError('Only 2D and 3D meshes are supported')
         return True
