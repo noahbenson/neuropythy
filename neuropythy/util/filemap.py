@@ -253,6 +253,8 @@ class URLPath(BasicPath):
         else: return None
     def ensure_path(self, rpath, cpath):
         url = self.join(self.base_path, rpath)
+        cdir = os.path.split(cpath)[0]
+        os.makedirs(cdir, mode=0o755)
         return url_download(url, cpath)
 class OSFPath(BasicPath):
     def __init__(self, base_path, cache_path=None):
@@ -281,6 +283,9 @@ class OSFPath(BasicPath):
         if not pimms.is_str(fl):
             os.makedirs(cpath, mode=0o755)
             return cpath
+        else:
+            cdir = os.path.split(cpath)[0]
+            os.makedirs(cdir, mode=0o755)
         return url_download(fl, cpath)
 class S3Path(BasicPath):
     def __init__(self, fs, base_path, cache_path=None):
@@ -292,6 +297,8 @@ class S3Path(BasicPath):
         else: return None
     def ensure_path(self, rpath, cpath):
         url = self.join(self.base_path, rpath)
+        cdir = os.path.split(cpath)[0]
+        os.makedirs(cdir, mode=0o755)
         self.s3fs.get(url, cpath)
         return cpath
 class TARPath(OSPath):
