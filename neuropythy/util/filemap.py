@@ -254,7 +254,7 @@ class URLPath(BasicPath):
     def ensure_path(self, rpath, cpath):
         url = self.join(self.base_path, rpath)
         cdir = os.path.split(cpath)[0]
-        os.makedirs(cdir, mode=0o755)
+        if not os.path.isdir(cdir): os.makedirs(cdir, mode=0o755)
         return url_download(url, cpath)
 class OSFPath(BasicPath):
     def __init__(self, base_path, cache_path=None):
@@ -281,11 +281,11 @@ class OSFPath(BasicPath):
     def ensure_path(self, rpath, cpath):
         fl = self._find_url(rpath)
         if not pimms.is_str(fl):
-            os.makedirs(cpath, mode=0o755)
+            if not os.path.isdir(cpath): os.makedirs(cpath, mode=0o755)
             return cpath
         else:
             cdir = os.path.split(cpath)[0]
-            os.makedirs(cdir, mode=0o755)
+            if not os.path.isdir(cdir): os.makedirs(cdir, mode=0o755)
         return url_download(fl, cpath)
 class S3Path(BasicPath):
     def __init__(self, fs, base_path, cache_path=None):
@@ -298,7 +298,7 @@ class S3Path(BasicPath):
     def ensure_path(self, rpath, cpath):
         url = self.join(self.base_path, rpath)
         cdir = os.path.split(cpath)[0]
-        os.makedirs(cdir, mode=0o755)
+        if not os.path.isdir(cdir): os.makedirs(cdir, mode=0o755)
         self.s3fs.get(url, cpath)
         return cpath
 class TARPath(OSPath):
@@ -316,7 +316,7 @@ class TARPath(OSPath):
                 td = tmpdir(delete=True)
                 tmpfl = os.path.join(td,tarfl)
                 shutil.move(cache_path, tmpfl)
-                os.makedirs(cpath, mode=0o775)
+                if not os.path.isdir(cpath): os.makedirs(cpath, mode=0o755)
                 shutil.move(tmpfl, tarpath)
             object.__setattr__(self, 'tarball_path', tarpath)
             object.__setattr__(self, 'cache_path', cpath)
@@ -396,9 +396,9 @@ class PseudoPath(ObjectWithMetaData):
     @pimms.param
     def delete(d):
         '''
-        pseudo_path.delete is True if the pseudo_path self-deletes on Python exit and False otherwise;
-        if this is Ellipsis, then self-deletes only when the cache-directory is created by the
-        PseudoPath class and is a temporary directory (i.e., not explicitly provided).
+        pseudo_path.delete is True if the pseudo_path self-deletes on Python exit and False
+        otherwise; if this is Ellipsis, then self-deletes only when the cache-directory is created
+        by the PseudoPath class and is a temporary directory (i.e., not explicitly provided).
         '''
         if d in (True, False, Ellipsis): return d
         else: raise ValueError('delete must be True, False, or Ellipsis')
@@ -786,6 +786,7 @@ class FileMap(ObjectWithMetaData):
     @staticmethod
     def _load(pdir, flnm, loadfn, *argmaps, **kwargs):
         inst = pimms.merge(*(argmaps + (kwargs,)))
+        flnm = flnm.format(**inst)
         try:
             lpth = pdir.local_path(flnm)
             args = pimms.merge(*argmaps, **kwargs)
@@ -863,8 +864,8 @@ class FileMap(ObjectWithMetaData):
             return data_struct(d)
         def lookup(flnm, inst):
             val = data_files[flnm]
-            filtfn = inst['filt'] if 'filt' in inst else lambda x:x
-            return filtfn(val)
+            if 'filt' in inst: val = inst['filt'](val)
+            return val
         def visit_maps(m):
             r = {}
             anylazy = False

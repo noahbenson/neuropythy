@@ -2173,18 +2173,22 @@ def subject_filemap(sid, subject_path=None):
     return pyr.pmap({'images': imgs, 'hemis': hems})
 
 def _hcp_adapt_fsinstructions(instr):
+    import copy
+    instr = copy.copy(instr)
     if pimms.is_list(instr):
         res = []
         for (fnm,desc) in zip(instr[0::2], instr[1::2]):
             desc = _hcp_adapt_fsinstructions(desc)
-            if   len(desc) == 0: continue
+            desc = (desc,) if pimms.is_map(desc) else desc
+            if len(desc) == 0: continue
             res.append(fnm)
             res.append(desc[0] if len(desc) == 1 else desc)
         return res
     elif pimms.is_map(instr):
         if   'image'     in instr: instr['image'] = 'freesurfer_' + instr['image']
         elif 'raw_image' in instr: instr['raw_image'] = 'freesurfer_' + instr['raw_image']
-        elif 'hemi'      in instr:
+        elif 'surface'   in instr: instr['surface'] = 'freesurfer_' + instr['surface']
+        if   'hemi'      in instr:
             h = instr['hemi']
             if h.endswith('x'): return ()
             instr['hemi'] = h + '_native_MSMAll'
@@ -2194,7 +2198,7 @@ def _hcp_adapt_fsinstructions(instr):
         return instr
     elif pimms.is_tuple(instr):
         tup = [_hcp_adapt_fsinstructions(u) for u in instr]
-        tup = tuple([v for u in tup for v in u if pimms.is_tuple(u) else [u]])
+        tup = tuple([v for u in tup for v in (u if pimms.is_tuple(u) else [u])])
         return tup
     else: raise ValueError('Unrecognized instruction type: %s [%s]' % (type(instr), instr))
         
@@ -2263,45 +2267,86 @@ hcp_filemap_instructions = [
                 {'surface':'very_inflated', 'hemi':'rh_native_MSMAll'})],
         'fsaverage_LR32k', [
             '{id}.L.inflated.32k_fs_LR.surf.gii',             {'surface':'inflated',
-                                                               'hemi':'lh_lowres_MSMSulc'},
+                                                               'hemi':'lh_nat32k_MSMSulc'},
             '{id}.L.midthickness.32k_fs_LR.surf.gii',         {'surface':'midgray',
-                                                               'hemi':'lh_lowres_MSMSulc'},
+                                                               'hemi':'lh_nat32k_MSMSulc'},
             '{id}.L.pial.32k_fs_LR.surf.gii',                 {'surface':'pial',
-                                                               'hemi':'lh_lowres_MSMSulc'},
+                                                               'hemi':'lh_nat32k_MSMSulc'},
             '{id}.L.very_inflated.32k_fs_LR.surf.gii',        {'surface':'very_inflated',
-                                                               'hemi':'lh_lowres_MSMSulc'},
+                                                               'hemi':'lh_nat32k_MSMSulc'},
             '{id}.L.white.32k_fs_LR.surf.gii',                {'surface':'white',
-                                                               'hemi':'lh_lowres_MSMSulc'},
+                                                               'hemi':'lh_nat32k_MSMSulc'},
             '{id}.R.inflated.32k_fs_LR.surf.gii',             {'surface':'inflated',
-                                                               'hemi':'rh_lowres_MSMSulc'},
+                                                               'hemi':'rh_nat32k_MSMSulc'},
             '{id}.R.midthickness.32k_fs_LR.surf.gii',         {'surface':'midgray',
-                                                               'hemi':'rh_lowres_MSMSulc'},
+                                                               'hemi':'rh_nat32k_MSMSulc'},
             '{id}.R.pial.32k_fs_LR.surf.gii',                 {'surface':'pial',
-                                                               'hemi':'rh_lowres_MSMSulc'},
+                                                               'hemi':'rh_nat32k_MSMSulc'},
             '{id}.R.very_inflated.32k_fs_LR.surf.gii',        {'surface':'very_inflated',
-                                                               'hemi':'rh_lowres_MSMSulc'},
+                                                               'hemi':'rh_nat32k_MSMSulc'},
             '{id}.R.white.32k_fs_LR.surf.gii',                {'surface':'white',
-                                                               'hemi':'rh_lowres_MSMSulc'},
+                                                               'hemi':'rh_nat32k_MSMSulc'},
             '{id}.L.inflated_MSMAll.32k_fs_LR.surf.gii',      {'surface':'inflated',
-                                                               'hemi':'lh_lowres_MSMAll'},
+                                                               'hemi':'lh_nat32k_MSMAll'},
             '{id}.L.midthickness_MSMAll.32k_fs_LR.surf.gii',  {'surface':'midgray',
-                                                               'hemi':'lh_lowres_MSMAll'},
+                                                               'hemi':'lh_nat32k_MSMAll'},
             '{id}.L.pial_MSMAll.32k_fs_LR.surf.gii',          {'surface':'pial',
-                                                               'hemi':'lh_lowres_MSMAll'},
+                                                               'hemi':'lh_nat32k_MSMAll'},
             '{id}.L.very_inflated_MSMAll.32k_fs_LR.surf.gii', {'surface':'very_inflated',
-                                                               'hemi':'lh_lowres_MSMAll'},
+                                                               'hemi':'lh_nat32k_MSMAll'},
             '{id}.L.white_MSMAll.32k_fs_LR.surf.gii',         {'surface':'white',
-                                                               'hemi':'lh_lowres_MSMAll'},
+                                                               'hemi':'lh_nat32k_MSMAll'},
             '{id}.R.inflated_MSMAll.32k_fs_LR.surf.gii',      {'surface':'inflated',
-                                                               'hemi':'rh_lowres_MSMAll'},
+                                                               'hemi':'rh_nat32k_MSMAll'},
             '{id}.R.midthickness_MSMAll.32k_fs_LR.surf.gii',  {'surface':'midgray',
-                                                               'hemi':'rh_lowres_MSMAll'},
+                                                               'hemi':'rh_nat32k_MSMAll'},
             '{id}.R.pial_MSMAll.32k_fs_LR.surf.gii',          {'surface':'pial',
-                                                               'hemi':'rh_lowres_MSMAll'},
+                                                               'hemi':'rh_nat32k_MSMAll'},
             '{id}.R.very_inflated_MSMAll.32k_fs_LR.surf.gii', {'surface':'very_inflated',
-                                                               'hemi':'rh_lowres_MSMAll'},
+                                                               'hemi':'rh_nat32k_MSMAll'},
             '{id}.R.white_MSMAll.32k_fs_LR.surf.gii',         {'surface':'white',
-                                                               'hemi':'rh_lowres_MSMAll'}]],
+                                                               'hemi':'rh_nat32k_MSMAll'}],
+        'fsaverage_LR59k', [
+            '{id}.L.inflated.59k_fs_LR.surf.gii',                   {'surface':'inflated',
+                                                                     'hemi':'lh_nat59k_MSMSulc'},
+            '{id}.L.midthickness.59k_fs_LR.surf.gii',               {'surface':'midgray',
+                                                                     'hemi':'lh_nat59k_MSMSulc'},
+            '{id}.L.pial.59k_fs_LR.surf.gii',                       {'surface':'pial',
+                                                                     'hemi':'lh_nat59k_MSMSulc'},
+            '{id}.L.very_inflated.59k_fs_LR.surf.gii',              {'surface':'very_inflated',
+                                                                     'hemi':'lh_nat59k_MSMSulc'},
+            '{id}.L.white.59k_fs_LR.surf.gii',                      {'surface':'white',
+                                                                     'hemi':'lh_nat59k_MSMSulc'},
+            '{id}.R.inflated.59k_fs_LR.surf.gii',                   {'surface':'inflated',
+                                                                     'hemi':'rh_nat59k_MSMSulc'},
+            '{id}.R.midthickness.59k_fs_LR.surf.gii',               {'surface':'midgray',
+                                                                     'hemi':'rh_nat59k_MSMSulc'},
+            '{id}.R.pial.59k_fs_LR.surf.gii',                       {'surface':'pial',
+                                                                     'hemi':'rh_nat59k_MSMSulc'},
+            '{id}.R.very_inflated.59k_fs_LR.surf.gii',              {'surface':'very_inflated',
+                                                                     'hemi':'rh_nat59k_MSMSulc'},
+            '{id}.R.white.59k_fs_LR.surf.gii',                      {'surface':'white',
+                                                                     'hemi':'rh_nat59k_MSMSulc'},
+            '{id}.L.inflated_1.6mm_MSMAll.59k_fs_LR.surf.gii',      {'surface':'inflated',
+                                                                     'hemi':'lh_nat59k_MSMAll'},
+            '{id}.L.midthickness_1.6mm_MSMAll.59k_fs_LR.surf.gii',  {'surface':'midgray',
+                                                                     'hemi':'lh_nat59k_MSMAll'},
+            '{id}.L.pial_1.6mm_MSMAll.59k_fs_LR.surf.gii',          {'surface':'pial',
+                                                                     'hemi':'lh_nat59k_MSMAll'},
+            '{id}.L.very_inflated_1.6mm_MSMAll.59k_fs_LR.surf.gii', {'surface':'very_inflated',
+                                                                     'hemi':'lh_nat59k_MSMAll'},
+            '{id}.L.white_1.6mm_MSMAll.59k_fs_LR.surf.gii',         {'surface':'white',
+                                                                     'hemi':'lh_nat59k_MSMAll'},
+            '{id}.R.inflated_1.6mm_MSMAll.59k_fs_LR.surf.gii',      {'surface':'inflated',
+                                                                     'hemi':'rh_nat59k_MSMAll'},
+            '{id}.R.midthickness_1.6mm_MSMAll.59k_fs_LR.surf.gii',  {'surface':'midgray',
+                                                                     'hemi':'rh_nat59k_MSMAll'},
+            '{id}.R.pial_1.6mm_MSMAll.59k_fs_LR.surf.gii',          {'surface':'pial',
+                                                                     'hemi':'rh_nat59k_MSMAll'},
+            '{id}.R.very_inflated_1.6mm_MSMAll.59k_fs_LR.surf.gii', {'surface':'very_inflated',
+                                                                     'hemi':'rh_nat59k_MSMAll'},
+            '{id}.R.white_1.6mm_MSMAll.59k_fs_LR.surf.gii',         {'surface':'white',
+                                                                     'hemi':'rh_nat59k_MSMAll'}]],
     'MNINonLinear', [
         'BiasField.nii.gz',         {'image':'bias_warped'},
         'T1w_restore.nii.gz',       {'image':'T1_warped'},
