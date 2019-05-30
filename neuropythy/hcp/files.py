@@ -2172,9 +2172,7 @@ def subject_filemap(sid, subject_path=None):
                 hems = hems.set(h, hdat.set('properties', prop))
     return pyr.pmap({'images': imgs, 'hemis': hems})
 
-#TODO #here
-hcp_adapted_freesurfer_subject_filemap_instructions = []
-def _hcp_adapt_fsinstructions(instr, into=None):
+def _hcp_adapt_fsinstructions(instr):
     if pimms.is_list(instr):
         res = []
         for (fnm,desc) in zip(instr[0::2], instr[1::2]):
@@ -2192,13 +2190,20 @@ def _hcp_adapt_fsinstructions(instr, into=None):
             instr['hemi'] = h + '_native_MSMAll'
             instr = (instr, copy.copy(instr))
             instr[1]['hemi'] = h + '_native_MSMSulc'
-            return instr
+        # others: label/annot/property -- these can stay the same
+        return instr
+    elif pimms.is_tuple(instr):
+        tup = [_hcp_adapt_fsinstructions(u) for u in instr]
+        tup = tuple([v for u in tup for v in u if pimms.is_tuple(u) else [u]])
+        return tup
+    else: raise ValueError('Unrecognized instruction type: %s [%s]' % (type(instr), instr))
         
-        
+hcp_adapted_freesurfer_subject_filemap_instructions = []
 for (dname,contents) in zip(freesurfer_subject_filemap_instructions[0::2],
                             freesurfer_subject_filemap_instructions[1::2]):
     if dname == 'xhemi': continue
-    #TODO #here
+    hcp_adapted_freesurfer_subject_filemap_instructions.append(dname)
+    hcp_adapted_freesurfer_subject_filemap_instructions.append(_hcp_adapt_fsinstructions(contents))
 
 hcp_filemap_data_hierarchy = [['image'], ['raw_image'], ['flatmap'],
                               ['hemi', 'surface'], ['hemi', 'tess'],
@@ -2224,75 +2229,7 @@ hcp_filemap_instructions = [
         'brainmask_fs.nii.gz',              {'image':'masked_brain'},
         'ribbon.nii.gz',                    {'image':'ribbon'},
         'wmparc.nii.gz',                    {'image':'white_parcellation'},
-        '{id}', [
-            'mri', [
-                'rawavg.mgz',              ({'raw_image':'freesurfer_rawavg'}, {'image':'raw'}),
-                'orig.mgz',                ({'raw_image':'freesurfer_orig'},
-                                            {'image':'original'}),
-                'orig_nu.mgz',             ({'raw_image':'freesurfer_orig_nu'},
-                                            {'image':'conformed'}),
-                'nu.mgz',                  ({'raw_image':'freesurfer_nu'}, {'image':'uniform'}),
-                'T1.mgz',                  ({'raw_image':'freesurfer_T1'},
-                                            {'image':'intensity_normalized'}),    
-                'brainmask.auto.mgz',      ({'raw_image':'freesurfer_brainmask.auto'},
-                                            {'image':'auto_masked_brain'}),       
-                'brainmask.mgz',           {'raw_image':'freesurfer_brainmask'},
-                'norm.mgz',                ({'raw_image':'freesurfer_norm'},
-                                            {'image':'normalized'}),
-                'aseg.auto_noCCseg.mgz',   {'raw_image':'freesurfer_aseg.auto_noCCseg'},
-                'aseg.auto.mgz',           ({'raw_image':'freesurfer_aseg.auto'},
-                                            {'image':'auto_segmentation'}),
-                'aseg.presurf.hypos.mgz',  {'raw_image':'freesurfer_aseg.presurf.hypos'},
-                'aseg.presurf.mgz',        ({'raw_image':'freesurfer_aseg.presurf'},
-                                            {'image':'presurface_segmentation'}),
-                'brain.mgz',               {'raw_image':'freesurfer_brain'},
-                'brain.finalsurfs.mgz',    {'raw_image':'freesurfer_brain.finalsurfs'},
-                'wm.seg.mgz',              {'raw_image':'freesurfer_wm.seg'},
-                'wm.asegedit.mgz',         {'raw_image':'freesurfer_wm.asegedit'},
-                'wm.mgz',                  ({'raw_image':'freesurfer_wm'},
-                                            {'image':'white_matter'}),
-                'filled.mgz',              {'raw_image':'freesurfer_filled'},
-                'T2.mgz',                  {'raw_image':'freesurfer_T2'},
-                'ribbon.mgz',              {'raw_image':'freesurfer_ribbon'},
-                'ctrl_pts.mgz',            {'raw_image':'freesurfer_ctrl_pts'},
-                'lh.ribbon.mgz',           ({'raw_image':'freesurfer_lh.ribbon'},
-                                            {'image':'lh_ribbon'}),               
-                'rh.ribbon.mgz',           ({'raw_image':'freesurfer_rh.ribbon'},
-                                            {'image':'rh_ribbon'}),               
-                'wmparc.mgz',              {'raw_image':'freesurfer_mparc'},
-                'aseg.mgz',                ({'raw_image':'freesurfer_aseg'},
-                                            {'image':'segmentation'})],
-            'surf', [
-                'lh.area', (
-                    {'property':'white_surface_area',
-                     'hemi':'lh_native_MSMSulc', 'load':_load_fsmorph},
-                    {'property':'white_surface_area',
-                     'hemi':'lh_native_MSMAll',  'load':_load_fsmorph}),
-                'lh.area.mid', (
-                    {'property':'midgray_surface_area',
-                     'hemi':'lh_native_MSMSulc', 'load':_load_fsmorph},
-                    {'property':'midgray_surface_area',
-                     'hemi':'lh_native_MSMAll',  'load':_load_fsmorph}),
-                'lh.area.pial', (
-                    {'property':'pial_surface_area',
-                     'hemi':'lh_native_MSMSulc', 'load':_load_fsmorph},
-                    {'property':'pial_surface_area',
-                     'hemi':'lh_native_MSMAll',  'load':_load_fsmorph}),
-                'rh.area', (
-                    {'property':'white_surface_area',
-                     'hemi':'rh_native_MSMSulc', 'load':_load_fsmorph},
-                    {'property':'white_surface_area',
-                     'hemi':'rh_native_MSMAll',  'load':_load_fsmorph}),
-                'rh.area.mid', (
-                    {'property':'midgray_surface_area',
-                     'hemi':'rh_native_MSMSulc', 'load':_load_fsmorph},
-                    {'property':'midgray_surface_area',
-                     'hemi':'rh_native_MSMAll',  'load':_load_fsmorph}),
-                'rh.area.pial', (
-                    {'property':'pial_surface_area',
-                     'hemi':'rh_native_MSMSulc', 'load':_load_fsmorph},
-                    {'property':'pial_surface_area',
-                     'hemi':'rh_native_MSMAll',  'load':_load_fsmorph})]],
+        '{id}', hcp_adapted_freesurfer_subject_filemap_instructions,
         'Native', [
             '{id}.L.white.native.surf.gii', (
                 {'surface':'white', 'hemi':'lh_native_MSMSulc'},
