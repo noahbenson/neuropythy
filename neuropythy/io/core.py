@@ -479,5 +479,52 @@ def save_nifti(filename, obj, like=None, header=None, affine=None, extensions=El
     obj.to_filename(filename)
     return filename
 
+@importer('string', ('txt','text'))
+def load_string(filename, to=None):
+    '''
+    load_string(filename) loads the given file as a string. The optional argument to can be set to
+      'lines' to load a list of lines or to 'bytes' to load the data as a byte-string.
+    '''
+    if to is None: to = 'string'
+    to = to.lower()
+    if to in ['string', 'str', 'text', 'txt', 't', 's']:
+        with open(filename, 'r') as fl:
+            return fl.read()
+    elif to in ['binary', 'bytes', 'b', 'raw']:
+        with open(filename, 'rb') as fl:
+            return fl.read()
+    elif to in ['lines', 'l']:
+        with open(filename, 'r') as fl:
+            return fl.read().splitlines()
+@exporter('string', ('txt','text'))
+def save_string(filename, s):
+    '''
+    save_string(filename, s) saves the given string to the given file as text. The argument s may
+      be a list of strings (lines). If s is neither a list of strings nor a string, it is cast to
+      a string using str(s).
+    '''
+    if pimms.is_vector(s, 'str'):
+        with open(filename, 'w') as fl:
+            for l in s: fl.write(s + '\n')
+        return filename
+    elif not pimms.is_str(s): s = str(s)
+    with open(filename, 'w') as fl:
+        fl.write(s)
+    return filename
+@importer('bytes', ('bin', 'bytes'))
+def load_bytes(filename):
+    '''
+    load_bytes(filename) loads the given file as a byte-string.
+    '''
+    with open(filename, 'rb') as fl:
+        return fl.read()
+@exporter('bytes', ('bin','bytes'))
+def save_bytes(filename, s):
+    '''
+    save_bytes(filename, s) saves the given byte-string s to the given file as raw bytes. The
+      argument s must be either bytes or a bytearray.
+    '''
+    with open(filename, 'wb') as fl: fl.write(s)
+    return filename
 
-
+    

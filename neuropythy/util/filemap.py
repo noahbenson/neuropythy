@@ -216,7 +216,7 @@ class BasicPath(object):
         # otherwise, we have no tarball on the path and just need to return ourselves as we are:
         return (self, rpath)
     def find(self, *path_parts):
-        yes = self.join(self.base_path, *path_parts)
+        yes = self.join(*path_parts)
         (pp, rpath) = self._check_tarball(*path_parts)
         # if that gave us back a different path object, we defer to it:
         if pp is not self: return yes if pp.find(rpath) is not None else None
@@ -232,12 +232,16 @@ class BasicPath(object):
         (pp, rpath) = self._check_tarball(*path_parts)
         # if that gave us back a different path object, we defer to it:
         if pp is not self: return pp.getpath(rpath)
-        fpath = self.join(self.base_path, rpath)
         # check the cache path first
         rp = pp.find(rpath)
+        fpath = self.join(self.base_path, rpath)
         if rp is None: raise ValueError('getpath: path not found: %s' % fpath)
         if self.cache_path is not None:
             cpath = self.osjoin(self.cache_path, self.to_ospath(rp))
+            if len(rp) == 0:
+                # we point to a file and are caching it locally...
+                flnm = self.split(fpath)[-1]
+                cpath = os.path.join(cpath, flnm)
             if os.path.exists(cpath): return cpath
             return self.ensure_path(rp, cpath)
         else: return self.ensure_path(rp, None)
