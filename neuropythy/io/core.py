@@ -34,12 +34,12 @@ def guess_import_format(filename, **kwargs):
     (_,filename) = os.path.split(filename)
     if '.' in filename:
         fnm = filename.lower()
-        fmt = next((k for (k,(_,es,_)) in six.iteritems(importers)
+        fmt = next((k for (k,(_,es,_,_)) in six.iteritems(importers)
                     if any(fnm.endswith('.' + e) for e in es)),
                    None)
         if fmt: return fmt
     # that didn't work; let's check the sniffers
-    for (k,(_,_,sniff)) in six.iteritems(importers):
+    for (k,(_,_,sniff,_)) in six.iteritems(importers):
         try:
             if sniff(filename, **kwargs): return k
         except Exception: pass
@@ -69,18 +69,19 @@ def load(filename, format=None, **kwargs):
         format = guess_import_format(filename, **kwargs)
         if format is None:
             # try formats and see if one works!
-            for (k,(f,_,_)) in six.iteritems(importers):
+            for (k,(f,_,_,md)) in six.iteritems(importers):
+                if not bool(md.get('auto', True)): continue
                 try:              return f(filename, **kwargs)
                 except Exception: pass
             raise ValueError('Could not deduce format of file %s' % filename)
     format = format.lower()
     if format not in importers:
         raise ValueError('Format \'%s\' not recognized by neuropythy' % format)
-    (f,_,_) = importers[format]
+    (f,_,_,_) = importers[format]
     obj = f(filename, **kwargs)
     if isinstance(obj, ObjectWithMetaData): return obj.with_meta(source_filename=filename)
     else: return obj
-def importer(name, extensions=None, sniff=None):
+def importer(name, extensions=None, sniff=None, auto=True):
     '''
     @importer(name) is a decorator that declares that the following function is an file loading
       function that should be registered with the neuropythy load function. See also the
@@ -96,6 +97,9 @@ def importer(name, extensions=None, sniff=None):
       * sniff (default: None) may optionally be a function f(s) that yields True when the given
         string s is a filename for a file of this type. If no sniff is given, this type can still
         be detected by running the importer and catching any raised exception.
+      * auto (default: True) may optionally be set to false to specify that the importer should not
+        be auto-guessed--i.e., either the sniff must yield true or the format must be explicitly
+        specified for the importer to be invoked; it will never be invoked by trial and error.
     '''
     name = name.lower()
     if name in importers:
@@ -105,7 +109,7 @@ def importer(name, extensions=None, sniff=None):
     else:                          extensions = tuple(extensions)
     def _importer(f):
         global importers
-        importers = importers.set(name, (f, extensions, sniff))
+        importers = importers.set(name, (f, extensions, sniff, pyr.m(auto=auto)))
         setattr(load, name, f)
         return f
     return _importer
@@ -479,7 +483,7 @@ def save_nifti(filename, obj, like=None, header=None, affine=None, extensions=El
     obj.to_filename(filename)
     return filename
 
-@importer('string', ('txt','text'))
+@importer('string', ('txt','text'), auto=False)
 def load_string(filename, to=None):
     '''
     load_string(filename) loads the given file as a string. The optional argument to can be set to
@@ -511,7 +515,7 @@ def save_string(filename, s):
     with open(filename, 'w') as fl:
         fl.write(s)
     return filename
-@importer('bytes', ('bin', 'bytes'))
+@importer('bytes', ('bin', 'bytes'), auto=False)
 def load_bytes(filename):
     '''
     load_bytes(filename) loads the given file as a byte-string.
