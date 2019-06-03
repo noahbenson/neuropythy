@@ -776,13 +776,14 @@ class Cortex(geo.Topology):
         idcs = indices
         if is_image(data):
             arr = np.asarray(data.get_data())
-            if idcs is None: idcs = np.isfinte(arr) & arr.astype(np.bool)
+            if idcs is None:
+                tmp = np.sum(arr, 3) if len(arr.shape) == 4 else arr
+                idcs = np.isfinite(tmp) & tmp.astype(np.bool)
             if pimms.is_array(idcs, None, 3): idcs = np.where(idcs)
             aff = data.affine
             idcs = np.asarray(idcs)
             if idcs.shape[0] != 3: idcs = idcs.T
-            if native_to_vertex_matrix is not None:
-                aff = np.dot(native_to_vertex_matrix, aff)
+            if native_to_vertex_matrix is not None: aff = np.dot(native_to_vertex_matrix, aff)
             xyz = np.dot(
                 aff,
                 np.concatenate((idcs, np.ones(1 if len(idcs.shape) == 1 else (1, idcs.shape[1])))))
