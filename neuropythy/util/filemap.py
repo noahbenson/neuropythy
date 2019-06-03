@@ -97,11 +97,18 @@ def _osf_tree(proj, path=None, base='osfstorage'):
     else:            path = (osf_basepath % (proj, base)) + path.lstrip('/')
     dat = json.loads(url_download(path, None))
     if 'data' not in dat: raise ValueError('Cannot detect kind of url for ' + path)
-    dat = dat['data']
-    if pimms.is_map(dat): return dat['links']['download']
-    res = {r['name']:(u['links']['download'] if r['kind'] == 'file' else
-                      curry(lambda r: _osf_tree(proj, r, base), r['path']))
-           for u in dat for r in [u['attributes']]}
+    res = {}
+    if pimms.is_map(dat['data']): return dat['data']['links']['download']
+    while dat is not None:
+        links = dat.get('links', {})
+        dat = dat['data']
+        for u in dat:
+            for r in [u['attributes']]:
+                res[r['name']] = (u['links']['download'] if r['kind'] == 'file' else
+                                  curry(lambda r: _osf_tree(proj, r, base), r['path']))
+        nxt = links.get('next', None)
+        if nxt is not None: dat = json.loads(url_download(nxt, None))
+        else: dat = None
     return pimms.lazy_map(res)
 def osf_crawl(k, *pths, **kw):
     '''
