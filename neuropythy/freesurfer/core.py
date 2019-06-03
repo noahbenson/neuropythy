@@ -219,13 +219,12 @@ def _load_geo(flnm,u):
     x.setflags(write=False)
     t.setflags(write=False)
     return (x,t)    
-freesurfer_subject_data_hierarchy = [['image'], ['raw_image'],
-                                     ['hemi', 'surface'], ['hemi', 'tess'],
-                                     ['hemi', 'registration'],
-                                     ['hemi', 'property'],
-                                     ['hemi', 'label'], ['hemi', 'alt_label'],
-                                     ['hemi', 'weight'], ['hemi', 'alt_weight'],
-                                     ['hemi', 'annot'], ['hemi', 'alt_annot']]
+freesurfer_subject_data_hierarchy = [['image'],                ['raw_image'],
+                                     ['hemi', 'surface'],      ['hemi', 'tess'],
+                                     ['hemi', 'registration'], ['hemi', 'property'],
+                                     ['hemi', 'label'],        ['hemi', 'alt_label'],
+                                     ['hemi', 'weight'],       ['hemi', 'alt_weight'],
+                                     ['hemi', 'annot'],        ['hemi', 'alt_annot']]
 freesurfer_subject_filemap_instructions = [
     'mri', [
         'rawavg.mgz',              ({'raw_image':'rawavg'},
