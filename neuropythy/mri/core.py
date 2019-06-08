@@ -15,8 +15,10 @@ import os, sys, types, six, pimms
 
 from itertools import chain
 
-from ..util import (ObjectWithMetaData, to_affine, is_image, is_address, is_tuple, address_data,
-                    curry, to_hemi_str, is_pseudo_path, pseudo_path, to_pseudo_path)
+from ..util import (ObjectWithMetaData, to_affine, is_image, is_address, is_tuple,
+                    address_data, curry, to_hemi_str, is_pseudo_path, pseudo_path, to_pseudo_path,
+                    curry)
+from .images import (to_image, to_image_spec)
 
 @pimms.immutable
 class Subject(ObjectWithMetaData):
@@ -185,7 +187,7 @@ class Subject(ObjectWithMetaData):
         sub.lh_gray_indices is equivalent to numpy.where(sub.lh_gray_mask).
         '''
         if lh_gray_mask is None: return None
-        if is_image(lh_gray_mask): lh_gray_mask = lh_gray_mask.get_data()
+        if is_image(lh_gray_mask): lh_gray_mask = lh_gray_mask.dataobj
         return tuple([pimms.imm_array(x) for x in np.where(lh_gray_mask)])
     @pimms.value
     def rh_gray_indices(rh_gray_mask):
@@ -193,7 +195,7 @@ class Subject(ObjectWithMetaData):
         sub.rh_gray_indices is equivalent to numpy.where(sub.rh_gray_mask).
         '''
         if rh_gray_mask is None: return None
-        if is_image(rh_gray_mask): rh_gray_mask = rh_gray_mask.get_data()
+        if is_image(rh_gray_mask): rh_gray_mask = rh_gray_mask.dataobj
         return tuple([pimms.imm_array(x) for x in np.where(rh_gray_mask)])
     @pimms.value
     def gray_indices(lh_gray_indices, rh_gray_indices):
@@ -214,7 +216,7 @@ class Subject(ObjectWithMetaData):
         subject's lh, represented as 3-tuples.
         '''
         if lh_white_mask is None: return None
-        if is_image(lh_white_mask): lh_white_mask = lh_white_mask.get_data()
+        if is_image(lh_white_mask): lh_white_mask = lh_white_mask.dataobj
         idcs = np.transpose(np.where(lh_white_mask))
         return frozenset([tuple(row) for row in idcs])
     @pimms.value
@@ -224,7 +226,7 @@ class Subject(ObjectWithMetaData):
         subject's rh, represented as 3-tuples.
         '''
         if rh_white_mask is None: return None
-        if is_image(rh_white_mask): rh_white_mask = rh_white_mask.get_data()
+        if is_image(rh_white_mask): rh_white_mask = rh_white_mask.dataobj
         idcs = np.transpose(np.where(rh_white_mask))
         return frozenset([tuple(row) for row in idcs])
     @pimms.value
@@ -252,7 +254,7 @@ class Subject(ObjectWithMetaData):
             key = next(images.iterkeys(), None)
         img = images[key]
         if img is None: return None
-        if is_image(img): img = img.get_data()
+        if is_image(img): img = img.dataobj
         return np.asarray(img).shape
 
     @pimms.value
@@ -758,14 +760,83 @@ class Cortex(geo.Topology):
         mesh = geo.to_mesh((self, surface))
         return mesh.from_image(image, affine=affine, method=method, fill=fill, dtype=dtype,
                                native_to_vertex_matrix=native_to_vertex_matrix, weights=weights)
-    def address(self, data, indices=None, native_to_vertex_matrix=None):
+    def to_image(self, prop, image_spec=None):
+        '''
+        cortex.to_image(property) yields a 3D image of the given property.
+        cortex.to_image(property, imspec) uses the given image-specification to construct the image.
+        '''
+        raise NotImplementedError('Cortex.to_image')
+    def address_image(self, img, native_to_vertex_matrix=None):
+        '''
+        cortex.address_image(img) is like cortex.address() but works on images; note that
+          cortex.address(img) will call cortex.address_image(img) when img is an image.
+        '''
+        dat = to_image_spec(img)
+        aff = dat['affine']
+        imsh = np.reshape(dat['image_shape'], (3,1))
+        if native_to_vertex_matrix is not None: aff = np.dot(native_to_vertex_matrix, aff)
+        aff = np.linalg.inv(aff)
+        # transform coordinates into voxel-space:
+        (wx,px) = (self.white_surface.coordinates, self.pial_surface.coordinates)
+        (wx,px) = [np.dot(aff, np.vstack([x, np.ones([1,x.shape[1]])]))[:3] for x in (wx,px)]
+        # now we find the addresses... start by getting the face coords:
+        fs = self.tess.indexed_faces
+        (wfx,pfx) = [np.transpose(x[:,fs], (1,0,2)) for x in (wx,px)]
+        # okay, make a bounding box for each prism in the cortex:
+        x = np.vstack([wfx,pfx])
+        (mn,mx) = [f(x, axis=0) for f in (np.min,np.max)]
+        mn[mn < 0] = 0
+        for (ii,n) in enumerate(imsh): mx[ii,mx[ii] >= n] = n - 1
+        # number of voxels in each bounding box:
+        (mn, mx) = (np.ceil(mn), np.floor(mx))
+        dims = mx - mn + 1
+        nvox = np.prod(dims, axis=0).astype('int')
+        ii = (nvox <= 0)
+        ii = np.where(~ii)[0]
+        # now we build up a big list of voxel indices and prisms to test against each other:
+        i1 = np.cumsum(nvox[ii])
+        i0 = np.concatenate([[0], i1[:-1]])
+        n  = int(i1[-1])
+        idcs = np.zeros((3,n), dtype=np.int)
+        wfxs = np.zeros((3,3,n), dtype=np.float)
+        pfxs = np.zeros((3,3,n), dtype=np.float)
+        iis  = np.zeros(n, dtype=np.int)
+        # we step along from i0 to i1 forgetting finished prisms along the way
+        (kk, q, mm, nvox, dims) = (ii, 0, mn[:,ii], nvox[ii], dims[:,ii])
+        mn = np.array(mm)
+        while len(kk) > 0:
+            wfxs[:,:,i0] = wfx[:,:,kk]
+            pfxs[:,:,i0] = pfx[:,:,kk]
+            iis[i0] = kk
+            # fun algorithm to iterate the ijk:
+            x = mm[0] + 1 - mn[0]
+            (mm[0],r) = (np.mod(x, dims[0]) + mn[0], x // dims[0])
+            x = mm[1] + r - mn[1]
+            (mm[1],r) = (np.mod(x, dims[1]) + mn[1], x // dims[1])
+            mm[2] += r
+            idcs[:,i0] = mm
+            # next iteration:
+            q += 1
+            ki = nvox > q
+            kk = kk[ki]
+            mm = mm[:,ki]
+            mn = mn[:,ki]
+            nvox = nvox[ki]
+            dims = dims[:,ki]
+            i0 = i0[ki]
+            i0 += 1
+        # now test them all:
+        bcs = geo.prism_barycentric_coordinates(wfxs, pfxs, idcs)
+        ok = ~np.isclose(np.sum(bcs, axis=0), 0)
+        idcs = idcs[:,ok]
+        bcs = bcs[:,ok]
+        (ii,kk) = np.unique(iis[ok], return_index=True)
+        return {'coordinates':bcs[:,kk], 'faces':self.tess.faces[:,ii], 'voxel_indices':idcs[:,kk]}
+    def address(self, data, native_to_vertex_matrix=None):
         '''
         cortex.address(points) yields the barycentric coordinates of the given point or points; the
           return value is a dict whose keys are 'face_id' and 'coordinates'. The address may be used
           to interpolate or unaddress either from a surface mesh or from a cortex.
-        cortex.address(image, idcs) yields the addresses of the voxels with the given indices in the
-          given image. The indices should either be a boolean mask image the same size as data or be
-          identical in format to the return value value of numpy.where().
         cortex.address(image) is equivalent to cortex.address(image, mask) where mask is equivalent
           to (numpy.isfinite(image) & image.astype(numpy.bool)).
 
@@ -773,22 +844,9 @@ class Cortex(geo.Topology):
         provide an affine-transformation from the image's native coordinate system to the cortex's
         vertex coordinate system.
         '''
-        idcs = indices
         if is_image(data):
-            arr = np.asarray(data.get_data())
-            if idcs is None:
-                tmp = np.sum(arr, 3) if len(arr.shape) == 4 else arr
-                idcs = np.isfinite(tmp) & tmp.astype(np.bool)
-            if pimms.is_array(idcs, None, 3): idcs = np.where(idcs)
-            aff = data.affine
-            idcs = np.asarray(idcs)
-            if idcs.shape[0] != 3: idcs = idcs.T
-            if native_to_vertex_matrix is not None: aff = np.dot(native_to_vertex_matrix, aff)
-            xyz = np.dot(
-                aff,
-                np.concatenate((idcs, np.ones(1 if len(idcs.shape) == 1 else (1, idcs.shape[1])))))
-            return self.address(xyz[:3])
-        else: data = np.asarray(data) # data must be a point matrix then
+            return self.address_image(data, native_to_vertex_matrix=native_to_vertex_matrix)
+        data = np.asarray(data) # data must be a point matrix then
         if len(data.shape) > 2: raise ValueError('point or point matrix required')
         if len(data.shape) == 2: xyz = data.T if data.shape[0] == 3 else data
         else:                    xyz = np.asarray([data])
@@ -805,6 +863,10 @@ class Cortex(geo.Topology):
         try:              shash = spspace.cKDTree(face_centers.T)
         except Exception: shash = spspace.KDTree(face_centers.T)
         (whsh, phsh) = [s.face_hash for s in (wsrf, psrf)]
+        # we can define a max distance for when something is too far from a point to plausibly be
+        # in a prism:
+        wpdist = np.sqrt(np.sum((wsrf.coordinates - psrf.coordinates)**2, axis=0))
+        max_dist = np.max(np.concatenate([wsrf.edge_lengths, psrf.edge_lengths, wpdist]))
         # Okay, for each voxel (xyz), we want to find the closest face centers; from those
         # centers, we find the ones for which the nearest point in the plane of the face to the
         # voxel lies inside the face, and of those we find the closest; this nearest point is
@@ -813,27 +875,39 @@ class Cortex(geo.Topology):
         # go ahead and make the results
         res_fs = np.full((3, n),     -1, dtype=np.int)
         res_xs = np.full((3, n), np.nan, dtype=np.float)
+        # points tha lie outside the pial surface entirely we can eliminate off the bat:
+        ii = [(mn <= ix) & (ix <= mx)
+              for (px,ix) in zip(psrf.coordinates, xyz.T)
+              for (mn,mx) in [(np.min(px), np.max(px))]]
+        ii = np.where(ii[0] & ii[1] & ii[2])[0]
         # Okay, we look for those isect's within the triangles
-        ii = np.asarray(range(n)) # the subset not yet matched
         idcs = []
         for i in range(N):
             if len(ii) == 0: break
             if i >= sofar:
                 sofar = max(4, 2*sofar)
-                idcs = shash.query(xyz[ii], sofar)[1].T
-            # we look at just the i'th column of the indices
-            col = fids[idcs[i]]
+                (ds,idcs) = shash.query(xyz[ii], sofar)
+            # if dist is greater than max distance, we can skip those
+            oks = np.where(ds[:,i] <= max_dist)[0]
+            if len(oks) == 0: break
+            elif len(oks) < len(ii):
+                ii = ii[oks]
+                idcs = idcs[oks]
+                ds = ds[oks]
+            col = fids[idcs[:,i]]
             bcs = geo.prism_barycentric_coordinates(fwcoords[:,:,col], fpcoords[:,:,col], xyz[ii].T)
             # figure out which ones were discovered to be in this prism
-            outp   = np.isclose(np.sum(bcs, axis=0), 0)
-            inp    = np.logical_not(outp)
-            ii_inp = ii[inp]
-            # for those in their prisms, we capture the face id's and coordinates
-            res_fs[:, ii_inp] = faces[:, col[inp]]
-            res_xs[:, ii_inp] = bcs[:, inp]
-            # trim down those that matched so we don't keep looking for them
-            ii = ii[outp]
-            idcs = idcs[:,outp]
+            outp = np.isclose(np.sum(bcs, axis=0), 0)
+            if not np.all(outp):
+                inp    = np.logical_not(outp)
+                ii_inp = ii[inp]
+                # for those in their prisms, we capture the face id's and coordinates
+                res_fs[:, ii_inp] = faces[:, col[inp]]
+                res_xs[:, ii_inp] = bcs[:, inp]
+                # trim down those that matched so we don't keep looking for them
+                ii = ii[outp]
+                idcs = idcs[outp]
+                ds = ds[outp]
             # And continue!
         # and return the data
         return {'faces': res_fs, 'coordinates': res_xs}

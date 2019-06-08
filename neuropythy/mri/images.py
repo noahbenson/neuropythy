@@ -86,8 +86,8 @@ class ImageType(object):
         # then reshape to a valid (4D) shape
         sh = arr.shape
         if   len(sh) == 2: arr = np.reshape(arr, (sh[0], 1, 1, sh[1]))
-        elif len(sh) == 1: arr = np.reshape(arr, (sh[0], 1, 1, 1))
-        elif len(sh) == 3: arr = np.reshape(arr, sh + (1,))
+        elif len(sh) == 1: arr = np.reshape(arr, (sh[0], 1, 1))
+        elif len(sh) == 3: arr = np.reshape(arr, sh)
         elif len(sh) != 4: raise ValueError('Cannot convert n-dimensional array to image if n > 4')
         # and return
         return arr
@@ -477,62 +477,207 @@ def to_image_type(image_type):
         try:    return image_types_by_header_type[x]
         except Exception: pass
     raise ValueError('Unsupported image type: %s' % image_type)
-def to_image_meta_data(img):
+def is_image_spec(imspec):
     '''
-    to_image_meta_data(img) yields a dictionary of meta-data for the given nibabel image object img.
-    to_image_meta_data(hdr) yields the equivalent meta-data for the given nibabel image header.
+    is_image_spec(imspec) yields True if imspec is a map with the keys 'affine' and 'image_shape',
+      otherwise yields False.
+    '''
+    return  pimms.is_map(imspec) and 'affine' in imspec and 'image_shape' in imspec
+def to_image_spec(img):
+    '''
+    to_image_spec(img) yields a dictionary of meta-data for the given nibabel image object img.
+    to_image_spec(hdr) yields the equivalent meta-data for the given nibabel image header.
 
     Note that obj may also be a mapping object, in which case it is returned verbatim.
     '''
-    if pimms.is_map(img): return img
-    try: hdr = img.header
-    except Exception: hdr = img
-    intype = to_image_type(hdr)
-    return intype.meta_data(hdr)
-def to_image(img, image_type=None, meta_data=None, **kwargs):
+    if is_image_spec(img): return img
+    elif not is_image_header(img):
+        img = to_image(img)
+        img = img.header
+    intype = to_image_type(img)
+    return intype.meta_data(img)
+def to_image(img, image_type=None, spec=None, **kwargs):
     '''
-    to_image(array) yields a Nifti1Image of the given array with default meta-data.
+    to_image(array) yields a Nifti1Image of the given array with default meta-data spec.
     to_image(array, image_type) yields an image object of the given type; image_type may either be
       an image class or a class name (see supported types below).
-    to_image((array, meta_data)) uses the given mapping of meta-data to fill in the image's
-      meta-data; note that meta_data may simply be an affine transformation matrix.
-    to_image((array, affine, meta_data)) uses the given affine specifically (the given affine
-      overrides any affine included in the meta_data).
+    to_image((array, spec)) uses the given mapping of meta-data (spec) to construct the image-spec
+      note that spec may simply be an affine transformation matrix or may be an image.
+    to_image((array, affine, spec)) uses the given affine specifically (the given affine
+      overrides any affine included in the spec meta-data).
 
-    Note that the array may optionally be an image itself, in which case its meta-data is used as a
-    starting point for the new meta-data. Any meta-data passed as a tuple overwrites this meta-data,
-    and any meta-data passed as an optional argument overwrites this meta-data in turn.
+    Note that the array may optionally be an image itself, in which case its spec is used as a
+    starting point for the new spec. Any spec-data passed as a tuple overwrites this spec-data,
+    and any spec-data passed as an optional argument overwrites this spec-data in turn.
 
     The first optional argument, specifying image_type is as an image type if possible, but if a
-    meta-data mapping is passed as the first argument it is used as such; otherwise, the optional
-    third argument is named meta_data, and any additional keyword arguments passed to to_image are
-    merged into this meta_data object left-to-right (i.e., keyword arguments overwrite the meta_data
-    keys).
+    spec-data mapping or equivalent (e.g., an image header or affine) is passed as the first
+    argument it is used as such; otherwise, the optional third argument is named spec, and any
+    additional keyword arguments passed to to_image are merged into this spec object left-to-right
+    (i.e., keyword arguments overwrite the spec keys).
+
+    If no affine is given and the image object given is an array then a FreeSurfer-like transform
+    that places the origin at the center of the image and applies a 
     '''
+    # make sure we return unchanged if no change requested
+    if is_image(img) and image_type is None and spec is None and len(kwargs) == 0: return img
     # quick cleanup of args:
-    if not pimms.is_map(meta_data): meta_data = to_image_meta_data(meta_data)
-    meta_data = pimms.merge({} if meta_data is None else meta_data, kwargs)
-    if image_type is None: image_type = 'nifti1'
-    # deduce image type
-    image_type = to_image_type(image_type)
+    # we have a variety of things that go into spec; in order (where later overwrites earlier):
+    # (1) img spec, (2) image_type map (if not an image type) (3) spec, (4) kw args
+    # see if image_type is actually an image type (might be a spec/image)...
+    if pimms.is_str(image_type) or isinstance(image_type, type):
+        (image_type, s2) = (to_image_type(image_type), {})
+    else: 
+        (image_type, s2) = (None, {} if image_type is None else to_image_spec(image_type))
+    s3 = {} if spec is None else to_image_spec(spec)
+    if image_type is None: image_type = image_types_by_name['nifti1']
     # okay, next, parse the image argument itself:
     if is_tuple(img):
-        if   len(img) == 1: (img,aff,mdat) = (img[0], None, None)
-        elif len(img) == 2: (img,aff,mdat) = (img[0], None, img[1])
-        elif len(img) == 3: (img,aff,mdat) = img
+        if   len(img) == 1: (img,aff,s1) = (img[0], None, {})
+        elif len(img) == 2: (img,aff,s1) = (img[0], None, img[1])
+        elif len(img) == 3: (img,aff,s1) = img
         else: raise ValueError('cannot parse more than 3 elements from image tuple')
-    else: (aff,mdat) = (None,None)
-    # see if the img argument is an image object
-    try: (img,aff0,mdat0) = (img.dataobj, img.affine, to_image_meta_data(img))
-    except Exception: (aff0,mdat0) = (None, {})
-    # check that the affine wasn't given as the meta-data (e.g. (img,aff) instead of (img,mdat))
-    if aff is None and mdat is not None:
-        try:    (aff, mdat) = (to_affine(mdat, 3), {})
-        except Exception: pass
-    # parse the meta-data that has been given
-    mdat = dict(pimms.merge(mdat0, {} if mdat is None else mdat, meta_data))
-    # if there is an explicit affine, we put it into mdat now
-    if aff is not None: mdat['affine'] = to_affine(aff, 3)
-    if aff0 is not None and 'affine' not in mdat: mdat['affine'] = to_affine(aff0, 3)
+        # check that the affine wasn't given as the meta-data (e.g. (img,aff) instead of (img,mdat))
+        if aff is None and s1 is not None:
+            try:    (aff, s1) = (to_affine(s1, 3), {})
+            except Exception: pass
+    elif is_image(img): (aff,s1) = (None, to_image_spec(img))
+    else: (aff,s1) = (None, {})
+    try: s0 = to_image_spec(img)
+    except Exception: s0 = {}
+    spec = pimms.merge(s0, s1, s2, s3, kwargs)
+    if aff is not None: spec = pimms.assoc(spec, affine=to_affine(aff, 3))
+    # okay, if img is just an array and there is no affine specified, then we want to make an affine
+    # that centers the origin in the middle of the array
+    if pimms.is_array(img, None, 3) and 'affine' not in spec:
+        img  = np.asarray(img)
+        ijk0 = np.asarray(img.shape) * 0.5
+        aff  = to_affine(([[-1,0,0],[0,0,-1],[0,1,0]], ijk0), 3)
+        spec = pimms.assoc(spec, affine=aff)
     # okay, we create the image now:
-    return image_type.create(img, meta_data=mdat)
+    return image_type.create(img, meta_data=spec)
+def image_interpolate(img, points, affine=None, method=None, fill=0, dtype=None, weights=None):
+    '''
+    image_interpolate(img, points) yields the result of interpolating the given points in the given
+      image.
+
+    Generally, the provided image (img) would be a nibabel image object, in which case, an affine
+    transformation is included; if img is just an array, the affine transform is assumed to a
+    FreeSurfer-like transform that places the origin at the center of the array; see to_image().
+
+    The following options may be used:
+      * affine (default: None) may specify the affine transform that aligns the vertex coordinates
+        with the image (vertex-to-voxel transform). If image is an MGHImage or a Nifti1Image or
+        similar, then the affine transform included in the header will be used by default if None is
+        given; this parameter overwrites whatever parameter is included in the image, however.
+      * method (default: None) may specify either 'linear' or 'nearest'; if None, then the
+        interpolation is linear when the image data is real and nearest otherwise.
+      * fill (default: 0) values filled in when a vertex falls outside of the image.
+      * native_to_vertex_matrix (default: None) may optionally give a final transformation that
+        converts from native subject orientation encoded in images to vertex positions.
+      * weights (default: None) may optionally provide an image whose voxels are weights to use
+        during the interpolation; these weights are in addition to trilinear weights and are
+        ignored in the case of nearest interpolation unless a voxel's weight is 0. The weights,
+        whether an array or an image-object, but have the same shape as the input img--any affine
+        is ignored.
+      * native_to_vertex_matrix (default: None) specifies a matrix that aligns the surface
+        coordinates with their subject's 'native' orientation; None is equivalnet to the
+        identity matrix.
+    '''
+    points = np.asarray(points)
+    if len(points.shape) == 1:
+        return image_interpolate(img, np.reshape(points,[3,1]), affine=affine, method=method,
+                                 fill=fill, dtype=dtype, weights=weights)[0]
+    if points.shape[0] != 3: points = points.T
+    if pimms.is_str(img): image = load(img)
+    img = to_image(img) if affine is None else to_image(img, affine=affine)
+    image = img.dataobj
+    imspec = to_image_spec(img)
+    # we'll use the inverse affine on the points
+    affine = np.linalg.inv(imspec['affine'])
+    if method is not None: method = method.lower()
+    if method is None or method in ['auto', 'automatic']:
+        method = 'linear' if np.issubdtype(image.dtype, np.inexact) else 'nearest'
+    if dtype is None: dtype = image.dtype
+    # figure out the weights...
+    if weights is not None: 
+        if pimms.is_str(weights): weights = load(weights).dataobj
+        elif is_image(weights): weights = weights.dataobj
+        else: weights = np.asanyarray(weights)
+        if not np.array_equal(weights.shape, image.shape[:3]):
+            raise ValueError('weights and image must have the same shape')
+    # okay, these are actually pretty simple; first transform the coordinates
+    xyz = np.dot(affine, np.vstack([points, np.ones([1,points.shape[1]])]))[:3]
+    # remember: this might be a 4d or higher-dim image...
+    res = np.full((xyz.shape[1],) + image.shape[3:], fill, dtype=dtype)
+    # now find the nearest voxel centers...
+    # if we are doing nearest neighbor; we're basically done already:
+    image = np.asarray(image)
+    imsh = np.reshape(image.shape, (3,1))
+    if method == 'nearest':
+        ijk = np.asarray(np.round(xyz), dtype=np.int)
+        ok = np.all(ijk >= 0, axis=0) & np.all(ijk < imsh, axis=0)
+        if weights is not None:
+            ww = weights[tuple(ijk[:,ok])]
+            ok[ok] &= ~np.isclose(ww, 0)
+        res[ok] = image[tuple(ijk[:,ok])]
+        return res
+    # otherwise, we do linear interpolation; start by finding the 8 neighboring voxels
+    mins = np.floor(xyz)
+    maxs = np.ceil(xyz)
+    ok = np.all(mins >= 0, axis=0) & np.all(maxs < imsh, axis=0)
+    (mins,maxs,xyz) = [x[:,ok] for x in (mins,maxs,xyz)]
+    voxs = np.asarray([mins,
+                       [mins[0], mins[1], maxs[2]],
+                       [mins[0], maxs[1], mins[2]],
+                       [mins[0], maxs[1], maxs[2]],
+                       [maxs[0], mins[1], mins[2]],
+                       [maxs[0], mins[1], maxs[2]],                           
+                       [maxs[0], maxs[1], mins[2]],
+                       maxs],
+                      dtype=np.int)
+    vals = np.asarray([image[tuple(row)] for row in voxs])
+    # trilinear weights
+    wgts = np.asarray([np.prod(1 - np.abs(xyz - row), axis=0) for row in voxs])
+    # weight-image weights
+    if weights is not None: wgts = wgts * np.asarray([weights[tuple(row)] for row in voxs])
+    winv = zinv(np.sum(wgts, axis=0))
+    wgts *= winv
+    ok2 = ~np.isclose(winv, 0)
+    ok[ok] &= ok2
+    res[ok] = np.sum(wgts * vals, axis=0)[ok2]
+    return res
+def image_apply(image, affine, post=True):
+    '''
+    image_apply(im, aff) applies the given affine transform to to_image(im) and yields an equivalent
+      image with the new transform in place of the old one.
+
+    The optional third argument post (default: True) may be set to False to specify that the affine
+    in the returned image should be dot(im.affine, aff) instead of dot(aff, im.affine).
+    '''
+    im = to_image(image)
+    af = to_affine(affine, 3)
+    af = np.dot(aff, im.affine) if post else np.dot(im.affine, aff)
+    return to_image(image, affine=affine)
+def image_reslice(image, spec, method=None, fill=0, dtype=None, weights=None, image_type=None):
+    '''
+    image_reslice(image, spec) yields a duplicate of the given image resliced to have the voxels
+      indicated by the given image spec. Note that spec may be an image itself.
+
+    Optional arguments that can be passed to image_interpolate() (asside from affine) are allowed
+    here and are passed through.
+    '''
+    if image_type is None and is_image(image): image_type = to_image_type(image)
+    spec = to_image_spec(spec)
+    image = to_image(image)
+    # we make a big mesh and interpolate at these points...
+    imsh = spec['image_shape']
+    (args, kw) = ([np.arange(n) for n in imsh[:3]], {'indexing': 'ij'})
+    ijk = np.asarray([u.flatten() for u in np.meshgrid(*args, **kw)])
+    ijk = np.dot(spec['affine'], np.vstack([ijk, np.ones([1,ijk.shape[1]])]))[:3]
+    # interpolate here...
+    u = image_interpolate(image, ijk, method=method, fill=fill, dtype=dtype, weights=weights)
+    return to_image((np.reshape(u, imsh), spec), image_type=image_type)
+
+    
+    
