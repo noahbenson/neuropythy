@@ -839,7 +839,7 @@ class Tesselation(VertexSet):
         md = self.meta_data
         if meta_data is not None: md = pimms.merge(md, meta_data)
         return Mesh(self, coords, meta_data=md, properties=properties)
-    def subtess(self, vertices, tag=None):
+    def subtess(self, vertices, tag=None, expand=False):
         '''
         tess.subtess(vertices) yields a sub-tesselation of the given tesselation object that only
           contains the given vertices, which may be specified as a boolean vector or as a list of
@@ -851,14 +851,12 @@ class Tesselation(VertexSet):
         '''
         vertices = np.asarray(vertices)
         if len(vertices) != self.vertex_count or \
-           not np.array_equal(vertices, np.asarray(vertices, np.bool)):
-            tmp = self.index(vertices)
-            vertices = np.zeros(self.vertex_count, dtype=np.bool)
-            vertices[tmp] = 1
-        vidcs = self.indices[vertices]
+           not np.array_equal(vertices, vertices.astype('bool')):
+            vidcs = self.index(vertices)
+        else: vidcs = self.indices[vertices]
         if len(vidcs) == self.vertex_count: return self
-        fsum = np.sum([vertices[f] for f in self.indexed_faces], axis=0)
-        fids = np.where(fsum == 3)[0]
+        fsum = np.sum(vertices[self.indexed_faces], axis=0)
+        fids = np.where(fsum > (0 if expand else 2))[0]
         faces = self.faces[:,fids]
         vidcs = self.index(np.unique(faces))
         props = self._properties
@@ -961,7 +959,7 @@ class Mesh(VertexSet):
           the given mesh; d is the number of dimensions that define the vertex positions in the mesh
           and p is the number of edges in the mesh.
         '''
-        return pimms.imm_array([coordinates[:,e] for e in tess.indexed_edges])
+        return pimms.imm_array(np.transpose(coordinates[:, tess.indexed_edges], (1,0,2)))
     @pimms.value
     def face_coordinates(tess, coordinates):
         '''
@@ -969,7 +967,7 @@ class Mesh(VertexSet):
           the given mesh; d is the number of dimensions that define the vertex positions in the mesh
           and m is the number of triange faces in the mesh.
         '''
-        return pimms.imm_array([coordinates[:,f] for f in tess.indexed_faces])
+        return pimms.imm_array(np.transpose(coordinates[:, tess.indexed_faces], (1,0,2)))
     @pimms.value
     def edge_centers(edge_coordinates):
         '''
@@ -1695,73 +1693,15 @@ class Mesh(VertexSet):
             coordinates with their subject's 'native' orientation; None is equivalnet to the
             identity matrix.
         '''
-        if native_to_vertex_matrix is None:
-            native_to_vertex_matrix = np.eye(4)
-        native_to_vertex_matrix = to_affine(native_to_vertex_matrix)
-        if pimms.is_str(image): image = load(image)
-        if is_image(image):
-            # we want to apply the image's affine transform by default
-            if affine is None: affine = image.affine
-            image = image.get_data()
-        image = np.asarray(image)
-        if affine is None:
-            # wild guess: the inverse of FreeSurfer tkr_vox2ras matrix without alignment to native
-            from neuropythy.freesurfer import tkr_vox2ras
-            affine = np.dot(np.linalg.inv(native_to_vertex_matrix),
-                            tkr_vox2ras(image.shape[0:3], (1.0, 1.0, 1.0)))
-            ijk0 = np.asarray(image.shape) * 0.5
-            affine = to_affine(([[-1,0,0],[0,0,-1],[0,1,0]], ijk0), 3)
-        else: affine = to_affine(affine, 3)
-        affine = np.dot(native_to_vertex_matrix, affine)
-        affine = npla.inv(affine)
-        if method is not None: method = method.lower()
-        if method is None or method in ['auto', 'automatic']:
-            method = 'linear' if np.issubdtype(image.dtype, np.inexact) else 'nearest'
-        if dtype is None: dtype = image.dtype
-        # okay, these are actually pretty simple; first transform the coordinates
-        xyz = affine.dot(np.vstack((self.coordinates, np.ones(self.vertex_count))))[0:3]
-        # remember: this might be a 4d or higher-dim image...
-        res = np.full((self.vertex_count,) + image.shape[3:], fill, dtype=dtype)
-        # now find the nearest voxel centers...
-        # if we are doing nearest neighbor; we're basically done already:
-        if method == 'nearest':
-            ijk = np.asarray(np.round(xyz), dtype=np.int)
-            ok = np.all((ijk >= 0) & [ii < sh for (ii,sh) in zip(ijk, image.shape)], axis=0)
-            res[ok] = image[tuple(ijk[:,ok])]
-            return res
-        # otherwise, we do linear interpolation; start by parsing the weights if given
-        if weights is None: weights = np.ones(image.shape)
-        elif pimms.is_str(weights): weights = load(weights).get_data()
-        elif is_image(weights): weights = weights.get_data()
-        else: weights = np.asarray(weights)
-        # find the 8 neighboring voxels
-        mins = np.floor(xyz)
-        maxs = np.ceil(xyz)
-        ok = np.all((mins >= 0) & [ii < sh for (ii,sh) in zip(maxs, image.shape[0:3])], axis=0)
-        (mins,maxs,xyz) = [x[:,ok] for x in (mins,maxs,xyz)]
-        voxs = np.asarray([mins,
-                           [mins[0], mins[1], maxs[2]],
-                           [mins[0], maxs[1], mins[2]],
-                           [mins[0], maxs[1], maxs[2]],
-                           [maxs[0], mins[1], mins[2]],
-                           [maxs[0], mins[1], maxs[2]],                           
-                           [maxs[0], maxs[1], mins[2]],
-                           maxs],
-                          dtype=np.int)
-        # trilinear weights
-        wgts_tri = np.asarray([np.prod(1 - np.abs(xyz - row), axis=0) for row in voxs])
-        # weight-image weights
-        wgts_wgt = np.asarray([weights[tuple(row)] for row in voxs])
-        # note that there might be a 4D image here
-        if len(wgts_wgt.shape) > len(wgts_tri.shape):
-            for _ in range(len(wgts_wgt.shape) - len(wgts_tri.shape)):
-                wgts_tri = np.expand_dims(wgts_tri, -1)
-        wgts = wgts_tri * wgts_wgt
-        wgts *= zinv(np.sum(wgts, axis=0))
-        vals = np.asarray([image[tuple(row)] for row in voxs])
-        res[ok] = np.sum(wgts * vals, axis=0)
-        return res
-    
+        from neuropythy.mri import image_interpolate
+        xyz = self.coordinates
+        if native_to_vertex_matrix is not None:
+            native_to_vertex_matrix = to_affine(native_to_vertex_matrix, 3)
+            # apply the inverse of this matrix to our vertices then run through image_interpolate
+            mtx = np.linalg.inv(native_to_vertex_matrix)
+            xyz = np.dot(mtx, np.vstack([xyz, np.ones([1,xyz.shape[1]])]))[:3]
+        return image_interpolate(image, affine=affine, method=method,
+                                 fill=fill, dtype=dtype, weights=weights)
     # smooth a field on the cortical surface
     def smooth(self, prop, smoothness=0.5, weights=None, weight_min=None, weight_transform=None,
                outliers=None, data_range=None, mask=None, valid_range=None, null=np.nan,

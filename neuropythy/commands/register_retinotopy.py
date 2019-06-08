@@ -243,13 +243,13 @@ _retinotopy_parser = pimms.argv_parser(_retinotopy_parser_instructions)
 
 def _guess_surf_file(fl):
     # MGH/MGZ files
-    try: return fsmgh.load(fl).get_data().flatten()
+    try: return fsmgh.load(fl).dataobj.flatten()
     except Exception: pass
     # FreeSurfer Curv files
     try: return fsio.read_morph_data(fl)
     except Exception: pass
     # Nifti files
-    try: return np.squeeze(nib.load(fl).get_data())
+    try: return np.squeeze(nib.load(fl).dataobj)
     except Exception: raise ValueError('Could not determine filetype for: %s' % fl)
 def _guess_vol_file(fl):
     # MGH/MGZ files

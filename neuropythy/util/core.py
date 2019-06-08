@@ -442,7 +442,7 @@ def is_image_header(x):
     is_image_header(x) yields True if x is a nibabel.spatialimages.SpatialHeader object and False
       otherwise.
     '''
-    return isinstance(x, nib.spatialimages.SpatialHeader)
+    return isinstance(x, (nib.spatialimages.SpatialHeader, nib.wrapstruct.LabeledWrapStruct))
 
 def is_address(data):
     '''

@@ -186,7 +186,7 @@ def find_subject_path(sub, check_path=True):
 def _load_imm_mgh(pdir, flnm):
     flnm = pdir.local_path(flnm)
     img = fsmgh.load(flnm)
-    img.get_data().setflags(write=False)
+    img.dataobj.setflags(write=False)
     return img
 
 ####################################################################################################
@@ -621,11 +621,11 @@ def images_from_filemap(fmap):
         arr.setflags(write=False)
         return fsmgh.MGHImage(arr, rib.affine, rib.header)
     # start with the ribbon:
-    ims['lh_gray_mask']  = lambda:_make_imm_mask(raw_images['ribbon'].get_data(), 3)
-    ims['lh_white_mask'] = lambda:_make_imm_mask(raw_images['ribbon'].get_data(), 2)
-    ims['rh_gray_mask']  = lambda:_make_imm_mask(raw_images['ribbon'].get_data(), 42)
-    ims['rh_white_mask'] = lambda:_make_imm_mask(raw_images['ribbon'].get_data(), 41)
-    ims['brain_mask']    = lambda:_make_imm_mask(raw_images['ribbon'].get_data(), 0, False)
+    ims['lh_gray_mask']  = lambda:_make_imm_mask(raw_images['ribbon'].dataobj, 3)
+    ims['lh_white_mask'] = lambda:_make_imm_mask(raw_images['ribbon'].dataobj, 2)
+    ims['rh_gray_mask']  = lambda:_make_imm_mask(raw_images['ribbon'].dataobj, 42)
+    ims['rh_white_mask'] = lambda:_make_imm_mask(raw_images['ribbon'].dataobj, 41)
+    ims['brain_mask']    = lambda:_make_imm_mask(raw_images['ribbon'].dataobj, 0, False)
     # merge in with the typical images
     return pimms.merge(fmap.data_tree.image, pimms.lazy_map(ims))
 def subject_from_filemap(fmap, name=None, meta_data=None, check_path=True):
@@ -809,18 +809,18 @@ def load_mgh(filename, to='auto'):
     img = fsmgh.load(filename)
     to = to.lower()
     if to == 'image':    return img
-    elif to == 'data':   return img.get_data()
+    elif to == 'data':   return img.dataobj
     elif to == 'affine': return img.affine
     elif to == 'header': return img.header
     elif to == 'field':
-        dat = np.squeeze(img.get_data())
+        dat = np.squeeze(img.dataobj)
         if len(dat.shape) > 2:
             raise ValueError('image requested as field has more than 2 non-unitary dimensions')
         return dat
     elif to in ['auto', 'automatic']:
         dims = set(img.dataobj.shape)
         if 1 < len(dims) < 4 and 1 in dims:
-            return np.squeeze(img.get_data())
+            return np.squeeze(img.dataobj)
         else:
             return img
     else:
