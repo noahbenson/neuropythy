@@ -207,7 +207,7 @@ class Subject(mri.Subject):
         imgs = {k:_img_loader(k) for k in six.iterkeys(imgmap)}
         def _make_mask(val, eq=True):
             rib = imgmap['ribbon']
-            arr = (rib.get_data() == val) if eq else (rib.get_data() != val)
+            arr = (rib.dataobj == val) if eq else (rib.dataobj != val)
             arr.setflags(write=False)
             return type(rib)(arr, rib.affine, rib.header)
         imgs['lh_gray_mask']  = lambda:_make_mask(3)
