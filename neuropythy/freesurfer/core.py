@@ -540,7 +540,7 @@ def subject_file_map(path):
     return file_map(path, freesurfer_subject_filemap_instructions,
                     data_hierarchy=freesurfer_subject_data_hierarchy)
 _registration_aliases = {'benson14_retinotopy.v4_0': 'benson17'}
-def cortex_from_filemap(fmap, chirality, name, subid=None):
+def cortex_from_filemap(fmap, chirality, name, subid=None, affine=None):
     '''
     cortex_from_filemap(filemap, chirality, name) yields a cortex object from the given filemap;
       if the chirality and name do not match, then the result must be an xhemi.
@@ -605,7 +605,9 @@ def cortex_from_filemap(fmap, chirality, name, subid=None):
                 if mid not in regs:
                     regs = regs.set(mid, curry(_load_surf, os.path.join(surf_path, flnm)))
     # Okay, make the cortex object!
-    return mri.Cortex(chirality, tess, surfs, regs, meta_data={'file_map':fmap}).persist()
+    md = {'file_map': fmap}
+    if subid is not None: md['subject_id'] = subid
+    return mri.Cortex(chirality, tess, surfs, regs, affine=affine, meta_data=md).persist()
 def images_from_filemap(fmap):
     '''
     images_from_filemap(fmap) yields a persistent map of MRImages tracked by the given subject with
@@ -633,19 +635,19 @@ def subject_from_filemap(fmap, name=None, meta_data=None, check_path=True):
     if check_path and not is_freesurfer_subject_path(fmap.pseudo_paths[None]):
         raise ValueError('given path does not appear to hold a freesurfer subject')
     # we need to go ahead and load the ribbon...
-    imgs = images_from_filemap(fmap)
-    hems = pimms.lazy_map({h:curry(cortex_from_filemap, fmap, h, ch)
-                           for (h,ch) in zip(['lh','rhx','rh','lhx'], ['lh','lh','rh','rh'])})
     rib = fmap.data_tree.raw_image['ribbon']
     vox2nat = rib.affine
     vox2vtx = rib.header.get_vox2ras_tkr()
+    vtx2nat = np.dot(vox2nat, np.linalg.inv(vox2vtx))
+    # make images and hems
+    imgs = images_from_filemap(fmap)
+    hems = pimms.lazy_map({h:curry(cortex_from_filemap, fmap, h, ch, name, vtx2nat)
+                           for (h,ch) in zip(['lh','rhx','rh','lhx'], ['lh','lh','rh','rh'])})
     meta_data = pimms.persist({} if meta_data is None else meta_data)
     meta_data = meta_data.set('raw_images', fmap.data_tree.raw_image)
     return mri.Subject(name=name, pseudo_path=fmap.pseudo_paths[None],
                        hemis=hems, images=imgs,
-                       meta_data=meta_data,
-                       voxel_to_vertex_matrix=vox2vtx,
-                       voxel_to_native_matrix=vox2nat)
+                       meta_data=meta_data)
 @nyio.importer('freesurfer_subject', sniff=is_freesurfer_subject_path)
 def subject(path, name=Ellipsis, meta_data=None, check_path=True, filter=None):
     '''
@@ -854,7 +856,7 @@ def to_mgh(obj, like=None, header=None, affine=None, extra=Ellipsis):
             if affine is None: affine = like.affine
             if extra is Ellipsis: extra = like.extra
         elif isinstance(like, mri.Subject):
-            if affine is None: affine = like.voxel_to_native_matrix
+            if affine is None: affine = like.images['brain'].affine
         else:
             raise ValueError('Could not interpret like argument with type %s' % type(like))
     # check to make sure that we have to change something:

@@ -22,7 +22,7 @@ from .util  import (triangle_area, triangle_address, alignment_matrix_3D, rotati
 from ..util import (ObjectWithMetaData, to_affine, zinv, is_image, is_address, address_data, curry,
                     curve_spline, CurveSpline, chop, zdivide, flattest, inner, config, library_path,
                     dirpath_to_list, to_hemi_str, is_tuple, is_list, is_set, close_curves,
-                    normalize, denormalize, AutoDict, auto_dict, times)
+                    normalize, denormalize, AutoDict, auto_dict, times, apply_affine)
 from ..io   import (load, importer, exporter)
 from functools import reduce
 
@@ -1668,8 +1668,7 @@ class Mesh(VertexSet):
             tx = selfx[:,faces].T
         return barycentric_to_cartesian(tx, coords)
 
-    def from_image(self, image, affine=None, method=None, fill=0, dtype=None,
-                   native_to_vertex_matrix=None, weights=None):
+    def from_image(self, image, affine=None, method=None, fill=0, dtype=None, weights=None):
         '''
         mesh.from_image(image) interpolates the given 3D image array at the values in the given 
           mesh's coordinates and yields the property that results. If image is given as a string,
@@ -1684,24 +1683,18 @@ class Mesh(VertexSet):
           * method (default: None) may specify either 'linear' or 'nearest'; if None, then the
             interpolation is linear when the image data is real and nearest otherwise.
           * fill (default: 0) values filled in when a vertex falls outside of the image.
-          * native_to_vertex_matrix (default: None) may optionally give a final transformation that
-            converts from native subject orientation encoded in images to vertex positions.
           * weights (default: None) may optionally provide an image whose voxels are weights to use
             during the interpolation; these weights are in addition to trilinear weights and are
             ignored in the case of nearest interpolation.
-          * native_to_vertex_matrix (default: None) specifies a matrix that aligns the surface
-            coordinates with their subject's 'native' orientation; None is equivalnet to the
-            identity matrix.
         '''
         from neuropythy.mri import image_interpolate
         xyz = self.coordinates
-        if native_to_vertex_matrix is not None:
-            native_to_vertex_matrix = to_affine(native_to_vertex_matrix, 3)
+        if affine is not None:
+            affine = to_affine(affine, 3)
             # apply the inverse of this matrix to our vertices then run through image_interpolate
-            mtx = np.linalg.inv(native_to_vertex_matrix)
-            xyz = np.dot(mtx, np.vstack([xyz, np.ones([1,xyz.shape[1]])]))[:3]
-        return image_interpolate(image, affine=affine, method=method,
-                                 fill=fill, dtype=dtype, weights=weights)
+            #mtx = np.linalg.inv(affine)
+            xyz = apply_affine(affine, xyz)
+        return image_interpolate(image, xyz, method=method, fill=fill, dtype=dtype, weights=weights)
     # smooth a field on the cortical surface
     def smooth(self, prop, smoothness=0.5, weights=None, weight_min=None, weight_transform=None,
                outliers=None, data_range=None, mask=None, valid_range=None, null=np.nan,
@@ -4137,24 +4130,25 @@ def to_mesh(obj):
         elif is_topo(a):
             from neuropythy import is_cortex
             if   is_mesh(b):          return b
-            elif not pimms.is_str(b): raise ValueError('to_mesh: non-str surf/reg name: %s' % (b,))
-            (b0, lb) = (b, b.lower())
-            # check for translations of the name first:
-            s = b[4:] if lb.startswith('reg:') else b[5:] if lb.startswith('surf:') else b
-            ls = s.lower()
-            if ls.endswith('_sphere'): b = ('reg:' + s[:-7])
-            elif ls == 'sphere': b = 'reg:native'
-            lb = b.lower()
-            # we try surfaces first (if a is a cortex and has surfaces)
-            if is_cortex(a) and not lb.startswith('reg:'):
-                (s,ls) = (b[5:],lb[5:]) if lb.startswith('surf:') else (b,lb)
-                if   s  in a.surfaces: return a.surfaces[s]
-                elif ls in a.surfaces: return a.surfaces[ls]
-            # then check registrations
-            if not lb.startswith('surf:'):
-                (s,ls) = (b[4:],lb[4:]) if lb.startswith('reg:') else (b,lb)
-                if   s  in a.registrations: return a.registrations[s]
-                elif ls in a.registrations: return a.registrations[ls]
+            elif pimms.is_str(b):
+                (b0, lb) = (b, b.lower())
+                # check for translations of the name first:
+                s = b[4:] if lb.startswith('reg:') else b[5:] if lb.startswith('surf:') else b
+                ls = s.lower()
+                if ls.endswith('_sphere'): b = ('reg:' + s[:-7])
+                elif ls == 'sphere': b = 'reg:native'
+                lb = b.lower()
+                # we try surfaces first (if a is a cortex and has surfaces)
+                if is_cortex(a) and not lb.startswith('reg:'):
+                    (s,ls) = (b[5:],lb[5:]) if lb.startswith('surf:') else (b,lb)
+                    if   s  in a.surfaces: return a.surfaces[s]
+                    elif ls in a.surfaces: return a.surfaces[ls]
+                # then check registrations
+                if not lb.startswith('surf:'):
+                    (s,ls) = (b[4:],lb[4:]) if lb.startswith('reg:') else (b,lb)
+                    if   s  in a.registrations: return a.registrations[s]
+                    elif ls in a.registrations: return a.registrations[ls]
+            elif pimms.is_number(b): return a.surface(b)
             # nothing found
             raise ValueError('to_mesh: mesh named "%s" not found in topology %s' % (b0, a))
         else: raise ValueError('to_mesh: could not deduce meaning of row: %s' % (obj,))

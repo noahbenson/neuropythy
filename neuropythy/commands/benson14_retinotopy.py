@@ -15,6 +15,7 @@ import os, sys, six, pimms
 from   ..freesurfer                 import (subject, add_subject_path)
 from   ..vision                     import (predict_retinotopy, retinotopy_model, clean_retinotopy)
 from   ..                           import io as nyio
+from   ..mri                        import (is_image, to_image, image_clear)
 
 info = \
    '''
@@ -180,17 +181,21 @@ def main(*args):
             note('   - Skipping volume export.')
         else:
             note('   - Exporting Volumes:')
+            # generate the volumes once...
+            im = sub.images['brain']
+            note('    - Addressing volume...')
+            addr = (sub.lh.image_address(im), sub.rh.image_address(im))
             for t in lhdat.keys():
                 flnm = os.path.join(sub.path, 'mri', tr[t] + vext)
                 if ow or not os.path.exists(flnm):
                     note('    - Preparing volume file: %s' % flnm)
                     dtyp = (np.int32 if t == 'varea' else np.float32)
                     vol = sub.cortex_to_image(
-                        (lhdat[t], rhdat[t]),
+                        (lhdat[t], rhdat[t]), image_clear(im),
                         method=('nearest' if t == 'varea' else 'linear'),
-                        dtype=dtyp)
+                        address=addr, dtype=dtyp)
                     note('    - Exporting volume file: %s' % flnm)
-                    nyio.save(flnm, vol, like=sub)
+                    nyio.save(flnm, vol)
                 else:
                     note('    - Not overwriting existing file: %s' % flnm)
         note('   Subject %s finished!' % sub.name)

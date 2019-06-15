@@ -1516,7 +1516,7 @@ def register_retinotopy(hemi,
     return m if yield_imap else m['predicted_mesh']
 
 # Tools for registration-free retinotopy prediction:
-def predict_retinotopy(sub, template='benson14', registration='fsaverage'):
+def predict_retinotopy(sub, template='benson14', registration='fsaverage', sym_angle=True):
     '''
     predict_retinotopy(subject) yields a pair of dictionaries each with four keys: angle, eccen,
       sigma, and varea. Each of these keys maps to a numpy array with one entry per vertex.  The
@@ -1528,6 +1528,11 @@ def predict_retinotopy(sub, template='benson14', registration='fsaverage'):
       * template (default: 'benson14') specifies the template to use.
       * registration (default: 'fsaverage') specifies the subject registration to use; generally can
         only be 'fsaverage' or 'fsaverage_sym'.
+      * sym_angle (default: True) may specify that the polar angle returned should be symmetric or
+        not-symmetric across the vertical meridian. By convention, the predict_retinotopy() function
+        yields the symmetric retinotopy, meaning that in LH and RH the polar angles range from 0 
+        (UVM) to 180 (LVM). If sym_angle is set to False, then the RH values will be negative and
+        the LH values will be positive.
     '''
     template = template.lower()
     retino_tmpls = predict_retinotopy.retinotopy_templates[registration]
@@ -1555,7 +1560,6 @@ def predict_retinotopy(sub, template='benson14', registration='fsaverage'):
                 for k in ['angle', 'eccen', 'varea', 'sigma']
                 for dat in [nyio.load(os.path.join(tmpl_path, 'surf', filenames[(h,k)]))]}
              for h in hemis})
-
     # Okay, we just need to interpolate over to this subject
     tmpl = retino_tmpls[template]
     if not all(s in tmpl for s in hemis):
@@ -1580,9 +1584,21 @@ def predict_retinotopy(sub, template='benson14', registration='fsaverage'):
             subj_hems = (sub,)
             tmpl_hems = ((fsa.lh if sub.chirality == 'lh' else fsa.rh),)
             chrs_hems = (sub.chirality,)
-    tpl = tuple([th.interpolate(sh, tmpl[h if registration == 'fsaverage' else 'sym'])
-                for (sh,th,h) in zip(subj_hems, tmpl_hems, chrs_hems)])
-    return tpl[0] if len(tpl) == 1 else tpl
+    tpl = []
+    for (sh,th,h) in zip(subj_hems, tmpl_hems, chrs_hems):
+        q = pyr.pmap(tmpl[h if registration == 'fsaverage' else 'sym'])
+        (a,e) = (q['angle'],q['eccen'])
+        a = np.pi/180*(90 - a)
+        q = pimms.assoc(pimms.dissoc(q, 'angle', 'eccen'), x=e*np.cos(a), y=e*np.sin(a))
+        dat = th.interpolate(sh, q)
+        a = np.mod(90 - 180.0/np.pi * np.arctan2(dat['y'], dat['x']) + 180, 360) - 180
+        if not sym_angle and h == 'rh': a *= -1
+        e = np.sqrt(dat['x']**2 + dat['y']**2)
+        bad = dat['varea'] == 0
+        a[bad] = 0
+        e[bad] = 0
+        tpl.append(pimms.assoc(pimms.dissoc(dat, 'x', 'y'), angle=a, eccen=e))
+    return tpl[0] if len(tpl) == 1 else tuple(tpl)
 predict_retinotopy.retinotopy_templates = pyr.m(fsaverage={}, fsaverage_sym={})
 
 def retinotopy_comparison(arg1, arg2, arg3=None,

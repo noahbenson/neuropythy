@@ -5,9 +5,9 @@
 # By Noah C. Benson
 
 import numpy as np
-import math
+import math, six
 
-from ..util import czdivide
+from ..util import (czdivide, zinv)
 
 def normalize(u):
     '''
@@ -655,6 +655,7 @@ def tetrahedral_barycentric_coordinates(tetra, pt):
     # I found a description of this algorithm here (Nov. 2017):
     # http://steve.hollasch.net/cgindex/geometry/ptintet.html
     tetra = np.asarray(tetra)
+    pt = np.asarray(pt)
     if tetra.shape[0] != 4:
         if tetra.shape[1] == 4:
             if tetra.shape[0] == 3:
@@ -708,23 +709,58 @@ def prism_barycentric_coordinates(tri1, tri2, pt):
          tri)
         for tri in (tri1,tri2)]
     pt = pt.T if pt.shape[0] != 3 else pt
-    # get the individual tetrahedron bc coordinates
-    bcs1 = tetrahedral_barycentric_coordinates([tri1[0], tri1[1], tri1[2], tri2[0]], pt)
-    bcs2 = tetrahedral_barycentric_coordinates([tri1[1], tri1[2], tri2[0], tri2[1]], pt)
-    bcs3 = tetrahedral_barycentric_coordinates([tri1[2], tri2[0], tri2[1], tri2[2]], pt)
-    bcs4 = tetrahedral_barycentric_coordinates([tri1[0], tri1[1], tri2[0], tri2[1]], pt)
-    bcs5 = tetrahedral_barycentric_coordinates([tri1[0], tri1[2], tri2[0], tri2[2]], pt)
-    bcs6 = tetrahedral_barycentric_coordinates([tri1[1], tri1[2], tri2[1], tri2[2]], pt)
-    bcs = ((bcs1[0] + bcs4[0] + bcs5[0],
-            bcs1[1] + bcs2[0] + bcs4[1] + bcs6[0],
-            bcs1[2] + bcs2[1] + bcs3[0] + bcs5[1] + bcs6[1]),
-           (bcs1[3] + bcs2[2] + bcs3[1] + bcs4[2] + bcs5[2],
-            bcs2[3] + bcs3[2] + bcs4[3] + bcs6[2],
-            bcs3[3] + bcs5[3] + bcs6[3]))
-    # convert into (a,b,c,d) coordinates
-    abc = np.sum(bcs, axis=0)
-    d = np.sum(bcs[1], axis=0)
-    return np.asarray((abc[0], abc[1], d))
+    ## if the triangles aren't on coherent sides of each other, something is wrong with this prism
+    ## (for now we don't do this because I'm not convinced it's necessary with cortex)
+    #faces   = np.asarray([tri1, tri2])
+    #(u1,u2) = np.cross(faces[:,1] - faces[:,0], faces[:,2] - faces[:,0], axis=1)
+    #(p1,p2) = np.reshape([tri1[0], tri2[0]], (2,1,3,-1))
+    ## make sure all three points from both triangles are on the right side of the other
+    #sd1to2  = np.sign(np.sum((tri2 - p1) * np.reshape(u1, (1,3,-1)), axis=1))
+    #sd2to1  = np.sign(np.sum((tri1 - p2) * np.reshape(u2, (1,3,-1)), axis=1))
+    #bad = np.where(#np.any(sd1to2 == sd2to1, axis=0) |
+    #               (sd1to2[0] != sd1to2[1])         |
+    #               (sd1to2[0] != sd1to2[2]))[0]
+    # get the individual tetrahedron bc coordinates; we divide the prism up into a few tetrahedrons
+    ((a1,b1,c1),(a2,b2,c2)) = (tri1, tri2)
+    (ab2,bc2,ca2) = np.mean([(a2,b2), (b2,c2), (c2,a2)], axis=1)
+    mu1 = np.mean(tri1, axis=0)
+    tetpts = np.asarray([a1,b1,c1, a2,b2,c2, ab2,bc2,ca2, mu1])
+    bcs = np.vstack([tetrahedral_barycentric_coordinates(tetpts[tet], pt)
+                     for tet in prism_barycentric_coordinates.tetrahedrons])
+    # add up the weights on the points...
+    abc12 = np.zeros([6, bcs.shape[1]])
+    for (k, ii, wii) in prism_barycentric_coordinates.weight_plan:
+        for (i,wi) in zip(ii, wii):
+            abc12[wi] += bcs[i] / k
+    # okay, now separate into h and ab:
+    abc = abc12[:3] + abc12[3:]
+    tot = np.sum(abc, axis=0)
+    abc[2] = 1 - np.sum(abc12[:3], axis=0)
+    bad = np.where(~np.isclose(tot, 1))[0]
+    abc[:,bad] = 0
+    q = tot[(tot > 1) & ~np.isclose(tot, 1)]
+    return abc
+# meta-data used by the above function:
+# order of points is a1, b1, c1,  a2, b2, c2,  ab2, bc2, ca2,  mu1, where 1 is the first triangle,
+# 2 is the second trignale, uv1 is the average of points u1 and v1, and mu1 is the average of tri1.
+prism_barycentric_coordinates.weight_counts = np.asarray([1,1,1, 1,1,1, 2,2,2, 3])
+prism_barycentric_coordinates.weights = {
+    1: np.reshape(np.arange(6), (6,1)),
+    2: np.array([[-1,-1],[-1,-1],[-1,-1],[-1,-1],[-1,-1],[-1,-1], # a1-c3 (0-5)
+                 [3,4], [4,5], [5,3]]), #ab2-ca2 (6-8)
+    3: np.full((10, 3), -1)}
+prism_barycentric_coordinates.weights[3][-1] = [0,1,2]
+prism_barycentric_coordinates.tetrahedrons = np.array([[0, 1, 6, 9],  [1, 2, 7, 9],  [2, 0, 8, 9],
+                                                       [0, 6, 8, 9],  [1, 6, 7, 9],  [2, 7, 8, 9],
+                                                       [0, 6, 8, 3],  [1, 6, 7, 4],  [2, 7, 8, 5],
+                                                       [6, 7, 8, 9]])
+prism_barycentric_coordinates.tetflat = prism_barycentric_coordinates.tetrahedrons.flatten()
+prism_barycentric_coordinates.tetflat_weight_count = prism_barycentric_coordinates.weight_counts[
+    prism_barycentric_coordinates.tetflat]
+prism_barycentric_coordinates.weight_plan = tuple(
+    [(k, ii, v[prism_barycentric_coordinates.tetflat[ii]])
+     for (k,v) in six.iteritems(prism_barycentric_coordinates.weights)
+     for ii in np.where(prism_barycentric_coordinates.tetflat_weight_count == k)])
 
 def point_in_prism(tri1, tri2, pt):
     '''

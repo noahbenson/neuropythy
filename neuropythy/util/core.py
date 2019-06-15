@@ -264,6 +264,27 @@ def to_affine(aff, dims=None):
         arg = (dims, dims,dims+1, dims+1,dims+1)
         raise ValueError('%dD affine matrix must be %dx%d or %dx%d' % arg)
     return aff
+def apply_affine(aff, coords):
+    '''
+    apply_affine(affine, coords) yields the result of applying the given affine transformation to
+      the given coordinate or coordinates.
+
+    This function expects coords to be a (dims X n) matrix but if the first dimension is neither 2
+    nor 3, coords.T is used; i.e.:
+      apply_affine(affine3x3, coords2xN) ==> newcoords2xN
+      apply_affine(affine4x4, coords3xN) ==> newcoords3xN
+      apply_affine(affine3x3, coordsNx2) ==> newcoordsNx2 (for N != 2)
+      apply_affine(affine4x4, coordsNx3) ==> newcoordsNx3 (for N != 3)
+    '''
+    if aff is None: return coords
+    (coords,tr) = (np.asanyarray(coords), False)
+    if len(coords.shape) == 1: return np.squeeze(apply_affine(np.reshape(coords, (-1,1)), aff))
+    elif len(coords.shape) > 2: raise ValueError('cannot apply affine to ND-array for N > 2')
+    if   len(coords) == 2: aff = to_affine(aff, 2)
+    elif len(coords) == 3: aff = to_affine(aff, 3)
+    else: (coords,aff,tr) = (coords.T, to_affine(aff, coords.shape[1]), True)
+    r = np.dot(aff, np.vstack([coords, np.ones([1,coords.shape[1]])]))[:-1]
+    return r.T if tr else r
 def is_dataframe(d):
     '''
     is_dataframe(d) yields True if d is a pandas DataFrame object and False otherwise; if
@@ -510,7 +531,95 @@ def address_data(data, dims=None, surface=0.5, strict=True):
             else:
                 raise ValueError('address contains %d non-finite faces (%s)' % (len(w[0]),w))
     return (faces, coords)
+def address_interpolate(addr, prop, method=None, surface='midgray', strict=False, null=np.nan,
+                        tess=None):
+    '''
+    address_interpolate(addr, prop) yields the result of interpolating the given property prop at
+      the given addresses. If addr contains 3D addresses and prop is a map of layer values from 0 to
+      1 (e.g., {0:white_prop, 0.5:midgray_prop, 1:pial_prop}), then the addresses are interpolated
+      from the appropriate layers.
 
+    The following optional arguments may be given:
+      * method (default: None) may be either 'linear' or 'nearest' to force linear/nearest
+        interpolation. If None is given (the default), then linear is used for all real and complex
+        (inexact) numbers and nearest is used for all others.
+      * surface (default: 'midgray') may specify the surface the if addr provides 2D addresses but
+        3D property data are given (otherwise this argument is ignored); in this case, surface
+        specifies the height-fraction or named surface at which the interpolation should take place;
+        0 is white and 1 is pial.
+      * strict (default: False) may be set to True to indicate that an error should be raised if any
+        address coordinates have non-finite values (i.e., were "out-in-region" values); otherwise
+        the associated interpolated values are silently set to null.
+      * null (default: nan) may specify the value given to any "out-of-region" value found in the
+        addresses.
+      * tess (default: None) may specify a tesselation object that should be used to lookup the
+        faces and convert them into face indices.
+    '''
+    (faces, (a,b,h)) = address_data(addr, 3, surface=surface)
+    if tess is not None: faces = tess.index(faces)
+    bad = np.where(~np.isfinite(a))[0]
+    if strict is True and len(bad) > 0: raise ValueError('non-finite coordinates found in address')
+    c = 1.0 - a - b
+    # parse the properties:
+    if pimms.is_vector(prop): prop = {0:prop, 1:prop}
+    elif pimms.is_matrix(prop): prop = {k:v for (k,v) in zip(np.linspace(0,1,len(prop)), prop)}
+    elif not pimms.is_map(prop): raise ValueError('bad property arg of type %s' % type(prop))
+    # start by making the upper and lower property values for each indexed voxel:
+    ks = np.argsort(list(prop.keys()))
+    vs = np.asarray([prop[ks[0]]] + [prop[k] for k in ks] + [prop[ks[-1]]])
+    ks = np.concatenate([[-np.inf], ks, [np.inf]])
+    # good time to figure out what method we are using:
+    if method is None:
+        if np.issubdtype(vs.dtype, np.inexact): method = 'linear'
+        else: method = 'nearest'
+    else:
+        method = method.lower()
+        if method in ['lin','trilinear','barycentric','bc']: method = 'linear'
+        elif method in ['near', 'nn', 'nearest-neighbor', 'nearest_neighbor']: method = 'nearest'
+        if method != 'nearest' and method != 'linear':
+            raise ValueError('cannot understand method: %s' % method)
+    # where in each column is the 
+    q = (h > np.reshape(ks, (-1,1)))
+    # qs[0] is always True, qs[-1] is always False; the first False indicates h's layer
+    wh1 = np.argmin(q, axis=0) # get first occurance of False; False means h >= the layer
+    wh0 = wh1 - 1
+    h = (h - ks[wh0]) / (ks[wh1] - ks[wh0])
+    h[wh0 == 0] = 0.5
+    h[wh1 == (len(ks) - 1)] = 0.5
+    hup = (h > 0.5) # the heights above 0.5 (closer to the upper than the lower)
+    # okay, figure out the actual values we use:
+    vals = vs[:,faces]
+    each = np.arange(len(wh1))
+    vals = np.transpose(vals, (0,2,1))
+    lower = vals[(wh0, each)].T
+    upper = vals[(wh1, each)].T
+    if method == 'linear': vals = lower*(1 - h) + upper*h
+    else:
+        vals = np.array(lower)
+        ii = h > 0.5
+        vals[:,ii] = upper[:,ii]
+    # make sure that we only get inf/nan values using nearest (otherwise they spread!)
+    ii = np.where(~np.isfinite(lower) & hup)
+    vals[ii] = upper[ii]
+    ii = np.where(~np.isfinite(upper) & ~hup)
+    vals[ii] = lower[ii]
+    # now, let's interpolate across a/b/c;
+    if method == 'linear':
+        w = np.asarray([a,b,c])
+        ni = np.where(~np.isfinite(vals))
+        if len(ni[0]) > 0:
+            w[ni] = 0
+            vals[ni] = 0
+            ww = zinv(np.sum(w, axis=0))
+            w *= ww
+        else: ww = None
+        res = np.sum(vals * w, axis=0)
+        if ww is not None: res[np.isclose(ww, 0)] = null
+    else:
+        wh = np.argmax([a,b,c], axis=0)
+        res = vals[(wh, np.arange(len(wh)))]
+    if len(bad) > 0: res[bad] = null
+    return res
 def numel(x):
     '''
     numel(x) yields the number of elements in x: the product of the shape of x.

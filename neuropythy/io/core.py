@@ -428,7 +428,7 @@ def to_nifti(obj, like=None, header=None, affine=None, extensions=Ellipsis, vers
             if header is None: header = like.header
             if affine is None: affine = like.affine
         elif isinstance(like, Subject):
-            if affine is None: affine = like.voxel_to_native_matrix
+            if affine is None: affine = like.images['brain'].affine
         else:
             raise ValueError('Could not interpret like argument with type %s' % type(like))
     # check to make sure that we have to change something:

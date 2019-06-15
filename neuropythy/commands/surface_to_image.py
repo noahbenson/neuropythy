@@ -13,14 +13,16 @@ import nibabel.freesurfer.mghformat as     fsmgh
 import os, sys, pimms
 
 from ..freesurfer                   import (subject, add_subject_path, find_subject_path)
-from ..io                           import save
+from ..io                           import (save, load)
+from ..mri                          import (is_image, is_image_spec, image_clear, to_image)
 
 info = \
    '''
    Syntax: surface_to_image <subject> <out>
    <subject> must be a valid FreeSurfer subject id (in the $SUBJECTS_DIR directory
-     or directory path)
-   <out> is the output MGH/MGZ file to write.
+     or configured subject paths) or a full path to a FreeSurfer subject or it can
+     be a valid HCP subject identifier.
+   <out> is the output volume file to write.
    In addition to the subject and the output filename, at least one and at most two
    surface file(s) must be specified. These may be specified using the --lh (or -l)
    and --rh (or -r) options below or without them; if they files are specified
@@ -38,6 +40,12 @@ info = \
        -r|--rh=<file>
        These options specify the surface data files that are to be projected to
        the subject's ribbon.
+     * -i|--image=<file>
+       The given file specifies the image-spec of the output image; all header-data
+       are copied from this image and the file's affine and the image shape are used
+       to determine the slice prescription of the output image. File may optionally
+       be a JSON file containing a mapping with the keys 'affine' and 'image_shape'.
+       If no image is given then the subject's 'brain' image is used.
      * -m|--method=<name>
        Specifies the method that should be used. Supported options are linear,
        nearest, and auto (the default). Both linear and nearest methods find the
@@ -67,6 +75,7 @@ _surface_to_ribbon_parser_instructions = [
     # Options             
     ['l', 'lh',           'lh_file',      None],
     ['r', 'rh',           'rh_file',      None],
+    ['i', 'image',        'image',        None],
     ['f', 'fill',         'fill',         0],
     ['m', 'method',       'method',       'auto'],
     ['t', 'type',         'dtype',        None],
@@ -151,19 +160,30 @@ def main(args):
       raise ValueError('Too many arguments provided!')
     if sub is None: raise ValueError('No subject specified or found in $SUBJECT')
     if lhfl is None and rhfl is None: raise ValueError('No surfaces provided')
+    sub = subject(sub)
     # check the method
     method = opts['method'].lower()
-    if method not in ['linear', 'lines', 'nearest', 'auto']:
+    if method not in ['linear', 'nearest', 'auto']:
         raise ValueError('Unsupported method: %s' % method)
     # and the datatype
     if opts['dtype'] is None: dtyp = None
-    elif opts['dtype'].lower() == 'float': dtyp = np.float32
-    elif opts['dtype'].lower() == 'int': dtyp = np.int32
+    elif opts['dtype'].lower() == 'float': dtyp = np.float
+    elif opts['dtype'].lower() == 'int': dtyp = np.int
     else: raise ValueError('Type argument must be float or int')
     if method == 'auto':
-      if dtyp is np.float32: method = 'linear'
-      elif dtyp is np.int32: method = 'nearest'
+      if dtyp is np.float: method = 'linear'
+      elif dtyp is np.int: method = 'nearest'
       else: method = 'linear'
+    # and the input/sample image
+    im = opts['image']
+    if im is None:
+      im = sub.images['brain']
+      try: note('Using template image: %s' % im.get_filename())
+      except Exception: pass
+    else:
+      note('Using template image: %s' % im)
+      im = load(im)
+    im = to_image(image_clear(im, fill=opts['fill']), dtype=dtyp)
     # Now, load the data:
     note('Reading surfaces...')
     (lhdat, rhdat) = (None, None)
@@ -176,13 +196,12 @@ def main(args):
     (dat, hemi) = (rhdat, 'rh') if lhdat is None else \
                   (lhdat, 'lh') if rhdat is None else \
                   ((lhdat, rhdat), None)
-    sub = subject(sub)
     # okay, make the volume...
     note('Generating volume...')
-    vol = sub.cortex_to_image(dat, hemi=hemi, method=method, fill=opts['fill'], dtype=dtyp)
+    im = sub.cortex_to_image(dat, im, hemi=hemi, method=method, fill=opts['fill'], dtype=dtyp)
     # and write out the file
     note('Exporting volume file: %s' % outfl)
-    save(outfl, vol, affine=sub.voxel_to_native_matrix)
+    save(outfl, im)
     note('surface_to_image complete!')
-    return 0    
+    return 0
 
