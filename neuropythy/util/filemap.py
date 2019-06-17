@@ -548,8 +548,8 @@ def pseudo_path(source_path, cache_path=None, delete=Ellipsis, credentials=None,
       * cache_path (default: None) specifies the cache directory in which to put any extracted or
         downloaded contents. If None, then a temporary directory is created and used. If the source
         path is a local directory, then the cache path is not needed and is instead ignored. Note
-        that if the cache path is not deleted, it can be reused across sessions--the pseudo-path will
-        always check for files in the cache path before extracting or downloading them.
+        that if the cache path is not deleted, it can be reused across sessions--the pseudo-path
+        will always check for files in the cache path before extracting or downloading them.
       * delete (default: Ellipsis) may be set to True or False to declare that the cache directory
         should be deleted at system exit (assuming a normal Python system exit). If Ellipsis, then
         the cache_path is deleted only if it is created by the pseudo-path object--given cache paths
@@ -616,7 +616,7 @@ class FileMap(ObjectWithMetaData):
         '''
         if lf is None:
             from ..io import load
-            return lambda fl,ii: load(fl)
+            return lambda flnm, meta: load(flnm, meta['format']) if 'format' in meta else load(flnm)
         else: return lf
     @pimms.param
     def cache_path(cp):

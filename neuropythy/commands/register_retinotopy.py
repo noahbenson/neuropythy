@@ -243,13 +243,13 @@ _retinotopy_parser = pimms.argv_parser(_retinotopy_parser_instructions)
 
 def _guess_surf_file(fl):
     # MGH/MGZ files
-    try: return fsmgh.load(fl).get_data().flatten()
+    try: return fsmgh.load(fl).dataobj.flatten()
     except Exception: pass
     # FreeSurfer Curv files
     try: return fsio.read_morph_data(fl)
     except Exception: pass
     # Nifti files
-    try: return np.squeeze(nib.load(fl).get_data())
+    try: return np.squeeze(nib.load(fl).dataobj)
     except Exception: raise ValueError('Could not determine filetype for: %s' % fl)
 def _guess_vol_file(fl):
     # MGH/MGZ files
@@ -524,12 +524,13 @@ def save_volume_files(note, error, registrations, subject,
     if no_vol_export: return {'volume_files': ()}
     volume_format = volume_format.lower()
     # make an exporter for properties:
+    affmatrix = subject.images['brain'].affine
     if volume_format in ['mgh', 'mgz', 'auto', 'automatic', 'default']:
         volume_format = 'mgh' if volume_format == 'mgh' else 'mgz'
         def export(flnm, d):
             flnm = flnm + '.' + volume_format
             dt = np.int32 if np.issubdtype(d.dtype, np.dtype(int).type) else np.float32
-            img = fsmgh.MGHImage(np.asarray(d, dtype=dt), subject.voxel_to_native_matrix)
+            img = fsmgh.MGHImage(np.asarray(d, dtype=dt), affmatrix)
             img.to_filename(flnm)
             return flnm
     elif volume_format in ['nifti', 'nii', 'niigz', 'nii.gz']:
@@ -537,7 +538,7 @@ def save_volume_files(note, error, registrations, subject,
         def export(flnm, p):
             flnm = flnm + '.' + volume_format
             dt = np.int32 if np.issubdtype(p.dtype, np.dtype(int).type) else np.float32
-            img = nib.Nifti1Image(np.asarray(p, dtype=dt), subject.voxel_to_native_matrix)
+            img = nib.Nifti1Image(np.asarray(p, dtype=dt), affmatrix)
             img.to_filename(flnm)
             return flnm
     else:
@@ -547,13 +548,17 @@ def save_volume_files(note, error, registrations, subject,
     note('Extracting predicted meshes for volume export...')
     hemis = [registrations[h]['predicted_mesh'] if h in registrations else None
              for h in ['lh', 'rh']]
+    note('Addressing image...')
+    im = subject.images['brain']
+    addr = (subject.lh.image_address(im), subject.rh.image_address(im))
     for (pname,tag) in zip(['polar_angle', 'eccentricity', 'visual_area', 'radius'],
                            [angle_tag, eccen_tag, label_tag, radius_tag]):
         # we have to make the volume first...
         dat = tuple([None if h is None else h.prop(pname) for h in hemis])
         (mtd,dt) = ('nearest',np.int32) if pname == 'visual_area' else ('linear',np.float32)
         note('Constructing %s image...' % pname)
-        img = subject.cortex_to_image(dat, method=mtd, dtype=dt)
+        img = subject.cortex_to_image(dat, image_clear(subject.images['brain']),
+                                      method=mtd, dtype=dt, address=addr)
         flnm = export(os.path.join(path, tag), img)
         files.append(flnm)
     return {'volume_files': tuple(files)}

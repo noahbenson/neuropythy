@@ -22,7 +22,7 @@ from .util  import (triangle_area, triangle_address, alignment_matrix_3D, rotati
 from ..util import (ObjectWithMetaData, to_affine, zinv, is_image, is_address, address_data, curry,
                     curve_spline, CurveSpline, chop, zdivide, flattest, inner, config, library_path,
                     dirpath_to_list, to_hemi_str, is_tuple, is_list, is_set, close_curves,
-                    normalize, denormalize, AutoDict, auto_dict, times)
+                    normalize, denormalize, AutoDict, auto_dict, times, apply_affine)
 from ..io   import (load, importer, exporter)
 from functools import reduce
 
@@ -839,7 +839,7 @@ class Tesselation(VertexSet):
         md = self.meta_data
         if meta_data is not None: md = pimms.merge(md, meta_data)
         return Mesh(self, coords, meta_data=md, properties=properties)
-    def subtess(self, vertices, tag=None):
+    def subtess(self, vertices, tag=None, expand=False):
         '''
         tess.subtess(vertices) yields a sub-tesselation of the given tesselation object that only
           contains the given vertices, which may be specified as a boolean vector or as a list of
@@ -851,14 +851,12 @@ class Tesselation(VertexSet):
         '''
         vertices = np.asarray(vertices)
         if len(vertices) != self.vertex_count or \
-           not np.array_equal(vertices, np.asarray(vertices, np.bool)):
-            tmp = self.index(vertices)
-            vertices = np.zeros(self.vertex_count, dtype=np.bool)
-            vertices[tmp] = 1
-        vidcs = self.indices[vertices]
+           not np.array_equal(vertices, vertices.astype('bool')):
+            vidcs = self.index(vertices)
+        else: vidcs = self.indices[vertices]
         if len(vidcs) == self.vertex_count: return self
-        fsum = np.sum([vertices[f] for f in self.indexed_faces], axis=0)
-        fids = np.where(fsum == 3)[0]
+        fsum = np.sum(vertices[self.indexed_faces], axis=0)
+        fids = np.where(fsum > (0 if expand else 2))[0]
         faces = self.faces[:,fids]
         vidcs = self.index(np.unique(faces))
         props = self._properties
@@ -961,7 +959,7 @@ class Mesh(VertexSet):
           the given mesh; d is the number of dimensions that define the vertex positions in the mesh
           and p is the number of edges in the mesh.
         '''
-        return pimms.imm_array([coordinates[:,e] for e in tess.indexed_edges])
+        return pimms.imm_array(np.transpose(coordinates[:, tess.indexed_edges], (1,0,2)))
     @pimms.value
     def face_coordinates(tess, coordinates):
         '''
@@ -969,7 +967,7 @@ class Mesh(VertexSet):
           the given mesh; d is the number of dimensions that define the vertex positions in the mesh
           and m is the number of triange faces in the mesh.
         '''
-        return pimms.imm_array([coordinates[:,f] for f in tess.indexed_faces])
+        return pimms.imm_array(np.transpose(coordinates[:, tess.indexed_faces], (1,0,2)))
     @pimms.value
     def edge_centers(edge_coordinates):
         '''
@@ -1670,8 +1668,7 @@ class Mesh(VertexSet):
             tx = selfx[:,faces].T
         return barycentric_to_cartesian(tx, coords)
 
-    def from_image(self, image, affine=None, method=None, fill=0, dtype=None,
-                   native_to_vertex_matrix=None, weights=None):
+    def from_image(self, image, affine=None, method=None, fill=0, dtype=None, weights=None):
         '''
         mesh.from_image(image) interpolates the given 3D image array at the values in the given 
           mesh's coordinates and yields the property that results. If image is given as a string,
@@ -1686,82 +1683,18 @@ class Mesh(VertexSet):
           * method (default: None) may specify either 'linear' or 'nearest'; if None, then the
             interpolation is linear when the image data is real and nearest otherwise.
           * fill (default: 0) values filled in when a vertex falls outside of the image.
-          * native_to_vertex_matrix (default: None) may optionally give a final transformation that
-            converts from native subject orientation encoded in images to vertex positions.
           * weights (default: None) may optionally provide an image whose voxels are weights to use
             during the interpolation; these weights are in addition to trilinear weights and are
             ignored in the case of nearest interpolation.
-          * native_to_vertex_matrix (default: None) specifies a matrix that aligns the surface
-            coordinates with their subject's 'native' orientation; None is equivalnet to the
-            identity matrix.
         '''
-        if native_to_vertex_matrix is None:
-            native_to_vertex_matrix = np.eye(4)
-        native_to_vertex_matrix = to_affine(native_to_vertex_matrix)
-        if pimms.is_str(image): image = load(image)
-        if is_image(image):
-            # we want to apply the image's affine transform by default
-            if affine is None: affine = image.affine
-            image = image.get_data()
-        image = np.asarray(image)
-        if affine is None:
-            # wild guess: the inverse of FreeSurfer tkr_vox2ras matrix without alignment to native
-            from neuropythy.freesurfer import tkr_vox2ras
-            affine = np.dot(np.linalg.inv(native_to_vertex_matrix),
-                            tkr_vox2ras(image.shape[0:3], (1.0, 1.0, 1.0)))
-            ijk0 = np.asarray(image.shape) * 0.5
-            affine = to_affine(([[-1,0,0],[0,0,-1],[0,1,0]], ijk0), 3)
-        else: affine = to_affine(affine, 3)
-        affine = np.dot(native_to_vertex_matrix, affine)
-        affine = npla.inv(affine)
-        if method is not None: method = method.lower()
-        if method is None or method in ['auto', 'automatic']:
-            method = 'linear' if np.issubdtype(image.dtype, np.inexact) else 'nearest'
-        if dtype is None: dtype = image.dtype
-        # okay, these are actually pretty simple; first transform the coordinates
-        xyz = affine.dot(np.vstack((self.coordinates, np.ones(self.vertex_count))))[0:3]
-        # remember: this might be a 4d or higher-dim image...
-        res = np.full((self.vertex_count,) + image.shape[3:], fill, dtype=dtype)
-        # now find the nearest voxel centers...
-        # if we are doing nearest neighbor; we're basically done already:
-        if method == 'nearest':
-            ijk = np.asarray(np.round(xyz), dtype=np.int)
-            ok = np.all((ijk >= 0) & [ii < sh for (ii,sh) in zip(ijk, image.shape)], axis=0)
-            res[ok] = image[tuple(ijk[:,ok])]
-            return res
-        # otherwise, we do linear interpolation; start by parsing the weights if given
-        if weights is None: weights = np.ones(image.shape)
-        elif pimms.is_str(weights): weights = load(weights).get_data()
-        elif is_image(weights): weights = weights.get_data()
-        else: weights = np.asarray(weights)
-        # find the 8 neighboring voxels
-        mins = np.floor(xyz)
-        maxs = np.ceil(xyz)
-        ok = np.all((mins >= 0) & [ii < sh for (ii,sh) in zip(maxs, image.shape[0:3])], axis=0)
-        (mins,maxs,xyz) = [x[:,ok] for x in (mins,maxs,xyz)]
-        voxs = np.asarray([mins,
-                           [mins[0], mins[1], maxs[2]],
-                           [mins[0], maxs[1], mins[2]],
-                           [mins[0], maxs[1], maxs[2]],
-                           [maxs[0], mins[1], mins[2]],
-                           [maxs[0], mins[1], maxs[2]],                           
-                           [maxs[0], maxs[1], mins[2]],
-                           maxs],
-                          dtype=np.int)
-        # trilinear weights
-        wgts_tri = np.asarray([np.prod(1 - np.abs(xyz - row), axis=0) for row in voxs])
-        # weight-image weights
-        wgts_wgt = np.asarray([weights[tuple(row)] for row in voxs])
-        # note that there might be a 4D image here
-        if len(wgts_wgt.shape) > len(wgts_tri.shape):
-            for _ in range(len(wgts_wgt.shape) - len(wgts_tri.shape)):
-                wgts_tri = np.expand_dims(wgts_tri, -1)
-        wgts = wgts_tri * wgts_wgt
-        wgts *= zinv(np.sum(wgts, axis=0))
-        vals = np.asarray([image[tuple(row)] for row in voxs])
-        res[ok] = np.sum(wgts * vals, axis=0)
-        return res
-    
+        from neuropythy.mri import image_interpolate
+        xyz = self.coordinates
+        if affine is not None:
+            affine = to_affine(affine, 3)
+            # apply the inverse of this matrix to our vertices then run through image_interpolate
+            #mtx = np.linalg.inv(affine)
+            xyz = apply_affine(affine, xyz)
+        return image_interpolate(image, xyz, method=method, fill=fill, dtype=dtype, weights=weights)
     # smooth a field on the cortical surface
     def smooth(self, prop, smoothness=0.5, weights=None, weight_min=None, weight_transform=None,
                outliers=None, data_range=None, mask=None, valid_range=None, null=np.nan,
@@ -4197,24 +4130,25 @@ def to_mesh(obj):
         elif is_topo(a):
             from neuropythy import is_cortex
             if   is_mesh(b):          return b
-            elif not pimms.is_str(b): raise ValueError('to_mesh: non-str surf/reg name: %s' % (b,))
-            (b0, lb) = (b, b.lower())
-            # check for translations of the name first:
-            s = b[4:] if lb.startswith('reg:') else b[5:] if lb.startswith('surf:') else b
-            ls = s.lower()
-            if ls.endswith('_sphere'): b = ('reg:' + s[:-7])
-            elif ls == 'sphere': b = 'reg:native'
-            lb = b.lower()
-            # we try surfaces first (if a is a cortex and has surfaces)
-            if is_cortex(a) and not lb.startswith('reg:'):
-                (s,ls) = (b[5:],lb[5:]) if lb.startswith('surf:') else (b,lb)
-                if   s  in a.surfaces: return a.surfaces[s]
-                elif ls in a.surfaces: return a.surfaces[ls]
-            # then check registrations
-            if not lb.startswith('surf:'):
-                (s,ls) = (b[4:],lb[4:]) if lb.startswith('reg:') else (b,lb)
-                if   s  in a.registrations: return a.registrations[s]
-                elif ls in a.registrations: return a.registrations[ls]
+            elif pimms.is_str(b):
+                (b0, lb) = (b, b.lower())
+                # check for translations of the name first:
+                s = b[4:] if lb.startswith('reg:') else b[5:] if lb.startswith('surf:') else b
+                ls = s.lower()
+                if ls.endswith('_sphere'): b = ('reg:' + s[:-7])
+                elif ls == 'sphere': b = 'reg:native'
+                lb = b.lower()
+                # we try surfaces first (if a is a cortex and has surfaces)
+                if is_cortex(a) and not lb.startswith('reg:'):
+                    (s,ls) = (b[5:],lb[5:]) if lb.startswith('surf:') else (b,lb)
+                    if   s  in a.surfaces: return a.surfaces[s]
+                    elif ls in a.surfaces: return a.surfaces[ls]
+                # then check registrations
+                if not lb.startswith('surf:'):
+                    (s,ls) = (b[4:],lb[4:]) if lb.startswith('reg:') else (b,lb)
+                    if   s  in a.registrations: return a.registrations[s]
+                    elif ls in a.registrations: return a.registrations[ls]
+            elif pimms.is_number(b): return a.surface(b)
             # nothing found
             raise ValueError('to_mesh: mesh named "%s" not found in topology %s' % (b0, a))
         else: raise ValueError('to_mesh: could not deduce meaning of row: %s' % (obj,))

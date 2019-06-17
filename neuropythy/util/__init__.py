@@ -12,10 +12,10 @@ from .core     import (ObjectWithMetaData, normalize, denormalize,
                        inv, zinv, divide, cdivide, zdivide, czdivide, power, cpower, inner,
                        sine, cosine, tangent, cotangent, secant, cosecant,
                        arcsine, arccosine, arctangent,
-                       library_path, address_data, is_address, AutoDict, auto_dict,
-                       curve_spline, curve_intersection, close_curves, is_curve_spline,
-                       to_curve_spline, CurveSpline,
-                       DataStruct, data_struct, tmpdir, dirpath_to_list)
+                       library_path, address_data, is_address, address_interpolate,
+                       AutoDict, auto_dict, curve_spline, curve_intersection, close_curves,
+                       is_curve_spline, to_curve_spline, CurveSpline,
+                       DataStruct, data_struct, tmpdir, dirpath_to_list, apply_affine)
 from .conf     import (config, to_credentials, detect_credentials, load_credentials)
 from .filemap  import (FileMap, file_map, is_file_map, pseudo_path, is_pseudo_path, to_pseudo_path,
                        osf_crawl, url_download)

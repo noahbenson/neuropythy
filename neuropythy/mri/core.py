@@ -8,15 +8,19 @@ import numpy.linalg        as npla
 import scipy               as sp
 import scipy.sparse        as sps
 import scipy.spatial       as spspace
-import neuropythy.geometry as geo
 import pyrsistent          as pyr
 import collections         as colls
 import os, sys, types, six, pimms
 
+from .. import geometry as geo
+
 from itertools import chain
 
-from ..util import (ObjectWithMetaData, to_affine, is_image, is_address, is_tuple, address_data,
-                    curry, to_hemi_str, is_pseudo_path, pseudo_path, to_pseudo_path)
+from ..util import (ObjectWithMetaData, to_affine, apply_affine, is_image, is_address, is_tuple,
+                    is_list, address_data, address_interpolate, curry, to_hemi_str, is_pseudo_path,
+                    pseudo_path, to_pseudo_path)
+from .images import (to_image, to_image_spec, is_image_spec, is_image_header, is_pimage, is_npimage,
+                     image_copy)
 
 @pimms.immutable
 class Subject(ObjectWithMetaData):
@@ -37,14 +41,11 @@ class Subject(ObjectWithMetaData):
     Subject respects laziness in the hemis and images classes, and this mechanism is recommended
     as a way to lazily load subject data (see pimms.lazy_map).
     '''
-    def __init__(self, name=None, pseudo_path=None, hemis=None, images=None, meta_data=None,
-                 voxel_to_vertex_matrix=None, voxel_to_native_matrix=None):
+    def __init__(self, name=None, pseudo_path=None, hemis=None, images=None, meta_data=None):
         self.name                   = name
-        self.pseudo_path             = pseudo_path
+        self.pseudo_path            = pseudo_path
         self.hemis                  = hemis
         self.images                 = images
-        self.voxel_to_vertex_matrix = voxel_to_vertex_matrix
-        self.voxel_to_native_matrix = voxel_to_native_matrix
         self.meta_data              = meta_data
 
     @pimms.param
@@ -84,48 +85,6 @@ class Subject(ObjectWithMetaData):
         elif pimms.is_pmap(imgs): return imgs
         elif pimms.is_map(imgs):  return pyr.pmap(imgs)
         else: raise ValueError('images must be a mapping')
-    @pimms.value
-    def native_to_vertex_matrix(native_to_voxel_matrix, voxel_to_vertex_matrix):
-        '''
-        sub.native_to_vertex_matrix is the affine transformation matrix that converts from the
-        subject's 'native' orientation to the vertex orientation.
-        '''
-        return pimms.imm_array(np.dot(voxel_to_vertex_matrix, native_to_voxel_matrix))
-    @pimms.value
-    def vertex_to_native_matrix(native_to_vertex_matrix):
-        '''
-        sub.vertex_to_native_matrix is the inverse matrix of sub.native_to_vertex_matrix.
-        '''
-        return pimms.imm_array(npla.inv(native_to_vertex_matrix))
-    @pimms.param
-    def voxel_to_native_matrix(mtx):
-        '''
-        sub.voxel_to_vertex_matrix is the 4x4 affine transformation matrix that converts from a
-        subject's (0-indexed) voxel indices to that subject's 'native' orientation; this is the
-        orientation matrix used when exporting a subject's images, and should be the orientation
-        encoded in the subject's image data.
-        '''
-        return pimms.imm_array(to_affine(mtx, 3))
-    @pimms.value
-    def native_to_voxel_matrix(voxel_to_native_matrix):
-        '''
-        sub.native_to_voxel_matrix is the inverse matrix of sub.voxel_to_native_matrix.
-        '''
-        return pimms.imm_array(npla.inv(voxel_to_native_matrix))
-    @pimms.value
-    def vertex_to_voxel_matrix(voxel_to_vertex_matrix):
-        '''
-        sub.vertex_to_voxel_matrix is the inverse matrix of sub.voxel_to_vertex_matrix.
-        '''
-        return pimms.imm_array(npla.inv(voxel_to_vertex_matrix))
-    @pimms.param
-    def voxel_to_vertex_matrix(mtx):
-        '''
-        sub.voxel_to_vertex_matrix is the 4x4 affine transformation matrix that converts from
-        (i,j,k) indices in the subject's image/voxel space to (x,y,z) coordinates in the subject's
-        cortical surface space.
-        '''
-        return pimms.imm_array(to_affine(mtx, 3))
 
     # Aliases for hemispheres
     @pimms.value
@@ -185,7 +144,7 @@ class Subject(ObjectWithMetaData):
         sub.lh_gray_indices is equivalent to numpy.where(sub.lh_gray_mask).
         '''
         if lh_gray_mask is None: return None
-        if is_image(lh_gray_mask): lh_gray_mask = lh_gray_mask.get_data()
+        if is_image(lh_gray_mask): lh_gray_mask = lh_gray_mask.dataobj
         return tuple([pimms.imm_array(x) for x in np.where(lh_gray_mask)])
     @pimms.value
     def rh_gray_indices(rh_gray_mask):
@@ -193,7 +152,7 @@ class Subject(ObjectWithMetaData):
         sub.rh_gray_indices is equivalent to numpy.where(sub.rh_gray_mask).
         '''
         if rh_gray_mask is None: return None
-        if is_image(rh_gray_mask): rh_gray_mask = rh_gray_mask.get_data()
+        if is_image(rh_gray_mask): rh_gray_mask = rh_gray_mask.dataobj
         return tuple([pimms.imm_array(x) for x in np.where(rh_gray_mask)])
     @pimms.value
     def gray_indices(lh_gray_indices, rh_gray_indices):
@@ -214,7 +173,7 @@ class Subject(ObjectWithMetaData):
         subject's lh, represented as 3-tuples.
         '''
         if lh_white_mask is None: return None
-        if is_image(lh_white_mask): lh_white_mask = lh_white_mask.get_data()
+        if is_image(lh_white_mask): lh_white_mask = lh_white_mask.dataobj
         idcs = np.transpose(np.where(lh_white_mask))
         return frozenset([tuple(row) for row in idcs])
     @pimms.value
@@ -224,7 +183,7 @@ class Subject(ObjectWithMetaData):
         subject's rh, represented as 3-tuples.
         '''
         if rh_white_mask is None: return None
-        if is_image(rh_white_mask): rh_white_mask = rh_white_mask.get_data()
+        if is_image(rh_white_mask): rh_white_mask = rh_white_mask.dataobj
         idcs = np.transpose(np.where(rh_white_mask))
         return frozenset([tuple(row) for row in idcs])
     @pimms.value
@@ -252,183 +211,8 @@ class Subject(ObjectWithMetaData):
             key = next(images.iterkeys(), None)
         img = images[key]
         if img is None: return None
-        if is_image(img): img = img.get_data()
+        if is_image(img): img = img.dataobj
         return np.asarray(img).shape
-
-    @pimms.value
-    def lh_vertex_to_voxel_linear_interpolation(lh_gray_indices, lh, image_dimensions,
-                                                voxel_to_vertex_matrix):
-        '''
-        sub.lh_gray_vertex_to_voxel_linear_interpolation is a scipy sparse matrix representing the
-          interpolation from the vertices into the voxels; the ordering of the voxels that is
-          produced by the dot-product of this matrix with the vector of vertex-values is the same
-          as the ordering used in sub.lh_gray_indices.
-        The method works by projecting the vectors from the white surface vertices to the pial
-        surface vertices into the the ribbon and weighting them by the fraction of the vector that
-        lies in the voxel.
-        '''
-        return _vertex_to_voxel_linear_interpolation(lh, lh_gray_indices, image_dimensions,
-                                                     voxel_to_vertex_matrix)
-    @pimms.value
-    def rh_vertex_to_voxel_linear_interpolation(rh_gray_indices, rh, image_dimensions,
-                                                voxel_to_vertex_matrix):
-        '''
-        sub.rh_gray_vertex_to_voxel_linear_interpolation is a scipy sparse matrix representing the
-          interpolation from the vertices into the voxels; the ordering of the voxels that is
-          produced by the dot-product of this matrix with the vector of vertex-values is the same
-          as the ordering used in sub.rh_gray_indices.
-        The method works by projecting the vectors from the white surface vertices to the pial
-        surface vertices into the the ribbon and weighting them by the fraction of the vector that
-        lies in the voxel.
-        '''
-        return _vertex_to_voxel_linear_interpolation(rh, rh_gray_indices, image_dimensions,
-                                                     voxel_to_vertex_matrix)
-    @pimms.value
-    def lh_vertex_to_voxel_heaviest_interpolation(lh_vertex_to_voxel_linear_interpolation):
-        '''
-        sub.lh_gray_vertex_to_voxel_heaviest_interpolation is a scipy sparse matrix representing the
-          interpolation from the vertices into the voxels; the ordering of the voxels that is
-          produced by the dot-product of this matrix with the vector of vertex-values is the same
-          as the ordering used in sub.lh_gray_indices.
-        The method works by projecting the vectors from the white surface vertices to the pial
-        surface vertices into the the ribbon and weighting them by the fraction of the vector that
-        lies in the voxel; the column in each row of the interpolation matrix with the highest
-        weight is then given a value of 1 while all other rows are given values of 0. This is
-        equivalent to performing nearest-neighbor interpolation while controlling for the depth of
-        the voxel in the cortex.
-        '''
-        interp = lh_vertex_to_voxel_linear_interpolation
-        (rs,cs) = interp.shape
-        argmaxs = np.asarray(interp.argmax(axis=1))[:,0]
-        return sps.csr_matrix((np.ones(rs, dtype=np.int), (range(rs), argmaxs)),
-                              shape=interp.shape,
-                              dtype=np.int)
-    @pimms.value
-    def rh_vertex_to_voxel_heaviest_interpolation(rh_vertex_to_voxel_linear_interpolation):
-        '''
-        sub.rh_gray_vertex_to_voxel_heaviest_interpolation is a scipy sparse matrix representing the
-          interpolation from the vertices into the voxels; the ordering of the voxels that is
-          produced by the dot-product of this matrix with the vector of vertex-values is the same
-          as the ordering used in sub.rh_gray_indices.
-        The method works by projecting the vectors from the white surface vertices to the pial
-        surface vertices into the the ribbon and weighting them by the fraction of the vector that
-        lies in the voxel; the column in each row of the interpolation matrix with the highest
-        weight is then given a value of 1 while all other rows are given values of 0. This is
-        equivalent to performing nearest-neighbor interpolation while controlling for the depth of
-        the voxel in the cortex.
-        '''
-        interp = rh_vertex_to_voxel_linear_interpolation
-        (rs,cs) = interp.shape
-        argmaxs = np.asarray(interp.argmax(axis=1))[:,0]
-        return sps.csr_matrix((np.ones(rs, dtype=np.int), (range(rs), argmaxs)),
-                              shape=interp.shape,
-                              dtype=np.int)
-    @pimms.value
-    def vertex_to_voxel_linear_interpolation(lh_vertex_to_voxel_linear_interpolation,
-                                             rh_vertex_to_voxel_linear_interpolation):
-        '''
-        sub.rh_gray_vertex_to_voxel_linear_interpolation is a scipy sparse matrix representing the
-          interpolation from the vertices into the voxels; the ordering of the voxels that is
-          produced by the dot-product of this matrix with the vector of vertex-values is the same
-          as the ordering used in sub.gray_indices. The vertex-values should be concatenated, LH
-          values then RH values.
-        The method works by projecting the vectors from the white surface vertices to the pial
-        surface vertices into the the ribbon and weighting them by the fraction of the vector that
-        lies in the voxel.
-        '''
-        (lm, rm) = (lh_vertex_to_voxel_linear_interpolation,rh_vertex_to_voxel_linear_interpolation)
-        (ls, rs) = (lm.shape, rm.shape)
-        (lels, rels) = (sps.find(lm), sps.find(rm))
-        rels = (rels[0] + ls[0], rels[1] + ls[1], rels[2])
-        (rows,cols,vals) = [np.concatenate(pair) for pair in zip(lels, rels)]
-        return sps.csr_matrix((vals, (rows,cols)), shape=np.add(ls, rs))
-
-    @pimms.value
-    def lh_vertex_to_voxel_lines_interpolation(lh_gray_indices, lh, image_dimensions,
-                                               vertex_to_voxel_matrix):
-        '''
-        sub.lh_gray_vertex_to_voxel_lines_interpolation is a scipy sparse matrix representing the
-          interpolation from the vertices into the voxels; the ordering of the voxels that is
-          produced by the dot-product of this matrix with the vector of vertex-values is the same
-          as the ordering used in sub.lh_gray_indices.
-        The method works by projecting the vectors from the white surface vertices to the pial
-        surface vertices into the the ribbon and weighting them by the fraction of the vector that
-        lies in the voxel.
-        '''
-        return _vertex_to_voxel_lines_interpolation(lh, lh_gray_indices, image_dimensions,
-                                                    vertex_to_voxel_matrix)
-    @pimms.value
-    def rh_vertex_to_voxel_lines_interpolation(rh_gray_indices, rh, image_dimensions,
-                                               vertex_to_voxel_matrix):
-        '''
-        sub.rh_gray_vertex_to_voxel_lines_interpolation is a scipy sparse matrix representing the
-          interpolation from the vertices into the voxels; the ordering of the voxels that is
-          produced by the dot-product of this matrix with the vector of vertex-values is the same
-          as the ordering used in sub.rh_gray_indices.
-        The method works by projecting the vectors from the white surface vertices to the pial
-        surface vertices into the the ribbon and weighting them by the fraction of the vector that
-        lies in the voxel.
-        '''
-        return _vertex_to_voxel_lines_interpolation(rh, rh_gray_indices, image_dimensions,
-                                                    vertex_to_voxel_matrix)
-    @pimms.value
-    def vertex_to_voxel_lines_interpolation(lh_vertex_to_voxel_lines_interpolation,
-                                            rh_vertex_to_voxel_lines_interpolation):
-        '''
-        sub.rh_gray_vertex_to_voxel_lines_interpolation is a scipy sparse matrix representing the
-          interpolation from the vertices into the voxels; the ordering of the voxels that is
-          produced by the dot-product of this matrix with the vector of vertex-values is the same
-          as the ordering used in sub.gray_indices. The vertex-values should be concatenated, LH
-          values then RH values.
-        The method works by projecting the vectors from the white surface vertices to the pial
-        surface vertices into the the ribbon and weighting them by the fraction of the vector that
-        lies in the voxel.
-        '''
-        (lm, rm) = (lh_vertex_to_voxel_lines_interpolation, rh_vertex_to_voxel_lines_interpolation)
-        (ls, rs) = (lm.shape, rm.shape)
-        (lels, rels) = (sps.find(lm), sps.find(rm))
-        rels = (rels[0] + ls[0], rels[1] + ls[1], rels[2])
-        (rows,cols,vals) = [np.concatenate(pair) for pair in zip(lels, rels)]
-        return sps.csr_matrix((vals, (rows,cols)), shape=np.add(ls, rs))
-
-    @pimms.value
-    def lh_vertex_to_voxel_nearest_interpolation(lh_gray_indices, lh, voxel_to_vertex_matrix):
-        '''
-        sub.lh_gray_vertex_to_voxel_nearest_interpolation is a scipy sparse matrix representing the
-          interpolation from the vertices into the voxels; the ordering of the voxels that is
-          produced by the dot-product of this matrix with the vector of vertex-values is the same
-          as the ordering used in sub.lh_gray_indices.
-        The method used is nearest-neighbors to either the closest pial or white surface vertex.
-        '''
-        return _vertex_to_voxel_nearest_interpolation(lh, lh_gray_indices, voxel_to_vertex_matrix)
-    @pimms.value
-    def rh_vertex_to_voxel_nearest_interpolation(rh_gray_indices, rh, voxel_to_vertex_matrix):
-        '''
-        sub.rh_gray_vertex_to_voxel_nearest_interpolation is a scipy sparse matrix representing the
-          interpolation from the vertices into the voxels; the ordering of the voxels that is
-          produced by the dot-product of this matrix with the vector of vertex-values is the same
-          as the ordering used in sub.lh_gray_indices.
-        The method used is nearest-neighbors to either the closest pial or white surface vertex.
-        '''
-        return _vertex_to_voxel_nearest_interpolation(rh, rh_gray_indices, voxel_to_vertex_matrix)
-    @pimms.value
-    def vertex_to_voxel_nearest_interpolation(lh_vertex_to_voxel_nearest_interpolation,
-                                              rh_vertex_to_voxel_nearest_interpolation):
-        '''
-        sub.rh_gray_vertex_to_voxel_nearest_interpolation is a scipy sparse matrix representing the
-          interpolation from the vertices into the voxels; the ordering of the voxels that is
-          produced by the dot-product of this matrix with the vector of vertex-values is the same
-          as the ordering used in sub.lh_gray_indices.
-        The method used is nearest-neighbors to either the closest pial or white surface vertex.
-        '''
-        (lm, rm) = (lh_vertex_to_voxel_nearest_interpolation,
-                    rh_vertex_to_voxel_nearest_interpolation)
-        (ls, rs) = (lm.shape, rm.shape)
-        (lels, rels) = (sps.find(lm), sps.find(rm))
-        rels = (rels[0] + ls[0], rels[1] + ls[1], rels[2])
-        (rows,cols,vals) = [np.concatenate(pair) for pair in zip(lels, rels)]
-        return sps.csr_matrix((vals, (rows,cols)), shape=np.add(ls, rs))
-    
     @pimms.value
     def repr(name, path):
         '''
@@ -465,131 +249,84 @@ class Subject(ObjectWithMetaData):
         if not pimms.is_str(filename): filename = self.pseudo_path.join(*filename)
         flnm = self.pseudo_path.local_path(filename)
         return load(flnm, *args, **kw)
-    def cortex_to_image(self, data,
-                        hemi=None, method='linear', fill=0, dtype=None, affine=None, shape=None):
+    def cortex_to_image(self, data, im,
+                        hemi=None, method=None, fill=0, affine=Ellipsis, address=None,
+                        # below are the property() args:
+                        dtype=Ellipsis, outliers=None,    data_range=None,    clipped=np.inf,
+                        weights=None,   weight_min=0,     null=np.nan,        transform=None,
+                        mask=None,      valid_range=None, weight_transform=Ellipsis):
         '''
-        sub.cortex_to_image(data, hemi) projects the given cortical-surface data to the given
-          subject's gray-matter voxels of the given hemisphere and returns the resulting numpy
-          array.
-        sub.cortex_to_image((lh_data, rh_data)) projects into both hemispheres.
+        sub.cortex_to_image(data, im) yields an MRImage object with the same image-spec as im but
+          with the given data projected into the image. The argument im may be anything that can be
+          converted to an image-spec using the to_image_spec() function. If im is an image whose
+          dataobj member is not persistent and is not an array-proxy then the image itself will be
+          written into.
+        sub.cortex_to_image(data, im, hemi) projects the given cortical-surface data to the given
+          subject's gray-matter voxels of the given hemisphere and returns the image object.
+        sub.cortex_to_image((lh_data, rh_data), im) projects into both hemispheres and yields the
+          object.
+
+        Note that if no hemisphere is given and the input argument data is not a tuple like
+        (lh_data, rh_data), then it must be a property name that is shared by both hemispheres. Even
+        if both hemispheres have the same vertex_count, you cannot pass one vector unless a
+        hemisphere name is given. By default the hemispheres used are 'lh' and 'rh'.
     
-        The following options may be given:
-          * method (default: 'linear') specifies that a particular method should be used; valid
-            options are 'linear', 'heaviest', and 'nearest'. The 'linear' method uses the
-            lh_vertex_to_voxel_linear_interpolation and rh_vertex_to_voxel_linear_interpolation 
-            matrices while 'nearest' uses the nearest-neighbor interpolation. The 'heaviest' method
-            uses the highest-valued weight in the 'linear' interpolation matrix, which is
-            equivalent to using nearest-neighbor interpolation after controlling for the depth of
-            the voxel with respect to the vertices. The 'linear' method is generally preferred
-            unless your data is discreet, in which the 'heaviest' method is generally best.
+        The data argument may be a 2-tuple, in which case it is always interpreted as (lh-data,
+        rh-data); the individual hemisphere data can be a vector of values or a property name. The
+        data are always passed through the cortex.property() method and any option that can be given
+        to property() can be given here and will be forwarded along. The following additional
+        options may also be given:
+          * method (default: None) specifies that a particular method should be used; valid options
+            are 'linear' and 'nearest'. The 'linear' method uses linear interpolation within the
+            prismatic columns of the cortex (see cortex.to_image() for more info); the nearest
+            method uses the vertex on the cortex to which the given voxel is closest (using the
+            lines that the vertices make through cortex). The default, None, specifies that linear
+            should be used for all real/complex (inexact) data and nearest should be used for all
+            other data (integers/strings/etc).
           * fill (default: 0) specifies the value to be assigned to all voxels not in the gray mask
             or voxels in the gray-mask that are missed by the interpolation method.
-          * dtype (default: None) specifies the data type that should be exported. If None, this
-            will be automatically set to np.float32 for floating-point data and np.int32 for integer
-            data.
-          * affine (default: None) specifies the affine transformation that should be used to align
-            the cortical surfaces with the voxels. If None, then the subject's vertex-to-voxel
-            matrix will be used.
-          * shape (default: None) specifies the dimensions of the output array; if None, then the
-            subject's image_dimensions is used.
+          * affine (default: Ellipsis) specifies the affine transformation that should be used to
+            align the cortical surfaces with the voxels. If Ellipsis, then the affine transforms
+            saved in the cortex objects. Note that this option overwrites these transforms if found.
+          * address (default: None) may specify pre-calculated addresses for use in projecting the
+            hemispheres into the image.
         '''
+        # get our image:
+        if pimms.is_nparray(im) and len(im.shape) >= 3: im = ny.to_image(im)
+        if is_image(im) and (is_pimage(im) or not is_npimage(im)): im = image_copy(im)
+        else: im = to_image(to_image_spec(im), fill=fill)
         # what hemisphere(s)?
         hemi = to_hemi_str(hemi)
         hemi = ('lh', None) if hemi == 'lh' else (None, 'rh') if hemi == 'rh' else ('lh','rh')
         nhems = len([x for x in hemi if x])
         tr = None
         # Make the data match this format...
-        if   is_tuple(data) and len(data) == 2: pass
-        elif pimms.is_map(data): data = ((None,       data['rh']) if hemi[0] is None else
-                                         (data['lh'], None)       if hemi[1] is None else
-                                         (data['lh'], data['rh']))
-        elif pimms.is_str(data): data = (data, data)
-        elif pimms.is_array(data):
+        if   (is_tuple(data) or is_list(data)) and len(data) == nhems: pass
+        elif pimms.is_map(data): data = tuple([None if h is None else data[h] for h in hemi])
+        elif pimms.is_str(data): data = (data,) * nhems
+        else:
             data = np.asarray(data)
             sh = data.shape
-            if   nhems == 1: data = tuple([None if k is None else data for k in hemi])
-            elif 2 in sh:
-                ax = next([k for (k,d) in enumerate(sh) if d == 2])
-                data = np.transpose(data, list(chain([ax], range(0, ax), range(ax+1, len(sh)))))
-            else: raise ValueError('bad data shape for number of hemispheres')
-        else: raise ValueError('cortex_to_image cannot deduce data structure')
-        # Make sure we have all the data...
-        data = list(data)
-        for (dat,h,ii) in zip(data, hemi, [0,1]):
-            if h is None: continue
-            if dat is None: raise ValueError('hemisphere %s requested but data not provided' % h)
-            hem = self.hemis[h]
-            dat = hem.property(dat)
-            if not pimms.is_array(dat, None, (1,2)):
-                raise ValueError('data given for %s is neither a vector nor a matrix' % h)
-            if pimms.is_matrix(dat) and dat.shape[0] != hem.vertex_count: dat = dat.T
-            if dat.shape[0] != hem.vertex_count:
-                raise ValueError('vertex data for %s does not match number of vertices' % h)
-            data[ii] = dat
-        # data can be a matrix, but both datas must be the same if so; also figure out the number
-        # of frames in case matrices were provided:
-        if data[0] is not None and data[1] is not None:
-            if not pimms.is_matrix(data[0]):
-                if pimms.is_matrix(data[1]):
-                    raise ValueError('hemisphere data shapes must match in non-vertex dimension')
-                else: frames = 1
-            elif not pimms.is_matrix(data[1]):
-                raise ValueError('hemisphere data shapes must match in non-vertex dimension')
-            elif data[0].shape[1] != data[1].shape[1]:
-                raise ValueError('hemisphere data shapes must match in non-vertex dimension')
-            else: frames = data[0].shape[1]
-        elif data[0] is None:
-            frames = data[1].shape[1] if pimms.is_matrix(data[1]) else 1
-        else:
-            frames = data[0].shape[1] if pimms.is_matrix(data[0]) else 1
-        # Figure out the dtype
-        if dtype is None:
-            # check the input...
-            floatq = any(d is not None and pimms.is_array(d, np.inexact) for d in data)
-            dtype = np.float32 if floatq else np.int32
-        shape = self.image_dimensions if shape is None else shape
-        # make our output array
-        dims = shape + (frames,) if frames > 1 and len(shape) < 4 else shape
-        arr = np.full(dims, fill, dtype=dtype)
-        # if we are given a transform matrix, we have to build the interpolation
-        # what method? specifically, what matrices to use?
-        if pimms.is_str(method):
-            method = 'auto' if method is None else method.lower()
-            if method in ['auto', 'automatic']:
-                method = 'linear' if np.issubdtype(dtype, np.inexact) else 'heaviest'
-            # if there is no affine specified, we can use one of the pre-built
-            # matrices for this subject
-            if affine is None and np.array_equal(shape, self.image_dimensions):
-                if nhems == 2:
-                    interp  = getattr(self, 'vertex_to_voxel_%s_interpolation' % method)
-                    indices = self.gray_indices
-                else:
-                    interp =  [getattr(self, '%s_vertex_to_voxel_%s_interpolation' % (h, method))
-                               for h in hemi if h is not None][0]
-                    indices = [getattr(self, '%s_gray_indices'%h) for h in hemi if h is not None][0]
-            else:
-                # we need to build a matrix
-                tmp = [cortex_to_image_interpolation(h, mask=mask, affine=affine,
-                                                     method=method, shape=shape)
-                       for h in hemi if h is not None]
-                indices = (tmp[0][0], tmp[1][0])
-                interp = (tmp[0][1], tmp[1][1])
-                interp  = interp[0]  if nhems == 1 else sps.hstack(interp)
-                indices = indices[0] if nhems == 1 else tuple(np.hstack(indices))
-        else:
-            indices = mask
-            interp = method
-        data = [x for x in data if x is not None][0] if nhems == 1 else np.concatenate(data)
-        # if the fill is non-zero, we need to note where the interp matrix misses
-        misses = None if fill == 0 else np.where(np.abs(interp).sum(axis=1) == 0)
-        arr[indices] = interp.dot(data)
-        # note the misses if there are some
-        if misses: arr[misses] = fill
-        # That's everything!
-        return arr
+            if nhems == 1: data = tuple([None if k is None else data for k in hemi])
+            else: raise ValueError('cannot given single array of data for multiple hemispheres')
+        # gather up the property() keywords for the next step:
+        kw = dict(affine=affine,         method=method,
+                  dtype=dtype,           null=null,          outliers=outliers,
+                  data_range=data_range, clipped=clipped,    weights=weights,
+                  weight_min=weight_min, mask=mask,          valid_range=valid_range,
+                  transform=transform,   weight_transform=weight_transform)
+        if address is None: address = (None, None)
+        # okay, we just need to pass down to the to_image function of the hemispheres:
+        for (dat,h,addr,ii) in zip(data, hemi, address, np.arange(nhems)):
+            if h is None: dat = None
+            if dat is None: continue
+            if addr is not None: kw['address'] = addr
+            elif 'address' in kw: del kw['address']
+            im = self.hemis[h].to_image(dat, im, **kw)
+        return im
     def image_to_cortex(self, image,
-                        surface='midgray', hemi=None, affine=None, method=None, fill=0, dtype=None,
-                        weights=None):
+                        surface='midgray', hemi=None, affine=Ellipsis, method=None, fill=0,
+                        dtype=None, weights=None):
         '''
         sub.image_to_cortex(image) is equivalent to the tuple
           (sub.lh.from_image(image), sub.rh.from_image(image)).
@@ -605,8 +342,26 @@ class Subject(ObjectWithMetaData):
         else:
             hemi = getattr(self, hemi)
             return hemi.from_image(image, surface=surface, affine=affine,
-                                   method=method, fill=fill, dtype=dtype, weights=weights,
-                                   native_to_vertex_matrix=self.native_to_vertex_matrix)
+                                   method=method, fill=fill, dtype=dtype, weights=weights)
+    def image_address(self, image, hemi='lr'):
+        '''
+        sub.image_address(image) yields the (lh, rh) image-addresses for the given image or
+          image-spec.
+        sub.image_address(image, h) uses the given hemisphere h, which may alternately be a tuple of
+          hemisphere names. The default, 'lr', is equivalent to ('lh','rh').
+        '''
+        if is_tuple(hemi):
+            sing = False
+            hemi = [to_hemi_str(h) for h in hemi]
+            if h == ['lr']: h = ['lh','rh']
+        else:
+            sing = True
+            hemi = to_hemi_str(hemi)
+            hemi = ['lh','rh'] if hemi == 'lr' else [hemi]
+        r = [self.hemis[h].image_address(image)
+             for h in hemi]
+        if sing and len(r) == 1: return r[0]
+        else: return tuple(r)
 def is_subject(s):
     '''
     is_subject(s) yields True if s is a Subject object and False otherwise.
@@ -631,15 +386,16 @@ class Cortex(geo.Topology):
     registrations includes the key 'native' this is taken to be the default registration for the
     particular cortex object.
     '''
-    def __init__(self, chirality, tess, surfaces, registrations, properties=None, meta_data=None):
+    def __init__(self, chirality, tess, surfaces, registrations,
+                 properties=None, affine=None, meta_data=None):
         self.chirality = chirality
         self.surface_coordinates = surfaces
         self.meta_data = meta_data
         geo.Topology.__init__(self, tess, registrations, properties=properties)
         self.chirality = chirality
         self.surface_coordinates = surfaces
+        self.affine = affine
         self.meta_data = meta_data
-
     @pimms.param
     def chirality(ch):
         '''
@@ -650,6 +406,17 @@ class Cortex(geo.Topology):
         if ch != 'lh' and ch != 'rh':
             raise ValueError('chirality must be \'lh\' or \'rh\'')
         return ch
+    @pimms.param
+    def affine(aff):
+        '''
+        cortex.affine is either None or an affine transformation that specifies how the coordinates
+        of the surfaces in the given cortex should be rotated in order to align with an abstract
+        'native' geometry. This field is used, e.g., by FreeSurfer subjects to indicate how the
+        coordinates of the FreeSurfer surfaces should be transformed in order to be aligned with the
+        native-space defined by the affine transforms of the FreeSurfer images.
+        '''
+        if aff is None: return None
+        return to_affine(aff, 3)
     @pimms.param
     def surface_coordinates(surfs):
         '''
@@ -674,6 +441,17 @@ class Cortex(geo.Topology):
                 return m.persist()
             return _lambda
         return pimms.lazy_map({k:_make_mesh(k) for k in six.iterkeys(surface_coordinates)})
+    @pimms.value
+    def aligned_surfaces(surfaces, affine):
+        '''
+        cortex.aligned_surfaces is identical to cortex.surfaces except that the aligned surfaces
+        have been transformed by cortex.affine.
+        '''
+        if affine is None: return surfaces
+        def align_surf(s):
+            srf = surfaces[s]
+            return srf.copy(coordinates=apply_affine(affine, srf.coordinates))
+        return pimms.lazy_map({k:curry(align_surf, k) for k in six.iterkeys(surfaces)})
     @pimms.require
     def validate_surfaces(surfaces):
         '''
@@ -723,7 +501,7 @@ class Cortex(geo.Topology):
 
     def __repr__(self):
         return self.repr
-    def surface(self, name='white'):
+    def surface(self, name='white', aligned=False):
         '''
         cortex.surface() yields the white surface of the given cortex
         cortex.surface(name) yields the surface with the given name (e.g., 'white', 'pial',
@@ -733,62 +511,201 @@ class Cortex(geo.Topology):
           range 0-1 may be returned by following the vectors between white and pial surfaces, but
           they may have odd appearances, and this should not be confused with surface inflation.
         cortex.surface([dist]) yields the layer that is the given distance from the white surface.
+
+        The optional argument aligned (default: False) may be specified to extract meshes already
+        aligned according to the cortex.affine matrix.
         '''
+        srfs = self.aligned_surfaces if aligned else self.surfaces
         if pimms.is_str(name):
-            if name.lower() == 'midgray' and 'midgray' not in self.surfaces:
+            if name.lower() == 'midgray' and 'midgray' not in srfs:
                 return self.midgray_surface # in case it's been provided via overloading
-            elif name in self.surfaces: return self.surfaces[name]
-            else: return geo.to_mesh((self, name))
+            elif name in srfs: return srfs[name]
+            else:
+                m = geo.to_mesh((self, name))
+                if not aligned or self.affine is None: return m
+                return m.copy(coordinates=apply_affine(self.affine, m.coordinates))
         elif pimms.is_vector(name, 'real') and len(name) == 1:
-            x0 = self.white_surface.coordinates
-            dx = self.white_to_pial_vectors
-            return self.make_mesh(x0 + name[0]*dx)
+            x0 = srfs['white'].coordinates
+            x1 = srfs['pial'].coordinates
+            q = name[0]
+            return self.make_mesh(x0*(1 - q) + x1*q)
         elif pimms.is_real(name):
-            x0 = self.white_surface.coordinates
-            x1 = self.pial_surface.coordinates
+            x0 = srfs['white'].coordinates
+            x1 = srfs['pial'].coordinates
             return self.make_mesh((1 - name)*x0 + name*x1)
-        else:
-            raise ValueError('could not understand surface layer: %s' % name)
-    def from_image(self, image, surface='midgray', affine=None, method=None, fill=0, dtype=None,
-                   native_to_vertex_matrix=None, weights=None):
+        else: raise ValueError('could not understand surface layer: %s' % name)
+    def from_image(self, image,
+                   surface='midgray', affine=Ellipsis, method=None, fill=0, dtype=None,
+                   weights=None):
         '''
         cortex.from_image(image) is equivalent to cortex.midgray_surface.from_image(image).
         cortex.from_image(image, surface) uses the given surface (see also cortex.surface).
+
+        The optional argument affine (default: Ellipsis) can be used to override the cortex.affine
+        transformation typically used in cortex-image alignment.
         '''
         mesh = geo.to_mesh((self, surface))
+        if affine is Ellipsis: affine = self.affine
         return mesh.from_image(image, affine=affine, method=method, fill=fill, dtype=dtype,
-                               native_to_vertex_matrix=native_to_vertex_matrix, weights=weights)
-    def address(self, data, indices=None, native_to_vertex_matrix=None):
+                               weights=weights)
+    def to_image(self, prop, image,
+                 fill=0, image_type=None, method=None, address=None, affine=Ellipsis,
+                 # the rest of the arguments are for property()
+                 dtype=Ellipsis,   outliers=None,  data_range=None,           clipped=np.inf,
+                 weights=None,     weight_min=0,   weight_transform=Ellipsis, mask=None,
+                 valid_range=None, null=np.nan,    transform=None):
+        '''
+        cortex.to_image(property, ...) yields a 3D image of the given property.
+        cortex.to_image(property, image) writes the data into the given image and returns it if the
+          image contains a writeable numpy array; otherwise duplicates the image with a new
+          read-only array that consists of the new data written over the old data and yields that
+          image. Note that most images returned by nibabel use array proxies and thus are duplicated
+          rather than written to by default (because the dataobj is an ArrayProxy and not a
+          writeable numpy array).
+        cortex.to_image(property, imspec) uses the given image-specification to construct the image.
+
+        Additional keyword arguments accepted by cortex.property() are passed along when determining
+        the property vector. The following additional optional arguments are also accepted:
+          * fill (default: 0) also specifies the value given to the cells of a new image if one must
+            be constructed (for example, if no image is passed or an image-spec is given).
+          * image_type (default: None) specifies the image type that should be returned; by default
+            uses the type of the given image or 'nifti1' if no image type can be inferred.
+          * method (default: None) specifies the method of interpolation to use. By default, this
+            is 'linear' if the property data are inexact numbers and 'nearest' if the data are
+            anything else (strings, integers, etc.).
+          * address (default: None) may optionally be used to provide the pre-calculated addresses
+            rather than using cortex.image_address() to find them.
+        '''
+        # start by getting the propery:
+        propkw = dict(dtype=dtype,           null=null,                         outliers=outliers,
+                      data_range=data_range, clipped=clipped,                   weights=weights,
+                      mask=mask,             valid_range=valid_range,           transform=transform,
+                      weight_min=weight_min, weight_transform=weight_transform)
+        if pimms.is_map(prop):
+            ktr = lambda k:0 if k == 'white' else 1 if k == 'pial' else 0.5 if k == 'midgray' else k
+            prop = {ktr(k):self.property(v, **propkw) for (k,v) in six.iteritems(prop)}
+        else:
+            prop = self.property(prop, **propkw)
+            # we assume these are linearly-spaced between 0 and 1
+            if pimms.is_vector(prop): prop = {0:prop, 1:prop}
+            else: prop = {k:v for (k,v) in zip(np.linspace(0, 1, len(prop)), prop)}
+        # next, figure out the image
+        if   is_image_spec(image):   image = to_image(image,
+                                                      fill=fill, image_type=image_type, dtype=dtype)
+        elif is_image_header(image): image = to_image(image,
+                                                      fill=fill, image_type=image_type, dtype=dtype)
+        else:                        image = to_image(image, image_type=image_type, dtype=dtype)
+        if is_pimage(image) or not pimms.is_nparray(image.dataobj):
+            image = image_copy(image, image_type=image_type)
+        if image_type is not None:
+            image_type = to_image_type(image_type)
+            if to_image_type(image) is not image_type:
+                image = image_copy(image, image_type=image_type)
+        # okay, now we get the projection of the cortex into the image:
+        addr = self.image_address(image, affine=affine) if address is None else address
+        # and use this to interpolate...
+        dat = address_interpolate(addr, prop, method=method, null=null)
+        # and put these into the image!
+        image.dataobj[tuple(addr['voxel_indices'])] = dat
+        return image
+    def image_address(self, img, affine=Ellipsis):
+        '''
+        cortex.image_address(img) is like cortex.address() but works on images; note that
+          cortex.address(img) will call cortex.address_image(img) when img is an image.
+
+        The optional argument affine may be used to override the cortex.affine transform usually
+        used in cortex-image alignment.
+
+        Note that the algorithm employed by this method works by dividing each triangular "prism"
+        (colum through the cortex defined by each face in the cortex tesselation) into a number of
+        tetrahedrons; because this definition of cortex is not necessarily identical to other 
+        definitions (such as that used by FreeSurfer itself), so depending the precise definition
+        of what is inside the cortex in a particular image may vary around the edges.
+        '''
+        dat = to_image_spec(img)
+        aff = dat['affine']
+        imsh = np.reshape(dat['image_shape'], (3,1))
+        if affine is Ellipsis: affine = self.affine
+        if affine is not None: aff = np.dot(np.linalg.inv(affine), aff)
+        aff = np.linalg.inv(aff)
+        # transform coordinates into voxel-space:
+        (wx,px) = (self.white_surface.coordinates, self.pial_surface.coordinates)
+        (wx,px) = [np.dot(aff, np.vstack([x, np.ones([1,x.shape[1]])]))[:3] for x in (wx,px)]
+        # now we find the addresses... start by getting the face coords:
+        fs = self.tess.indexed_faces
+        (wfx,pfx) = [np.transpose(x[:,fs], (1,0,2)) for x in (wx,px)]
+        # okay, make a bounding box for each prism in the cortex:
+        x = np.vstack([wfx,pfx])
+        (mn,mx) = [f(x, axis=0) for f in (np.min,np.max)]
+        mn[mn < 0] = 0
+        for (ii,n) in enumerate(imsh): mx[ii,mx[ii] >= n] = n - 1
+        # number of voxels in each bounding box:
+        (mn, mx) = (np.ceil(mn), np.floor(mx) + 1)
+        dims = mx - mn
+        dims[dims < 0] = 0
+        nvox = np.prod(dims, axis=0).astype('int') #dbg
+        ii = np.where(nvox > 0)[0]
+        # now we build up a big list of voxel indices and prisms to test against each other:
+        i1 = np.cumsum(nvox[ii])
+        i0 = np.concatenate([[0], i1[:-1]])
+        n  = int(i1[-1])
+        idcs = np.zeros((3,n),   dtype=np.int)
+        wfxs = np.zeros((3,3,n), dtype=np.float)
+        pfxs = np.zeros((3,3,n), dtype=np.float)
+        iis  = np.zeros(n,       dtype=np.int)
+        # we step along from i0 to i1 forgetting finished prisms along the way
+        (kk, q, mn, nvox, dims) = (ii, 0, mn[:,ii], nvox[ii], dims[:,ii])
+        while len(kk) > 0:
+            wfxs[:,:,i0] = wfx[:,:,kk]
+            pfxs[:,:,i0] = pfx[:,:,kk]
+            iis[i0] = kk
+            idcs[:,i0] = [(q // (dims[1]*dims[2]))      + mn[0],
+                          np.mod(q // dims[2], dims[1]) + mn[1],
+                          np.mod(q, dims[2])            + mn[2]]
+            # next iteration:
+            q += 1
+            ki = np.where(nvox > q)[0]
+            nvox = nvox[ki]
+            kk = kk[ki]
+            if len(kk) == 0: break
+            mn = mn[:,ki]
+            dims = dims[:,ki]
+            i0 = i0[ki]
+            i0 += 1
+        # now test them all:
+        bcs = geo.prism_barycentric_coordinates(wfxs, pfxs, idcs)
+        ok = ~np.isclose(np.sum(bcs, axis=0), 0)
+        # potentially-useful debug code (not currently used)
+        #object.__setattr__(self, '_debug', {}) #dbg
+        #self._debug['mn'] = np.array(mn) #dbg
+        #self._debug['mx'] = np.array(mx) #dbg
+        #self._debug['dims'] = np.array(dims) #dbg
+        #self._debug['i0'] = i0 #dbg
+        #self._debug['bcs'] = bcs
+        #self._debug['ok'] = ok
+        #self._debug['wfxs'] = wfxs
+        #self._debug['pfxs'] = pfxs
+        #self._debug['idcs'] = idcs
+        idcs = idcs[:,ok]
+        bcs = bcs[:,ok]
+        ii = iis[ok]
+        #(ii,kk) = np.unique(ii, return_index=True)
+        #return {'coordinates':bcs[:,kk], 'faces':self.tess.faces[:,ii], 'voxel_indices':idcs[:,kk]}
+        return {'coordinates':bcs, 'faces':self.tess.faces[:,ii], 'voxel_indices':idcs}
+    def address(self, data, affine=Ellipsis):
         '''
         cortex.address(points) yields the barycentric coordinates of the given point or points; the
           return value is a dict whose keys are 'face_id' and 'coordinates'. The address may be used
           to interpolate or unaddress either from a surface mesh or from a cortex.
-        cortex.address(image, idcs) yields the addresses of the voxels with the given indices in the
-          given image. The indices should either be a boolean mask image the same size as data or be
-          identical in format to the return value value of numpy.where().
         cortex.address(image) is equivalent to cortex.address(image, mask) where mask is equivalent
           to (numpy.isfinite(image) & image.astype(numpy.bool)).
 
-        If an image is provided as input then the optional argument native_to_vertex_matrix may
-        provide an affine-transformation from the image's native coordinate system to the cortex's
-        vertex coordinate system.
+        The optional argument affine (default: Ellipsis) may be set to an affine transformation that
+        should be applied prior to aligning the cortex with an image (if a point-set is given, then
+        this parameter is ignored). Ellipsis indicates that cortex.affine should be used.
         '''
-        idcs = indices
-        if is_image(data):
-            arr = np.asarray(data.get_data())
-            if idcs is None:
-                tmp = np.sum(arr, 3) if len(arr.shape) == 4 else arr
-                idcs = np.isfinite(tmp) & tmp.astype(np.bool)
-            if pimms.is_array(idcs, None, 3): idcs = np.where(idcs)
-            aff = data.affine
-            idcs = np.asarray(idcs)
-            if idcs.shape[0] != 3: idcs = idcs.T
-            if native_to_vertex_matrix is not None: aff = np.dot(native_to_vertex_matrix, aff)
-            xyz = np.dot(
-                aff,
-                np.concatenate((idcs, np.ones(1 if len(idcs.shape) == 1 else (1, idcs.shape[1])))))
-            return self.address(xyz[:3])
-        else: data = np.asarray(data) # data must be a point matrix then
+        if is_image(data): return self.image_address(data, affine=affine)
+        data = np.asarray(data) # data must be a point matrix then
         if len(data.shape) > 2: raise ValueError('point or point matrix required')
         if len(data.shape) == 2: xyz = data.T if data.shape[0] == 3 else data
         else:                    xyz = np.asarray([data])
@@ -805,6 +722,10 @@ class Cortex(geo.Topology):
         try:              shash = spspace.cKDTree(face_centers.T)
         except Exception: shash = spspace.KDTree(face_centers.T)
         (whsh, phsh) = [s.face_hash for s in (wsrf, psrf)]
+        # we can define a max distance for when something is too far from a point to plausibly be
+        # in a prism:
+        wpdist = np.sqrt(np.sum((wsrf.coordinates - psrf.coordinates)**2, axis=0))
+        max_dist = np.max(np.concatenate([wsrf.edge_lengths, psrf.edge_lengths, wpdist]))
         # Okay, for each voxel (xyz), we want to find the closest face centers; from those
         # centers, we find the ones for which the nearest point in the plane of the face to the
         # voxel lies inside the face, and of those we find the closest; this nearest point is
@@ -813,27 +734,39 @@ class Cortex(geo.Topology):
         # go ahead and make the results
         res_fs = np.full((3, n),     -1, dtype=np.int)
         res_xs = np.full((3, n), np.nan, dtype=np.float)
+        # points tha lie outside the pial surface entirely we can eliminate off the bat:
+        ii = [(mn <= ix) & (ix <= mx)
+              for (px,ix) in zip(psrf.coordinates, xyz.T)
+              for (mn,mx) in [(np.min(px), np.max(px))]]
+        ii = np.where(ii[0] & ii[1] & ii[2])[0]
         # Okay, we look for those isect's within the triangles
-        ii = np.asarray(range(n)) # the subset not yet matched
         idcs = []
         for i in range(N):
             if len(ii) == 0: break
             if i >= sofar:
                 sofar = max(4, 2*sofar)
-                idcs = shash.query(xyz[ii], sofar)[1].T
-            # we look at just the i'th column of the indices
-            col = fids[idcs[i]]
+                (ds,idcs) = shash.query(xyz[ii], sofar)
+            # if dist is greater than max distance, we can skip those
+            oks = np.where(ds[:,i] <= max_dist)[0]
+            if len(oks) == 0: break
+            elif len(oks) < len(ii):
+                ii = ii[oks]
+                idcs = idcs[oks]
+                ds = ds[oks]
+            col = fids[idcs[:,i]]
             bcs = geo.prism_barycentric_coordinates(fwcoords[:,:,col], fpcoords[:,:,col], xyz[ii].T)
             # figure out which ones were discovered to be in this prism
-            outp   = np.isclose(np.sum(bcs, axis=0), 0)
-            inp    = np.logical_not(outp)
-            ii_inp = ii[inp]
-            # for those in their prisms, we capture the face id's and coordinates
-            res_fs[:, ii_inp] = faces[:, col[inp]]
-            res_xs[:, ii_inp] = bcs[:, inp]
-            # trim down those that matched so we don't keep looking for them
-            ii = ii[outp]
-            idcs = idcs[:,outp]
+            outp = np.isclose(np.sum(bcs, axis=0), 0)
+            if not np.all(outp):
+                inp    = np.logical_not(outp)
+                ii_inp = ii[inp]
+                # for those in their prisms, we capture the face id's and coordinates
+                res_fs[:, ii_inp] = faces[:, col[inp]]
+                res_xs[:, ii_inp] = bcs[:, inp]
+                # trim down those that matched so we don't keep looking for them
+                ii = ii[outp]
+                idcs = idcs[outp]
+                ds = ds[outp]
             # And continue!
         # and return the data
         return {'faces': res_fs, 'coordinates': res_xs}
@@ -863,6 +796,14 @@ class Cortex(geo.Topology):
             (wtx, ptx) = [sx[:,faces].T for sx in (wx, px)]
         (wu, pu) = [geo.barycentric_to_cartesian(tx, bc) for tx in (wtx, ptx)]
         return wu*ds + pu*(1 - ds)
+    def image_weight(self, img, affine=None):
+        '''
+        cortex.image_weight(img) yields an image with the spec given by img (which may be an image
+          or an image-spec) and with each voxel containing the weight of the cortex in that voxel.
+          The weight is equal to the fraction of the voxel's volume that overlaps with the cortex.
+        '''
+        raise NotImplementedError('image_weight is not yet implemented') #TODO
+
 def is_cortex(c):
     '''
     is_cortex(c) yields True if c is a Cortex object and False otherwise.
@@ -1057,105 +998,3 @@ def _vertex_to_voxel_nearest_interpolation(hemi, gray_indices, voxel_to_vertex_m
     return sps.csr_matrix((np.ones(len(wn)), (range(len(wn)), wn)),
                           shape=(len(gray_indices[0]), vcount),
                           dtype=np.float)
-
-def cortex_to_image_interpolation(obj, mask=None, affine=None, method='linear', shape=None):
-    '''
-    cortex_to_image_interpolation(obj) yields a tuple (indices, interp) where indices is a tuple of
-      voxel indices and interp is an interpolation matrix that converts a vector of cortical
-      surface vertex values into a vector of of voxel values with the same ordering as those given
-      in indices.
-
-    The argument obj may be either a subject or a cortex or a tuple of (lh, rh) cortices. If the obj
-    specifies two cortices, then the interp matrix will be arranged such that the vertex-value
-    vector with which interp should be multiplied must first list the LH values then the RH values;
-    i.e., image[indices] = interp.dot(join(lh_values, rh_values)).
-
-    The following options are accepted:
-      * mask (default: None) specifies the mask of vertices that should be interpolated; if this is
-        None, then this will attempt to use the gray_indices of the object if the object is a
-        subject, otherwise this is equivalent to 'all'. The special value 'all' indicates that all
-        vertices overlapping with the cortex should be interpolated. Mask may be given as a boolean
-        mask or as a set or as a tuple/matrix of indices equivalent to numpy.where(binary_mask) or
-        its transpose. The value indices that is returned will be identical to mask if mask is given
-        in the same format.
-      * affine (default: None) specifies the affine transform that is used to align the vertices
-        with the voxels. In voxel-space, the voxel with index (i,j,k) is centered at at the point
-        (i,j,k) and is 1 unit wide in every direction. If the value None is given, will attempt to
-        use the object's vertex_to_voxel_matrix if object is a subject, otherwise will use a
-        FreeSurfer-like orientation that places the vertex origin in the center of the image.
-      * shape (default: None) specifies the size of the resulting image as a tuple. If None is given
-        then the function attempts to deduce the correct shape; if obj is a subject, then its
-        image_dimensions tuple is used. Otherwise, the size is deduced from the mask, if possible;
-        if it cannot be deduced from the mask, then (256, 256, 256) is used.
-      * method (default: 'linear') specifies the method to use. May be 'linear', 'heaviest', or
-        'nearest'.
-    '''
-    # get the min/max values of the coordinates (for deducing sizes, if necessary)
-    if mask is None:
-        if shape is None and affine is None:
-            # we have no way to deduce anything
-            shape = (256,256,256)
-            affine = ([[-1,0,0],[0,0,-1],[0,1,0]], [128,128,128])
-        elif shape is None:
-            shape = (256,256,256)
-        elif affine is None:
-            affine = ([[-1,0,0],[0,0,-1],[0,1,0]], np.asarray(shape) / 2)
-        mask = obj.gray_indices if isinstance(obj, Subject) else 'all'
-    # okay, having handled that no-arg case, lets parse the argument we have
-    if pimms.is_matrix(mask):
-        # we take this to be the list; we don't chante its order
-        if not is_tuple(mask) or len(mask) != 3:
-            mask = np.asarray(mask, dtype=np.int)
-            mask = tuple(mask.T if mask.shape[0] != 3 else mask)
-    elif isinstance(mask, colls.Set):
-        # we have to convert this into a propert mask
-        mask = np.asarray(list(mask)).T
-        tmp = np.full(shape, False)
-        tmp[tuple(mask)] = True
-        mask = np.where(tmp)
-    elif pimms.is_array(mask, dims=3):
-        if shape is None: shape = mask.shape
-        mask = np.where(mask)
-    elif pimms.is_str(mask) and mask.lower() == 'all':
-        if shape is None: shape = (256,256,256)
-        mask = np.where(np.ones(shape))
-    else:
-        raise ValueError('Could not understand mask argument')
-    # at this point, we can deduce shape from mask and affine from shape
-    if shape is None:  shape  = np.asarray(np.ceil(np.max(mask, axis=0)), dtype=np.int)
-    if affine is None:
-        if isinstance(obj, Subject):
-            affine = obj.vertex_to_voxel_matrix
-        else:
-            affine = ([[-1,0,0],[0,0,-1],[0,1,0]], np.asarray(shape) / 2)
-    affine = to_affine(affine, 3)
-    hems = (obj.lh, obj.rh) if isinstance(obj, Subject) else (obj,)
-    # all arguments are basically pre-processed; we just need to make the interpolation
-    method = 'auto' if method is None else method.lower()
-    if method in ['linear', 'auto', 'automatic']:
-        interp = [_vertex_to_voxel_linear_interpolation(h, mask, shape, affine) for h in hems]
-        if len(interp) == 1: interp = interp[0]
-        else: interp = sps.hstack(interp)
-    elif method in ['lines', 'line']:
-        interp = [_vertex_to_voxel_lines_interpolation(h, mask, shape, affine) for h in hems]
-        if len(interp) == 1: interp = interp[0]
-        else: interp = sps.hstack(interp)
-    elif method in ['heaviest', 'heavy', 'weight', 'weightiest']:
-        interp = [_vertex_to_voxel_linear_interpolation(h, mask, shape, affine) for h in hems]
-        if len(interp) == 1: interp = interp[0]
-        else: interp = sps.hstack(interp)
-        # convert to binary matrix:
-        (rs,cs) = interp.shape
-        argmaxs = np.asarray(interp.argmax(axis=1))[:,0]
-        return sps.csr_matrix((np.ones(rs, dtype=np.int), (range(rs), argmaxs)),
-                              shape=interp.shape,
-                              dtype=np.int)
-    elif method in ['nearest', 'near', 'nearest-neighbor', 'nn']:
-        aff = npla.inv(affine)
-        interp = [_vertex_to_voxel_nearest_interpolation(h, mask, aff) for h in hems]
-        if len(interp) == 1: interp = interp[0]
-        else: interp = sps.hstack(interp)
-    else:
-        raise ValueError('unsupported method: %s' % method)
-    # That's it; we have the interp matrix and the indices
-    return (mask, interp)

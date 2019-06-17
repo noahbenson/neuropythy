@@ -229,6 +229,31 @@ try:
     itself runs linearly from 0 to 1, so cortical magnification data should be log-transformed
     then scaled before being passed.
     '''
+    # A few other handy colormaps:
+    cmap_temperature_dark = blend_cmap('temperature_dark',
+                                       [(0,1,1), (0,0,1), (0,0,0), (1,0,0), (1,1,0)])
+    cmap_temperature      = blend_cmap('temperature',
+                                       [(0,0,1), (0,1,1), (1,1,1), (1,1,0), (1,0,0)])
+    cmap_lightsaber_dark  = blend_cmap('lightsaber_dark',
+                                       [(0,1,1), (0,1,0), (0,0,0), (1,0,0), (1,1,0)])
+    cmap_lightsaber       = blend_cmap('lightsaber',
+                                       [(0,1,0), (0,1,1), (1,1,1), (1,1,0), (1,0,0)])
+    cmap_electricity_dark = blend_cmap('electricity_dark',
+                                       [(0,1,1), (0,0,1), (0,0,0), (0,1,0), (1,1,0)])
+    cmap_electricity      = blend_cmap('electricity',
+                                       [(0,0,1), (0,1,1), (1,1,1), (1,1,0), (0,1,0)])
+    cmap_reddish          = blend_cmap('reddish',
+                                       [(1,1,1), (1,1,0), (1,0,0), (0.5, 0, 0.25)])
+    cmap_reddish_dark     = blend_cmap('reddish_dark',
+                                       [(0,0,0), (1,0,0), (1,1,0), (1, 1, 0.25)])
+    cmap_bluish           = blend_cmap('bluish',
+                                       [(1,1,1), (0,1,1), (0,0,1), (0.25, 0, 0.5)])
+    cmap_bluish_dark      = blend_cmap('bluish_dark',
+                                       [(0,0,0), (0,0,1), (0,1,1), (0.25, 1, 1)])
+    cmap_greenish         = blend_cmap('greenish',
+                                       [(1,1,1), (0,1,1), (0,1,0), (0.25, 0.5, 0)])
+    cmap_greenish_dark    = blend_cmap('greenish_dark',
+                                       [(0,0,0), (0,1,0), (1,1,0), (1, 1, 0.5)])
 
     colormaps = {
         'curvature':        (cmap_curvature,        (-1,1)),
@@ -244,7 +269,20 @@ try:
         'log_eccentricity': (cmap_log_eccentricity, (np.log(0.5), np.log(90.0))),
         'radius':           (cmap_radius,           (0, 40)), 
         'log_radius':       (cmap_log_radius,       (np.log(0.25), np.log(40.0))),
-        'log_cmag':         (cmap_log_cmag,         (np.log(0.5), np.log(32.0)))}
+        'log_cmag':         (cmap_log_cmag,         (np.log(0.5), np.log(32.0))),
+        # the handy but non-neuroscience-based ones:
+        'temperature_dark': (cmap_temperature_dark, (-1,1)),
+        'temperature':      (cmap_temperature,      (-1,1)),
+        'lightsaber_dark':  (cmap_lightsaber_dark,  (-1,1)),
+        'lightsaber':       (cmap_lightsaber,       (-1,1)),
+        'electricity_dark': (cmap_electricity_dark, (-1,1)),
+        'electricity':      (cmap_electricity,      (-1,1)),
+        'reddish_dark':     (cmap_reddish_dark,     (0,1)),
+        'reddish':          (cmap_reddish,          (0,1)),
+        'greenish_dark':    (cmap_greenish_dark,    (0,1)),
+        'greenish':         (cmap_greenish,         (0,1)),
+        'bluish_dark':      (cmap_bluish_dark,      (0,1)),
+        'bluish':           (cmap_bluish,           (0,1))}
     for (k,(cmap,_)) in six.iteritems(colormaps): matplotlib.cm.register_cmap(k, cmap)
 
     def _diff_order(n):

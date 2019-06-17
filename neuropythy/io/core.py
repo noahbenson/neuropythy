@@ -379,18 +379,18 @@ def load_nifti(filename, to='auto'):
     img = nib.load(filename)
     to = to.lower()
     if to == 'image':    return img
-    elif to == 'data':   return img.get_data()
+    elif to == 'data':   return img.dataobj
     elif to == 'affine': return img.affine
     elif to == 'header': return img.header
     elif to == 'field':
-        dat = np.squeeze(np.asarray(img.get_data()))
+        dat = np.squeeze(np.asarray(img.dataobj))
         if len(dat.shape) > 2:
             raise ValueError('image requested as field has more than 2 non-unitary dimensions')
         return dat
     elif to in ['auto', 'automatic']:
-        dims = set(np.shape(img.get_data()))
+        dims = set(np.shape(img.dataobj))
         if 1 < len(dims) < 4 and 1 in dims:
-            return np.squeeze(np.asarray(img.get_data()))
+            return np.squeeze(np.asarray(img.dataobj))
         else:
             return img
     else:
@@ -428,7 +428,7 @@ def to_nifti(obj, like=None, header=None, affine=None, extensions=Ellipsis, vers
             if header is None: header = like.header
             if affine is None: affine = like.affine
         elif isinstance(like, Subject):
-            if affine is None: affine = like.voxel_to_native_matrix
+            if affine is None: affine = like.images['brain'].affine
         else:
             raise ValueError('Could not interpret like argument with type %s' % type(like))
     # check to make sure that we have to change something:
