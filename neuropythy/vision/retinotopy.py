@@ -2248,3 +2248,47 @@ def clean_retinotopy(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=Ellipsis,
         for (u,v) in zip([x,y], X): u[tess.index(submesh.labels)] = v
     return as_retinotopy({'x':x, 'y':y}, output_style)
 
+def visual_field_mesh(max_eccentricity=12, hemi='lr', resolution=0.18):
+    '''
+    visual_field_mesh() yields a 2D mesh object that tiles the visual field up to 12 degrees of
+      eccentricity.
+    visual_field_mesh(max_ecc) tiles the visual field out to max_ecc degrees of eccentricity.
+    visual_field_mesh(max_ecc, hemi) tiles only the right ('lh') or left ('rh') visual field out to
+      max_ecc degrees of eccentricity; 'lr' can be given for both hemispheres.
+      
+    The optional argument resolution (default: 1) may be modified to adjust the resolution of the
+    points returned up or down.
+    '''
+    from neuropythy.util import to_hemi_str
+    from neuropythy import mesh
+    from scipy.spatial import Delaunay
+    h = to_hemi_str(hemi)
+    if max_eccentricity is None: max_eccentricity = 90
+    # parse resolution: we want an odd number of 
+    def to_oddeven(k, mod=1):
+        kk = np.max([int(np.round(k)), 1])
+        if   kk % 2 == mod: return kk
+        elif kk < k:        return kk + 1
+        else:               return kk - 1
+    # okay, decide what polar angle and eccentricity values go into the mesh:
+    if   h == 'lh': angle = np.linspace(0, 180, to_oddeven(180*resolution))
+    elif h == 'rh': angle = np.linspace(-180, 0, to_oddeven(180*resolution))
+    else:           angle = np.linspace(-180, 180, to_oddeven(360*resolution, 0), endpoint=False)
+    theta = np.pi/180.0 * (90 - angle)
+    nang = len(angle)
+    # for eccentricity, we want to logspace it:
+    eccen = np.logspace(-3, 1, to_oddeven(nang/np.pi, 0), base=2)
+    #eccen = np.arange(to_oddeven(nang/np.pi, 0))
+    eccen -= np.min(eccen)
+    eccen = eccen / np.max(eccen) * (max_eccentricity - 0.15) + 0.15
+    necc = len(eccen)
+    (t, r) = np.meshgrid(theta, eccen)
+    # here's the tricky part: we want to slightly adjust the values of r for every other row...
+    r[1:, 1::2] = np.mean([r[:-1, 1::2], r[1:, 1::2]], axis=0)
+    r[0, 1::2] -= 0.075
+    (t, r) = [u.flatten() for u in (t, r)]
+    (x, y) = (r*np.cos(t), r*np.sin(t))
+    # okay, make the mesh:
+    xy = np.asarray([x,y])
+    tt = Delaunay(xy.T)
+    return mesh(tt.simplices.T, xy)
