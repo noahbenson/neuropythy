@@ -708,14 +708,14 @@ def guess_cortex_cmap(pname):
       given property is not a string or is not recognized then the log_eccentricity axis is used
       and the suggested vmin and vmax are None.
     '''
-    if not pimms.is_str(pname): return (log_eccentricity, None, None)
+    if not pimms.is_str(pname): return (log_eccentricity, (None, None))
     if pname in colormaps: return colormaps[pname]
     # check each manually
     for (k,v) in six.iteritems(colormaps):
         if pname.endswith(k): return v
     for (k,v) in six.iteritems(colormaps):
         if pname.startswith(k): return v
-    return (log_eccentricity, None, None)
+    return (log_eccentricity, (None, None))
 def apply_cmap(zs, cmap, vmin=None, vmax=None):
     '''
     apply_cmap(z, cmap) applies the given cmap to the values in z; if vmin and/or vmad are passed,
