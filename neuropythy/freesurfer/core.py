@@ -171,16 +171,13 @@ def find_subject_path(sub, check_path=True):
     '''
     sdirs = config['freesurfer_subject_paths']
     # if it's a full/relative path already, use it:
-    if is_freesurfer_subject_path(sub): return sub
-    path = next((p for sd in sdirs for p in [os.path.join(sd, sub)]
-                 if is_freesurfer_subject_path(p)),
-                None)
-    if path is not None: return path
-    if check_path: return None
-    if os.path.isdir(sub): return sub
+    if ((not check_path or is_freesurfer_subject_path(sub)) and
+        (check_path is None or os.path.isdir(sub))):
+        return sub
     return next((p for sd in sdirs for p in [os.path.join(sd, sub)]
-                 if os.path.isdir(p)),
-                sub)
+                 if ((not check_path or is_freesurfer_subject_path(p)) and
+                     (check_path is None or os.path.isdir(p)))),
+                None)
 
 # Used to load immutable-like mgh objects
 def _load_imm_mgh(pdir, flnm):
@@ -222,7 +219,7 @@ def _load_geo(flnm,u):
 freesurfer_subject_data_hierarchy = [['image'],                ['raw_image'],
                                      ['hemi', 'surface'],      ['hemi', 'tess'],
                                      ['hemi', 'registration'], ['hemi', 'property'],
-                                     ['hemi', 'label'],        ['hemi', 'alt_label'],
+                                     ['hemi', 'label'],        #['hemi', 'alt_label'],
                                      ['hemi', 'weight'],       ['hemi', 'alt_weight'],
                                      ['hemi', 'annot'],        ['hemi', 'alt_annot']]
 freesurfer_subject_filemap_instructions = [
@@ -558,7 +555,7 @@ def cortex_from_filemap(fmap, chirality, name, subid=None, affine=None):
     def _load_with_alt(k, s0, sa, trfn):
         try: u = s0.get(k, None)
         except Exception: u = None
-        if u is None:
+        if u is None and sa is not None:
             try: u = sa.get(k, None)
             except Exception: u = None
         if u is None: raise ValueError('Exception while loading property %s' % k)
