@@ -722,8 +722,8 @@ def apply_cmap(zs, cmap, vmin=None, vmax=None):
       they are used to scale z.
     '''
     zs = np.asarray(zs, dtype='float')
-    if vmin is None: vmin = np.min(zs)
-    if vmax is None: vmax = np.max(zs)
+    if vmin is None: vmin = np.nanmin(zs)
+    if vmax is None: vmax = np.nanmax(zs)
     if pimms.is_str(cmap): cmap = matplotlib.cm.get_cmap(cmap)
     return cmap((zs - vmin) / (vmax - vmin))
 
@@ -994,13 +994,13 @@ try:
             (x,y,z) = m.coordinates
             ii = slice(i0, i0 + m.vertex_count)
             ipvm = ipv.plot_trisurf(x,y,z, m.tess.faces.T, color=rgba[ii,:3])
-            mns = np.min([mns, np.min([x,y,z], axis=1)], axis=0)
-            mxs = np.max([mxs, np.max([x,y,z], axis=1)], axis=0)
+            mns = np.nanmin([mns, np.nanmin([x,y,z], axis=1)], axis=0)
+            mxs = np.nanmax([mxs, np.nanmax([x,y,z], axis=1)], axis=0)
             ms = ms + (ipvm,)
         # Figure out the bounding box...
         szs = mxs - mns
         mid = 0.5*(mxs + mns)
-        bsz = np.max(szs)
+        bsz = np.nanmax(szs)
         # okay, set the plot limits
         mxs = mid + 0.5*bsz
         mns = mid - 0.5*bsz
