@@ -3,7 +3,7 @@
 # Utility for presenting a directory with a particular format as a data structure.
 # By Noah C. Benson
 
-import os, warnings, six, tarfile, atexit, shutil, posixpath, json, copy, pimms
+import os, sys, warnings, logging, six, tarfile, atexit, shutil, posixpath, json, copy, pimms
 import numpy          as np
 import pyrsistent     as pyr
 from   posixpath  import join as urljoin, split as urlsplit, normpath as urlnormpath
@@ -82,7 +82,8 @@ def is_tarball_path(path):
     is_tarball_path(p) yields True if p is either a valid path of a tarball file or is such a path
       followed by a colon then any additional path.
     '''
-    (tb,p) = split_tarball_path(path)
+    try: (tb,p) = split_tarball_path(path)
+    except Exception: return False
     return tb is not None
 def is_tarball_file(path):
     '''
@@ -272,11 +273,13 @@ class OSFPath(BasicPath):
         BasicPath.__init__(self, base_path, pathmod=posixpath, cache_path=cache_path)
         # if there's a tarball on the base path, we need to grab it instead of doing a typical
         # osf_crawl
-        (tbloc, tbinternal) = split_tarball_path(base_path)
-        if tbloc == None: tree = osf_crawl(base_path)
-        else: tree = osf_crawl(tbloc)
-        object.__setattr__(self, 'osf_tree', tree)
+        object.__setattr__(self, 'osf_tree', Ellipsis)
     def _find_url(self, rpath):
+        if self.osf_tree is Ellipsis:
+            (tbloc, tbinternal) = split_tarball_path(self.base_path)
+            if tbloc == None: tree = osf_crawl(self.base_path)
+            else: tree = osf_crawl(tbloc)
+            self.osf_tree = tree
         fl = self.osf_tree
         parts = [s for s in rpath.split(self.sep) if s != '']
         # otherwise walk the tree...
@@ -392,6 +395,7 @@ class PseudoPath(ObjectWithMetaData):
         pseudo_path.source_path is the source path of the the given pseudo-path object.
         '''
         if sp is None: return os.path.join(os.path.sep)
+        if is_tuple(sp) and isinstance(sp[0], s3fs.S3FileSystem): return sp
         if not pimms.is_str(sp): raise ValueError('source_path must be a string/path')
         if is_url(sp) or is_s3_path(sp): return sp
         return os.path.expanduser(os.path.expandvars(sp))
@@ -431,8 +435,12 @@ class PseudoPath(ObjectWithMetaData):
         if is_tuple(source_path):
             (el0,pp) = (source_path[0], source_path[1:])
             if s3fs is not None and isinstance(el0, s3fs.S3FileSystem):
-                rpr = 'S3:/' + urljoin(*pp)
                 base_path = urljoin(*pp)
+                bpl = base_path.lower()
+                if   bpl.startswith('s3://'): base_path = base_path[5:]
+                elif bpl.startswith('s3:/'):  base_path = base_path[4:]
+                elif bpl.startswith('s3:'):   base_path = base_path[3:]
+                rpr = 's3://' + base_path
                 pathmod = S3Path(el0, base_path, cache_path=cp['cp'])
             elif is_pseudo_path(el0):
                 raise NotImplementedError('pseudo-path nests not yet supported')
@@ -468,8 +476,10 @@ class PseudoPath(ObjectWithMetaData):
             base_path = ''
             # ok, don't know what it is...
         else: raise ValueError('Could not interpret source path: %s' % source_path)
-        return pyr.pmap({'repr':      rpr,
-                         'pathmod':   pathmod})
+        tmp = {'repr':rpr, 'pathmod':pathmod}
+        if not cp.is_lazy('cp'):
+            tmp['cache_path'] = cp['cp']
+        return pyr.pmap(tmp)
     @pimms.require
     def check_path_data(_path_data):
         '''
@@ -483,7 +493,19 @@ class PseudoPath(ObjectWithMetaData):
           from the pdir.cache_path if the cache_path provided was None yet a temporary cache path
           was needed.
         '''
-        return _path_data['cache']
+        return _path_data.get('cache_path', None)
+    @pimms.value
+    def actual_source_path(source_path):
+        '''
+        pdir.actual_source_path is identical to pdir.source_path except when the input source_path
+        is a tuple (e.g. giving an s3fs object followed by a source path), in which case
+        pdir.actual_source_path is a string representation of the source path.
+        '''
+        if source_path is None: return None
+        if pimms.is_str(source_path): return source_path
+        s = urljoin(*source_path[1:])
+        if not s.lower().startswith('s3://'): s = 's3://' + s
+        return s
     def __repr__(self):
         p = self._path_data['repr']
         return "pseudo_path('%s')" % p
@@ -798,8 +820,12 @@ class FileMap(ObjectWithMetaData):
     def _load(pdir, flnm, loadfn, *argmaps, **kwargs):
         inst = pimms.merge(*(argmaps + (kwargs,)))
         flnm = flnm.format(**inst)
+        args = pimms.merge(*argmaps, **kwargs)
+        #logging.info('FileMap: loading file "%s"...\n' % flnm) #debug
+        if '_exvivo' in flnm: raise KeyboardInterrupt()
         try:
             lpth = pdir.local_path(flnm)
+            #logging.info('     ... local path: %s\n' % lpth) #debug
             args = pimms.merge(*argmaps, **kwargs)
             loadfn = inst['load'] if 'load' in args else loadfn
             #filtfn = inst['filt'] if 'filt' in args else lambda x,y:x
@@ -807,9 +833,9 @@ class FileMap(ObjectWithMetaData):
             #dat = filtfn(dat, args)
         except Exception:
             dat = None
-            raise
+            #raise
         # check for miss instructions if needed
-        if dat is None and 'miss' in args: miss = args['miss']
+        if dat is None and 'miss' in argmaps: miss = args['miss']
         else: miss = None
         if pimms.is_str(miss) and miss.lower() in ('error','raise','exception'):
             raise ValueError('File %s failed to load' % flnm)
