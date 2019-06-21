@@ -65,7 +65,7 @@ class Subject(ObjectWithMetaData):
         sub.path is the path of the subject's data directory, if any.
         '''
         if pseudo_path is None: return None
-        return pseudo_path.source_path
+        return pseudo_path.actual_source_path
     @pimms.param
     def hemis(h):
         '''
@@ -801,6 +801,8 @@ class Cortex(geo.Topology):
         cortex.image_weight(img) yields an image with the spec given by img (which may be an image
           or an image-spec) and with each voxel containing the weight of the cortex in that voxel.
           The weight is equal to the fraction of the voxel's volume that overlaps with the cortex.
+
+        Note: not yet implemented.
         '''
         raise NotImplementedError('image_weight is not yet implemented') #TODO
 
