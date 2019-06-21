@@ -56,8 +56,7 @@ class VertexSet(ObjectWithMetaData):
         pre-processed input version of the value obj.properties.
         '''
         if props is None: return None
-        if pimms.is_itable(props): return props.persist()
-        elif pimms.is_map(props): return pimms.itable(props).persist()
+        elif pimms.is_map(props): return pimms.persist(props)
         else: raise ValueError('provided properties data must be a mapping')
     @pimms.value
     def vertex_count(labels):
@@ -73,19 +72,19 @@ class VertexSet(ObjectWithMetaData):
         idcs = np.arange(0, vertex_count, 1, dtype=np.int)
         idcs.setflags(write=False)
         return idcs
-    @pimms.require
-    def validate_vertex_properties_size(_properties, vertex_count):
-        '''
-        validate_vertex_properties_size requires that _properties have the same number of rows as
-        the vertex_count (unless _properties is empty).
-        '''
-        if   _properties is None: return True
-        elif _properties.row_count == 0: return True
-        elif _properties.row_count == vertex_count: return True
-        else:
-            s = (_properties.row_count, vertex_count)
-            s = '_properties.row_count (%d) and vertex_count (%d) must be equal' % s
-            raise ValueError(s)
+    #@pimms.require
+    #def validate_vertex_properties_size(_properties, vertex_count):
+    #    '''
+    #    validate_vertex_properties_size requires that _properties have the same number of rows as
+    #    the vertex_count (unless _properties is empty).
+    #    '''
+    #    if   _properties is None: return True
+    #    elif _properties.row_count == 0: return True
+    #    elif _properties.row_count == vertex_count: return True
+    #    else:
+    #        s = (_properties.row_count, vertex_count)
+    #        s = '_properties.row_count (%d) and vertex_count (%d) must be equal' % s
+    #        raise ValueError(s)
     # The idea here is that _properties may be provided by the overloading class, then properties
     # can be overloaded by that class to add unmodifiable properties to the object; e.g., meshes
     # want coordinates to be a property that cannot be updated.
@@ -95,7 +94,8 @@ class VertexSet(ObjectWithMetaData):
         obj.properties is an itable of property values given to the vertex-set obj.
         '''
         _properties = pyr.m() if _properties is None else _properties
-        return _properties.set('index', indices).set('label', labels)
+        pp = _properties.set('index', indices).set('label', labels)
+        return pimms.itable(pp).persist()
     @pimms.value
     def repr(vertex_count):
         '''
@@ -815,18 +815,18 @@ class Tesselation(VertexSet):
         return tuple([tuple([vertex_index[u] for u in nei]) for nei in neighborhoods])
 
     # Requirements/checks
-    @pimms.require
-    def validate_properties(vertex_count, _properties):
-        '''
-        tess.validate_properties requres that all non-builtin properties have the same number of
-          entries as the there are vertices in the tesselation.
-        '''
-        if _properties is None or len(_properties.column_names) == 0:
-            return True
-        if vertex_count != _properties.row_count:
-            ns = (_properties.row_count, vertex_count)
-            raise ValueError('_properties has incorrect number of entries %d; (should be %d)' % ns)
-        return True
+    #@pimms.require
+    #def validate_properties(vertex_count, _properties):
+    #    '''
+    #    tess.validate_properties requres that all non-builtin properties have the same number of
+    #      entries as the there are vertices in the tesselation.
+    #    '''
+    #    if _properties is None or len(_properties) == 0:
+    #        return True
+    #    if vertex_count != _properties.row_count:
+    #        ns = (_properties.row_count, vertex_count)
+    #        raise ValueError('_properties has incorrect number of entries %d; (should be %d)' % ns)
+    #    return True
 
     # Normal Methods
     def __repr__(self):
