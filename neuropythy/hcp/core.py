@@ -15,261 +15,255 @@ from ..        import mri           as mri
 from ..        import io            as nyio
 from ..        import vision        as nyvis
 
-from ..util    import (library_path, curry)
+from ..util    import (library_path, curry, config, to_pseudo_path, is_pseudo_path)
 from .files    import (subject_paths, clear_subject_paths, add_subject_path, find_subject_path,
-                       to_subject_id, subject_filemap, retinotopy_prefix, lowres_retinotopy_prefix,
-                       inferred_retinotopy_prefix, lowres_inferred_retinotopy_prefix,
-                       load_retinotopy_cache, save_retinotopy_cache)
+                       subject_file_map, is_hcp_subject_path)
 
-# An hcp.Subject is much like an mri.Subject, but its dependency structure all comes from the
-# path rather than data provided to the constructor:
-@pimms.immutable
-class Subject(mri.Subject):
+def to_default_alignment_value(x):
+    if not pimms.is_str(x): raise ValueError('hcp_default_alignment must be a string')
+    x = x.lower()
+    if   x in ('msmsulc', 'sulc'): x = 'MSMSulc'
+    elif x in ('msmall', 'all'):   x = 'MSMAll'
+    else: raise ValueError('invalid value for hcp_default_alignment: %s')
+    return x
+config.declare('hcp_default_alignment', environ_name='HCP_DEFAULT_ALIGNMENT',
+               filter=to_default_alignment_value, default_value='MSMAll')
+def cortex_from_filemap(fmap, name, affine=None):
     '''
-    A neuropythy.hcp.Subject is an instance of neuropythy.mri.Subject that depends only on
-    the path of the subject represented; all other data are automatically derived from this.
-    
-    Do not call Subject() directly; use neuropythy.hcp.subject() instead.
+    cortex_from_filemap(filemap, chirality, name) yields a cortex object from the given filemap.
     '''
-    def __init__(self, sid, path, meta_data=None, default_alignment='MSMAll'):
-        sid = None if sid is None else to_subject_id(sid)
-        path = os.path.abspath(path)
-        name = path.split(os.sep)[-1] if sid is None else str(sid)
-        # get the name...
-        self.subject_id = sid
-        self.name = name
-        self.path = path
-        self.default_alignment = default_alignment
-        self.meta_data = meta_data
-        # these are the only actually required data for the constructor; the rest is values
-
-    @staticmethod
-    def _hmap_has_retinotopy(hmaps, size):
-        # by looking at hmaps, check if both hemispheres have retinotopy data
-        props = [('%s_%s' % (retinotopy_prefix, s))
-                 for s in ['polar_angle', 'eccentricity', 'radius', 'variance_explained']]
-        hsuf = '_LR%dk_MSMAll' % size
-        return all(p in hmaps[h + hsuf]['properties'] for p in props for h in ('lh','rh'))
-    @staticmethod
-    def _cortex_setup_native_retinotopy(subdir, sid, hemmap, hmaps, align='MSMAll'):
-        # Here, hemmap is the map that will be cortex.hemis and hmaps is filemap['hemis'].
-        size = next((s for s in [59,32] if Subject._hmap_has_retinotopy(hmaps, s)), None)
-        # okay, size is the best we can do from the database files, but let's see if we have any
-        # cache files; only use the 32k cache file if we can't load the 59k database file
-        nsuf = '_native_%s' % align
-        rp = retinotopy_prefix + '_'
-        props = [('%s%s' % (rp, s))
-                 for s in ['polar_angle', 'eccentricity', 'radius', 'variance_explained']]
-        cache = load_retinotopy_cache(subdir, sid, alignment=align)
-        # merge cache in now
-        for (hname,hcache) in six.iteritems(cache):
-            if hname not in hemmap: continue
-            hemmap = hemmap.set(hname, curry(lambda m,n,c:m[n].with_prop(c), hemmap,hname,hcache))
-        hfrompat = '%%s_LR%%dk_%s' % align
-        # now make a filter that adds the properties when the hemi is loaded
-        def check_hemi_retinotopy(hname):
-            h = hname[:2]
-            def lazy_hemi_fixer():
-                tohem = hemmap[hname] # where we interpolate to; also the hem to fix
-                # we only interpolate onto native hemispheres:
-                if hname.split('_')[1] != 'native': return tohem
-                # we want to make a lazy loader of the whole retinotopy dataset here
-                def get_interpolated_retinotopy():
-                    if get_interpolated_retinotopy.val is not None:
-                        return get_interpolated_retinotopy.val
-                    m = {}
-                    # we interpolate both prf and lowres-prf
-                    for (rp,res) in zip([retinotopy_prefix, lowres_retinotopy_prefix], [59,32]):
-                        rp = rp + '_'
-                        # first, if we have the retinotopy from cache, we can skip this...
-                        if all(k in tohem.properties for k in props): continue
-                        fromhem = hemmap[hfrompat % (h,res)] # where we interpolate from
-                        if fromhem is None: continue
-                        fromdat = {k:fromhem.prop(k)
-                                   for k in six.iterkeys(fromhem.properties)
-                                   if k.startswith(rp)}
-                        # if the data isn't in the from hemi, we can't interpolate
-                        if len(fromdat) == 0: continue
-                        # convert to x/y for interpolation (avoid circular angle mean issues)
-                        try: (x,y) = nyvis.as_retinotopy(fromdat, 'geographical', prefix=rp)
-                        except Exception: continue
-                        del fromdat[rp + 'polar_angle']
-                        del fromdat[rp + 'eccentricity']
-                        fromdat['x'] = x
-                        fromdat['y'] = y
-                        todat = fromhem.interpolate(tohem, fromdat, method='linear')
-                        # back to visual coords
-                        (a,e) = nyvis.as_retinotopy(todat, 'visual')
-                        todat = todat.remove('x').remove('y')
-                        # save results in our tracking variable, m
-                        for (k,v) in six.iteritems(todat):                       m[k]      = v
-                        for (k,v) in zip(['polar_angle','eccentricity'], [a,e]): m[rp + k] = v
-                    m = pyr.pmap(m)
-                    # we can save the cache...
-                    get_interpolated_retinotopy.val = m
-                    if len(m) > 0: save_retinotopy_cache(subdir, sid, hname, m, alignment=align)
-                    return m
-                get_interpolated_retinotopy.val = None
-                # figure out what properties we'll get from this
-                props = []
-                for (rp,res) in zip([retinotopy_prefix, lowres_retinotopy_prefix], [59,32]):
-                    fromh = hemmap[hfrompat % (h,res)] # where we interpolate from
-                    if fromh is None: props = []
-                    else: props = props + [k for k in six.iterkeys(fromh.properties)
-                                           if k.startswith(rp) and k not in tohem.properties]
-                if len(props) == 0: return tohem
-                m = pimms.lazy_map({p:curry(lambda k:get_interpolated_retinotopy()[k], p)
-                                    for p in props})
-                return tohem.with_prop(m)
-            return lazy_hemi_fixer
-        # now update the hemmap
-        return pimms.lazy_map({h:check_hemi_retinotopy(h) for h in six.iterkeys(hemmap)})
-    @staticmethod
-    def _cortex_from_hemimap(sid, hname, hmap):
-        chirality = hname[0:2]
-        # get a tess from the registration or surface map; first check for non-lazy or memoized
-        # values that don't require loading
-        (srfs, regs) = [hmap[k] for k in ('surfaces','registrations')]
-        tess = next((m[k] for m in (srfs,regs) for k in six.iterkeys(m) if not m.is_lazy(k)), None)
-        if tess is None: tess = regs['fs_LR']
-        tess = tess.tess.with_prop(hmap['properties'])
-        return mri.Cortex(chirality, tess, srfs, regs)
-    @pimms.param
-    def subject_id(sid):
-        '''
-        sub.subject_id is the 6-digit HCP subject id of the subject sub, or None if sub was loaded
-        from a non-standard source.
-        '''
-        if sid is None: return None
-        try: sid = int(sid)
-        except Exception: raise ValueError('Subject IDs must be 6-digit ints or strings')
-        if sid < 100000 or sid > 999999: raise ValueError('Subject IDs must be 6 digits')
-        return sid
-    @pimms.param
-    def default_alignment(da):
-        '''
-        sub.default_alignment is either 'MSMAll' or 'MSMSulc' and specifies what alignment algorithm
-        is used as the default hemisphere set. For example, if this is 'MSMAll', then sub.lh_native
-        will be identical to sub.lh_native_MSMAll instead of to sub.lh_native_MSMSulc.
-        '''
-        if da.lower() in ('msmsulc', 'sulc'): return 'MSMSulc'
-        elif da.lower() in ('msmall', 'all'): return 'MSMAll'
-        else: raise ValueError('default_alignment must be MSMAll or MSMSulc')
-    @pimms.value
-    def filemap(path):
-        '''
-        sub.filemap is a lazily-loading map of the files imported for the given sub. It should
-        generally not be necessary to access this value directly.
-        '''
-        return subject_filemap(path)
-    @pimms.value
-    def hemis(path, subject_id, filemap, default_alignment):
-        '''
-        sub.hemis is a persistent map of hemispheres/cortex objects for the given HCP subject sub.
-        HCP subjects have many hemispheres of the name <chirality>_<topology>_<alignment> where
-        chirality is lh or rh, topology is native or an atlas name, and alignment is MSMAll or
-        MSMSulc. The lh and rh hemispheres are aliases for lh_native and rh_native. The
-        default_alignment of the subject determines whether MSMAll or MSMSulc alignments are aliased
-        as <chirality>_<alignment> hemispheres.
-        '''
-        sid = subject_id
-        hmaps = filemap['hemis']
-        def _ctx_loader(k):
-            def _f():
-                try: return Subject._cortex_from_hemimap(sid, k, hmaps[k])
-                except Exception: return None
-            return _f
-        hemmap0 = pimms.lazy_map({k:_ctx_loader(k) for k in six.iterkeys(hmaps)})
-        # one special thing: we can auto-load retinotopy from another hemisphere and interpolate it
-        # onto the native hemisphere; set that up if possible (note that retinotopy is always
-        # aligned to MSMAll):
-        hemmap0 = Subject._cortex_setup_native_retinotopy(path, sid, hemmap0, hmaps, 'MSMAll')
-        # now setup the aliases
-        def _ctx_lookup(k): return lambda:hemmap0[k]
-        hemmap = {}
-        da = '_' + default_alignment
-        for k in six.iterkeys(hmaps):
-            hemmap[k] = _ctx_lookup(k)
-            if k.endswith(da):
-                kk = k[:-len(da)]
-                hemmap[kk] = hemmap[k]
-                if kk.endswith('_native'): hemmap[k[0:2]] = hemmap[k]
-        return pimms.lazy_map(hemmap)
-    @pimms.value
-    def images(filemap):
-        '''
-        sub.images is a persistent map of MRImages tracked by the given subject sub; in HCP subjects
-        these are renamed and converted from their typical HCP filenames (such as 'ribbon') to forms
-        that conform to the neuropythy naming conventions (such as 'gray_mask').
-        '''
-        imgmap = filemap['images']
-        def _img_loader(k): return lambda:imgmap[k]
-        imgs = {k:_img_loader(k) for k in six.iterkeys(imgmap)}
-        def _make_mask(val, eq=True):
-            rib = imgmap['ribbon']
-            arr = (rib.dataobj == val) if eq else (rib.dataobj != val)
-            arr.setflags(write=False)
-            return type(rib)(arr, rib.affine, rib.header)
-        imgs['lh_gray_mask']  = lambda:_make_mask(3)
-        imgs['lh_white_mask'] = lambda:_make_mask(2)
-        imgs['rh_gray_mask']  = lambda:_make_mask(42)
-        imgs['rh_white_mask'] = lambda:_make_mask(41)
-        imgs['brain_mask']    = lambda:_make_mask(0, False)
-        return pimms.lazy_map(imgs)
-    @pimms.value
-    def voxel_to_vertex_matrix(images):
-        '''
-        See neuropythy.mri.Subject.voxel_to_vertex_matrix.
-        '''
-        return pimms.imm_array(images['ribbon'].affine)
-    @pimms.value
-    def voxel_to_native_matrix(images):
-        '''
-        See neuropythy.mri.Subject.voxel_to_native_matrix.
-        '''
-        return pimms.imm_array(np.eye(4))
-
-@nyio.importer('hcp_subject')
-def subject(sid, subjects_path=None, meta_data=None, default_alignment='MSMAll'):
+    chirality = name[:2].lower()
+    # get the relevant hemi-data
+    hdat = fmap.data_tree.hemi[name]
+    # we need the tesselation at build-time, so let's create that now:
+    tris = hdat.tess['white']
+    # this tells us the max number of vertices
+    n = np.max(tris) + 1
+    # Properties: we want to merge a bunch of things together...
+    # for labels, weights, annots, we need to worry about loading alts:
+    def _load_with_alt(k, s0, sa, trfn):
+        if s0 is not None:
+            try: u = s0.get(k, None)
+            except Exception: u = None
+        if u is None and sa is not None:
+            try: u = sa.get(k, None)
+            except Exception: u = None
+        if u is None: raise ValueError('Exception while loading property %s' % k)
+        else: return u if trfn is None else trfn(u)
+    def _lbltr(ll):
+        l = np.zeros(n, dtype='bool')
+        l[ll[0]] = True
+        l.setflags(write=False)
+        return l
+    def _wgttr(ll):
+        w = np.zeros(n, dtype='float')
+        w[ll[0]] = ll[1]
+        w.setflags(write=False)
+        return w
+    def _anotr(ll):
+        ll[0].setflags(write=False)
+        return ll[0]
+    p = {}
+    from itertools import chain
+    l = hdat.label if hasattr(hdat, 'label') else {}
+    al = hdat.alt_label if hasattr(hdat, 'alt_label') else {}
+    for k in chain(six.iterkeys(l), six.iterkeys(al)):
+        p[k+'_label'] = curry(_load_with_alt, k, l, al, _lbltr)
+    w = hdat.weight if hasattr(hdat, 'weight') else {}
+    aw = hdat.alt_weight if hasattr(hdat, 'alt_weight') else {}
+    for k in chain(six.iterkeys(w), six.iterkeys(aw)):
+        p[k+'_weight'] = curry(_load_with_alt, k, w, aw, _wgttr)
+    a = hdat.annot if hasattr(hdat, 'annot') else {}
+    aa = hdat.alt_annot if hasattr(hdat, 'alt_annot') else {}
+    for k in chain(six.iterkeys(a), six.iterkeys(aa)):
+        p[k] = curry(_load_with_alt, k, a, aa, _anotr)
+    props = pimms.merge(hdat.property, pimms.lazy_map(p))
+    tess = geo.Tesselation(tris, properties=props)
+    # if this is a subject that exists in the library, we may want to add some files:
+    if name is None:
+        pd = fmap.pseudo_paths[None]._path_data
+        name = pd['pathmod'].split(fmap.actual_path)[1]
+    regs = hdat.registration
+    # Okay, make the cortex object!
+    md = {'file_map': fmap}
+    if name is not None: md['subject_id'] = name
+    return mri.Cortex(chirality, tess, hdat.surface, regs, affine=affine, meta_data=md).persist()
+def images_from_filemap(fmap):
     '''
-    subject(sid) yields a HCP Subject object for the subject with the given subject id; sid may be a
-      path to a subject or a subject id, in which case the subject paths are searched for it.
-    subject(None, path) yields a non-standard HCP subject at the given path.
-    subject(sid, path) yields the specific HCP Subject at the given path.
-
-    Subjects are cached and not reloaded.  Note that subects returned by subject() are always
-    persistent Immutable objects; this means that you must create a transient version of the subject
-    to modify it via the member function sub.transient(). Better, you can make copies of the objects
-    with desired modifications using the copy method.
-
-    This function works with the neuropythy.hcp.auto_download() function; if you have enabled auto-
-    downloading, then subjects returned from this subject may be downloading themselves lazily.
+    images_from_filemap(fmap) yields a persistent map of MRImages tracked by the given subject with
+      the given name and path; in freesurfer subjects these are renamed and converted from their
+      typical freesurfer filenames (such as 'ribbon') to forms that conform to the neuropythy naming
+      conventions (such as 'gray_mask'). To access data by their original names, use the filemap.
     '''
-    if subjects_path is None:
-        if os.path.isdir(str(sid)):
-            (fdir, fnm) = os.path.split(str(sid))
-            try: sid = to_subject_id(fnm)
-            except Exception: sid = None
-            pth = fdir
-        else:
-            sid = to_subject_id(sid)
-            fnm = str(sid)
-            fdir = find_subject_path(sid)
-            if fdir is None: raise ValueError('Could not locate subject with id \'%s\'' % sid)
-            pth = os.path.split(fdir)[0]
+    imgmap = fmap.data_tree.image
+    def img_loader(k): return lambda:imgmap[k]
+    imgs = {k:img_loader(k) for k in six.iterkeys(imgmap)}
+    def _make_mask(val, eq=True):
+        rib = imgmap['ribbon']
+        arr = (rib.dataobj == val) if eq else (rib.dataobj != val)
+        arr.setflags(write=False)
+        return type(rib)(arr, rib.affine, rib.header)
+    imgs['lh_gray_mask']  = lambda:_make_mask(3)
+    imgs['lh_white_mask'] = lambda:_make_mask(2)
+    imgs['rh_gray_mask']  = lambda:_make_mask(42)
+    imgs['rh_white_mask'] = lambda:_make_mask(41)
+    imgs['brain_mask']    = lambda:_make_mask(0, False)
+    # merge in with the typical images
+    return pimms.merge(fmap.data_tree.image, pimms.lazy_map(imgs))
+def subject_from_filemap(fmap, name=None, meta_data=None, check_path=True,
+                         default_alignment='MSMAll'):
+    '''
+    subject_from_filemap(fmap) yields an HCP subject from the given filemap.
+    '''
+    # start by making a pseudo-dir:
+    if check_path and not is_hcp_subject_path(fmap.pseudo_paths[None]):
+        raise ValueError('given path does not appear to hold an HCP subject')
+    # we need to go ahead and load the ribbon...
+    rib = fmap.data_tree.image['ribbon']
+    vox2nat = rib.affine
+    # make images and hems
+    imgs = images_from_filemap(fmap)
+    # many hemispheres to create:
+    hems = pimms.lazy_map({h:curry(cortex_from_filemap, fmap, h)
+                           for h in ['lh_native_MSMAll',  'rh_native_MSMAll',
+                                     'lh_nat32k_MSMAll',  'rh_nat32k_MSMAll',
+                                     'lh_nat59k_MSMAll',  'rh_nat59k_MSMAll',
+                                     'lh_LR32k_MSMAll',   'rh_LR32k_MSMAll',
+                                     'lh_LR59k_MSMAll',   'rh_LR59k_MSMAll',
+                                     'lh_LR164k_MSMAll',  'rh_LR164k_MSMAll'
+                                     'lh_native_MSMSulc', 'rh_native_MSMSulc',
+                                     'lh_nat32k_MSMSulc', 'rh_nat32k_MSMSulc',
+                                     'lh_nat59k_MSMSulc', 'rh_nat59k_MSMSulc',
+                                     'lh_LR32k_MSMSulc',  'rh_LR32k_MSMSulc',
+                                     'lh_LR59k_MSMSulc',  'rh_LR59k_MSMSulc',
+                                     'lh_LR164k_MSMSulc', 'rh_LR164k_MSMSulc']})
+    # now, setup the default alignment aliases:
+    if default_alignment is not None:
+        for h in ['lh_native',  'rh_native',  'lh_nat32k',  'rh_nat32k',
+                  'lh_nat59k',  'rh_nat59k',  'lh_LR32k',   'rh_LR32k',
+                  'lh_LR59k',   'rh_LR59k',   'lh_LR164k',  'rh_LR164k']:
+            hems = hems.set(h, curry(lambda h:hems[h+'_'+default_alignment], h))
+        hems = hems.set('lh', lambda: hems['lh_native'])
+        hems = hems.set('rh', lambda: hems['rh_native'])
+    meta_data = pimms.persist({} if meta_data is None else meta_data)
+    meta_data = meta_data.set('raw_images', fmap.data_tree.raw_image)
+    if default_alignment is not None:
+        meta_data = meta_data.set('default_alignment', default_alignment)
+    return mri.Subject(name=name, pseudo_path=fmap.pseudo_paths[None],
+                       hemis=hems, images=imgs,
+                       meta_data=meta_data).persist()
+@nyio.importer('hcp_subject', sniff=is_hcp_subject_path)
+def subject(path, name=Ellipsis, meta_data=None, check_path=True, filter=None,
+            default_alignment=Ellipsis):
+    '''
+    subject(name) yields an HCP-based Subject object for the subject with the given name or path.
+      Subjects are cached and not reloaded, so multiple calls to subject(name) will yield the same
+      immutable subject object.
+
+    The name argument is allowed to take a variety of forms:
+      * a local (absolute or relative) path to a valid HCP subject directory
+      * a url or pseudo-path to a valid HCP subject
+      * an integer, in which case the neuropythy.data['hcp'] dataset is used (i.e., the subject data
+        are auto-downloaded from the HCP Amazon-S3 bucket as required)
+    If you request a subject by path, the HCP module has no way of knowing for sure if that subject
+    should be auto-downloaded, so is not; if you want subjects to be auto-downloaded from the HCP
+    database, you should represent the subjects by their integer ids.
+
+    Note that subects returned by hcp_subject() are always persistent Immutable objects; this
+    means that you must create a transient version of the subject to modify it via the member
+    function sub.transient(). Better, you can make copies of the objects with desired modifications
+    using the copy method--see the pimms library documentation regarding immutable classes and
+    objects.
+
+    If you wish to modify all subjects loaded by this function, you may set its attribute 'filter'
+    to a function or list of functions that take a single argument (a subject object) and returns a
+    single argument (a potentially-modified subject object).
+
+    The argument name may alternately be a pseudo_path object or a path that can be converted into a
+    pseudo_path object.
+
+    The following options are accepted:
+      * name (default: Ellipsis) may optionally specify the subject's name; if Ellipsis, then
+        attempts to deduce the name from the initial argument (which may be a name or a path).
+      * meta_data (default: None) may optionally be a map that contains meta-data to be passed along
+        to the subject object (note that this meta-data will not be cached).
+      * check_path (default: True) may optionally be set to False to ignore the requirement that a
+        directory contain at least the mri/, label/, and surf/ directories to be considered a valid
+        HCP subject directory. Subject objects returned when this argument is not True are not
+        cached. Additionally, check_path may be set to None instead of False, indicating that no
+        sanity checks or search should be performed whatsoever: the string name should be trusted 
+        to be an exact relative or absolute path to a valid HCP subejct.
+      * filter (default: None) may optionally specify a filter that should be applied to the subject
+        before returning. This must be a function that accepts as an argument the subject object and
+        returns a (potentially) modified subject object. Filtered subjects are cached by using the
+        id of the filters as part of the cache key.
+      * default_alignment (default: Ellipsis) specifies the default alignment to use with HCP
+        subjects; this may be either 'MSMAll' or 'MSMSulc'; the deafult (Ellipsis) indicates that
+        the 'hcp_default_alignment' configuration value should be used (by default this is
+        'MSMAll').
+    '''
+    from neuropythy import data
+    if pimms.is_str(default_alignment):
+        default_alignment = to_default_alignment_value(default_alignment)
+    elif default_alignment in (Ellipsis, None):
+        default_alignment = config['hcp_default_alignment']
+    # first thing: if the sid is an integer, we try to get the subject from the hcp dataset;
+    # in this case, because the hcp dataset actually calls down through here (with a pseudo-path),
+    # we don't need to run any of the filters that are run below (they have already been run)
+    if pimms.is_int(path):
+        try: return data['hcp'].subjects[path]
+        except Exception: pass
+    # convert the path to a pseudo-dir; this may fail if the user is requesting a subject by name...
+    try: pdir = to_pseudo_path(path)
+    except Exception: pdir = None
+    if pdir is None: # search for a subject with this name
+        tmp = find_subject_path(path, check_path=check_path)
+        if tmp is not None:
+            pdir = to_pseudo_path(tmp)
+            path = tmp
+    if pdir is None:
+        # It's possible that we need to check the hcp dataset
+        try: return data['hcp'].subjects[int(path)]
+        except: pass
+        raise ValueError('could not find HCP subject: %s' % (path,))
+    path = pdir.actual_source_path
+    # okay, before we continue, lets check the cache...
+    tup = (path, default_alignment)
+    if tup in subject._cache: sub = subject._cache[tup]
     else:
-        if sid is None:
-            (pth, fnm) = os.path.split(subjects_path)
-        else:
-            sid = to_subject_id(sid)
-            fnm = str(sid)
-            fdir = subjects_path
-    fdir = os.path.abspath(os.path.join(pth, fnm))
-    if fdir in subject._cache: return subject._cache[fdir]
-    sub = Subject(sid, fdir, meta_data=meta_data, default_alignment=default_alignment).persist()
-    if isinstance(sub, Subject): subject._cache[fdir] = sub
-    return sub
+        # extract the name if need-be
+        if name is Ellipsis:
+            import re
+            (pth,name) = (path, '.')
+            while name == '.': (pth, name) = pdir._path_data['pathmod'].split(pth)
+            name = name.split(':')[-1]
+            name = pdir._path_data['pathmod'].split(name)[1]
+            if '.tar' in name: name = name.split('.tar')[0]
+        # make the filemap
+        fmap = subject_file_map(pdir, name=name)
+        # and make the subject!
+        sub = subject_from_filemap(fmap, name=name, check_path=check_path, meta_data=meta_data,
+                                   default_alignment=default_alignment)
+        if mri.is_subject(sub):
+            sub = sub.persist()
+            sub = sub.with_meta(file_map=fmap)
+            subject._cache[(path, default_alignment)] = sub
+    # okay, we have the initial subject; let's organize the filters
+    if pimms.is_list(subject.filter) or pimms.is_tuple(subject.filter): filts = list(subject.filter)
+    else: filts = []
+    if pimms.is_list(filter) or pimms.is_tuple(filter): filter = list(filter)
+    else: filter = []
+    filts = filts + filter
+    if len(filts) == 0: return sub
+    fids = tuple([id(f) for f in filts])
+    tup = fids + (path, default_alignment)
+    if tup in subject._cache: return subject._cache[tup]
+    for f in filts: sub = f(sub)
+    if mri.is_subject(sub): subject._cache[tup] = sub
+    return sub.persist()
 subject._cache = {}
+subject.filter = None
+
 def forget_subject(sid):
     '''
     forget_subject(sid) causes neuropythy's hcp module to forget about cached data for the subject

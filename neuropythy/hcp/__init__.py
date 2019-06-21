@@ -4,10 +4,9 @@
 # neuropythy.
 
 from .files import (subject_paths, clear_subject_paths, add_subject_path, find_subject_path,
-                    to_subject_id, subject_filemap, download, auto_download, retinotopy_prefix,
-                    lowres_retinotopy_prefix, inferred_retinotopy_prefix,
-                    lowres_inferred_retinotopy_prefix)
-from .core import (Subject, subject, forget_subject, forget_all)
+                    gifti_to_array, cifti_split, cifti_extract, is_hcp_subject_path,
+                    subject_file_map)
+from .core import (subject, forget_subject, forget_all)
 
 subject_ids = tuple(
     [100206, 100307, 100408, 100610, 101006, 101107, 101309, 101410, 101915, 102008, 102109, 102311,
