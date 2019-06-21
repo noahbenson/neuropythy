@@ -457,7 +457,7 @@ def is_image(image):
     is_image(img) yields True if img is an instance if nibabel.spatialimages.SpatialImagee and False
       otherwise.
     '''
-    return isinstance(image, nibabel.dataobj_images.DataobjImage)
+    return isinstance(image, nib.dataobj_images.DataobjImage)
 def is_image_header(x):
     '''
     is_image_header(x) yields True if x is a nibabel.spatialimages.SpatialHeader object and False
