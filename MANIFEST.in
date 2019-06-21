@@ -37,3 +37,9 @@ include neuropythy/lib/data/fsaverage_sym/surf/lh.benson14_eccen.v2_1.mgz
 include neuropythy/lib/data/fsaverage_sym/surf/lh.benson14_varea.v1.0.mgz
 include neuropythy/lib/data/fsaverage_sym/surf/lh.benson14_anorm.v1_0.mgz
 include neuropythy/lib/data/fsaverage_sym/surf/lh.benson14_retinotopy.v3_0.sphere.reg
+include neuropythy/lib/data/fs_LR/lh.atlasroi.32k_fs_LR.shape.gii
+include neuropythy/lib/data/fs_LR/rh.atlasroi.32k_fs_LR.shape.gii
+include neuropythy/lib/data/fs_LR/lh.atlasroi.59k_fs_LR.shape.gii
+include neuropythy/lib/data/fs_LR/rh.atlasroi.59k_fs_LR.shape.gii
+include neuropythy/lib/data/fs_LR/lh.atlasroi.164k_fs_LR.shape.gii
+include neuropythy/lib/data/fs_LR/rh.atlasroi.164k_fs_LR.shape.gii
