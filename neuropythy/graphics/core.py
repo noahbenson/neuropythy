@@ -968,7 +968,7 @@ try:
         mesh = []
         for arg in (obj if pimms.is_vector(obj) else [obj]):
             if   geo.is_mesh(arg): mesh.append(arg)
-            elif geo.is_topo(arg): mesh.append(to_mesh((mesh, surface)))
+            elif geo.is_topo(arg): mesh.append(geo.to_mesh((mesh, surface)))
             elif mri.is_subject(arg):
                 for h in (hemi if pimms.is_vector(hemi) else [hemi]):
                     if geo.is_topo(h) or geo.is_mesh(h): hh = [h]
@@ -976,7 +976,7 @@ try:
                     else:
                         h = to_hemi_str(h)
                         hh = [arg.lh, arg.rh] if h == 'lr' else [arg.hemis[h]]
-                    for hh in h: mesh.append(to_mesh((hh, surface)))
+                    for hh in h: mesh.append(geo.to_mesh((hh, surface)))
         # process the colors
         rgba = np.concatenate(
             [cortex_plot_colors(m, color=color, cmap=cmap, vmin=vmin, vmax=vmax,
