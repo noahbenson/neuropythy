@@ -822,7 +822,6 @@ class FileMap(ObjectWithMetaData):
         flnm = flnm.format(**inst)
         args = pimms.merge(*argmaps, **kwargs)
         #logging.info('FileMap: loading file "%s"...\n' % flnm) #debug
-        if '_exvivo' in flnm: raise KeyboardInterrupt()
         try:
             lpth = pdir.local_path(flnm)
             #logging.info('     ... local path: %s\n' % lpth) #debug
