@@ -976,7 +976,7 @@ try:
                     else:
                         h = to_hemi_str(h)
                         hh = [arg.lh, arg.rh] if h == 'lr' else [arg.hemis[h]]
-                    for hh in h: mesh.append(geo.to_mesh((hh, surface)))
+                    for hhh in hh: mesh.append(geo.to_mesh((hhh, surface)))
         # process the colors
         rgba = np.concatenate(
             [cortex_plot_colors(m, color=color, cmap=cmap, vmin=vmin, vmax=vmax,
