@@ -860,7 +860,11 @@ class Tesselation(VertexSet):
         faces = self.faces[:,fids]
         vidcs = self.index(np.unique(faces))
         props = self._properties
-        if props is not None and len(props) > 1: props = props[vidcs]
+        if props is not None and len(props) > 1:
+            if pimms.is_itable(props): props = props[vidcs]
+            else:
+                props = pimms.lazy_map({k: curry(lambda p,k,vi:p[k][vidcs], props, k, vidcs)
+                                        for k in six.iterkeys(props)})
         md = self.meta_data.set(tag, self) if pimms.is_str(tag)   else \
              self.meta_data.set('supertess', self) if tag is True else \
              self.meta_data
