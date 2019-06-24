@@ -279,7 +279,7 @@ class OSFPath(BasicPath):
             (tbloc, tbinternal) = split_tarball_path(self.base_path)
             if tbloc == None: tree = osf_crawl(self.base_path)
             else: tree = osf_crawl(tbloc)
-            self.osf_tree = tree
+            object.__setattr__(self, 'osf_tree', tree)
         fl = self.osf_tree
         parts = [s for s in rpath.split(self.sep) if s != '']
         # otherwise walk the tree...
