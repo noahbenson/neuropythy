@@ -853,6 +853,8 @@ class Tesselation(VertexSet):
         if len(vertices) != self.vertex_count or \
            not np.array_equal(vertices, vertices.astype('bool')):
             vidcs = self.index(vertices)
+            vertices = np.zeros(self.vertex_count, dtype='bool')
+            vertices[vidcs] = True
         else: vidcs = self.indices[vertices]
         if len(vidcs) == self.vertex_count: return self
         fsum = np.sum(vertices[self.indexed_faces], axis=0)
