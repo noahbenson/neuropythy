@@ -31,6 +31,20 @@ config.declare('hcp_auto_path',    environ_name='HCP_AUTO_PATH',    default_valu
 config.declare('hcp_auto_default_alignment',
                environ_name='HCP_AUTO_DEFAULT_ALIGNMENT',
                default_value='MSMAll')
+def to_interpolation_method(im):
+    '''
+    to_interpolation_method(x) yields either 'linear' or 'nearest' or raises an exception, depending
+      on x; if x is None or a string resembling 'nearest', then 'nearest' is returned, while a
+      string resembling 'linear' results in 'linear' being returned.
+    '''
+    if im is None: return 'nearest'
+    im = im.lower()
+    if   im in ['linear','lin','trilinear','trilin']: return 'linear'
+    elif im in ['nearest','near','nn','nearest-neighbor','nearest_neighbor']: return 'nearest'
+    else: raise ValueError('given interpolation_method (%s) is not recognized' % (im,))
+config.declare('hcp_retinotopy_interpolation_method',
+               environ_name='HCP_RETINOTOPY_INTERPOLATION_METHOD',
+               default_value='nearest', filter=to_interpolation_method)
 # See if the config/environment lets auto-downloading start in the "on" state
 def to_auto_download_state(arg):
     '''
@@ -319,7 +333,10 @@ class HCPRetinotopyDataset(Dataset):
 
     # these expect value % (hemi, alignment, surfacename)
     _retinotopy_cache_tr = pimms.persist({
-        'native': {
+        # the native filename's here aren't actually used; they would also include a '.linear.' for
+        # linear interpolation right before the 'native59k' or 'native32k' (these are the filenames
+        # for nearest interpolation)
+        'native': { 
             (retinotopy_prefix + '_polar_angle')              :'%s.split%s_angle.%s.native59k.mgz',
             (retinotopy_prefix + '_eccentricity')             :'%s.split%s_eccen.%s.native59k.mgz',
             (retinotopy_prefix + '_radius')                   :'%s.split%s_prfsz.%s.native59k.mgz',
@@ -347,7 +364,7 @@ class HCPRetinotopyDataset(Dataset):
             (retinotopy_prefix + '_mean_signal')              :'%s.split%s_means.59k.mgz',
             (retinotopy_prefix + '_gain')                     :'%s.split%s_const.59k.mgz'}})
     
-    def __init__(self, url=Ellipsis, cache_directory=Ellipsis,
+    def __init__(self, url=Ellipsis, cache_directory=Ellipsis, interpolation_method=Ellipsis,
                  meta_data=None, create_directories=True, create_mode=0o755):
         cdir = cache_directory
         if cdir is Ellipsis: cdir = config['hcp_auto_path']
@@ -361,6 +378,7 @@ class HCPRetinotopyDataset(Dataset):
                          create_mode=create_mode)
         if url is Ellipsis: url = HCPRetinotopyDataset.default_url
         self.url = url
+        self.interpolation_method = interpolation_method
     @pimms.param
     def url(u):
         '''
@@ -368,6 +386,15 @@ class HCPRetinotopyDataset(Dataset):
         '''
         if not pimms.is_str(u): raise ValueError('url must be a string')
         return u
+    @pimms.param
+    def interpolation_method(im):
+        '''
+        ny.data['hcp_retinotopy'].interpolation_method is a string, either 'nearest' (default) or
+        'linear', which specifies whether nearest or linear interpolation should be used when
+        interpolating retinotopy data from the fs_LR meshes onto the native meshes.
+        '''
+        if im is Ellipsis or im is None: return config['hcp_retinotopy_interpolation_method']
+        else: return to_interpolation_method(im)
     @pimms.value
     def pseudo_path(url, cache_directory):
         '''
@@ -497,7 +524,8 @@ class HCPRetinotopyDataset(Dataset):
              for (sid,sdat) in six.iteritems(xy_props)}
         return pimms.persist(r)
     @pimms.value
-    def subjects(retinotopy_data, cache_directory, create_mode, create_directories):
+    def subjects(retinotopy_data, cache_directory, create_mode, create_directories,
+                 interpolation_method):
         '''
         hcp_retinotopy.subjects is a lazy map whose keys are HCP subject IDs (of those subjects with
         valid retinotopic mapping data) and whose values are subject objects (obtained from the
@@ -532,7 +560,9 @@ class HCPRetinotopyDataset(Dataset):
             # to do some interpolation for the native hemispheres
             hems1 = hems
             ftr = {'polar_angle':'angle', 'eccentricity':'eccen', 'mean_signal':'means',
-                   'variance_explained':'vexpl', 'gain':'const', 'radius':'prfsz'}
+                   'variance_explained':'vexpl', 'gain':'const', 'radius':'prfsz',
+                   'x':'xcrds', 'y':'ycrds'}
+            intpart = '.' if interpolation_method == 'nearest' else '.linear.'
             def _interp_hem(hemi, h, res, align):
                 pfls = nttrs[res]
                 def _interp_prop(k):
@@ -543,14 +573,15 @@ class HCPRetinotopyDataset(Dataset):
                     if pnm in ftr:
                         flnm = os.path.join(
                             cache_directory, str(sid), 'retinotopy',
-                            '%s.%s_%s.%s.native%dk.mgz' % (h,split,ftr[pnm],align,res))
+                            '%s.%s_%s.%s%snative%dk.mgz' % (h,split,ftr[pnm],align,intpart,res))
                         if os.path.isfile(flnm): return nyio.load(flnm)
+                    else: flnm = None
                     msg = 'HCPRetinotopyDataset: Interpolating %s for suject %d %s...'
                     logging.info(msg % (k, sid, h))
                     hfrom = hems1['%s_LR%dk_%s' % (h, res, align)]
-                    p = hfrom.interpolate(hemi, hfrom.prop(k), method='nearest')
+                    p = hfrom.interpolate(hemi, hfrom.prop(k), method=interpolation_method)
                     # write cache and return
-                    if pnm in ftr: nyio.save(flnm, p)
+                    if flnm is not None: nyio.save(flnm, p)
                     return p
                 pfx = next(six.iterkeys(pfls)).split('_')[0] + '_'
                 interp_props = {
