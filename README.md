@@ -338,8 +338,8 @@ version of neuropythy that they are running.
 To be clear: this license does not interfere with any scientific or personal use of neuropythy, nor
 does it forbid commercial use outright. If you wish to use neuropythy in commercial software, you
 must only do one of the following: 
- * Use a version of neuropythy prior to version 1.0 (all of which will remain licensed under the GPL
-   alone);
+ * Use a version of neuropythy prior to version 0.9.5 (all of which will remain licensed under the
+   GPL);
  * Make freely available the neuropythy source code used in the provided service;
  * Obtain a custom license for neuropythy from the author.
 
