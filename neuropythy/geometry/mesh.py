@@ -1595,11 +1595,11 @@ class Mesh(VertexSet):
                 return self.apply_interpolation(interps['nearest'], dat)
         if pimms.is_str(data) and data.lower() == 'all':
             data = self.properties
-        if pimms.is_lazy_map(data):
-            return pimms.lazy_map({k:curry(lambda k:_apply_interp(data[k]), k)
+        if pimms.is_lazy_map(data) or pimms.is_imap(data):
+            return pimms.lazy_map({k:curry(lambda data,k:_apply_interp(data[k]), data, k)
                                    for k in six.iterkeys(data)})
         elif pimms.is_map(data):
-            return pyr.pmap({k:_apply_interp(data[k]) for k in six.iterkeys(data)})
+            return pyr.pmap({k:_apply_interp(v) for (k,v) in six.iteritems(data)})
         elif pimms.is_matrix(data):
             # careful... the matrix could actually be a tuple of rows of different types...
             # if it's a numpy array object, though, this won't be the case
@@ -1611,6 +1611,8 @@ class Mesh(VertexSet):
             if len(np.unique([row.dtype for row in data])) == 1:
                 return _apply_interp(np.asarray(data))
             else: return tuple([_apply_interp(row) for row in data])
+        elif pimms.is_set(data):
+            return pyr.pmap({k:_apply_interp(k) for k in data})
         elif pimms.is_vector(data, np.number) and len(data) == self.tess.vertex_count:
             return _apply_interp(data)
         elif pimms.is_vector(data):

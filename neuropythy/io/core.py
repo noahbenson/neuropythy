@@ -507,7 +507,7 @@ def save_string(filename, s):
       be a list of strings (lines). If s is neither a list of strings nor a string, it is cast to
       a string using str(s).
     '''
-    if pimms.is_vector(s, 'str'):
+    if pimms.is_vector(s, 'string'):
         with open(filename, 'w') as fl:
             for l in s: fl.write(s + '\n')
         return filename

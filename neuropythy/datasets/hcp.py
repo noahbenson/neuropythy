@@ -276,6 +276,53 @@ def _prefix_keys(m, prefix):
     f = lambda k:m[k]
     return pimms.lazy_map({(prefix+k): curry(f, k) for k in six.iterkeys(m)})    
 
+hcp_retinotopy_property_names = ('polar_angle', 'eccentricity', 'radius', 'variance_explained',
+                                 'mean_signal', 'gain', 'x', 'y')
+hcp_retinotopy_property_files = pyr.pmap({'polar_angle':'angle', 'eccentricity':'eccen', 
+                                          'mean_signal':'means', 'gain':'const', 'radius':'prfsz',
+                                          'variance_explained':'vexpl', 'x':'xcrds', 'y':'ycrds'})
+@pimms.calc(*hcp_retinotopy_property_names)
+def calc_native_properties(native_hemi, fs_LR_hemi, prefix, resolution, subject_id=None,
+                           method='nearest', cache_directory=None, alignment='MSMAll'):
+    '''
+    calc_native_properties is a pimms calculator that requires a native hemisphere, an fs_LR
+    hemisphere, and a property prefix and yields the interpolated retinotopic mapping properties.
+    '''
+    method = to_interpolation_method(method)
+    # first: check for a cache file:
+    if cache_directory is not None:
+        if subject_id is None: pth = cache_directory
+        else: pth = os.path.join(cache_directory, str(subject_id), 'retinotopy')
+        # we load all or none here:
+        ftr = hcp_retinotopy_property_files
+        mtd = '.' if method == 'nearest' else '.linear.'
+        flp = '%s.%s%%s.%s%snative%dk.mgz' % (native_hemi.chirality,prefix,alignment,mtd,resolution)
+        fls = {k:os.path.join(pth, flp % ftr[k]) for k in hcp_retinotopy_property_names}
+        try: return {k:nyio.load(v, 'mgh') for (k,v) in six.iteritems(fls)}
+        except Exception: pass
+    else: fls = None
+    logging.info('HCP Dataset: Interpolating retinotopy for HCP subject %s / %s (method: %s)...'
+                 % (subject_id, native_hemi.chirality, method))
+    p = fs_LR_hemi.interpolate(native_hemi,
+                               {k:(prefix+k) for k in hcp_retinotopy_property_names
+                                if k not in ['polar_angle', 'eccentricity']},
+                               method=method)
+    # calculate the angle/eccen from the x and y values
+    theta = np.arctan2(p['y'], p['x'])
+    p = pimms.assoc(p,
+                    polar_angle=np.mod(90 - 180/np.pi*theta + 180, 360) - 180,
+                    eccentricity=np.hypot(p['x'], p['y']))
+    # write cache and return
+    if fls is not None:
+        try:
+            for (k,v) in six.iteritems(p): nyio.save(fls[k], v)
+        except Exception as e:
+            tup = (subject_id, native_hemi.chirality, type(e).__name__ + str(e.args))
+            warnings.warn('cache write failed for HCP retinotopy subject %s / %s: %s' % tup,
+                          RuntimeWarning)
+    return p
+interpolate_native_properties = pimms.plan({'native_properties': calc_native_properties})
+
 @pimms.immutable
 class HCPRetinotopyDataset(Dataset):
     '''
@@ -559,53 +606,18 @@ class HCPRetinotopyDataset(Dataset):
             # okay, we have the data transferred over the the fs_LR hemispheres now; we just need
             # to do some interpolation for the native hemispheres
             hems1 = hems
-            ftr = {'polar_angle':'angle', 'eccentricity':'eccen', 'mean_signal':'means',
-                   'variance_explained':'vexpl', 'gain':'const', 'radius':'prfsz',
-                   'x':'xcrds', 'y':'ycrds'}
-            intpart = '.' if interpolation_method == 'nearest' else '.linear.'
+            def _get(inp, k): return inp[k]
             def _interp_hem(hemi, h, res, align):
                 pfls = nttrs[res]
-                def _interp_prop(k):
-                    # first: check for a cache file:
-                    split = k.split('-')[0]
-                    if not split.startswith('split'): split = 'split0'
-                    pnm = '_'.join(k.split('_')[1:])
-                    if pnm in ftr:
-                        flnm = os.path.join(
-                            cache_directory, str(sid), 'retinotopy',
-                            '%s.%s_%s.%s%snative%dk.mgz' % (h,split,ftr[pnm],align,intpart,res))
-                        if os.path.isfile(flnm): return nyio.load(flnm)
-                    else: flnm = None
-                    msg = 'HCPRetinotopyDataset: Interpolating %s for suject %d %s...'
-                    logging.info(msg % (k, sid, h))
-                    hfrom = hems1['%s_LR%dk_%s' % (h, res, align)]
-                    p = hfrom.interpolate(hemi, hfrom.prop(k), method=interpolation_method)
-                    # write cache and return
-                    if flnm is not None: nyio.save(flnm, p)
-                    return p
                 pfx = next(six.iterkeys(pfls)).split('_')[0] + '_'
-                interp_props = {
-                    k: curry(_interp_prop, k)
-                    for k0 in six.iterkeys(pfls) for spl in ['', 'split1-', 'split2-']
-                    for k in [spl + k0]
-                    if not any(k.endswith(s) for s in ['_polar_angle','_eccentricity'])}
-                for spl in ['', 'split1-', 'split2-']:
-                    interp_props[spl+pfx + 'x'] = curry(_interp_prop, spl+pfx + 'x')
-                    interp_props[spl+pfx + 'y'] = curry(_interp_prop, spl+pfx + 'y')
-                interp_props = pimms.lazy_map(interp_props)
-                # get the polar angle and eccentricity values (still lazy)...
-                def _toang(itp,spl):
-                    ang0 = np.arctan2(itp[spl+pfx+'y'], itp[spl+pfx+'x'])
-                    return np.mod(90 - 180/np.pi*ang0 + 180, 360) - 180
-                def _toecc(itp,spl): return np.sqrt(itp[spl+pfx+'y']**2 + itp[spl+pfx+'x']**2)
-                for spl in ['', 'split1-', 'split2-']:
-                    angecc = pimms.lazy_map({'angle': curry(_toang, interp_props, spl),
-                                             'eccen': curry(_toecc, interp_props, spl)})
-                    interp_props = interp_props.set(spl+pfx + 'polar_angle',
-                                                    curry(lambda u:u['angle'], angecc))
-                    interp_props = interp_props.set(spl+pfx + 'eccentricity',
-                                                    curry(lambda u:u['eccen'], angecc))
-                return hemi.with_prop(interp_props)
+                inpargs = dict(native_hemi=hemi, fs_LR_hemi=hems1['%s_LR%dk_%s' % (h, res, align)],
+                               subject_id=sid,   method=interpolation_method,  resolution=res,
+                               alignment=align,  cache_directory=cache_directory)
+                lm = pimms.lazy_map({(p+k): curry(_get, inp, k)
+                                     for spl in ['', 'split1-', 'split2-'] for p in [spl + pfx]
+                                     for inp in [interpolate_native_properties(prefix=p, **inpargs)]
+                                     for k   in hcp_retinotopy_property_names})
+                return hemi.with_prop(lm)
             def _interp_nat(h, align):
                 # okay, let's get the hemisphere we are modifying...
                 hemi = hems1['%s_native_%s' % (h, align)]

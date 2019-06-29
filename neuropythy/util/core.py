@@ -173,8 +173,9 @@ def normalize(data):
         return {normalize_type_key: [None, 'ellipsis']}
     elif pimms.is_scalar(data):
         # we have an object of some type we don't really recognize
-        try:    m = data.normalize()
-        except Exception: raise ValueError('Failed to run obj.normalize() on unrecognized obj: %s' % data)
+        try:              m = data.normalize()
+        except Exception: m = None
+        if m is None: raise ValueError('could not run obj.normalize() on obj: %s' % (data,))
         if not pimms.is_map(m): raise ValueError('obj.normalize() returned non-map; obj: %s' % data)
         m = dict(m)
         tt = type(data)
