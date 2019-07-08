@@ -114,8 +114,8 @@ class Dataset(ObjectWithMetaData):
         if not create_directories: raise ValueError('dataset cache directory not found: %s')
         os.makedirs(os.path.abspath(cache_directory), create_mode)
         return True
-# We create the dataset repository: this is a lazy map; to add a dataset to it, use the function
-# add_dataset(), immediately below
+# We create the dataset repository: this is just a lazy map; to add a dataset to iit, use the
+# function add_dataset(), immediately below
 data = pimms.lazy_map({})
 def add_dataset(dset, fn=None):
     '''
@@ -139,8 +139,11 @@ def add_dataset(dset, fn=None):
                 raise ValueError('Loader for dataset %s failed to return a dataset' % nm)
             return x
         data = data.set(nm, _load_dset)
+    # we want to update neuropythy.data also; this is a bit of a hack, but should work fine
+    import neuropythy
+    neuropythy.data = data
     return None
 
-    
+
             
         
