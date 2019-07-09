@@ -146,13 +146,17 @@ def normalize(data):
     if data is None: return None
     elif pimms.is_array(data, 'complex') and not pimms.is_array(data, 'real'):
         # any complex number must be handled specially:
-        return {normalize_type_key: [None, 'complex'], 're':np.real(data), 'im': np.imag(data)}
+        return {normalize_type_key: [None, 'complex'],
+                're':np.real(data).astype('float'), 'im': np.imag(data).astype('float')}
     elif is_set(data):
         # sets also have a special type:
         return {normalize_type_key: [None, 'set'], 'elements': normalize(list(data))}
-    elif pimms.is_scalar(data, ('number', 'string', 'unicode', 'bool')):
-        # scalars are already normalized
+    elif pimms.is_scalar(data, ('string', 'unicode', 'bool', 'integer')):
+        # most scalars are already normalized
         return data
+    elif pimms.is_scalar(data, 'number'):
+        # make sure it's not a float32 object
+        return float(data)
     elif sps.issparse(data):
         # sparse matrices always get encoded as if they were csr_matrices (for now)
         (i,j,v) = sps.find(data)
