@@ -283,10 +283,11 @@ def save_json(filename, obj, normalize=True):
     from neuropythy.util import normalize as norm
     dat = norm(obj) if normalize else obj
     if pimms.is_str(filename):
+        jsonstr = json.dumps(dat)
         if any(filename.endswith(s) for s in ('.gz', '.bz2', '.lzma')):
-            with gzip.open(filename, 'wt') as fl: json.dump(dat, fl)
+            with gzip.open(filename, 'wt') as fl: fl.write(jsonstr)
         else:
-            with open(filename, 'wt') as fl: json.dump(dat, fl)
+            with open(filename, 'wt') as fl: fl.write(jsonstr)
     else: json.dump(dat, filename)
     return filename
 @importer('csv', ('csv', 'csv.gz', 'csv.bz2', 'csv.lzma'))
