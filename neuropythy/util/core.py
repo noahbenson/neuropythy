@@ -128,7 +128,6 @@ class ObjectWithMetaData(object):
         than normalize(obj).
         '''
         return self(**params)
-normalize_type_key = '__type__'
 def normalize(data):
     '''
     normalize(obj) yields a JSON-friendly normalized description of the given object. If the data
@@ -146,11 +145,11 @@ def normalize(data):
     if data is None: return None
     elif pimms.is_array(data, 'complex') and not pimms.is_array(data, 'real'):
         # any complex number must be handled specially:
-        return {normalize_type_key: [None, 'complex'],
+        return {normalize.type_key: [None, 'complex'],
                 're':np.real(data).astype('float'), 'im': np.imag(data).astype('float')}
     elif is_set(data):
         # sets also have a special type:
-        return {normalize_type_key: [None, 'set'], 'elements': normalize(list(data))}
+        return {normalize.type_key: [None, 'set'], 'elements': normalize(list(data))}
     elif pimms.is_scalar(data, ('string', 'unicode', 'bool', 'integer')):
         # most scalars are already normalized
         return data
@@ -160,7 +159,7 @@ def normalize(data):
     elif sps.issparse(data):
         # sparse matrices always get encoded as if they were csr_matrices (for now)
         (i,j,v) = sps.find(data)
-        return {normalize_type_key: [None, 'sparse_matrix'],
+        return {normalize.type_key: [None, 'sparse_matrix'],
                 'rows':i.tolist(), 'cols':j.tolist(), 'vals': v.tolist(),
                 'shape':data.shape}
     elif pimms.is_map(data):
@@ -174,7 +173,7 @@ def normalize(data):
         # numpy arrays just get turned into lists
         return data.tolist() if pimms.is_nparray(data) else data
     elif data is Ellipsis:
-        return {normalize_type_key: [None, 'ellipsis']}
+        return {normalize.type_key: [None, 'ellipsis']}
     elif pimms.is_scalar(data):
         # we have an object of some type we don't really recognize
         try:              m = data.normalize()
@@ -183,11 +182,12 @@ def normalize(data):
         if not pimms.is_map(m): raise ValueError('obj.normalize() returned non-map; obj: %s' % data)
         m = dict(m)
         tt = type(data)
-        m[normalize_type_key] = [tt.__module__, tt.__name__]
+        m[normalize.type_key] = [tt.__module__, tt.__name__]
         return m
     else:
         # we have an array/list of some kind that isn't a number, string, or boolean
         return [normalize(x) for x in data]
+normalize.type_key = '__type__'
 def denormalize(data):
     '''
     denormalize(data) yield a denormalized version of the given JSON-friendly normalized data. This
@@ -201,8 +201,8 @@ def denormalize(data):
     elif pimms.is_scalar(data, ('number', 'bool', 'string', 'unicode')): return data
     elif pimms.is_map(data):
         # see if it's a non-native map
-        if normalize_type_key in data:
-            (mdl,cls) = data[normalize_type_key]
+        if normalize.type_key in data:
+            (mdl,cls) = data[normalize.type_key]
             if mdl is None:
                 if   cls == 'ellipsis': return Ellipsis
                 elif cls == 'complex':  return np.array(data['re']) + 1j*np.array(data['im'])
@@ -213,7 +213,7 @@ def denormalize(data):
                 else: raise ValueError('unrecognized builtin denormalize class: %s' % cls)
             else:
                 cls = getattr(importlib.import_module(mdl), cls)
-                d = {k:denormalize(v) for (k,v) in six.iteritems(data) if k != normalize_type_key}
+                d = {k:denormalize(v) for (k,v) in six.iteritems(data) if k != normalize.type_key}
                 return cls.denormalize(d)
         else: return {k:denormalize(v) for (k,v) in six.iteritems(data)} # native map
     else:
