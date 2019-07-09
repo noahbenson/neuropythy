@@ -191,8 +191,11 @@ class HCPDataset(Dataset):
         # we get the subject list by doing an ls of the amazon bucket, but we fallback to a constant
         # list (in neuropythy.hcp)
         logging.info('HCPDataset: Getting HCP subject list...')
+        aws_ips = ['99.84.127.26', '99.84.127.10', '99.84.127.3', '99.84.127.119']
         try:
-            raise ValueError() # skip all this for now
+            # this will raise an error if the internet is not alive
+            dummy = urllib.request.urlopen('http://216.58.192.142', timeout=1)
+            # internet is alive, so continue...
             pm = s3_path._path_data['pathmod']
             subdirs = []
             for s in pm.s3fs.ls(url):
