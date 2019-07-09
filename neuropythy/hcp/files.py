@@ -530,7 +530,7 @@ hcp_filemap_instructions = [
             '{id}.R.aparc.native.label.gii',  _prop('Deskian06_parcellation', 'rh_native'),
             '{id}.R.aparc.a2009s.native.label.gii', (_prop('Destrieaux09_parcellation', 'rh_native')
                                                     + _prop('parcellation', 'rh_native')),
-            '{id}.R.atlasroi.native.shape.gii', _prop('atlas', 'rh_native', filt=_tobool),
+            '{id}.R.atlasroi.native.shape.gii', _prop('atlas', 'rh_native', key='label'),
             '{id}.R.curvature.native.shape.gii', _prop('curvature', 'rh_native', filt=lambda c:-c),
             '{id}.R.sulc.native.shape.gii', _prop('convexity', 'rh_native'),
             '{id}.R.corrThickness.native.shape.gii', _prop('thickness', 'rh_native'),
@@ -698,7 +698,7 @@ hcp_filemap_instructions = [
             '{id}.R.SmoothedMyelinMap_BC.32k_fs_LR.func.gii', _prop_msmsulc('myelin_smooth',
                                                                             'rh_LR32k'),
             '{id}.R.RefMyelinMap.32k_fs_LR.func.gii', _prop_msmsulc('myelin_ref', 'rh_LR32k'),
-            '{id}.R.atlasroi.32k_fs_LR.shape.gii', _prop('atlas', 'rh_LR32k', filt=_tobool),
+            '{id}.R.atlasroi.32k_fs_LR.shape.gii', _prop('atlas', 'rh_LR32k', key='label'),
             '{id}.R.curvature.32k_fs_LR.shape.gii', _prop('curvature', 'rh_LR32k',
                                                           filt=lambda c:-c),
             '{id}.R.sulc.32k_fs_LR.shape.gii', _prop_msmsulc('convexity', 'rh_LR32k'),
