@@ -1613,7 +1613,7 @@ class Mesh(VertexSet):
             else: return tuple([_apply_interp(row) for row in data])
         elif pimms.is_set(data):
             return pyr.pmap({k:_apply_interp(k) for k in data})
-        elif pimms.is_vector(data, np.number) and len(data) == self.tess.vertex_count:
+        elif pimms.is_vector(data, ('number','bool')) and len(data) == self.tess.vertex_count:
             return _apply_interp(data)
         elif pimms.is_vector(data):
             return tuple([_apply_interp(d) for d in data])
