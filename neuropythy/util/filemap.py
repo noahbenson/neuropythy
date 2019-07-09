@@ -542,7 +542,7 @@ class PseudoPath(ObjectWithMetaData):
         '''
         # if the file exists in the pseudo-path, just return the local path
         if self.find(*args) is not None: return self.local_path(*args)
-        cp = self._path_data['cache']
+        cp = self._path_data.get('cache', None)
         if cp is None: cp = self.source_path
         return os.path.join(cp, *args)
 def is_pseudo_path(pdir):
