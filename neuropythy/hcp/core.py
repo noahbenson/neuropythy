@@ -45,9 +45,11 @@ def cortex_from_filemap(fmap, name, affine=None):
         if s0 is not None:
             try: u = s0.get(k, None)
             except Exception: u = None
+        else: u = None
         if u is None and sa is not None:
             try: u = sa.get(k, None)
             except Exception: u = None
+        if u is None: print(s0.get(k, None), sa.get(k,None))
         if u is None: raise ValueError('Exception while loading property %s' % k)
         else: return u if trfn is None else trfn(u)
     def _lbltr(ll):
@@ -67,15 +69,15 @@ def cortex_from_filemap(fmap, name, affine=None):
     from itertools import chain
     l = hdat.label if hasattr(hdat, 'label') else {}
     al = hdat.alt_label if hasattr(hdat, 'alt_label') else {}
-    for k in chain(six.iterkeys(l), six.iterkeys(al)):
+    for k in set(chain(six.iterkeys(l), six.iterkeys(al))):
         p[k+'_label'] = curry(_load_with_alt, k, l, al, _lbltr)
     w = hdat.weight if hasattr(hdat, 'weight') else {}
     aw = hdat.alt_weight if hasattr(hdat, 'alt_weight') else {}
-    for k in chain(six.iterkeys(w), six.iterkeys(aw)):
+    for k in set(chain(six.iterkeys(w), six.iterkeys(aw))):
         p[k+'_weight'] = curry(_load_with_alt, k, w, aw, _wgttr)
     a = hdat.annot if hasattr(hdat, 'annot') else {}
     aa = hdat.alt_annot if hasattr(hdat, 'alt_annot') else {}
-    for k in chain(six.iterkeys(a), six.iterkeys(aa)):
+    for k in set(chain(six.iterkeys(a), six.iterkeys(aa))):
         p[k] = curry(_load_with_alt, k, a, aa, _anotr)
     props = pimms.merge(hdat.property, pimms.lazy_map(p))
     tess = geo.Tesselation(tris, properties=props)
