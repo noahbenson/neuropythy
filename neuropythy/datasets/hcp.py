@@ -1,5 +1,5 @@
 ####################################################################################################
-# neuropythy/datasets/hcp1200.py
+# neuropythy/datasets/hcp.py
 # The HCP_1200 dataset
 # by Noah C. Benson
 
