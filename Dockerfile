@@ -14,7 +14,6 @@ FROM jupyter/scipy-notebook
 MAINTAINER Noah C. Benson <nben@nyu.edu>
 
 # Install some stuff...
-RUN apt-get install -y curl
 RUN conda update --yes -n base conda && conda install --yes py4j nibabel s3fs
 RUN conda install --yes -c conda-forge ipywidgets
 RUN pip install --upgrade setuptools
@@ -37,6 +36,7 @@ COPY ./docker/jupyter_notebook_config.py /home/$NB_USER/.jupyter/
 USER root
 COPY ./LICENSE.txt              /LICENSE.txt
 COPY ./README.md                /README.md
+RUN apt-get install -y curl
 RUN mkdir -p /required_subjects
 #COPY docker/required_subjects.tar.gz /
 RUN curl -L -o /required_subjects/fsaverage.tar.gz https://github.com/noahbenson/neuropythy/wiki/files/fsaverage.tar.gz && \
