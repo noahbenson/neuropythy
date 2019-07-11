@@ -14,6 +14,7 @@ FROM jupyter/scipy-notebook
 MAINTAINER Noah C. Benson <nben@nyu.edu>
 
 # Install some stuff...
+RUN apt-get install -y curl
 RUN conda update --yes -n base conda && conda install --yes py4j nibabel s3fs
 RUN conda install --yes -c conda-forge ipywidgets
 RUN pip install --upgrade setuptools
