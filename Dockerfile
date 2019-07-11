@@ -34,17 +34,15 @@ COPY ./docker/jupyter_notebook_config.py /home/$NB_USER/.jupyter/
 
 # Copy the README and license over.
 USER root
+RUN apt-get update && apt-get install -y --no-install-recommends curl
 COPY ./LICENSE.txt              /LICENSE.txt
 COPY ./README.md                /README.md
-RUN apt-get install -y curl
 RUN mkdir -p /required_subjects
 #COPY docker/required_subjects.tar.gz /
 RUN curl -L -o /required_subjects/fsaverage.tar.gz https://github.com/noahbenson/neuropythy/wiki/files/fsaverage.tar.gz && \
     curl -L -o /required_subjects/fsaverage_sym.tar.gz https://github.com/noahbenson/neuropythy/wiki/files/fsaverage_sym.tar.gz && \
-    cd /required_subjects && tar zxf fsaverage.tar.gs && tar zxf fsaverage_sym.tar.gz && rm ./fsaverage.tar.gz ./fsaverage_sym.tar.gz
-
-RUN cd / && tar zxvf required_subjects.tar.gz && rm /required_subjects.tar.gz && \
-    chown -R root:root required_subjects && chmod -R 755 /required_subjects
+    cd /required_subjects && tar zxf fsaverage.tar.gz && tar zxf fsaverage_sym.tar.gz && rm ./fsaverage.tar.gz ./fsaverage_sym.tar.gz && \
+    chown -R root:root /required_subjects && chmod -R 755 /required_subjects
 
 # Make some global directories in the user's name also
 RUN mkdir -p /subjects /freesurfer_subjects /hcp_subjects /cache && \
