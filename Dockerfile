@@ -38,8 +38,8 @@ COPY ./LICENSE.txt              /LICENSE.txt
 COPY ./README.md                /README.md
 RUN mkdir -p /required_subjects
 #COPY docker/required_subjects.tar.gz /
-RUN curl -o /required_subjects/fsaverage.tar.gz https://github.com/noahbenson/neuropythy/wiki/files/fsaverage.tar.gz && \
-    curl -o /required_subjects/fsaverage_sym.tar.gz https://github.com/noahbenson/neuropythy/wiki/files/fsaverage_sym.tar.gz && \
+RUN curl -L -o /required_subjects/fsaverage.tar.gz https://github.com/noahbenson/neuropythy/wiki/files/fsaverage.tar.gz && \
+    curl -L -o /required_subjects/fsaverage_sym.tar.gz https://github.com/noahbenson/neuropythy/wiki/files/fsaverage_sym.tar.gz && \
     cd /required_subjects && tar zxf fsaverage.tar.gs && tar zxf fsaverage_sym.tar.gz && rm ./fsaverage.tar.gz ./fsaverage_sym.tar.gz
 
 RUN cd / && tar zxvf required_subjects.tar.gz && rm /required_subjects.tar.gz && \
