@@ -26,10 +26,7 @@ COPY ./setup.py ./setup.cfg ./MANIFEST.in ./LICENSE.txt ./README.md \
 COPY ./neuropythy /home/$NB_USER/neuropythy/neuropythy
 RUN cd /home/$NB_USER/neuropythy && pip install -r requirements-dev.txt && python setup.py install
 
-RUN mkdir -p /home/$NB_USER/data       \
-             /home/$NB_USER/data/HCP   \
-             /home/$NB_USER/data/cache \
-             /home/$NB_USER/.jupyter
+RUN mkdir -p /home/$NB_USER/.jupyter
 
 # Copy over some files...
 COPY ./docker/npythyrc /home/$NB_USER/.npythyrc
@@ -44,6 +41,11 @@ COPY docker/required_subjects.tar.gz /
 
 RUN cd / && tar zxvf required_subjects.tar.gz && rm /required_subjects.tar.gz && \
     chown -R root:root required_subjects && chmod -R 755 /required_subjects
+
+# Make some global directories in the user's name also
+RUN mkdir -p /subjects /freesurfer_subjects /hcp_subjects /cache && \
+    chown $NB_USER /subjects /freesurfer_subjects /hcp_subjects /cache
+
 
 # Make sure we have the run.sh script ready:
 COPY docker/main.sh /main.sh

@@ -25,12 +25,22 @@ config.declare_credentials('hcp_credentials',
                            filenames=['~/.hcp-passwd', '~/.passwd-hcp',
                                       '~/.s3fs-passwd', '~/.passwd-s3fs'],
                            aws_profile_name=['HCP', 'hcp', 'S3FS', 's3fs'])
-config.declare('hcp_auto_release', environ_name='HCP_AUTO_RELEASE', default_value='HCP_1200')
-config.declare('hcp_auto_database',environ_name='HCP_AUTO_DATABASE',default_value='hcp-openaccess')
-config.declare('hcp_auto_path',    environ_name='HCP_AUTO_PATH',    default_value=Ellipsis)
+def to_nonempty(s):
+    '''
+    to_nonempty(s) yields s if s is a nonempty string and otherwise raises an exception.
+    '''
+    if not pimms.is_str(s) or s == '': raise ValueError('cannot convert object to non-empty string')
+    return s
+config.declare('hcp_auto_release', environ_name='HCP_AUTO_RELEASE', default_value='HCP_1200',
+               filter=to_nonempty)
+config.declare('hcp_auto_database',environ_name='HCP_AUTO_DATABASE',default_value='hcp-openaccess',
+               filter=to_nonempty)
+config.declare('hcp_auto_path',    environ_name='HCP_AUTO_PATH',    default_value=Ellipsis,
+               filter=to_nonempty)
 config.declare('hcp_auto_default_alignment',
                environ_name='HCP_AUTO_DEFAULT_ALIGNMENT',
-               default_value='MSMAll')
+               default_value='MSMAll',
+               filter=to_nonempty)
 def to_interpolation_method(im):
     '''
     to_interpolation_method(x) yields either 'linear' or 'nearest' or raises an exception, depending
@@ -56,6 +66,7 @@ def to_auto_download_state(arg):
     '''
     if   arg is Ellipsis:       return config['hcp_credentials'] is not None
     elif not pimms.is_str(arg): return arg in (True, 1)
+    elif arg.strip() == '': raise ValueError('auto-download argument may not be an empty string')
     else:
         arg = arg.lower().strip()
         return (True        if arg in ('on', 'yes', 'true', '1')            else
