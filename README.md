@@ -280,7 +280,7 @@ The above instructions will create a notebook server running on port 8888; to ch
 either edit the `docker-compose.yml` file or instead use `docker-compose run`:
 
 ```bash
-docker-compose run -p 8080:8080 neuropythy notebook
+docker-compose run -p 8888:8080 neuropythy notebook
 ```
 
 Assuming that your FreeSurfer subjects directory and your HCP subject directory, if any, are set via
