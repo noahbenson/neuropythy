@@ -171,7 +171,7 @@ def normalize(data):
         return newdict
     elif pimms.is_array(data, ('number', 'string', 'unicode', 'bool')):
         # numpy arrays just get turned into lists
-        return data.tolist() if pimms.is_nparray(data) else data
+        return np.asarray(data).tolist()
     elif data is Ellipsis:
         return {normalize.type_key: [None, 'ellipsis']}
     elif pimms.is_scalar(data):
