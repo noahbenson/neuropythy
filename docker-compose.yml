@@ -3,16 +3,18 @@ services:
    neuropythy:
       build: .
       ports:
-         - "8080:8888"
+         - "8888:8888"
       environment:
          - HCP_AUTO_RELEASE="$HCP_AUTO_RELEASE"
          - HCP_AUTO_DATABASE="$HCP_AUTO_DATABASE"
          - HCP_CREDENTIALS="$HCP_CREDENTIALS"
          - HCP_AUTO_DOWNLOAD="$HCP_AUTO_DOWNLOAD"
-         - HCP_AUTO_PATH="/hcp_subjects"
-         - HCP_SUBJECTS_DIR="/hcp_subjects"
-         - SUBJECTS_DIR="/subjects:/freesurfer_subjects"
+         - HCP_AUTO_PATH="/data/hcp/subjects"
+         - HCP_SUBJECTS_DIR="/data/hcp/subjects"
+         - SUBJECTS_DIR="/data/freesurfer_subjects"
+         - NPYTHY_DATA_CACHE_ROOT="/data/cache"
       volumes:
-         - "$SUBJECTS_DIR:/freesurfer_subjects"
-         - "$HCP_SUBJECTS_DIR:/hcp_subjects"
-         - "$NPYTHY_DATA_CACHE_ROOT:/cache"
+         - "$SUBJECTS_DIR:/data/freesurfer_subjects"
+         - "$HCP_SUBJECTS_DIR:/data/hcp/subjects"
+         - "$NPYTHY_DATA_CACHE_ROOT:/data/cache"
+         - "$NPYTHY_EXT_DIR:/data/ext"

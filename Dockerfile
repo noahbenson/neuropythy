@@ -32,22 +32,23 @@ RUN mkdir -p /home/$NB_USER/.jupyter
 COPY ./docker/npythyrc /home/$NB_USER/.npythyrc
 COPY ./docker/jupyter_notebook_config.py /home/$NB_USER/.jupyter/
 
-# Copy the README and license over.
+# The root operations ...
 USER root
+
+# Copy the README and license over.
 RUN apt-get update && apt-get install -y --no-install-recommends curl
 COPY ./LICENSE.txt              /LICENSE.txt
 COPY ./README.md                /README.md
-RUN mkdir -p /required_subjects
-#COPY docker/required_subjects.tar.gz /
-RUN curl -L -o /required_subjects/fsaverage.tar.gz https://github.com/noahbenson/neuropythy/wiki/files/fsaverage.tar.gz && \
-    curl -L -o /required_subjects/fsaverage_sym.tar.gz https://github.com/noahbenson/neuropythy/wiki/files/fsaverage_sym.tar.gz && \
-    cd /required_subjects && tar zxf fsaverage.tar.gz && tar zxf fsaverage_sym.tar.gz && rm ./fsaverage.tar.gz ./fsaverage_sym.tar.gz && \
-    chown -R root:root /required_subjects && chmod -R 755 /required_subjects
+RUN mkdir -p /data/required_subjects
+RUN curl -L -o /data/required_subjects/fsaverage.tar.gz https://github.com/noahbenson/neuropythy/wiki/files/fsaverage.tar.gz && \
+    curl -L -o /data/required_subjects/fsaverage_sym.tar.gz https://github.com/noahbenson/neuropythy/wiki/files/fsaverage_sym.tar.gz && \
+    cd /data/required_subjects && tar zxf fsaverage.tar.gz && tar zxf fsaverage_sym.tar.gz && rm ./fsaverage.tar.gz ./fsaverage_sym.tar.gz && \
+    chown -R root:root /data/required_subjects && chmod -R 755 /data/required_subjects
 
 # Make some global directories in the user's name also
-RUN mkdir -p /subjects /freesurfer_subjects /hcp_subjects /cache && \
-    chown $NB_USER /subjects /freesurfer_subjects /hcp_subjects /cache
-
+RUN mkdir -p /data/hcp && \
+    chown $NB_USER /data /data/hcp && \
+    chmod 755 /data /data/hcp
 
 # Make sure we have the run.sh script ready:
 COPY docker/main.sh /main.sh

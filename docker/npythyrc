@@ -1,4 +1,5 @@
-{"freesurfer_subject_paths": "/subjects:/freesurfer_subjects:/required_subjects",
+{"freesurfer_subject_paths": "/freesurfer_subjects:/required_subjects",
  "data_cache_root":          "/cache",
  "hcp_subject_paths":        "/hcp_subjects",
- "hcp_auto_download":        true}
+ "hcp_auto_download":        true,
+ "hcp_credentials":          "/credentials"}
