@@ -1,0 +1,93 @@
+General Information
+================================================================================
+Github Repository: https://github.com/noahbenson/neuropythy
+Wiki: https://github.com/noahbenson/neuropythy/wiki
+Author: Noah C. Benson <nben@nyu.edu>
+License: Affero GPLv3
+
+Neuropythy Docker Invocation
+================================================================================
+The neuropythy docker can be invoked in a number of ways, which are described in
+more detail below.
+
+ * docker run --rm -it nben/neuropythy README
+   Print the neuropythy README.md file to standard output.
+ * docker run --rm -it nben/neuropythy LICENSE
+   Print the neuropythy license to standard output.
+ * docker run -it nben/neuropythy bash
+   Execute a bash shell for the user "jovyan".
+ * docker run -it -p8888:8888 nben/neuropythy notebook
+   Start an interactive jupyter notebook running on port 8888.
+ * docker run --rm -it nben/neuropythy <neuropythy-command> <command-args>
+   Execute a neuropythy command. These commands include atlas,
+   benson14_retinotopy, register_retinotopy, and surface_to_image. All
+   commands print a help message if given the argument "--help" or "-h".
+
+Jupyter Notebooks and docker-compose
+================================================================================
+If you plan to use neuropythy as a Jupyter computation environment, it is much
+easier to checkout the neuropythy repository from github and run the
+`docker-compose up` command. Instructions for this are given in the neuropythy
+README.md file; see https://github.com/noahbenson/neuropythy
+
+Configuration
+================================================================================
+In all invocation cases, environment variables that can typically be used to
+configure neuropythy can also be used to configure the docker-container. See
+[this page](https://github.com/noahbenson/neuropythy/wiki/Configuration) for an
+explanation of these variables. Note that you can also mount a custom .npythyrc
+in the user (jovyan) home directory, but this is not recommended. The
+environment variables should be correct *inside* the docker container, not in
+the external filesystem.
+
+If you plan to use neuropythy's auto-downloading features for Human Connectome
+Project (HCP) data, then you will need to give neuropythy a valid set of Amazon
+S3 credentials (see https://github.com/noahbenson/neuropythy/wiki/Configuration
+for more information on configuring neuropythy to work with the HCP). Note that
+while you can give neuropythy the filename of a file containing the HCP S3
+credentials--with the docker you must also ensure that this file can be read
+inside the docker-container. Alternately, you can provide your credentials as
+a string "<key>:<secret>" or set them inside the docker using code such as:
+```
+import neuropythy as ny
+ny.config['hcp_credentials'] = (key, secret)
+```
+
+Volumes
+================================================================================
+Neuropythy can interact with a number of directories for various kinds of data;
+these are detailed below.
+
+ * /data/freesurfer_subjects
+   If you intend to operate on FreeSurfer subjects, then you should mount your
+   subjects directory in this directory. For example:
+   > SD="$SUBJECTS_DIR" # save the actual subjects-dir
+   > export SUBJECTS_DIR=/data/freesurfer_subjects # path inside the docker
+   > docker run -it -p8888:8888 -v "$SD:$SUBJECTS_DIR" nben/neuropythy notebook
+
+ * /data/hcp/subjects
+   If you plan to use HCP subject directories or are planning to use neuropythy
+   to interact with the HCP 1200 subject release and/or the HCP 7T retinotopy
+   dataset (both of which can be auto-downloaded with the proper configuration)
+   and you wish to save the data that is downloaded on your local filesystem,
+   then you should mount this directory. For example:
+   > SD="$HCP_SUBJECTS_DIR" # save the actual HCP subjects-dir
+   > export HCP_SUBJECTS_DIR=/data/hcp/subjects # path inside the docker
+   > docker run -it -p8888:8888 -v "$SD:$HCP_SUBJECTS_DIR" \\
+       nben/neuropythy notebook
+
+ * /data/cache
+   Neuropythy can save various datasets that it manages (including the HCP
+   datasets mentioned in the item above, if a specific HCP directory is not
+   provided) in a single generic cache directory. If you wish to save this
+   cache on your local filesystem, then you should mount your cache directory
+   to /data/cache:
+   > CD="$NPYTHY_DATA_CACHE_ROOT"
+   > export NPYTHY_DATA_CACHE_ROOT=/data/cache
+   > docker run -it -p8888:8888 -v "$CD:$NPYTHY_DATA_CACHE_ROOT" \\
+       nben/neuropythy notebook
+
+ * /home/jovyan/work
+   If you want to mount your own code or notebooks inside the docker, then this
+   is a convenient place to mount them.
+

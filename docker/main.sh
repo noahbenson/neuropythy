@@ -37,7 +37,9 @@ export HCP_CREDENTIALS
 export NPYTHY_DATA_CACHE_ROOT
 
 # Okay, now interpret the inputs/args
-if [ "$1" = "README" ] || [ "$1" == "readme" ]
+if   [ "$1" = "help" ] || [ "$1" = "-h" ] || [ "$1" = "-help" ] || [ "$1" = "--help" ]
+then exec more /help.txt
+elif [ "$1" = "README" ] || [ "$1" == "readme" ]
 then exec cat /README.md
 elif [ "$1" = "LICENSE" ] || [ "$1" == "license" ]
 then exec cat /LICENSE.txt

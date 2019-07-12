@@ -52,7 +52,8 @@ RUN mkdir -p /data/hcp && \
 
 # Make sure we have the run.sh script ready:
 COPY docker/main.sh /main.sh
-RUN chmod 755 /main.sh
+COPY docker/help.txt /help.txt
+RUN chmod 755 /main.sh /help.txt
 
 USER $NB_USER
 
