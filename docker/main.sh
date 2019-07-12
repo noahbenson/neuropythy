@@ -7,15 +7,29 @@ set -eo pipefail
 
 # A few things we do first:
 # (1) Make sure SUBJECTS_DIR is setup correctly
-SUBJECTS_DIR=""
-[ -d /data/required_subjects ]   && SUBJECTS_DIR="/data/required_subjects"
-[ -d /data/freesurfer_subjects ] && SUBJECTS_DIR="$SUBJECTS_DIR:/data/freesurfer_subjects"
+if ! [ -d /data/required_subjects ]
+then SUBJECTS_DIR="/data/required_subjects"
+else SUBJECTS_DIR=""
+fi
+if   [ -d /data/freesurfer_subjects ]
+then SUBJECTS_DIR="/data/freesurfer_subjects:$SUBJECTS_DIR"
+else mkdir -p /data/local/freesurfer_subjects
+     SUBJECTS_DIR="/data/local/freesurfer_subjects:$SUBJECTS_DIR"
+fi
+
 # (2) Make sure the HCP_SUBJECTS_DIR is set correctly
-HCP_SUBJECTS_DIR=""
-[ -d /data/hcp/subjects ] && HCP_SUBJECTS_DIR="$HCP_SUBJECTS_DIR:/data/hcp/subjects"
+if   [ -d /data/hcp/subjects ]
+then HCP_SUBJECTS_DIR="/data/hcp/subjects"
+else mkdir -p /data/local/hcp/subjects
+     HCP_SUBJECTS_DIR="/data/local/hcp/subjects"
+fi
 # (3) Make sure the cache is set correctly
-NPYTHY_DATA_CACHE_ROOT=""
-[ -d /data/cache ] && NPYTHY_DATA_CACHE_ROOT="/data/cache"
+NPYTHY_DATA_CACHE_ROOT="/data/cache"
+if   [ -d /data/cache ]
+then NPYTHY_DATA_CACHE_ROOT="/data/cache"
+else mkdir -p /data/local/cache
+     NPYTHY_DATA_CACHE_ROOT="/data/local/cache"
+fi
 
 export SUBJECTS_DIR
 export HCP_SUBJECTS_DIR
