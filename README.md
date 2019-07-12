@@ -285,9 +285,11 @@ docker-compose run -p 8888:8080 neuropythy notebook
 
 Assuming that your FreeSurfer subjects directory and your HCP subject directory, if any, are set via
 the `SUBJECTS_DIR` and `HCP_SUBJECTS_DIR` environment variables, then these directories will be
-available inside the docker VM in `/freesurfer_subjects` and `/hcp_subjects`. Additionally, your
-`HCP_CREDENTIALS`, `HCP_AUTO_DOWNLOAD` and other environment variables will be forwarded to
-neuropythy.
+available inside the docker VM in `/data/freesurfer_subjects` and `/data/hcp/subjects`.
+Additionally, your `NPYTHY_DATA_CACHE_ROOT`, `HCP_CREDENTIALS`, `HCP_AUTO_DOWNLOAD` and other
+environment variables will be forwarded to neuropythy. However, note that if your `HCP_CREDENTIALS`
+variable is a file, you will need to put the literal credentials in the variable instead as the
+docker image cannot read from your file.
 
 ### Using `nben/neuropythy` from Docker Hub
 
@@ -298,8 +300,8 @@ To run the notebook server using the prepared docker-image:
 docker pull nben/neuropythy:latest
 # run the notebook server
 docker run -it \
-           -v "$SUBJECTS_DIR:/freesurfer_subjects" \
-           -v "$HCP_SUBJECTS_DIR:/hcp_subjects" \
+           -v "$SUBJECTS_DIR:/data/freesurfer_subjects" \
+           -v "$HCP_SUBJECTS_DIR:/data/hcp/subjects" \
            -p 8888:8888 \
        nben/neuropythy notebook
 ```
