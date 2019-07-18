@@ -16,12 +16,18 @@ then SUBJECTS_DIR="/data/freesurfer_subjects:$SUBJECTS_DIR"
 else mkdir -p /data/local/freesurfer_subjects
      SUBJECTS_DIR="/data/local/freesurfer_subjects:$SUBJECTS_DIR"
 fi
+if   [ -d /freesurfer_subjects ]
+then SUBJECTS_DIR="/freesurfer_subjects:$SUBJECTS_DIR"
+fi
 
 # (2) Make sure the HCP_SUBJECTS_DIR is set correctly
 if   [ -d /data/hcp/subjects ]
 then HCP_SUBJECTS_DIR="/data/hcp/subjects"
 else mkdir -p /data/local/hcp/subjects
      HCP_SUBJECTS_DIR="/data/local/hcp/subjects"
+fi
+if   [ -d /hcp_subjects ]
+then HCP_SUBJECTS_DIR="/hcp_subjects:$HCP_SUBJECTS_DIR"
 fi
 # (3) Make sure the cache is set correctly
 NPYTHY_DATA_CACHE_ROOT="/data/cache"
