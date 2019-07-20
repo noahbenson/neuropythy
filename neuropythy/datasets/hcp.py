@@ -368,6 +368,7 @@ class HCPRetinotopyDataset(Dataset):
     retinotopy_files = pyr.pmap({32:'prfresults.mat', 59:'prfresults59k.mat'})
     retinotopy_prefix = 'prf'
     lowres_retinotopy_prefix = 'lowres-prf'
+    highres_retinotopy_prefix = 'highres-prf'
     subject_ids = tuple([100610, 102311, 102816, 104416, 105923, 108323, 109123, 111312,
                          111514, 114823, 115017, 115825, 116726, 118225, 125525, 126426,
                          128935, 130114, 130518, 131217, 131722, 132118, 134627, 134829,
@@ -398,32 +399,32 @@ class HCPRetinotopyDataset(Dataset):
         # linear interpolation right before the 'native59k' or 'native32k' (these are the filenames
         # for nearest interpolation)
         'native': { 
-            (retinotopy_prefix + '_polar_angle')              :'%s.split%s_angle.%s.native59k.mgz',
-            (retinotopy_prefix + '_eccentricity')             :'%s.split%s_eccen.%s.native59k.mgz',
-            (retinotopy_prefix + '_radius')                   :'%s.split%s_prfsz.%s.native59k.mgz',
-            (retinotopy_prefix + '_variance_explained')       :'%s.split%s_vexpl.%s.native59k.mgz',
-            (retinotopy_prefix + '_mean_signal')              :'%s.split%s_means.%s.native59k.mgz',
-            (retinotopy_prefix + '_gain')                     :'%s.split%s_const.%s.native59k.mgz',
-            (lowres_retinotopy_prefix + '_polar_angle')       :'%s.split%s_angle.%s.native32k.mgz',
-            (lowres_retinotopy_prefix + '_eccentricity')      :'%s.split%s_eccen.%s.native32k.mgz',
-            (lowres_retinotopy_prefix + '_radius')            :'%s.split%s_prfsz.%s.native32k.mgz',
-            (lowres_retinotopy_prefix + '_variance_explained'):'%s.split%s_vexpl.%s.native32k.mgz',
-            (lowres_retinotopy_prefix + '_mean_signal')       :'%s.split%s_means.%s.native32k.mgz',
-            (lowres_retinotopy_prefix + '_gain')              :'%s.split%s_const.%s.native32k.mgz'},
+            (highres_retinotopy_prefix + '_polar_angle')        :'%s.split%s_angle.%s.native59k.mgz',
+            (highres_retinotopy_prefix + '_eccentricity')       :'%s.split%s_eccen.%s.native59k.mgz',
+            (highres_retinotopy_prefix + '_radius')             :'%s.split%s_prfsz.%s.native59k.mgz',
+            (highres_retinotopy_prefix + '_variance_explained') :'%s.split%s_vexpl.%s.native59k.mgz',
+            (highres_retinotopy_prefix + '_mean_signal')        :'%s.split%s_means.%s.native59k.mgz',
+            (highres_retinotopy_prefix + '_gain')               :'%s.split%s_const.%s.native59k.mgz',
+            (lowres_retinotopy_prefix + '_polar_angle')         :'%s.split%s_angle.%s.native32k.mgz',
+            (lowres_retinotopy_prefix + '_eccentricity')        :'%s.split%s_eccen.%s.native32k.mgz',
+            (lowres_retinotopy_prefix + '_radius')              :'%s.split%s_prfsz.%s.native32k.mgz',
+            (lowres_retinotopy_prefix + '_variance_explained')  :'%s.split%s_vexpl.%s.native32k.mgz',
+            (lowres_retinotopy_prefix + '_mean_signal')         :'%s.split%s_means.%s.native32k.mgz',
+            (lowres_retinotopy_prefix + '_gain')                :'%s.split%s_const.%s.native32k.mgz'},
         'LR32k': {                                             
-            (lowres_retinotopy_prefix + '_polar_angle')       :'%s.split%s_angle.32k.mgz',
-            (lowres_retinotopy_prefix + '_eccentricity')      :'%s.split%s_eccen.32k.mgz',
-            (lowres_retinotopy_prefix + '_radius')            :'%s.split%s_prfsz.32k.mgz',
-            (lowres_retinotopy_prefix + '_variance_explained'):'%s.split%s_vexpl.32k.mgz',
-            (lowres_retinotopy_prefix + '_mean_signal')       :'%s.split%s_means.32k.mgz',
-            (lowres_retinotopy_prefix + '_gain')              :'%s.split%s_const.32k.mgz'},
+            (lowres_retinotopy_prefix + '_polar_angle')         :'%s.split%s_angle.32k.mgz',
+            (lowres_retinotopy_prefix + '_eccentricity')        :'%s.split%s_eccen.32k.mgz',
+            (lowres_retinotopy_prefix + '_radius')              :'%s.split%s_prfsz.32k.mgz',
+            (lowres_retinotopy_prefix + '_variance_explained')  :'%s.split%s_vexpl.32k.mgz',
+            (lowres_retinotopy_prefix + '_mean_signal')         :'%s.split%s_means.32k.mgz',
+            (lowres_retinotopy_prefix + '_gain')                :'%s.split%s_const.32k.mgz'},
         'LR59k': {                                             
-            (retinotopy_prefix + '_polar_angle')              :'%s.split%s_angle.59k.mgz',
-            (retinotopy_prefix + '_eccentricity')             :'%s.split%s_eccen.59k.mgz',
-            (retinotopy_prefix + '_radius')                   :'%s.split%s_prfsz.59k.mgz',
-            (retinotopy_prefix + '_variance_explained')       :'%s.split%s_vexpl.59k.mgz',
-            (retinotopy_prefix + '_mean_signal')              :'%s.split%s_means.59k.mgz',
-            (retinotopy_prefix + '_gain')                     :'%s.split%s_const.59k.mgz'}})
+            (highres_retinotopy_prefix + '_polar_angle')        :'%s.split%s_angle.59k.mgz',
+            (highres_retinotopy_prefix + '_eccentricity')       :'%s.split%s_eccen.59k.mgz',
+            (highres_retinotopy_prefix + '_radius')             :'%s.split%s_prfsz.59k.mgz',
+            (highres_retinotopy_prefix + '_variance_explained') :'%s.split%s_vexpl.59k.mgz',
+            (highres_retinotopy_prefix + '_mean_signal')        :'%s.split%s_means.59k.mgz',
+            (highres_retinotopy_prefix + '_gain')               :'%s.split%s_const.59k.mgz'}})
     
     def __init__(self, url=Ellipsis, cache_directory=Ellipsis, interpolation_method=Ellipsis,
                  meta_data=None, create_directories=True, create_mode=0o755):
@@ -595,7 +596,7 @@ class HCPRetinotopyDataset(Dataset):
         alltrs = HCPRetinotopyDataset._retinotopy_cache_tr
         lrtrs = {32: alltrs['LR32k'], 59: alltrs['LR59k']}
         lpfx = HCPRetinotopyDataset.lowres_retinotopy_prefix
-        hpfx = HCPRetinotopyDataset.retinotopy_prefix
+        hpfx = HCPRetinotopyDataset.highres_retinotopy_prefix
         nttrs = {32: {k:v for (k,v) in six.iteritems(alltrs['native']) if k.startswith(lpfx)},
                  59: {k:v for (k,v) in six.iteritems(alltrs['native']) if k.startswith(hpfx)}}
         def _prep(sid):
@@ -632,12 +633,25 @@ class HCPRetinotopyDataset(Dataset):
                                      for inp in [interpolate_native_properties(prefix=p, **inpargs)]
                                      for k   in hcp_retinotopy_property_names})
                 return hemi.with_prop(lm)
+            def _get_highest_res(hemi, k):
+                try: x = hemi.prop(hpfx + '_' + k)
+                except Exception: x = None
+                if x is not None: return x
+                try: return hemi.prop(lpfx + '_' +  k)
+                except Exception: x = None
+                if x is not None: return x
+                raise ValueError('no retinotopy successfully loaded for hemi', hemi)
             def _interp_nat(h, align):
                 # okay, let's get the hemisphere we are modifying...
                 hemi = hems1['%s_native_%s' % (h, align)]
                 # we're going to interp from both the 32k and 59k meshes (if possible)
                 for res in [32, 59]: hemi = _interp_hem(hemi, h, res, align)
-                return hemi
+                # add the 'best/standard' prf header:
+                pfx = HCPRetinotopyDataset.retinotopy_prefix
+                lm = pimms.lazy_map({(pfx + '_' + k): curry(_get_highest_res, hemi, k)
+                                     for k in hcp_retinotopy_property_names})
+                # return with these properties:
+                return hemi.with_prop(lm)
             for h in ['lh','rh']:
                 for align in ['MSMAll','MSMSulc']:
                     hems = hems.set(h + '_native_' + align, curry(_interp_nat, h, align))
