@@ -49,7 +49,6 @@ def cortex_from_filemap(fmap, name, affine=None):
         if u is None and sa is not None:
             try: u = sa.get(k, None)
             except Exception: u = None
-        if u is None: print(s0.get(k, None), sa.get(k,None))
         if u is None: raise ValueError('Exception while loading property %s' % k)
         else: return u if trfn is None else trfn(u)
     def _lbltr(ll):
@@ -102,7 +101,8 @@ def images_from_filemap(fmap):
     imgs = {k:img_loader(k) for k in six.iterkeys(imgmap)}
     def _make_mask(val, eq=True):
         rib = imgmap['ribbon']
-        arr = (rib.dataobj == val) if eq else (rib.dataobj != val)
+        img = np.asarray(rib.dataobj)
+        arr = (img == val) if eq else (img != val)
         arr.setflags(write=False)
         return type(rib)(arr, rib.affine, rib.header)
     imgs['lh_gray_mask']  = lambda:_make_mask(3)
