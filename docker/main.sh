@@ -19,6 +19,9 @@ fi
 if   [ -d /freesurfer_subjects ]
 then SUBJECTS_DIR="/freesurfer_subjects:$SUBJECTS_DIR"
 fi
+if   [ -d /subjects ]
+then SUBJECTS_DIR="/subjects:$SUBJECTS_DIR"
+fi
 
 # (2) Make sure the HCP_SUBJECTS_DIR is set correctly
 if   [ -d /data/hcp/subjects ]
