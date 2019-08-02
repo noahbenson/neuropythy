@@ -16,8 +16,10 @@ if six.PY2: (_tuple_type, _list_type) = (types.TupleType, types.ListType)
 else:       (_tuple_type, _list_type) = (tuple, list)
 
 # Used by functions that pass arguments on to the isclose and related functions
-default_rtol = inspect.getargspec(np.isclose)[3][0]
-default_atol = inspect.getargspec(np.isclose)[3][1]
+try:              default_rtol = inspect.getargspec(np.isclose)[3][0]
+except Exception: default_rtol = 1e-5
+try:              default_atol = inspect.getargspec(np.isclose)[3][1]
+except Exception: default_atol = 1e-8
 
 # A few functions were moved into pimms; they still appear here for compatibility
 from pimms import (is_tuple, is_list, is_set, curry)
