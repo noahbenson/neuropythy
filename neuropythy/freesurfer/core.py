@@ -574,12 +574,19 @@ def cortex_from_filemap(fmap, chirality, name, subid=None, affine=None):
         ll[0].setflags(write=False)
         return ll[0]
     p = {}
-    for k in six.iterkeys(hdat.label):
-        p[k+'_label'] = curry(_load_with_alt, k, hdat.label, hdat.alt_label, _lbltr)
-    for k in six.iterkeys(hdat.weight):
-        p[k+'_weight'] = curry(_load_with_alt, k, hdat.weight, hdat.alt_weight, _wgttr)
-    for k in six.iterkeys(hdat.annot):
-        p[k] = curry(_load_with_alt, k, hdat.annot, hdat.alt_annot, _anotr)
+    from itertools import chain
+    l  = hdat.label     if hasattr(hdat, 'label')     else {}
+    al = hdat.alt_label if hasattr(hdat, 'alt_label') else {}
+    for k in set(chain(six.iterkeys(l), six.iterkeys(al))):
+        p[k+'_label'] = curry(_load_with_alt, k, l, al, _lbltr)
+    w  = hdat.weight     if hasattr(hdat, 'weight')     else {}
+    aw = hdat.alt_weight if hasattr(hdat, 'alt_weight') else {}
+    for k in set(chain(six.iterkeys(w), six.iterkeys(aw))):
+        p[k+'_weight'] = curry(_load_with_alt, k, w, aw, _wgttr)
+    a  = hdat.annot     if hasattr(hdat, 'annot')     else {}
+    aa = hdat.alt_annot if hasattr(hdat, 'alt_annot') else {}
+    for k in set(chain(six.iterkeys(a), six.iterkeys(aa))):
+        p[k] = curry(_load_with_alt, k, a, aa, _anotr)
     props = pimms.merge(hdat.property, pimms.lazy_map(p))
     tess = geo.Tesselation(tris, properties=props)
     def _make_midgray():
