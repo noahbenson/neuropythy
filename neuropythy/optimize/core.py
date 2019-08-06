@@ -389,8 +389,8 @@ class PotentialPlusPotential(PotentialFunction):
     def jacobian(self, params, into=None):
         dg = self.g.jacobian(params, into=into)
         dh = self.h.jacobian(params, into=dg)
-        if   dh is dg: return dh
-        else:          return dh + dg
+        if dh is dg: return dh
+        else:        return dh + dg
 @pimms.immutable
 class PotentialPlusConstant(PotentialFunction):
     def __init__(self, f, c):
