@@ -56,11 +56,11 @@ class ImageType(object):
         Parses the dtype out of the header data or the array, depending on which is given; if both,
           then the header-data overrides the array; if neither, then np.float32.
         '''
-        try:    dataobj = dataobj.dataobj
+        try: dataobj = dataobj.dataobj
         except Exception: pass
         dtype = np.asarray(dataobj).dtype if dataobj is not None else self.default_type()
-        if   hdat and 'type'  in hdat: dtype = np.dtype(hdat['type'])
-        elif hdat and 'dtype' in hdat: dtype = np.dtype(hdat['dtype'])
+        if   hdat and hdat.get('type', None) is not None: dtype = np.dtype(hdat['type'])
+        elif hdat and hdat.get('dtype',None) is not None: dtype = np.dtype(hdat['dtype'])
         return dtype
     @classmethod
     def parse_affine(self, hdat, dataobj=None):
