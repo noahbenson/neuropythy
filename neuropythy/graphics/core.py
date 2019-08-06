@@ -913,7 +913,7 @@ try:
     def cortex_plot_3D(obj,
                        color=None, cmap=None, vmin=None, vmax=None, alpha=None,
                        underlay='curvature', mask=None, hemi=None, surface='inflated',
-                       figure=Ellipsis, width=600, height=600,
+                       figure=Ellipsis, width=600, height=600, mesh_alpha=None,
                        view=None, camera_distance=100, camera_fov=None, camera_up=None):
         '''
     cortex_plot_3D(hemi) plots the inflated surface of the given cortex object hemi and returns the
@@ -948,6 +948,9 @@ try:
           * color = ((0,0,0,1), (0,0,1,0.5), (0,0,0.75,0,8))
           * alpha = (-0.5, 1, 0.5)
         then the resulting colors plotted will be ((0,0,0,0.5), (0,0,1,0.5), (0,0,0.75,0,4)).
+      * mesh_alpha (default: None) specifies the alpha to use for the mesh object itself. This may
+        be single value (0 for transparent, 1 for opaque) or a vector of values, one per vertex, or
+        a property name.
       * mask (default: None) specifies a mask to use for the mesh; this is passed through to_mask()
         to figure out the masking. Those vertices not in the mask are not plotted (but they will be
         plotted in the underlay if it is not None).
@@ -983,6 +986,15 @@ try:
                                 alpha=alpha, underlay=underlay, mask=mask)
              for m in mesh])
         n = len(rgba)
+        # process the mesh_alpha parameter
+        if mesh_alpha is None:
+            mesh_alpha = [None for m in mesh]
+        elif pimms.is_scalar(mesh_alpha):
+            if mesh_alpha == 1: mesh_alpha = None
+            elif pimms.is_str(mesh_alpha): mesh_alpha = [m.prop(mesh_alpha) for m in mesh]
+            else: mesh_alpha = [mesh_alpha for m in mesh]
+        elif len(mesh_alpha) != len(mesh):
+            mesh_alpha = [mesh_alpha for m in mesh]
         # Okay, setup the ipyv figure...
         mns = np.full(3, np.inf)
         mxs = np.full(3, -np.inf)
@@ -990,13 +1002,21 @@ try:
         if figure is None: f = ipv.gcf()
         elif figure is Ellipsis: f = ipv.figure(width=width, height=height)
         else: f = figure
-        for (m,i0) in zip(mesh,[0] if len(mesh) == 1 else [0,mesh[0].vertex_count]):
+        i0 = 0
+        for (m,ma) in zip(mesh, mesh_alpha):
             (x,y,z) = m.coordinates
             ii = slice(i0, i0 + m.vertex_count)
-            ipvm = ipv.plot_trisurf(x,y,z, m.tess.faces.T, color=rgba[ii,:3])
+            i0 += m.vertex_count
+            ipvm = ipv.plot_trisurf(x,y,z, m.tess.indexed_faces.T, color=rgba[ii,:3])
             mns = np.nanmin([mns, np.nanmin([x,y,z], axis=1)], axis=0)
             mxs = np.nanmax([mxs, np.nanmax([x,y,z], axis=1)], axis=0)
             ms = ms + (ipvm,)
+            # handle mesh alpha, if given
+            if ma is not None:
+                if pimms.is_scalar(ma): ma = np.full([m.vertex_count, 1], ma)
+                else: ma = np.reshape(ma, [m.vertex_count, 1])
+                ipvm.color = np.hstack([ipvm.color, ma])
+                ipvm.material.transparent = True
         # Figure out the bounding box...
         szs = mxs - mns
         mid = 0.5*(mxs + mns)
