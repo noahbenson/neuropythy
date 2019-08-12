@@ -78,17 +78,18 @@ def cortex_from_filemap(fmap, name, affine=None):
     aa = hdat.alt_annot if hasattr(hdat, 'alt_annot') else {}
     for k in set(chain(six.iterkeys(a), six.iterkeys(aa))):
         p[k] = curry(_load_with_alt, k, a, aa, _anotr)
-    props = pimms.merge(hdat.property, pimms.lazy_map(p))
+    props = pimms.merge(hdat.property if hasattr(hdat, 'property') else {}, pimms.lazy_map(p))
     tess = geo.Tesselation(tris, properties=props)
     # if this is a subject that exists in the library, we may want to add some files:
     if name is None:
         pd = fmap.pseudo_paths[None]._path_data
         name = pd['pathmod'].split(fmap.actual_path)[1]
-    regs = hdat.registration
+    regs = hdat.registration if hasattr(hdat, 'registration') else {}
     # Okay, make the cortex object!
     md = {'file_map': fmap}
     if name is not None: md['subject_id'] = name
-    return mri.Cortex(chirality, tess, hdat.surface, regs, affine=affine, meta_data=md).persist()
+    srfs = hdat.surface if hasattr(hdat, 'surface') else {}
+    return mri.Cortex(chirality, tess, srfs, regs, affine=affine, meta_data=md).persist()
 def images_from_filemap(fmap):
     '''
     images_from_filemap(fmap) yields a persistent map of MRImages tracked by the given subject with
