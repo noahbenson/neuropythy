@@ -32,19 +32,9 @@ RUN mkdir -p /home/$NB_USER/.jupyter
 COPY ./docker/npythyrc /home/$NB_USER/.npythyrc
 COPY ./docker/jupyter_notebook_config.py /home/$NB_USER/.jupyter/
 
-# Install some extras; first collapsible cell extensions...
+# Install collapsible cell extensions...
 RUN pip install jupyter_contrib_nbextensions
 RUN jupyter contrib nbextension install --user
-# next, the helvetica neue font (for plotting)
-RUN mkdir -p ~/.local/share/fonts/helvetica_neue_tmp
-RUN curl -L -o ~/.local/share/fonts/helvetica_neue_tmp/helveticaneue.zip \
-         https://github.com/noahbenson/neuropythy/wiki/files/helveticaneue.zip
-RUN cd ~/.local/share/fonts/helvetica_neue_tmp \
- && unzip helveticaneue.zip \
- && mv *.ttf .. \
- && cd .. \
- && rm -r ~/.local/share/fonts/helvetica_neue_tmp
-RUN fc-cache -f -v
 
 
 
@@ -72,6 +62,17 @@ COPY docker/help.txt /help.txt
 RUN chmod 755 /main.sh /help.txt
 
 USER $NB_USER
+
+# As the use (now with curl!), install the helvetica neue font (for figures)
+RUN mkdir -p ~/.local/share/fonts/helvetica_neue_tmp
+RUN curl -L -o ~/.local/share/fonts/helvetica_neue_tmp/helveticaneue.zip \
+         https://github.com/noahbenson/neuropythy/wiki/files/helveticaneue.zip
+RUN cd ~/.local/share/fonts/helvetica_neue_tmp \
+ && unzip helveticaneue.zip \
+ && mv *.ttf .. \
+ && cd .. \
+ && rm -r ~/.local/share/fonts/helvetica_neue_tmp
+RUN fc-cache -f -v
 
 # And mark it as the entrypoint
 #CMD ["/main.sh"]
