@@ -1,0 +1,7 @@
+.git
+.ipynb_checkpoints
+.DS_Store
+dist
+Dockerfile
+.gitignore
+.dockerignore
