@@ -43,8 +43,6 @@ class ImageType(object):
     @classmethod
     def header_type(self): raise NotImplementedError('ImageType.header_type must be overloaded')
     @classmethod
-    def meta_data(self, x): raise NotImplementedError('ImageType.meta_data must be overloaded')
-    @classmethod
     def aliases(self): return ()
     @classmethod
     def default_type(self): return np.dtype('float32')
@@ -219,6 +217,15 @@ class Nifti1ImageType(ImageType):
         except Exception: pass
         try: (sunit, tunit) = hdr.get_xyzt_units()
         except Exception: (sunit, tunit) = ('unknown', 'unknown')
+        vsz = d['voxel_size']
+        if vsz is not None and len(vsz) == 4:
+            d['voxel_size'] = vsz[:3]
+            if tunit == 'unknown': d['voxel_duration'] = vsz[3]
+            else:
+                try: d['voxel_duration'] = pimms.quant(vsz[3], tunit)
+                except Exception: d['voxel_duration'] = vsz[3]
+        else:
+            d['voxel_duration'] = None
         if sunit != 'unknown':
             try: d['voxel_size'] = pimms.quant(d['voxel_size'], sunit)
             except Exception: pass
@@ -449,11 +456,33 @@ class EcatImageType(ImageType):
         try: d['patient_orientation'] = hdr.get_patient_orient()
         except Exception: pass
         return d
+class Cifti2ImageType(ImageType):
+    @classmethod
+    def image_name(self): return 'cifti2'
+    @classmethod
+    def image_type(self): return nib.Cifti2Image
+    @classmethod
+    def header_type(self): return nib.Cifti2Header
+    @classmethod
+    def aliases(self): return ('cii', 'cii.gz', 'cifti')
+    @classmethod
+    def meta_data(self, img):
+        from neuropythy.hcp import cifti_axis_spec
+        d = {}
+        axdat = cifti_axis_spec(img)
+        d['axes_data'] = axdat
+        d['image_shape'] = tuple([ax.get('size', None) for ax in axdat])
+        #d['voxel_type'] = img.get_data_dtype()
+        return pimms.persist(d)
+    #@classmethod
+    #def postprocess_image(self, img, d):
+    #    return img
+
 
 image_types = (Nifti1ImageType, Nifti2ImageType, MGHImageType,
                Spm99AnalyzeImageType, Spm2AnalyzeImageType,
                Minc1ImageType, Minc2ImageType,
-               PARRECImageType, EcatImageType)
+               PARRECImageType, EcatImageType, Cifti2ImageType)
 image_types_by_name        = pyr.pmap({it.image_name():it  for it in image_types})
 image_types_by_image_type  = pyr.pmap({it.image_type():it  for it in image_types})
 image_types_by_header_type = pyr.pmap({it.header_type():it for it in image_types})

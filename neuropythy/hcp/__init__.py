@@ -5,7 +5,7 @@
 
 from .files import (subject_paths, clear_subject_paths, add_subject_path, find_subject_path,
                     gifti_to_array, cifti_split, cifti_extract, is_hcp_subject_path,
-                    subject_file_map)
+                    subject_file_map, cifti_label_data, cifti_axis_spec)
 from .core import (subject, forget_subject, forget_all)
 
 subject_ids = tuple(
