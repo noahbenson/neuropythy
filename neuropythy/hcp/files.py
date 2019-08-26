@@ -136,8 +136,8 @@ def gifti_to_array(gii):
 
 def cifti_label_data(obj):
     '''
-    cifti_label_data(obj) yields dictionary of label names mapped to label data in the given cifti 
-      object obj; if obj is not an interpretable label structure, None is returned.
+    cifti_label_data(obj) yields an ordered dictionary of label names mapped to label data in the
+      given cifti object obj; if obj is not an interpretable label structure, None is returned.
     
     If the argument obj is a CIFTI image object then a list of values, one per axis in the CIFTI
     object, is returned where None indicates that the axis was not a label axis. If obj is an axis,
@@ -159,7 +159,8 @@ def cifti_label_data(obj):
     nmaps = list(obj.named_maps)
     if len(nmaps) == 0: return None
     # it has a named map and label-table; we just have to interpret it
-    res = {}
+    from collections import OrderedDict
+    res = OrderedDict()
     for nmap in nmaps:
         lbls = {}
         for k in ([] if nmap.label_table is None else nmap.label_table):
@@ -211,7 +212,7 @@ def cifti_axis_spec(ax):
     (i0,n,step) = (ax.series_start, ax.number_of_series_points, ax.series_step)
     if n is not None:
         idcs = np.arange(i0, i0 + n*step, step)
-        imsh.append(len(idcs))
+        #imsh.append(len(idcs))
         if ax.series_unit is not None:
             try: idcs = pimms.quant(idcs, ax.series_unit.lower())
             except Exception: pass
@@ -238,8 +239,9 @@ def cifti_axis_spec(ax):
     # Check for label and scalar data:
     lbls = cifti_label_data(ax)
     if lbls is not None:
-        d['names'] = lbls
         d['size'] = len(lbls)
+        d['names'] = list(lbls.keys())
+        if not all(v is None for v in six.itervalues(lbls)): d['labels'] = list(lbls.values())
     # Check for parcel data:
     parcs = {}
     maxii = 0
@@ -260,10 +262,26 @@ def cifti_axis_spec(ax):
     # That's all we check for currently
     return d
 
-def cifti_split(cii, null=np.nan):
+def cifti_split(cii, label=('lh', 'rh', 'rest'), subject=None, hemi=None, null=np.nan):
     '''
-    cifti_split(cii) yields a tuple (lh_values, rh_values, subcortical_values) of the values stored
-      in the given cifti file cii.
+    cifti_split(cii, label) yields the rows or columns of the given cifti file that correspond to
+      the given label (see below).
+    cifti_split(cii) is equivalent to cifti_split(cii, ('lh', 'rh', 'rest')).
+
+    The label argument may be any of the following:
+      * a valid CIFTI label name such as 'CIFTI_STRUCTURE_CEREBELLUM' or
+        'CIFTI_STRUCTURE_CORTEX_LEFT';
+      * an abbreviated name such as 'cerebellum' for 'CIFTI_STRUCTURE_CEREBELLUM'.
+      * the abbreviations 'lh' and 'rh' which stand for 'CIFTI_STRUCTURE_CORTEX_LEFT' and 
+        'CIFTI_STRUCTURE_CORTEX_RIGHT';
+      * the special keyword 'rest', which represents all the rows/columns not collected by any other
+        instruction ('rest', by itself, results in the whole matrix being returned); or
+      * A tuple of the above, indicating that each of the items listed should be returned
+        sequentially in a tuple.
+
+    The following optional arguments may be given:
+      * subject (default: None) may specify the subject
+      * hemi (default: None) can specify the hemisphere object that 
     '''
     dat = np.asanyarray(cii.dataobj if is_image(cii) else cii)
     n = dat.shape[-1]
