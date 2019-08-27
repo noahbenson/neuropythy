@@ -33,9 +33,10 @@ COPY ./docker/npythyrc /home/$NB_USER/.npythyrc
 COPY ./docker/jupyter_notebook_config.py /home/$NB_USER/.jupyter/
 
 # Install collapsible cell extensions...
-RUN pip install jupyter_contrib_nbextensions
+RUN conda install -c conda-forge jupyter_contrib_nbextensions
 RUN jupyter contrib nbextension install --user
-
+RUN jupyter nbextension enable collapsible_headings/main \
+ && jupyter nbextension enable select_keymap/main
 
 
 # The root operations ...
@@ -73,6 +74,7 @@ RUN cd ~/.local/share/fonts/helvetica_neue_tmp \
  && cd .. \
  && rm -r ~/.local/share/fonts/helvetica_neue_tmp
 RUN fc-cache -f -v
+RUN rm -r ~/.cache/matplotlib
 
 # And mark it as the entrypoint
 #CMD ["/main.sh"]
