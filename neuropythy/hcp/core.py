@@ -133,7 +133,7 @@ def subject_from_filemap(fmap, name=None, meta_data=None, check_path=True,
                                      'lh_nat59k_MSMAll',  'rh_nat59k_MSMAll',
                                      'lh_LR32k_MSMAll',   'rh_LR32k_MSMAll',
                                      'lh_LR59k_MSMAll',   'rh_LR59k_MSMAll',
-                                     'lh_LR164k_MSMAll',  'rh_LR164k_MSMAll'
+                                     'lh_LR164k_MSMAll',  'rh_LR164k_MSMAll',
                                      'lh_native_MSMSulc', 'rh_native_MSMSulc',
                                      'lh_nat32k_MSMSulc', 'rh_nat32k_MSMSulc',
                                      'lh_nat59k_MSMSulc', 'rh_nat59k_MSMSulc',

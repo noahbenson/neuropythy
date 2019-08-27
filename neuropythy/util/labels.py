@@ -280,7 +280,7 @@ def label_index(dat, *args, **kw):
                     ids.append(k)
                     nms.append(v)
                 if c is not None: clrs.append(c)
-        if is_dataframe(dat):
+        elif is_dataframe(dat):
             if dat.index.name.lower() == 'id': ids = dat.index.values
             else: ids = dat['id'].values
             nms = dat['name'].values
