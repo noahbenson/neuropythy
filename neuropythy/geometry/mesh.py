@@ -1141,6 +1141,52 @@ class Mesh(VertexSet):
         The optional parameters tag and tag_tess is used identically as in mesh.submesh().
         '''
         return self.submesh(self.map(fn), tag=tag, tag_tess=tag_tess)
+
+    def apply_affine(self, affine):
+        '''
+        mesh.apply_affine(affine) yields a mesh that is a duplicate of the given mesh except that
+          the new mesh's coordinates have had the given affine transformation applied to them.
+        '''
+        return self.copy(coordinates=apply_affine(affine, self.coordinates))
+    def translate(self, x=None, y=None, z=None):
+        '''
+        mesh.translate(dx, dy, dz) copies the given mesh and returns the duplicate mesh after its
+          coordinates have been translated by the vector (dx, dy, dz). Any of the dx, dy, and dz
+          values may be None to indicate 0 translation.
+        mesh.translate([dx, dy, dz]) is equivalent to mesh.translate(dx, dy, dz).
+        '''
+        if y is None and z is None and x is not None:
+            x = np.asarray(x)
+            if len(x.shape) > 0 and x.shape[0] == 3:
+                (x, y, z) = x
+        if x is None: x = 0
+        if y is None: y = 0
+        if z is None: z = 0
+        if np.all((x == 0) & (y == 0) & (z == 0)): return self
+        (x0, y0, z0) = self.coordinates
+        return self.copy(coordinates=[x0 + x, y0 + y, z0 + z])
+    def rotate(self, pitch=None, roll=None, yaw=None):
+        '''
+        mesh.rotate(pitch, roll, yaw) copies the given mesh and returns the duplicate mesh after its
+          coordinates have been rotated by the angles given (in radians) by pitch, roll, and yaw.
+        mesh.rotate([pitch, roll, yaw]) is equivalent to mesh.rotate(pitch, roll, yaw).
+        
+        Pitch is counter-clockwise rotation about the x-axis; roll is counter-clockwise rotation
+        about the y-axis, and yaw is counter-clockwise rotation about the z-axis.
+        '''
+        if roll is None and yaw is None and pitch is not None:
+            pitch = np.asarray(pitch)
+            if len(pitch.shape) > 0 and pitch.shape[0] == 3:
+                (pitch, roll, yaw) = pitch
+        if pitch is None: pitch = 0
+        if roll  is None: roll  = 0
+        if yaw   is None: yaw   = 0
+        
+        rm = np.dot(np.dot(rotation_matrix_3D([1,0,0], pitch),
+                           rotation_matrix_3D([0,1,0], roll)),
+                    rotation_matrix_3D([0,0,1], yaw))
+        coords = np.dot(rm, self.coordinates)
+        return self.copy(coordinates=coords)
     
     # True if the point is in the triangle, otherwise False; tri_no is an index into the faces
     def is_point_in_face(self, tri_no, pt):
@@ -3161,6 +3207,7 @@ class Path(ObjectWithMetaData):
         same  = np.union1d(u,v)
         (q,wq) = [np.concatenate([a,b]) for (a,b) in [(u,v),(wu,wv)]]
         m = len(q)
+        if m == 0: return np.zeros(n, dtype=np.bool)
         # for the labels, the u and v have repeats, so we want to average their values
         mm  = sps.csr_matrix((np.ones(m), (q, np.arange(m))), shape=(n, m))
         lbl = zdivide(mm.dot(wq), flattest(mm.sum(axis=1)))
