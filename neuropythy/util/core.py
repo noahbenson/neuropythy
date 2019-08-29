@@ -1245,6 +1245,118 @@ def chop(x, rtol=default_rtol, atol=default_atol, copy=True):
     '''
     return replace_close(x, np.round(x), rtol=rtol, atol=atol, copy=copy)
 
+def nan_compare(f, x, y, nan_nan=False, nan_val=False, val_nan=False):
+    '''
+    nan_compare(f, x, y) is equivalent to f(x, y), which is assumed to be a boolean function that
+      broadcasts over x and y (such as numpy.less), except that NaN values in either x or y result
+      in a value of False instead of being run through f.
+
+    The argument f must be a numpy comparison function such as numpy.less that accepts the optional
+    arguments where and out.
+
+    The following optional arguments may be provided:
+      * nan_nan (default: False) specifies the return value (True or False) for comparisons
+        equivalent to f(nan, nan).
+      * nan_val (default: False) specifies the return value (True or False) for comparisons
+        equivalent to f(nan, non_nan).
+      * val_nan (default: False) specifies the return value (True or False) for comparisons
+        equivalent to f(non_nan, nan).
+    '''
+    #TODO: This should work with sparse matrices as well
+    x = np.asanyarray(x)
+    y = np.asanyarray(y)
+    xii = np.isnan(x)
+    yii = np.isnan(y)
+    if not xii.any() and not yii.any(): return f(x, y)
+    ii  = (~xii) & (~yii)
+    out = np.zeros(ii.shape, dtype=np.bool)
+    if nan_nan == nan_val and nan_val == val_nan:
+        # All the nan-result values are the same; we can simplify a little...
+        if nan_nan: out[~ii] = nan_nan
+    else:
+        if nan_nan: out[   xii &    yii] = nan_nan
+        if nan_val: out[   xii & (~yii)] = nan_val
+        if val_nan: out[(~xii) &    yii] = val_nan
+    return f(x, y, out=out, where=ii)
+def naneq(x, y, nan_nan=False, nan_val=False, val_nan=False):
+    '''
+    naneq(x, y) is equivalent to (x == y) except that NaN values in either x or y result in False.
+
+    The following optional arguments may be provided:
+      * nan_nan (default: False) specifies the return value (True or False) for comparisons
+        equivalent to naneq(nan, nan).
+      * nan_val (default: False) specifies the return value (True or False) for comparisons
+        equivalent to naneq(nan, 0).
+      * val_nan (default: False) specifies the return value (True or False) for comparisons
+        equivalent to naneq(nan, 0).
+    '''
+    return nan_compare(np.equal, x, y, nan_nan=nan_nan, nan_val=nan_val, val_nan=val_nan)
+def nanne(x, y, nan_nan=False, nan_val=False, val_nan=False):
+    '''
+    nanne(x, y) is equivalent to (x != y) except that NaN values in either x or y result in False.
+
+    The following optional arguments may be provided:
+      * nan_nan (default: False) specifies the return value (True or False) for comparisons
+        equivalent to nanne(nan, nan).
+      * nan_val (default: False) specifies the return value (True or False) for comparisons
+        equivalent to nanne(nan, 0).
+      * val_nan (default: False) specifies the return value (True or False) for comparisons
+        equivalent to nanne(nan, 0).
+    '''
+    return nan_compare(np.not_equal, x, y, nan_nan=nan_nan, nan_val=nan_val, val_nan=val_nan)
+def nanlt(x, y, nan_nan=False, nan_val=False, val_nan=False):
+    '''
+    nanlt(x, y) is equivalent to (x < y) except that NaN values in either x or y result in False.
+
+    The following optional arguments may be provided:
+      * nan_nan (default: False) specifies the return value (True or False) for comparisons
+        equivalent to nanlt(nan, nan).
+      * nan_val (default: False) specifies the return value (True or False) for comparisons
+        equivalent to nanlt(nan, 0).
+      * val_nan (default: False) specifies the return value (True or False) for comparisons
+        equivalent to nan;t(nan, 0).
+    '''
+    return nan_compare(np.less, x, y, nan_nan=nan_nan, nan_val=nan_val, val_nan=val_nan)
+def nanle(x, y, nan_nan=False, nan_val=False, val_nan=False):
+    '''
+    nanle(x, y) is equivalent to (x <= y) except that NaN values in either x or y result in False.
+
+    The following optional arguments may be provided:
+      * nan_nan (default: False) specifies the return value (True or False) for comparisons
+        equivalent to nanle(nan, nan).
+      * nan_val (default: False) specifies the return value (True or False) for comparisons
+        equivalent to nanle(nan, 0).
+      * val_nan (default: False) specifies the return value (True or False) for comparisons
+        equivalent to nanle(nan, 0).
+    '''
+    return nan_compare(np.less_equal, x, y, nan_nan=nan_nan, nan_val=nan_val, val_nan=val_nan)
+def nangt(x, y, nan_nan=False, nan_val=False, val_nan=False):
+    '''
+    nangt(x, y) is equivalent to (x > y) except that NaN values in either x or y result in False.
+
+    The following optional arguments may be provided:
+      * nan_nan (default: False) specifies the return value (True or False) for comparisons
+        equivalent to nangt(nan, nan).
+      * nan_val (default: False) specifies the return value (True or False) for comparisons
+        equivalent to nangt(nan, 0).
+      * val_nan (default: False) specifies the return value (True or False) for comparisons
+        equivalent to nangt(nan, 0).
+    '''
+    return nan_compare(np.greater, x, y, nan_nan=nan_nan, nan_val=nan_val, val_nan=val_nan)
+def nange(x, y, nan_nan=False, nan_val=False, val_nan=False):
+    '''
+    nange(x, y) is equivalent to (x >= y) except that NaN values in either x or y result in False.
+
+    The following optional arguments may be provided:
+      * nan_nan (default: False) specifies the return value (True or False) for comparisons
+        equivalent to nange(nan, nan).
+      * nan_val (default: False) specifies the return value (True or False) for comparisons
+        equivalent to nange(nan, 0).
+      * val_nan (default: False) specifies the return value (True or False) for comparisons
+        equivalent to nange(nan, 0).
+    '''
+    return nan_compare(np.greater_equal, x, y, nan_nan=nan_nan, nan_val=nan_val, val_nan=val_nan)
+
 def library_path():
     '''
     library_path() yields the path of the neuropythy library.
