@@ -709,6 +709,7 @@ class Cortex(geo.Topology):
         if len(data.shape) > 2: raise ValueError('point or point matrix required')
         if len(data.shape) == 2: xyz = data.T if data.shape[0] == 3 else data
         else:                    xyz = np.asarray([data])
+        if not xyz.flags['WRITEABLE']: xyz = np.array(xyz)
         # now, get the barycentric coordinates...
         n = len(xyz)
         fcount = self.tess.face_count
@@ -836,6 +837,7 @@ def _vertex_to_voxel_linear_interpolation(hemi, gray_indices, image_shape, voxel
     vcount = hemi.vertex_count
     # convert voxels to vertex-space
     xyz = voxel_to_vertex_matrix.dot(np.vstack((np.asarray(gray_indices), np.ones(n))))[0:3].T
+    if not xyz.flags['WRITEABLE']: xyz = np.array(xyz)
     # get some relevant structure data
     (fwcoords,fpcoords)  = (hemi.white_surface.face_coordinates, hemi.pial_surface.face_coordinates)
     fids = np.concatenate((range(hemi.tess.face_count), range(hemi.tess.face_count)))
@@ -976,6 +978,7 @@ def _vertex_to_voxel_nearest_interpolation(hemi, gray_indices, voxel_to_vertex_m
     else:                               vcount = hemi[0].vertex_count + hemi[1].vertex_count
     n   = len(gray_indices[0])
     xyz = voxel_to_vertex_matrix.dot(np.vstack((np.asarray(gray_indices), np.ones(n))))[0:3].T
+    if not xyz.flags['WRITEABLE']: xyz = np.array(xyz)
     # find the nearest to the white and pial layers
     if isinstance(hemi, Cortex):
         (wd, wn) = hemi.white_surface.vertex_hash.query(xyz, 1)

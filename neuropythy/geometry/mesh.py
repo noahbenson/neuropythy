@@ -1214,6 +1214,8 @@ class Mesh(VertexSet):
         # gradually increase until we find the container triangle; if k passes the max, then
         # we give up and assume no triangle is the container
         if k >= 288: return None
+        x = np.asarray(x)
+        if not x.flags['WRITEABLE']: x = np.array(x)
         try:              (d,near) = self.facee_hash.query(x, k=k, n_jobs=n_jobs)
         except Exception: (d,near) = self.facee_hash.query(x, k=k)
         near = [n for n in near if n not in searched]
@@ -1228,6 +1230,8 @@ class Mesh(VertexSet):
         mesh to the given point pt. If pt is an (n x dims) matrix of points, an id is given
         for each column of pt.
         '''
+        pt = np.asarray(pt)
+        if not pt.flags['WRITEABLE']: x = np.array(pt)
         try:              (d,near) = self.vertex_hash.query(pt, k=1, n_jobs=n_jobs)
         except Exception: (d,near) = self.vertex_hash.query(pt, k=1)
         return near
@@ -1271,6 +1275,7 @@ class Mesh(VertexSet):
             r = self.nearest_data([pt], k=k, n_jobs=n_jobs)[0];
             return (r[0][0], r[1][0], r[2][0])
         pt = pt.T if pt.shape[0] == self.coordinates.shape[0] else pt
+        if not pt.flags['WRITEABLE']: pt = np.array(pt)
         try:              (d, near) = self.face_hash.query(pt, k=k, n_jobs=n_jobs)
         except Exception: (d, near) = self.face_hash.query(pt, k=k)
         ids = [tri_no if tri_no is not None else self._find_triangle_search(x, 2*k, set(near_i))
@@ -1298,6 +1303,7 @@ class Mesh(VertexSet):
         if len(x.shape) == 1: return self.nearest_vertex([x], n_jobs=n_jobs)[0]
         if x.shape[0] == self.coordinates.shape[0]: x = x.T
         n = self.coordinates.shape[1]
+        if not x.flags['WRITEABLE']: x = np.array(x)
         try:              (_, nei) = self.vertex_hash.query(x, k=1, n_jobs=n_jobs)
         except Exception: (_, nei) = self.vertex_hash.query(x, k=1)
         return nei
@@ -1335,8 +1341,9 @@ class Mesh(VertexSet):
                 res = np.full(len(sub_pts), None, dtype=np.object)
                 if k != cur_k and cur_k > max_k: return res
                 if near is None:
-                    try:              near = self.face_hash.query(sub_pts, k=cur_k, n_jobs=n_jobs)[1]
-                    except Exception: near = self.face_hash.query(sub_pts, k=cur_k)[1]
+                    try:              near = self.face_hash.query(sub_pts, k=cur_k, n_jobs=n_jobs)
+                    except Exception: near = self.face_hash.query(sub_pts, k=cur_k)
+                    near = near[1]
                 # we want to try the nearest then recurse on those that didn't match...
                 guesses = near[:, top_i]
                 in_tri_q = self.is_point_in_face(guesses, sub_pts)
@@ -1370,7 +1377,9 @@ class Mesh(VertexSet):
                 else:
                     inside_q[finpts] = True
             if not inside_q.any(): return res
-            res[inside_q] = try_nearest(pt[inside_q])
+            pt = pt[inside_q]
+            if not pt.flags['WRITEABLE']: pt = np.array(pt)
+            res[inside_q] = try_nearest(pt)
             return res
 
     @staticmethod

@@ -496,6 +496,7 @@ class FieldOfView(object):
         x = np.asarray(x)
         if len(x.shape) == 1: return self([x])[0]
         x = np.transpose(x) if x.shape[0] == 2 else x
+        if not x.flags['WRITEABLE']: x = np.array(x)
         crd = self.coordinates
         sig = self.sigma
         wts = self._weight
@@ -613,6 +614,7 @@ class ArealCorticalMagnification(object):
     def nearest(self, x, y=None, n=Ellipsis):
         n = self.nnearest if n is Ellipsis else n
         x = ArealCorticalMagnification._xy_to_matrix(x,y)
+        if not x.flags['WRITEABLE']: x = np.array(x)
         return self.spatial_hash.query(x, n)
     def __call__(self, x, y=None):
         (d,ii) = self.nearest(x, y)
