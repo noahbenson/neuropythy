@@ -241,6 +241,7 @@ def to_mask(obj, m=None, indices=None):
     vertex indices instead of the vertex labels. If obj is not a VertexSet object, then this
     option is ignored.
     '''
+    from neuropythy.util import (naneq, nanle, nanlt)
     if not pimms.is_map(obj) and pimms.is_vector(obj) and len(obj) < 4 and m is None:
         if   len(obj) == 1: obj = obj[0]
         elif len(obj) == 2: (obj, m) = obj
@@ -263,11 +264,12 @@ def to_mask(obj, m=None, indices=None):
         if len(m) == 0: return np.asarray([], dtype=np.int)
         p = to_property(obj, m[0])
         if len(m) == 2 and hasattr(m[1], '__iter__'):
-            m = reduce(lambda q,u: np.logical_or(q, p == u), m[1], np.zeros(len(p), dtype=np.bool))
+            m = reduce(lambda q,u: np.logical_or(q, naneq(p, u)),
+                       m[1], np.zeros(len(p), dtype=np.bool))
         elif len(m) == 2:
-            m = (p == m[1])
+            m = naneq(p, m[1])
         elif len(m) == 3:
-            m = np.logical_and(m[1] < p, p <= m[2])
+            m = np.logical_and(nanlt(m[1], p), nanle(p, m[2]))
     elif pimms.is_str(m):
         m = np.asarray(obj[m], dtype=np.bool)
     elif pimms.is_map(m):
