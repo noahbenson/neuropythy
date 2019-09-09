@@ -31,7 +31,7 @@ config.declare('hcp_default_alignment', environ_name='HCP_DEFAULT_ALIGNMENT',
                filter=to_default_alignment_value, default_value='MSMAll')
 def cortex_from_filemap(fmap, name, affine=None):
     '''
-    cortex_from_filemap(filemap, chirality, name) yields a cortex object from the given filemap.
+    cortex_from_filemap(filemap, name) yields a cortex object from the given filemap.
     '''
     chirality = name[:2].lower()
     # get the relevant hemi-data
@@ -140,7 +140,7 @@ def subject_from_filemap(fmap, name=None, meta_data=None, check_path=True,
                                      'lh_nat59k_MSMSulc', 'rh_nat59k_MSMSulc',
                                      'lh_LR32k_MSMSulc',  'rh_LR32k_MSMSulc',
                                      'lh_LR59k_MSMSulc',  'rh_LR59k_MSMSulc',
-                                     'lh_LR164k_MSMSulc', 'rh_LR164k_MSMSulc'
+                                     'lh_LR164k_MSMSulc', 'rh_LR164k_MSMSulc',
                                      'lh_native_FS',      'rh_native_FS',
                                      'lh_nat32k_FS',      'rh_nat32k_FS',
                                      'lh_nat59k_FS',      'rh_nat59k_FS',
@@ -232,6 +232,9 @@ def subject(path, name=Ellipsis, meta_data=None, check_path=True, filter=None,
             pdir = to_pseudo_path(tmp)
             path = tmp
     if pdir is None:
+        if default_alignment != 'MSMAll':
+            warnings.warn('%s alignment requested, but MSMAll used for HCP release subject'
+                          % (default_alignment,))
         # It's possible that we need to check the hcp dataset
         try: return data['hcp'].subjects[int(path)]
         except: pass
