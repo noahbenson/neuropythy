@@ -22,8 +22,9 @@ from .files    import (subject_paths, clear_subject_paths, add_subject_path, fin
 def to_default_alignment_value(x):
     if not pimms.is_str(x): raise ValueError('hcp_default_alignment must be a string')
     x = x.lower()
-    if   x in ('msmsulc', 'sulc'): x = 'MSMSulc'
-    elif x in ('msmall', 'all'):   x = 'MSMAll'
+    if   x in ('msmsulc', 'sulc'):  x = 'MSMSulc'
+    elif x in ('msmall', 'all'):    x = 'MSMAll'
+    elif x in ('fs', 'freesurfer'): x = 'FS'
     else: raise ValueError('invalid value for hcp_default_alignment: %s')
     return x
 config.declare('hcp_default_alignment', environ_name='HCP_DEFAULT_ALIGNMENT',
@@ -139,7 +140,13 @@ def subject_from_filemap(fmap, name=None, meta_data=None, check_path=True,
                                      'lh_nat59k_MSMSulc', 'rh_nat59k_MSMSulc',
                                      'lh_LR32k_MSMSulc',  'rh_LR32k_MSMSulc',
                                      'lh_LR59k_MSMSulc',  'rh_LR59k_MSMSulc',
-                                     'lh_LR164k_MSMSulc', 'rh_LR164k_MSMSulc']})
+                                     'lh_LR164k_MSMSulc', 'rh_LR164k_MSMSulc'
+                                     'lh_native_FS',      'rh_native_FS',
+                                     'lh_nat32k_FS',      'rh_nat32k_FS',
+                                     'lh_nat59k_FS',      'rh_nat59k_FS',
+                                     'lh_LR32k_FS',       'rh_LR32k_FS',
+                                     'lh_LR59k_FS',       'rh_LR59k_FS',
+                                     'lh_LR164k_FS',      'rh_LR164k_FS']})
     # now, setup the default alignment aliases:
     if default_alignment is not None:
         for h in ['lh_native',  'rh_native',  'lh_nat32k',  'rh_nat32k',
@@ -201,8 +208,8 @@ def subject(path, name=Ellipsis, meta_data=None, check_path=True, filter=None,
         returns a (potentially) modified subject object. Filtered subjects are cached by using the
         id of the filters as part of the cache key.
       * default_alignment (default: Ellipsis) specifies the default alignment to use with HCP
-        subjects; this may be either 'MSMAll' or 'MSMSulc'; the deafult (Ellipsis) indicates that
-        the 'hcp_default_alignment' configuration value should be used (by default this is
+        subjects; this may be either 'MSMAll', 'MSMSulc', or 'FS'; the deafult (Ellipsis) indicates
+        that the 'hcp_default_alignment' configuration value should be used (by default this is
         'MSMAll').
     '''
     from neuropythy import data
