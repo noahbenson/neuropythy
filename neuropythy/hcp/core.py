@@ -221,6 +221,9 @@ def subject(path, name=Ellipsis, meta_data=None, check_path=True, filter=None,
     # in this case, because the hcp dataset actually calls down through here (with a pseudo-path),
     # we don't need to run any of the filters that are run below (they have already been run)
     if pimms.is_int(path):
+        if default_alignment != 'MSMAll':
+            warnings.warn('%s alignment requested, but MSMAll used for HCP release subject'
+                          % (default_alignment,))
         try: return data['hcp'].subjects[path]
         except Exception: pass
     # convert the path to a pseudo-dir; this may fail if the user is requesting a subject by name...
