@@ -1703,3 +1703,27 @@ def dirpath_to_list(p):
     if len(p) > 0 and not pimms.is_vector(p, str):
         raise ValueError('Path is not equivalent to a list of dirs')
     return [pp for pp in p if os.path.isdir(pp)]
+
+def try_until(*args, **kw):
+    '''
+    try_until(f1, f2, f3...) attempts to return f1(); if this raises an Exception during its
+      evaluation, however, it attempts to return f2(); etc. If none of the functions succeed, then
+      an exception is raised.
+
+    The following optional arguments may be given:
+      * check (default: None) may specify a function of one argument that must return True when the
+        passed value is an acceptable return value; for example, an option of
+        `check=lambda x: x is not None`  would indicate that a function that returns None should not
+        be considered to have succeeded.
+    '''
+    if 'check' in kw: check = kw.pop('check')
+    else: check = None
+    if len(kw) > 0: raise ValueError('unrecognized options given to try_until')
+    for f in args:
+        if not hasattr(f, '__call__'):
+            raise ValueError('function given to try_until is not callable')
+        try:
+            rval = f()
+            if check is None or check(rval): return rval
+        except Exception: raise
+    raise ValueError('try_until failed to find a successful function return')
