@@ -536,6 +536,7 @@ def save_volume_files(note, error, registrations, subject,
     save_volume_files is the calculator that saves the registration data out as volume files,
     which are put back in the registration as the value 'volume_files'.
     '''
+    from neuropythy.mri import image_clear
     if no_vol_export: return {'volume_files': ()}
     volume_format = volume_format.lower()
     # make an exporter for properties:
@@ -543,6 +544,7 @@ def save_volume_files(note, error, registrations, subject,
     if volume_format in ['mgh', 'mgz', 'auto', 'automatic', 'default']:
         volume_format = 'mgh' if volume_format == 'mgh' else 'mgz'
         def export(flnm, d):
+            if not pimms.is_nparray(d): d = np.asarray(d.dataobj)
             flnm = flnm + '.' + volume_format
             dt = np.int32 if np.issubdtype(d.dtype, np.dtype(int).type) else np.float32
             img = fsmgh.MGHImage(np.asarray(d, dtype=dt), affmatrix)
@@ -551,6 +553,7 @@ def save_volume_files(note, error, registrations, subject,
     elif volume_format in ['nifti', 'nii', 'niigz', 'nii.gz']:
         volume_format = 'nii' if volume_format == 'nii' else 'nii.gz'
         def export(flnm, p):
+            if not pimms.is_nparray(p): p = np.asarray(p.dataobj)
             flnm = flnm + '.' + volume_format
             dt = np.int32 if np.issubdtype(p.dtype, np.dtype(int).type) else np.float32
             img = nib.Nifti1Image(np.asarray(p, dtype=dt), affmatrix)
