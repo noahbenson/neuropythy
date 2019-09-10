@@ -13,9 +13,9 @@ import nibabel.freesurfer.mghformat as     fsmgh
 import pyrsistent                   as     pyr
 import os, sys, six, pimms
 
-from ..freesurfer                   import (subject, add_subject_path)
 from ..vision                       import (register_retinotopy, retinotopy_model, clean_retinotopy,
                                             empirical_retinotopy_data)
+from ..util                         import (nanlt, nangt)
 
 info = '''
 The register_retinotopy command can be used to register a subject's
@@ -243,21 +243,23 @@ _retinotopy_parser = pimms.argv_parser(_retinotopy_parser_instructions)
 
 def _guess_surf_file(fl):
     # MGH/MGZ files
-    try: return fsmgh.load(fl).dataobj.flatten()
+    try: return np.asarray(fsmgh.load(fl).dataobj).flatten()
     except Exception: pass
     # FreeSurfer Curv files
     try: return fsio.read_morph_data(fl)
     except Exception: pass
     # Nifti files
     try: return np.squeeze(nib.load(fl).dataobj)
-    except Exception: raise ValueError('Could not determine filetype for: %s' % fl)
+    except Exception: pass
+    raise ValueError('Could not determine filetype for: %s' % fl)
 def _guess_vol_file(fl):
     # MGH/MGZ files
     try: return fsmgh.load(fl)
     except Exception: pass
     # Nifti Files
     try: return nib.load(fl)
-    except Exception: raise ValueError('Could not determine filetype for: %s' % fl)
+    except Exception: pass
+    raise ValueError('Could not determine filetype for: %s' % fl)
 
 @pimms.calc('subject', 'model', 'options', 'note', 'error',
             'no_vol_export',     
@@ -324,12 +326,23 @@ def calc_arguments(args):
         sys.stderr.flush()
         sys.exit(1)
     if len(args) < 1: error('subject argument is required')
-    # Add the subjects directory, if there is one
-    if 'subjects_dir' in opts and opts['subjects_dir'] is not None:
-        add_subject_path(opts['subjects_dir'])
-    # Get the subject now
-    try: sub = subject(args[0])
-    except Exception: error('Failed to load subject %s' % args[0])
+    try: # we try FreeSurfer first:
+        import neuropythy.freesurfer as fs
+        # Add the subjects directory, if there is one
+        if 'subjects_dir' in opts and opts['subjects_dir'] is not None:
+            fs.add_subject_path(opts['subjects_dir'])
+        # Get the subject now
+        sub = fs.subject(args[0])
+    except Exception: sub = None
+    if sub is None:
+        try: # As an alternative, try HCP
+            import neuropythy.hcp as hcp
+            # Add the subjects directory, if there is one
+            if 'subjects_dir' in opts and opts['subjects_dir'] is not None:
+                hcp.add_subject_path(opts['subjects_dir'])
+            sub = hcp.subject(args[0])
+        except Exception: sub = None
+    if sub is None: error('Failed to load subject %s' % args[0])
     # and the model
     if len(args) > 1:       mdl_name = args[1]
     elif opts['model_sym']: mdl_name = 'schira'
@@ -383,7 +396,8 @@ def calc_retinotopy(note, error, subject, clean, run_lh, run_rh,
         props = {}
         # load the properties or find them in the auto-properties
         if ang:
-            try: props['polar_angle'] = _guess_surf_file(ang)
+            try:
+                props['polar_angle'] = _guess_surf_file(ang)
             except Exception: error('could not load surface file %s' % ang)
         elif tht:
             try:
@@ -393,7 +407,8 @@ def calc_retinotopy(note, error, subject, clean, run_lh, run_rh,
         else:
             props['polar_angle'] = empirical_retinotopy_data(hemi, 'polar_angle')
         if ecc:
-            try: props['eccentricity'] = _guess_surf_file(ecc)
+            try:
+                props['eccentricity'] = _guess_surf_file(ecc)
             except Exception: error('could not load surface file %s' % ecc)
         elif rho:
             try:
@@ -418,9 +433,9 @@ def calc_retinotopy(note, error, subject, clean, run_lh, run_rh,
         # and zero-out weights for high eccentricities
         props['weight'] = np.array(props['weight'])
         if max_in_eccen is not None:
-            props['weight'][props['eccentricity'] > max_in_eccen] = 0
+            props['weight'][nangt(props['eccentricity'], max_in_eccen)] = 0
         if min_in_eccen is not None:
-            props['weight'][props['eccentricity'] < min_in_eccen] = 0
+            props['weight'][nanlt(props['eccentricity'], min_in_eccen)] = 0
         # Do smoothing, if requested
         if clean:
             note('Cleaning %s retinotopy...' % h.upper())

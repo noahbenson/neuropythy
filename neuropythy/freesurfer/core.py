@@ -16,7 +16,15 @@ from .. import io       as nyio
 #import ..io as nyio
 
 from ..util import (config, library_path, curry, pseudo_path, is_pseudo_path, data_struct,
-                    label_indices, label_index, to_label_index, is_tuple, file_map, to_pseudo_path)
+                    label_indices, label_index, to_label_index, is_tuple, file_map, to_pseudo_path,
+                    try_until)
+
+def library_freesurfer_subjects():
+    '''
+    library_freesurfer_subjects() yields the path of the neuropythy library's FreeSurfer subjects
+      directory.
+    '''
+    return os.path.join(library_path(), 'data')
 
 ####################################################################################################
 # FreeSurfer home and where to find FreeSurfer LUTs and such
@@ -536,7 +544,7 @@ def subject_file_map(path):
     '''
     return file_map(path, freesurfer_subject_filemap_instructions,
                     data_hierarchy=freesurfer_subject_data_hierarchy)
-_registration_aliases = {'benson14_retinotopy.v4_0': 'benson17'}
+_registration_aliases = {'benson14_retinotopy.v4_0': ['benson17', 'benson17_retinotopy']}
 def cortex_from_filemap(fmap, chirality, name, subid=None, affine=None):
     '''
     cortex_from_filemap(filemap, chirality, name) yields a cortex object from the given filemap;
@@ -599,15 +607,21 @@ def cortex_from_filemap(fmap, chirality, name, subid=None, affine=None):
         pd = fmap.pseudo_paths[None]._path_data
         subid = pd['pathmod'].split(fmap.actual_path)[1]
     regs = hdat.registration
-    extra_path = os.path.join(library_path(), 'data', subid, 'surf')
+    extra_path = os.path.join(library_freesurfer_subjects(), subid, 'surf')
     if os.path.isdir(extra_path):
         for flnm in os.listdir(extra_path):
             if flnm.startswith(chirality + '.') and flnm.endswith('.sphere.reg'):
                 mid = flnm[(len(chirality)+1):-11]
-                if mid == '': mid = 'fsaverage'
-                else:         mid = _registration_aliases.get(mid, mid)
-                if mid not in regs:
-                    regs = regs.set(mid, curry(_load_surf, os.path.join(surf_path, flnm)))
+                if mid == '': mid = ['fsaverage']
+                else:         mid = _registration_aliases.get(mid, [mid])
+                load_mid_fn = curry(_load_surfx, os.path.join(extra_path, flnm), {})
+                for mid in mid:
+                    f = load_mid_fn if mid not in regs else \
+                        curry(try_until,
+                              curry(lambda regs: regs[mid], regs), load_mid_fn,
+                              check=pimms.is_matrix)
+                    regs = regs.set(mid, f)
+
     # Okay, make the cortex object!
     md = {'file_map': fmap}
     if subid is not None: md['subject_id'] = subid
