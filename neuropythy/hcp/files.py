@@ -703,7 +703,7 @@ hcp_filemap_instructions = [
             '{id}.R.roi.native.shape.gii', _prop('roi', 'rh_native', key='label'),
             '{id}.R.sphere.native.surf.gii',     _reg('native', 'rh_native'),
             '{id}.R.sphere.reg.native.surf.gii', _reg('fsaverage', 'rh_native'),
-            '{id}.R.sphere.reg.reg_LRnative.surf.gii', _reg_fs('fs_LR', 'rh_native'),
+            '{id}.R.sphere.reg.reg_LR.native.surf.gii', _reg_fs('fs_LR', 'rh_native'),
             '{id}.R.sphere.MSMAll.native.surf.gii', _reg_msmall('fs_LR', 'rh_native'),
             '{id}.R.sphere.MSMSulc.native.surf.gii',_reg_msmsulc('fs_LR', 'rh_native')],
         'fsaverage_LR59k', [
