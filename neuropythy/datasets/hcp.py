@@ -258,12 +258,16 @@ class HCPDataset(Dataset):
         # paths in the subject to be downloaded using the pseudo-path, return the cache path!
         sub   = self.subjects[sid]
         fmap  = sub.meta_data['file_map']
-        ppath = fmap.pseudo_path
+        ppath = fmap.path
         fls   = []
         logging.info('Downloading HCP subject %s structure data...' % (sid,))
         for fl in six.iterkeys(fmap.data_files):
-            logging.info('  * Downloading file %s' % (fl, sid))
-            fls.append(ppath.local_path(fl))
+            logging.info('  * Downloading file %s for subject %s' % (fl, sid))
+            try:
+                fls.append(ppath.local_path(fl))
+            except ValueError as e:
+                if len(e.args) != 1 or not e.args[0].startswith('getpath:'): raise
+                else: logging.info('    (File %s not found for subject %s)' % (fl, sid))
         logging.info('Subject %s donwnload complete!' % (sid,))
         return fls
 # we wrap this in a lambda so that it gets loaded when requested (in case the config changes between

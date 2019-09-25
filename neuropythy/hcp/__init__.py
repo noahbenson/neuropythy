@@ -6,7 +6,7 @@
 from .files import (subject_paths, clear_subject_paths, add_subject_path, find_subject_path,
                     gifti_to_array, cifti_split, cifti_extract, is_hcp_subject_path,
                     subject_file_map, cifti_label_data, cifti_axis_spec)
-from .core import (subject, forget_subject, forget_all)
+from .core import (subject, forget_subject, forget_all, download)
 
 subject_ids = tuple(
     [100206, 100307, 100408, 100610, 101006, 101107, 101309, 101410, 101915, 102008, 102109, 102311,

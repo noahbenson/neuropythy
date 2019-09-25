@@ -306,7 +306,12 @@ def forget_all():
     subject._cache = {}
     return None
     
+def download(sid):
+    '''
+    neuropythy.hcp.download(sid) is equivalent to neuropythy.data['hcp'].download(sid).
+    '''
+    import neuropythy as ny
+    return ny.data['hcp'].download(sid)
 
-    
     
     
