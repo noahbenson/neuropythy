@@ -8,6 +8,7 @@ python:
 
 install:
 - travis_retry pip install -r requirements-dev.txt
+- if [ "$TRAVIS_PYTHON_VERSION" == "2.7" ]; then travis_retry pip install 'pytest>4.0'; else travis_retry pip install 'pytest>=5.2'; fi
 - travis_retry pip install -e .
 
 script:
