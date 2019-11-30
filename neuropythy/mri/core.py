@@ -111,6 +111,37 @@ class Subject(ObjectWithMetaData):
         sub.rh is an alias for sub.hemis['rh'].
         '''
         return hemis.get('rh', None)
+    def to_hemi(self, h):
+        '''
+        sub.to_hemi(arg) attempts to convert arg into a hemisphere of the given subject. If arg is
+          a tuple or list of hemisphere objects or names, then each is converted and returned as
+          a tuple.
+
+        Note that the objects Ellipsis and None are converted into ('lh', 'rh'). If h is a string
+        that refers to a suffix of a left and right hemisphere in sub, then (lh, rh) are returned
+        for that particular hemisphere (e.g., with HCP subjects, 'LR32k' will return the 32k left
+        and right hemispheres as a tuple).
+        '''
+        if isinstance(h, Cortex): return h
+        elif pimms.is_str(h):
+            if h in self.hemis: return self.hemis[h]
+            elif h == 'lr' or len(h) == 0: return self.to_hemi(('lh', 'rh'))
+            elif h.startswith('lr_'): return self.to_hemi(('lh'+h[2:], 'rh'+h[2:]))
+            # see if there is a suffix for lh and rh:
+            if ('lh%s' % h) in self.hemis and ('rh%s' % h) in self.hemis:
+                return (self.hemis['lh%s' % h], self.hemis['rh%s' % h])
+            elif h[0] != '_' and ('lh_%s' % h) in self.hemis and ('rh_%s' % h) in self.hemis:
+                return (self.hemis['lh_%s' % h], self.hemis['rh_%s' % h])
+            # try converting to a hemi string
+            hh = to_hemi_str(h)
+            if h == hh: raise ValueError('Could not convert "%s" into a hemisphere' % h)
+            else: return self.to_hemi(hh)
+        elif pimms.is_vector(h):
+            return tuple([self.to_hemi(u) for u in h])
+        else:
+            # try to convert to a hemi-string
+            return self.to_hemi(to_hemi_str(h))
+        raise ValueError('Unrecognized hemisphere argument: %s' % (h,))
 
     # Aliases for images
     @pimms.value
@@ -296,14 +327,33 @@ class Subject(ObjectWithMetaData):
         if is_image(im) and (is_pimage(im) or not is_npimage(im)): im = image_copy(im)
         else: im = to_image(to_image_spec(im), fill=fill)
         # what hemisphere(s)?
-        hemi = to_hemi_str(hemi)
-        hemi = ('lh', None) if hemi == 'lh' else (None, 'rh') if hemi == 'rh' else ('lh','rh')
+        hemi = self.to_hemi(hemi)
+        if pimms.is_vector(hemi) and len(hemi) == 1: hemi = hemi[0]
+        if not pimms.is_vector(hemi):
+            if   hemi.chirality == 'lh': hemi = (hemi, None)
+            elif hemi.chirality == 'rh': hemi = (None, hemi)
+            else:                        hemi = (hemi, hemi)
+        elif len(hemi) != 2:
+            raise ValueError('Exactly two hemispheres must be given')
+        elif len(np.unique([None if h is None else h.chirality for h in hemi])) != 2:
+            raise ValueError('One or two different chiralities must be given in hemi argument')
+        # make sure they are in the right order:
+        if   hemi[1] is not None and hemi[1].chirality == 'lh': hemi = (hemi[1], hemi[0])
+        elif hemi[0] is not None and hemi[0].chirality == 'rh': hemi = (hemi[1], hemi[0])
         nhems = len([x for x in hemi if x])
         tr = None
         # Make the data match this format...
-        if   (is_tuple(data) or is_list(data)) and len(data) == nhems: pass
-        elif pimms.is_map(data): data = tuple([None if h is None else data[h] for h in hemi])
-        elif pimms.is_str(data): data = (data,) * nhems
+        if pimms.is_str(data): data = [None if h is None else data for h in hemi]
+        elif nhems == 1 and len(data) == 1:
+            if len(data[0]) != (hemi[0] if hemi[1] is None else hemi[1]).vertex_count:
+                raise ValueError('hemi/property size mismatch')
+            data = [None if h is None else data[0] for h in hemi]
+        elif len(data) == 2:
+            if not (data[0] is None and hemi[0] is None or len(data[0]) == hemi[0].vertex_count):
+                raise ValueError('lh hemi/property size mismatch')
+            if not (data[1] is None and hemi[1] is None or len(data[1]) == hemi[1].vertex_count):
+                raise ValueError('rh hemi/property size mismatch')
+            data = np.asarray(data)
         else:
             data = np.asarray(data)
             sh = data.shape
@@ -316,13 +366,16 @@ class Subject(ObjectWithMetaData):
                   weight_min=weight_min, mask=mask,          valid_range=valid_range,
                   transform=transform,   weight_transform=weight_transform)
         if address is None: address = (None, None)
+        elif not pimms.is_vector(address):
+            if nhems == 1: address = [None if h is None else address for h in hemi]
+            else: raise ValueError('Two hemispheres but only 1 address given')
         # okay, we just need to pass down to the to_image function of the hemispheres:
         for (dat,h,addr,ii) in zip(data, hemi, address, np.arange(nhems)):
             if h is None: dat = None
             if dat is None: continue
             if addr is not None: kw['address'] = addr
             elif 'address' in kw: del kw['address']
-            im = self.hemis[h].to_image(dat, im, **kw)
+            im = h.to_image(dat, im, **kw)
         return im
     def image_to_cortex(self, image,
                         surface='midgray', hemi=None, affine=Ellipsis, method=None, fill=0,

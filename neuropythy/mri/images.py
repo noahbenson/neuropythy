@@ -57,8 +57,8 @@ class ImageType(object):
         try: dataobj = dataobj.dataobj
         except Exception: pass
         dtype = np.asarray(dataobj).dtype if dataobj is not None else self.default_type()
-        if   hdat and hdat.get('type', None) is not None: dtype = np.dtype(hdat['type'])
-        elif hdat and hdat.get('dtype',None) is not None: dtype = np.dtype(hdat['dtype'])
+        if   hdat and hdat.get('type', None) not in [None,Ellipsis]: dtype = np.dtype(hdat['type'])
+        elif hdat and hdat.get('dtype',None) not in [None,Ellipsis]: dtype = np.dtype(hdat['dtype'])
         return dtype
     @classmethod
     def parse_affine(self, hdat, dataobj=None):
