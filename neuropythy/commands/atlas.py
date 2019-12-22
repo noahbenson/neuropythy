@@ -229,7 +229,7 @@ def calc_atlas_projections(subject_cortices, atlas_cortices, atlas_map, worklog,
         # convert these maps into interpolated properties...
         for (h,hmap) in six.iteritems(lmaps):
             hmap = pimms.lazy_map(
-                {m:curry(
+                {m: curry(
                     lambda hmap,h,m: atlas_cortices[h].interpolate(
                         subject_cortices[h],
                         hmap[m]),
@@ -241,9 +241,61 @@ def calc_atlas_projections(subject_cortices, atlas_cortices, atlas_map, worklog,
     # That's all; we can return atl_props once we persist it
     return {'atlas_properties':  pimms.persist(atl_props),
             'atlas_version_tags': pimms.persist(avt)}
+@pimms.calc('atlas_images', 'image_template_object')
+def calc_images(subject, atlas_properties, image_template, worklog):
+    '''
+    calc_images is a calculator that converts the atlas properties into a similar nested map of
+    atlas images.
+
+    Afferent parameters:
+      @ image_template 
+        The image template object or file to be used as a template for the output image. This
+        can be None (in which case 'brain' is used) or a string that identifies an image of the
+        subject. Or it can be a valid filename fo an image.
+
+    Efferent values:
+      @ atlas_images 
+        A nested lazy-map structure that contains the 3D images for each of the relevant atlases
+        and properties.
+    '''
+    from neuropythy import image_clear
+    # parse the image template
+    if image_template is None: image_template = subject.images['brain']
+    elif pimms.is_str(image_template):
+        if image_template in subject.images: 
+            image_template = subject.images[image_template]
+        else:
+            try: image_template = ny.load(image_template, to='image')
+            except Exception: image_template = None
+    if image_template is None:
+        raise ValueError('Could not load or find image template: %s' % (image_template,))
+    image_template = image_clear(image_template)
+    # having the image template, make the addresses:
+    hemis = list(six.iterkeys(next(six.itervalues(next(six.itervalues(atlas_properties))))))
+    addr = pimms.lmap({h: curry(lambda h: subject.hemis[h].image_address(image_template), h)
+                       for h in hemis})
+    worklog('Preparing images...')
+    def _make_images(vd, m):
+        worklog('Constructing %s images...' % (m,))
+        dat = {h: vd[h][m] for h in six.iterkeys(vd)}
+        lk = next(iter(sorted(k for k in six.iterkeys(dat) if k.lower().startswith('lh'))), None)
+        rk = next(iter(sorted(k for k in six.iterkeys(dat) if k.lower().startswith('rh'))), None)
+        idat = (dat[lk] if lk is not None else None, dat[rk] if rk is not None else None)
+        if np.array_equal(idat, (None, None)): return None
+        aa = (addr.get(lk, None), addr.get(rk, None))
+        im = subject.cortex_to_image(idat, image_template, hemi=(lk, rk), address=aa)
+        return im
+    ims = {atl: {v: pimms.lmap({m: curry(_make_images, vd, m) for m in six.iterkeys(hd)})
+                 for (v,vd) in six.iteritems(pps)
+                 for hd in [next(six.itervalues(vd))]}
+           for (atl, pps) in six.iteritems(atlas_properties)}
+    return {'atlas_images': pimms.persist(ims),
+            'image_template_object': image_template}
 @pimms.calc('filemap', 'export_all_fn')
-def calc_filemap(atlas_properties, subject, atlas_version_tags, worklog,
-                 output_path=None, overwrite=False, output_format='mgz', create_directory=False):
+def calc_filemap(atlas_properties, atlas_images, subject, atlas_version_tags, worklog,
+                 image_template_object, volume_export=False, surface_export=True, output_path=None,
+                 volume_path=None, overwrite=False, output_format='mgz', volume_format='mgz',
+                 create_directory=False):
     '''
     calc_filemap is a calculator that converts the atlas properties nested-map into a single-depth
     map whose keys are filenames and whose values are the interpolated property data.
@@ -253,6 +305,10 @@ def calc_filemap(atlas_properties, subject, atlas_version_tags, worklog,
         The directory into which the atlas files should be written. If not provided or None then
         uses the subject's surf directory. If this directory doesn't exist, then it uses the
         subject's directory itself.
+      @ volume_path 
+        The directory into which the volume files should be written. If not provided or None then
+        uses the subject's mri directory. If this directory doesn't exist, then it uses the
+        subject's directory itself.
       @ overwrite 
         Whether to overwrite existing atlas files. If True, then atlas files that already exist will
         be overwritten. If False, then no files are overwritten.
@@ -261,6 +317,10 @@ def calc_filemap(atlas_properties, subject, atlas_version_tags, worklog,
       @ output_format 
         The desired output format of the files to be written. May be one of the following: 'mgz',
         'mgh', or either 'curv' or 'morph'.
+      @ volume_export 
+        Whether to include the volume files in the export_all_fn; default is False.
+      @ surface_export 
+        Whether to include the surface files in the export_all_fn; default if True.
 
     Efferent values:
       @ filemap 
@@ -273,14 +333,27 @@ def calc_filemap(atlas_properties, subject, atlas_version_tags, worklog,
     if output_path is None:
         output_path = os.path.join(subject.path, 'surf')
         if not os.path.isdir(output_path): output_path = subject.path
+    if volume_path is None:
+        volume_path = os.path.join(subject.path, 'mri')
+        if not os.path.isdir(volume_path): volume_path = subject.path
     output_format = 'mgz' if output_format is None else output_format.lower()
     if output_format.startswith('.'): output_format = output_format[1:]
     (fmt,ending) = (('mgh','.mgz') if output_format == 'mgz' else
                     ('mgh','.mgh') if output_format == 'mgh' else
                     ('freesurfer_morph',''))
+    imtype = type(image_template_object)
+    if imtype is nib.Nifti1Image or imtype is nib.Nifti2Image:
+        imending = '.nii.gz'
+    elif imtype is nib.MGHImage:
+        imending = '.mgz'
+    else:
+        imending = '.mgz'
+        worklog('Note: Using image type MGH/MGZ in absence of explicit template')
     # make the filemap...
     worklog('Preparing Filemap...')
     fm = AutoDict()
+    sfiles = []
+    vfiles = []
     for (atl,atldat) in six.iteritems(atlas_properties):
         for (ver,verdat) in six.iteritems(atldat):
             vstr = atlas_version_tags[atl][ver]
@@ -289,6 +362,14 @@ def calc_filemap(atlas_properties, subject, atlas_version_tags, worklog,
                     flnm = '%s.%s_%s%s%s' % (h, atl, m, vstr, ending)
                     flnm = os.path.join(output_path, flnm)
                     fm[flnm] = curry(lambda hdat,m: hdat[m], hdat, m)
+                    sfiles.append(flnm)
+            # now surfaces...
+            ims = atlas_images[atl][ver]
+            for m in six.iterkeys(ims):
+                flnm = '%s_%s%s%s' % (atl, m, vstr, imending)
+                flnm = os.path.join(volume_path, flnm)
+                fm[flnm] = curry(lambda ims,m: ims[m], ims, m)
+                vfiles.append(flnm)
     # okay, make that a lazy map:
     filemap = pimms.lazy_map(fm)
     # the function for exporting all properties:
@@ -304,12 +385,16 @@ def calc_filemap(atlas_properties, subject, atlas_version_tags, worklog,
         filenames = []
         worklog('Extracting Files...')
         wl = worklog.indent()
-        for flnm in six.iterkeys(filemap):
-            wl(flnm)
-            filenames.append(nyio.save(flnm, filemap[flnm], fmt))
+        if surface_export:
+            for flnm in sfiles:
+                wl(flnm)
+                filenames.append(nyio.save(flnm, filemap[flnm], fmt))
+        if volume_export:
+            for flnm in vfiles:
+                wl(flnm)
+                filenames.append(nyio.save(flnm, filemap[flnm]))
         return filenames
     return {'filemap': filemap, 'export_all_fn': export_all}
-
 
 atlas_plan_data = pyr.pmap(
     {'init_worklog':calc_worklog,
@@ -317,17 +402,23 @@ atlas_plan_data = pyr.pmap(
      'init_atlases':calc_atlases,
      'init_cortices':calc_cortices,
      'atlas_properties':calc_atlas_projections,
+     'atlas_images':calc_images,
      'filemap':calc_filemap})
 atlas_plan = pimms.plan(atlas_plan_data)
 
 atlas_cmdline_abbrevs = {'output_format':    'f',
+                         'volume_format':    'F',
                          'atlases':          'a',
                          'overwrite':        'o',
                          'create_directory': 'c',
                          'subject_id':       's',
                          'hemis':            'H',
                          'output_path':      'o',
+                         'volume_path':      'O',
                          'atlas_subject_id': 'r',
+                         'image_template':   'i',
+                         'surface_export':   's',
+                         'volume_export':    'S',
                          'verbose':          'v'}
 
 def _format_afferent_doc(docstr, abbrevs=None, cols=80):
@@ -379,6 +470,7 @@ def main(*argv):
         return 1
     try: imap['export_all_fn']()
     except Exception as e:
+        raise
         sys.stderr.write('\nERROR:\n' + str(e) + '\n')
         sys.stderr.flush()
         sys.exit(2)
