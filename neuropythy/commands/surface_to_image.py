@@ -84,7 +84,7 @@ _surface_to_ribbon_parser = pimms.argv_parser(_surface_to_ribbon_parser_instruct
 
 def read_surf_file(flnm):
   if flnm.endswith(".mgh") or flnm.endswith(".mgz"):
-    data = fsmgh.load(flnm).dataobj.flatten()
+    data = np.array(fsmgh.load(flnm).dataobj).flatten()
   else:
     data = fsio.read_morph_data(flnm)
   return data
