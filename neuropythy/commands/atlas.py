@@ -242,7 +242,7 @@ def calc_atlas_projections(subject_cortices, atlas_cortices, atlas_map, worklog,
     return {'atlas_properties':  pimms.persist(atl_props),
             'atlas_version_tags': pimms.persist(avt)}
 @pimms.calc('atlas_images', 'image_template_object')
-def calc_images(subject, atlas_properties, image_template, worklog):
+def calc_images(subject, atlas_properties, image_template, worklog, volume_export=False):
     '''
     calc_images is a calculator that converts the atlas properties into a similar nested map of
     atlas images.
@@ -260,7 +260,14 @@ def calc_images(subject, atlas_properties, image_template, worklog):
     '''
     from neuropythy import image_clear
     # parse the image template
-    if image_template is None: image_template = subject.images['brain']
+    if not volume_export:
+        return {'atlas_images': {}, 'image_template_object': None}
+    if image_template is None:
+        k = next((k for k in ['brain', 'ribbon', 'original']
+                  if k in subject.images and subject.images.get(k, None) is not None),
+                 None)
+        if k is None: raise ValueError('Could not find a valid default image template')
+        else: image_template = subject.images[k]
     elif pimms.is_str(image_template):
         if image_template in subject.images: 
             image_template = subject.images[image_template]
@@ -333,7 +340,7 @@ def calc_filemap(atlas_properties, atlas_images, subject, atlas_version_tags, wo
     if output_path is None:
         output_path = os.path.join(subject.path, 'surf')
         if not os.path.isdir(output_path): output_path = subject.path
-    if volume_path is None:
+    if volume_export and volume_path is None:
         volume_path = os.path.join(subject.path, 'mri')
         if not os.path.isdir(volume_path): volume_path = subject.path
     output_format = 'mgz' if output_format is None else output_format.lower()
@@ -341,14 +348,15 @@ def calc_filemap(atlas_properties, atlas_images, subject, atlas_version_tags, wo
     (fmt,ending) = (('mgh','.mgz') if output_format == 'mgz' else
                     ('mgh','.mgh') if output_format == 'mgh' else
                     ('freesurfer_morph',''))
-    imtype = type(image_template_object)
-    if imtype is nib.Nifti1Image or imtype is nib.Nifti2Image:
-        imending = '.nii.gz'
-    elif imtype is nib.MGHImage:
-        imending = '.mgz'
-    else:
-        imending = '.mgz'
-        worklog('Note: Using image type MGH/MGZ in absence of explicit template')
+    if volume_export:
+        imtype = type(image_template_object)
+        if imtype is nib.Nifti1Image or imtype is nib.Nifti2Image:
+            imending = '.nii.gz'
+        elif imtype is nib.MGHImage:
+            imending = '.mgz'
+        else:
+            imending = '.mgz'
+            worklog('Note: Using image type MGH/MGZ in absence of explicit template')
     # make the filemap...
     worklog('Preparing Filemap...')
     fm = AutoDict()
@@ -363,13 +371,14 @@ def calc_filemap(atlas_properties, atlas_images, subject, atlas_version_tags, wo
                     flnm = os.path.join(output_path, flnm)
                     fm[flnm] = curry(lambda hdat,m: hdat[m], hdat, m)
                     sfiles.append(flnm)
-            # now surfaces...
-            ims = atlas_images[atl][ver]
-            for m in six.iterkeys(ims):
-                flnm = '%s_%s%s%s' % (atl, m, vstr, imending)
-                flnm = os.path.join(volume_path, flnm)
-                fm[flnm] = curry(lambda ims,m: ims[m], ims, m)
-                vfiles.append(flnm)
+            # now volumes...
+            if volume_export:
+                ims = atlas_images[atl][ver]
+                for m in six.iterkeys(ims):
+                    flnm = '%s_%s%s%s' % (atl, m, vstr, imending)
+                    flnm = os.path.join(volume_path, flnm)
+                    fm[flnm] = curry(lambda ims,m: ims[m], ims, m)
+                    vfiles.append(flnm)
     # okay, make that a lazy map:
     filemap = pimms.lazy_map(fm)
     # the function for exporting all properties:
