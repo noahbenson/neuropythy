@@ -86,6 +86,53 @@ class Subject(ObjectWithMetaData):
         elif pimms.is_map(imgs):  return pyr.pmap(imgs)
         else: raise ValueError('images must be a mapping')
 
+    # Updater operations:
+    def with_hemi(self, *ms, **kw):
+        '''
+        sub.with_hemi(name=hemi) adds the give Cortex object hemi to the subject's hemis map with
+          the given name.
+        sub.with_hemi(name1=hemi1, name2=hemi2...) adds all the given hemispheres.
+        sub.with_hemi({name1: hemi1, name2:hemi2}) is equivalent to the previous line.
+        
+        Note that any number of maps may be passed followed by any number of keyword arguments.
+        '''
+        hh = pimms.merge(self.hemis, *(ms + (kw,)))
+        if hh is self.hemis: return self
+        return self.copy(hemis=hh)
+    def with_image(self, *ms, **kw):
+        '''
+        sub.with_image(name=img) adds the give Cortex object hemi to the subject's hemis map with
+          the given name.
+        sub.with_image(name1=img1, name2=img2...) adds all the given hemispheres.
+        sub.with_image({name1:img1, name2:img2}) is equivalent to the previous line.
+        
+        Note that any number of maps may be passed followed by any number of keyword arguments.
+        '''
+        ims = pimms.merge(self.images, *(ms + (kw,)))
+        if ims is self.images: return self
+        return self.copy(images=ims)
+    def wout_hemi(self, *args):
+        '''
+        sub.wout_hemi(heminame) yields a clone of the given subject object sub but with the 
+          hemisphere with the given name removed.
+
+        Note that any number of names may be given.
+        '''
+        hh = self.hemis
+        for a in args: hh = hh.discard(a)
+        return self if hh is self.hemis else self.copy(hemis=hh)
+    def wout_image(self, *args):
+        '''
+        sub.wout_image(imgname) yields a clone of the given subject object sub but with the image
+          with the given name removed.
+
+        Note that any number of names may be given.
+        '''
+        ims = self.images
+        for a in args: ims = ims.discard(a)
+        return self if ims is self.images else self.copy(images=ims)
+
+
     # Aliases for hemispheres
     @pimms.value
     def LH(hemis):
