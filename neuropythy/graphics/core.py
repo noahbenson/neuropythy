@@ -336,6 +336,101 @@ try:
         return cm
 except Exception: pass
 
+def visual_field_legend(cmap, on=Ellipsis, max_eccentricity=12, transform=Ellipsis, pixels=288,
+                        background=None, boundary_pixels=0):
+    '''
+    visual_field_map('polar_angle') yields an image array of a legend of the polar angle colormap,
+      plotted in the visual-field.
+    visual_field_map('eccentricity') yields an image array of a legend of the eccentricity colormap,
+      plotted in the visual-field.
+    visual_field_map(colormap, property) is used to color an arbitrary colormap on the given
+      property. The prorperty may be 'polar_angle', 'eccentricity', 'theta', 'rho', 'x', or 'y'. For
+      explanations of these properties, see below.
+
+    Note: the call visual_field_legend('log_eccentricity') will plot an eccentricity legend using
+    the log_eccentricity colormap; this is not a plot of the log-eccentricity, but rather is usually
+    just a smoother/nicer version of the 'eccentricity' plot. This automatic scaling is performed
+    only if the second parameter is not provided or is given as Ellipsis.
+
+    The following optional arguments are accepted:
+      * max_eccentricity (default: 12) specifies the maximum eccentricity of the plot; for polar
+        angle plots this is not important, but for eccentricity, this will limit the range of the
+        plot.
+      * transform (default: Ellipsis) specifies a transform function f(x) that is applied to the
+        given property before being passed to the colormap. Note that this function should accept
+        and return a vector of values between 0 and 1 (for use by the colormap). A value of None
+        indicates that no transformation should be used. The default value of Ellipsis indicates
+        that the transformation should be detected automatically based on the plotted property; see
+        below for default scaling.
+      * pixels (default: 288) specifies the number of pixels in the width/height of the image.
+      * background (default: None) specifies the background on which to plot the image. The default
+        value of None is equivalent to (1,1,1,0) or a transparent background. Anything that, when
+        passed to to_rgba() yields a single color-vector, can be passed to background.
+      * boundary_pixels (default: 0) specifies the number of pixels around the edge of the image to
+        reserve for the boundary. This may be specified as (left, right, bottom, top) or as
+        (sides, top-bottom). In all cases, the boundary_pixels value does not change the width of
+        the image but rather makes the plot smaller.
+    '''
+    # Start by parsing arguments:
+    if max_eccentricity is None: max_eccentricity = 90
+    if pimms.is_str(cmap):
+        cmap = cmap.replace('-', '_').replace(' ', '_').lower()
+        if on is Ellipsis:
+            if   'polar_angle' in cmap: on = 'polar_angle'
+            elif 'theta' in cmap: on = 'theta'
+            elif 'log_eccentricity' in cmap:
+                on = 'eccentricity'
+                (mn,mx) = np.log([0.5, 0.5 + max_eccentricity])
+                if transform is Ellipsis:
+                    transform = lambda x: (np.log(x + 0.5) - mn) / (mx - mn)
+            elif 'eccentricity' in cmap: on = 'eccentricity'
+        if cmap in colormaps:
+            (cm, (mn,mx)) = colormaps[cmap]
+            if transform is Ellipsis:
+                if cmap.startswith('log'): transform = lambda x: (np.log(x) - mn) / (mx - mn)
+                else:                      transform = lambda x: (x - mn) / (mx - mn)
+            cmap = cm
+        else:
+            cmap = getattr(matplotlib.cm, cmap)
+    if transform is Ellipsis: transform = None
+    if background is None: background = (1,1,1,0)
+    else: background = to_rgba(background)
+    # go ahead and make the image and the image-portion we are using
+    whole_im = np.zeros((pixels, pixels, 4))
+    whole_im[:,:,:] = np.reshape(background, (1,1,4))
+    if boundary_pixels is None or boundary_pixels <= 0: im = whole_im
+    else: im = whole_im[boundary_pixels:-boundary_pixels, boundary_pixels:-boundary_pixels, :]
+    # note that this is visual field pixels:
+    mid = im.shape[0] / 2
+    (x_im, y_im) = np.meshgrid(np.arange(im.shape[0]) - mid, mid - np.arange(im.shape[1]))
+    r_im = np.sqrt(x_im**2 + y_im**2)
+    ii = np.where(r_im <= mid)
+    x = x_im[ii] / mid * max_eccentricity
+    y = y_im[ii] / mid * max_eccentricity
+    # what property are we plotting on?
+    if   on is Ellipsis: raise ValueError('could not deduce property on which to operate')
+    elif not pimms.is_str(on): raise ValueError('plot-property must be a string')
+    on = on.replace('-', '_').replace(' ', '_').lower()
+    if   on == 'polar_angle':  p = np.mod(90 - 180/np.pi*np.arctan2(y, x) + 180, 360) - 180
+    elif on == 'theta':        p = np.mod(np.arctan2(y, x) + np.pi, 2*np.pi) - np.pi
+    elif on == 'eccentricity': p = np.sqrt(x**2 + y**2)
+    elif on == 'rho':          p = np.sqrt(x**2 + y**2) * np.pi/180
+    elif on == 'x':            p = x
+    elif on == 'y':            p = y
+    else: raise ValueError('unrecognized plot parameter: %s' % (on,))
+    # okay, transform p:
+    p = p if transform is None else transform(p)
+    # and run it through the cmap...
+    clrs = cmap(p)
+    # and set the appropriate pixels...
+    im[ii] = clrs
+    # check for undersize requests
+    if boundary_pixels < 0:
+        bp = -boundary_pixels
+        whole_im = whole_im[bp:-bp, bp:-bp, :]
+    # and return the whole thing!
+    return whole_im
+
 def to_rgba(val):
     '''
     to_rgba(val) is identical to matplotlib.colors.to_rgba(val) except that it operates over lists
@@ -619,7 +714,7 @@ def angle_colors(*args, **kwargs):
       * weight_min (0.2) specifies that below this weight value, the curvature (or null color)
         should be plotted.
       * property (Ellipsis) specifies the specific property that should be used as the
-        eccentricity value; if Ellipsis, will attempt to auto-detect this value.
+        polar angle value; if Ellipsis, will attempt to auto-detect this value.
       * weight (Ellipsis) specifies  the specific property that should be used as the weight value.
       * null_color ('curvature') specifies a color that should be used as the background.
     '''
@@ -656,6 +751,8 @@ def sigma_colors(*args, **kwargs):
       preserves the arguments passed; e.g. sigma_colors(weighted=False)(mesh) is equivalent to
       sigma_colors(mesh, weighted=False).
 
+    Note: radius_colors() is an alias for sigma_colors().
+
     The following options are accepted:
       * weighted (True) specifies whether to use weight as opacity.
       * weight_min (0.2) specifies that below this weight value, the curvature (or null color)
@@ -666,6 +763,7 @@ def sigma_colors(*args, **kwargs):
       * null_color ('curvature') specifies a color that should be used as the background.
     '''
     return retino_colors(vertex_sigma_color, *args, **kwargs)
+radius_colors = sigma_colors
 def varea_colors(*args, **kwargs):
     '''
     varea_colors(obj) yields an array of colors for the visual area map of the given

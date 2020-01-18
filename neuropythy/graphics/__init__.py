@@ -18,6 +18,6 @@ from .core import (
     vertex_curvature_color, vertex_weight,
     vertex_angle, vertex_eccen, vertex_sigma, vertex_varea,
     vertex_angle_color, vertex_eccen_color, vertex_sigma_color, vertex_varea_color,
-    angle_colors, eccen_colors, sigma_colors, varea_colors, to_rgba, color_overlap,
-    curvature_colors, cortex_plot, cortex_plot_colors,
+    angle_colors, eccen_colors, sigma_colors, radius_colors, varea_colors, to_rgba,
+    color_overlap, visual_field_legend, curvature_colors, cortex_plot, cortex_plot_colors,
     ROIDrawer, trace_roi)
