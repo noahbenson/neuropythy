@@ -213,6 +213,22 @@ try:
     itself runs linearly from 0 to 1, so radius data should be log-transformed then scaled before
     being passed.
     '''
+    cmap_cmag = blend_cmap(
+        'cmag',
+        [(0,         (  0,  0,  0)),
+         (0.25/256,  (  0,  0,  0)),
+         (1.23/256,  (  0,  0,0.5)),
+         (2.97/256,  (  1,  0,  1)),
+         (7.25/256,  (0.5,  0,  0)),
+         (17.69/256, (  1,  1,  0)),
+         (43.13/256, (  0,0.5,  0)),
+         (105.0/256, (  0,  1,  1)),
+         (1,         (  1,  1,  1))])
+    cmap_cmag.__doc__ = '''
+    cmap_cmag is a colormap for plotting cortical magnification.
+    It is generally advised to use the cmap_log_cmag colormap, as it will give better results for
+    the logarithmically-distributed corotical magnification colormap.
+    '''
     cmap_log_cmag = blend_cmap(
         'log_cmag',
         [(0,     (  0,  0,  0)),
@@ -257,33 +273,36 @@ try:
 
     colormaps = {
         'curvature':        (cmap_curvature,        (-1,1)),
-        'polar_angle_sym':  (cmap_polar_angle_sym,  (-180,180)),
-        'polar_angle_lh':   (cmap_polar_angle_lh,   (-180,180)),
-        'polar_angle_rh':   (cmap_polar_angle_rh,   (-180,180)),
-        'polar_angle':      (cmap_polar_angle,      (-180,180)),
-        'theta_sym':        (cmap_theta_sym,        (-np.pi,np.pi)),
-        'theta_lh':         (cmap_theta_lh,         (-np.pi,np.pi)),
-        'theta_rh':         (cmap_theta_rh,         (-np.pi,np.pi)),
-        'theta':            (cmap_theta,            (-np.pi,np.pi)),
-        'eccentricity':     (cmap_eccentricity,     (0,90)),
-        'log_eccentricity': (cmap_log_eccentricity, (np.log(0.5), np.log(90.0))),
-        'radius':           (cmap_radius,           (0, 40)), 
-        'log_radius':       (cmap_log_radius,       (np.log(0.25), np.log(40.0))),
-        'log_cmag':         (cmap_log_cmag,         (np.log(0.5), np.log(32.0))),
+        'polar_angle':      (cmap_polar_angle,      (-180,180), 'deg'),
+        'polar_angle_sym':  (cmap_polar_angle_sym,  (-180,180), 'deg'),
+        'polar_angle_lh':   (cmap_polar_angle_lh,   (-180,180), 'deg'),
+        'polar_angle_rh':   (cmap_polar_angle_rh,   (-180,180), 'deg'),
+        'theta':            (cmap_theta,            (-np.pi,np.pi), 'rad'),
+        'theta_sym':        (cmap_theta_sym,        (-np.pi,np.pi), 'rad'),
+        'theta_lh':         (cmap_theta_lh,         (-np.pi,np.pi), 'rad'),
+        'theta_rh':         (cmap_theta_rh,         (-np.pi,np.pi), 'rad'),
+        'eccentricity':     (cmap_eccentricity,     (0,90), 'deg'),
+        'log_eccentricity': (cmap_log_eccentricity, (np.log(0.75), np.log(90.75)), 'deg'),
+        'radius':           (cmap_radius,           (0, 40), 'deg'), 
+        'log_radius':       (cmap_log_radius,       (np.log(0.25), np.log(40.25)), 'deg'),
+        'cmag2':            (cmap_cmag,             (0.25, 512.25), 'mm**2/deg**2'),
+        'log_cmag2':        (cmap_log_cmag,         (np.log(0.25), np.log(512.25)), 'mm**2/deg**2'),
+        'cmag':             (cmap_cmag,             (0.5, 256.5), 'mm/deg'),
+        'log_cmag':         (cmap_log_cmag,         (np.log(0.5), np.log(256.5)), 'mm/deg'),
         # the handy but non-neuroscience-based ones:
-        'temperature_dark': (cmap_temperature_dark, (-1,1)),
         'temperature':      (cmap_temperature,      (-1,1)),
-        'lightsaber_dark':  (cmap_lightsaber_dark,  (-1,1)),
+        'temperature_dark': (cmap_temperature_dark, (-1,1)),
         'lightsaber':       (cmap_lightsaber,       (-1,1)),
-        'electricity_dark': (cmap_electricity_dark, (-1,1)),
+        'lightsaber_dark':  (cmap_lightsaber_dark,  (-1,1)),
         'electricity':      (cmap_electricity,      (-1,1)),
-        'reddish_dark':     (cmap_reddish_dark,     (0,1)),
+        'electricity_dark': (cmap_electricity_dark, (-1,1)),
         'reddish':          (cmap_reddish,          (0,1)),
-        'greenish_dark':    (cmap_greenish_dark,    (0,1)),
+        'reddish_dark':     (cmap_reddish_dark,     (0,1)),
         'greenish':         (cmap_greenish,         (0,1)),
-        'bluish_dark':      (cmap_bluish_dark,      (0,1)),
-        'bluish':           (cmap_bluish,           (0,1))}
-    for (k,(cmap,_)) in six.iteritems(colormaps): matplotlib.cm.register_cmap(k, cmap)
+        'greenish_dark':    (cmap_greenish_dark,    (0,1)),
+        'bluish':           (cmap_bluish,           (0,1)),
+        'bluish_dark':      (cmap_bluish_dark,      (0,1))}
+    for (k,cmdat) in six.iteritems(colormaps): matplotlib.cm.register_cmap(k, cmdat[0])
 
     def _diff_order(n):
         u0 = np.arange(n)
@@ -336,6 +355,40 @@ try:
         return cm
 except Exception: pass
 
+def scale_for_cmap(cmap, x, vmin=Ellipsis, vmax=Ellipsis, unit=Ellipsis):
+    '''
+    scale_for_cmap(cmap, x) yields the values in x rescaled to be appropriate for the given
+      colormap cmap. The cmap must be the name of a colormap or a colormap object.
+
+    For a given cmap argument, if the object is a colormap itself, it is treated as cmap.name.
+    If the cmap names a colormap known to neuropythy, neuropythy will rescale the values in x
+    according to a heuristic.
+    '''
+    import matplotlib as mpl
+    if isinstance(cmap, mpl.colors.Colormap): cmap = cmap.name
+    (name, cm) = (None, None)
+    if cmap not in colormaps:
+        for (k,v) in six.iteritems(colormaps):
+            if cmap in k:
+                (name, cm) = (k, v)
+                break
+    else: (name, cm) = (cmap, colormaps[cmap])
+    if cm is not None:
+        cm = cm if len(cm) == 3 else (cm + (None,))
+        (cm, (mn,mx), uu) = cm
+        if vmin is Ellipsis: vmin = mn
+        if vmax is Ellipsis: vmax = mx
+        if unit is Ellipsis: unit = uu
+    if vmin is Ellipsis: vmin = None
+    if vmax is Ellipsis: vmax = None
+    if unit is Ellipsis: unit = None
+    x = pimms.mag(x) if unit is None else pimms.mag(x, unit)
+    if name is not None and name.startswith('log_'):
+        emn = np.exp(mn)
+        x = np.log(x + emn)
+    vmin = np.nanmin(x) if vmin is None else vmin
+    vmax = np.nanmax(x) if vmax is None else vmax
+    return (x - vmin) / (vmax - vmin)
 def visual_field_legend(cmap, on=Ellipsis, max_eccentricity=12, transform=Ellipsis, pixels=288,
                         background=None, boundary_pixels=0):
     '''
@@ -385,7 +438,7 @@ def visual_field_legend(cmap, on=Ellipsis, max_eccentricity=12, transform=Ellips
                     transform = lambda x: (np.log(x + 0.5) - mn) / (mx - mn)
             elif 'eccentricity' in cmap: on = 'eccentricity'
         if cmap in colormaps:
-            (cm, (mn,mx)) = colormaps[cmap]
+            (cm, (mn,mx)) = colormaps[cmap][:2]
             if transform is Ellipsis:
                 if cmap.startswith('log'): transform = lambda x: (np.log(x) - mn) / (mx - mn)
                 else:                      transform = lambda x: (x - mn) / (mx - mn)
@@ -806,14 +859,25 @@ def guess_cortex_cmap(pname):
       given property is not a string or is not recognized then the log_eccentricity axis is used
       and the suggested vmin and vmax are None.
     '''
-    if not pimms.is_str(pname): return (cmap_log_eccentricity, (None, None))
-    if pname in colormaps: return colormaps[pname]
-    # check each manually
-    for (k,v) in six.iteritems(colormaps):
-        if pname.endswith(k): return v
-    for (k,v) in six.iteritems(colormaps):
-        if pname.startswith(k): return v
-    return (cmap_log_eccentricity, (None, None))
+    import matplotlib as mpl
+    if isinstance(pname, mpl.colors.Colormap): pname = pname.name
+    if not pimms.is_str(pname): return (cmap_log_eccentricity, (None, None), None)
+    if pname in colormaps: cm = colormaps[pname]
+    else:
+        # check each manually
+        cm = None
+        for (k,v) in six.iteritems(colormaps):
+            if pname.endswith(k):
+                cm = v
+                break
+        if cm is None:
+            for (k,v) in six.iteritems(colormaps):
+                if pname.startswith(k):
+                    cm = v
+                    break
+        if cm is not None:
+            return cm if len(cm) == 3 else cm + (None,)
+    return (cmap_log_eccentricity, (None, None), None)
 def apply_cmap(zs, cmap, vmin=None, vmax=None):
     '''
     apply_cmap(z, cmap) applies the given cmap to the values in z; if vmin and/or vmad are passed,
@@ -910,9 +974,11 @@ def cortex_plot_colors(the_map,
         p = the_map.property(color)
         # if the colormap is none, we can try to guess it
         if cmap is None:
-            (cmap,(vmn,vmx)) = guess_cortex_cmap(color)
+            (cmap,(vmn,vmx),unit) = guess_cortex_cmap(color)
+            p = pimms.mag(p) if unit is None else pimms.mag(p, unit)
             if vmin is None: vmin = vmn
             if vmax is None: vmax = vmx
+        else: p = pimms.mag(p)
         color = apply_cmap(p, cmap, vmin=vmin, vmax=vmax)
     if not pimms.is_matrix(color):
         # must be a function; let's try it...

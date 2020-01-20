@@ -415,6 +415,28 @@ def retinotopy_data(m, source='any'):
     # That's it
     return res
 
+def to_logeccen(ecc, vmin=0, vmax=90, offset=0.75):
+    '''
+    to_logeccen(ecc) yields a rescaled log-space version of the eccentricity value (or values) ecc,
+      which are extracted in degrees.
+    to_logeccen(xy_matrix) rescales all the (x,y) points in the given matrix to have lox-spaced
+      eccentricity values.
+    '''
+    if pimms.is_matrix(ecc):
+        xy = pimms.mag(ecc, 'deg')
+        trq = xy.shape[0] != 2
+        xy = np.transpose(xy) if trq else np.asarray(xy)
+        ecc = np.sqrt(np.sum(xy**2, axis=0))
+        esc = to_logeccen(ecc, vmin=vmin, vmax=vmax, offset=offset)
+        ecc = zinv(ecc)
+        xy = xy * [ecc,ecc] * [esc,esc]
+        return xy.T if trq else xy
+    else:
+        (ecc, vmin, vmax, offset) = [pimms.mag(u, 'deg') for u in (ecc, vmin, vmax, offset)]
+        log_ecc = np.log(ecc + offset)
+        (vmin, vmax) = [np.log(u + offset) for u in (vmin, vmax)]
+        return (log_ecc - vmin) / (vmax - vmin)
+
 pRF_data_Wandell2015 = pyr.pmap(
     {k.lower():pyr.pmap(v)
      for (k,v) in six.iteritems(
