@@ -1356,6 +1356,19 @@ def nange(x, y, nan_nan=False, nan_val=False, val_nan=False):
         equivalent to nange(nan, 0).
     '''
     return nan_compare(np.greater_equal, x, y, nan_nan=nan_nan, nan_val=nan_val, val_nan=val_nan)
+def nanlog(x, null=np.nan):
+    '''
+    nanlog(x) is equivalent to numpy.log(x) except that it avoids calling log on 0 and non-finie
+      values; in place of these values, it returns the value null (which is nan by default).
+    '''
+    x = np.asarray(x)
+    ii0 = np.where(np.isfinite(x))
+    ii  = np.where(x[ii0] > 0)[0]
+    if len(ii) == numel(x): return np.log(x)
+    res = np.full(x.shape, null)
+    ii = tuple([u[ii] for u in ii0])
+    res[ii] = np.log(x[ii])
+    return res    
 
 def library_path():
     '''
