@@ -77,7 +77,7 @@ from   .vision     import (retinotopy_data, empirical_retinotopy_data, predicted
                            neighborhood_cortical_magnification, as_retinotopy, retinotopy_data,
                            retinotopy_comparison, as_retinotopy, to_logeccen)
 from   .geometry   import (mesh, tess, topo, map_projection, path_trace, 
-                           is_vset, is_mesh, is_tess, is_topo, is_flatmap,
+                           is_vset, is_mesh, is_tess, is_topo, is_flatmap, paths_to_labels,
                            is_map_projection, is_path, is_path_trace, close_path_traces,
                            to_mesh, to_tess, to_property, to_mask, to_flatmap, to_map_projection,
                            isolines, map_projections)
