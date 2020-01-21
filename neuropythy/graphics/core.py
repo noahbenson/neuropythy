@@ -1342,7 +1342,7 @@ class ROIDrawer:
             self.ys.append(self.ys[0])
             self.line.set_data(self.xs, self.ys)
             self.line.figure.canvas.draw()
-        plt.close(self.line.figure)
+        matplotlib.pyplot.close(self.line.figure)
         # clear everything
         self.connection = None
         self.line = None

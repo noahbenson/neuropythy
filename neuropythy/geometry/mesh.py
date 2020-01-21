@@ -3930,6 +3930,51 @@ def close_path_traces(*args):
     crvs = [x.curve if is_path_trace(x) else to_curve_spline(x) for x in args]
     loop = close_curves(*crvs)
     return path_trace(mp0, loop.coordinates, closed=True)
+def paths_to_labels(hemi, traces, null=0, fix_outer=True):
+    '''
+    paths_to_labels(hemi, {label1:trace1, label2:trace2, ...}) yields a vector of label
+      values, one per vertex in the given hemi (which must be a Cortex object, e.g.
+      subject.lh or subject.rh for a subject object).
+    
+    Note that the trace1, trace2, etc. arguments may be paths or traces, but they must be
+    paths on the givesn hemisphere if they are paths.
+
+    The ordering of the keys in the dictionary is not meaningless: labels identified by keys
+    later in the dictionary order will be assigned vertices that are not already assigned to
+    a previous key, so if you have two overlapping ROIs, the ROI earlier in the dictionary
+    order will be assigned the vertices in the overlapping region while the later ROI will
+    not. Accordingly, you should use an OrderedDict object for the path-traces if you have
+    overlapping ROIs.
+    
+    Optional arguments:
+      * null (default: 0) may specify the values given to vertices that are not in an ROI.
+      * fix_outer (default: True) may optionally be set to False to indicate that ROIs
+        drawn clockwise were drawn clockwise intentionally, with the intention of specifying
+        an outer ROI; typically, counter-clockwise paths specify that an ROI is on the
+        inside of the trace while clockwise traces specify that an ROI is on the outside of
+        the trace. If fix_outer is True, then traces that specify an outer ROI are
+        automatically inverted.
+    '''
+    assert ny.is_cortex(hemi), "hemi must be a Cortex object"
+    assert pimms.is_map(traces), "traces must be a dictionary or mapping"
+    # the result we will return:
+    lbls = np.full(hemi.vertex_count, null, dtype=np.asarray(list(traces.keys())).dtype)
+    # have we assigned the vertex a label?
+    lset = np.zeros(hemi.vertex_count, dtype='bool')
+    # okay, go through the traces one at a time:
+    for (lbl,trace) in six.iteritems(traces):
+        # convert the trace to a cortical path if necessary
+        path = trace.to_path(hemi) if is_path_trace(trace) else trace
+        ii = np.where(path.label > 0.5)[0] # get the vertices that are in the path
+        if fix_outer and len(ii) > hemi.vertex_count - len(ii):
+            # the path is an outer path so invert it
+            ii = np.where(path.label < 0.5)[0]
+        # check against labels we have already assigned to other traces:
+        ii = ii[~lset[ii]]
+        lset[ii] = True
+        # and assign the labels
+        lbls[ii] = lbl
+    return lbls
 
 def isolines(obj, prop, val,
              outliers=None,  data_range=None,  clipped=np.inf,

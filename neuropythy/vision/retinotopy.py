@@ -2180,7 +2180,7 @@ def clean_retinotopy_potential(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=
     vsgns   = op.sign(vmf)
     #f_magn  = (1.0 / m) * op.sum((vms - vme*vsgns[t])**2 + (vmt - vme*vsgns[s])**2)
     #vmfmu   = op.sqrt(op.abs(vms*vmt))
-    f_magn  = (1.0 / m) * (op.sum((vms - vmt)**2))# + op.sum((vmfmu - velen2)**2))
+    f_magn  = (1.0 / m) * (op.sum((vms - vmt)**2)) # + op.sum((vmfmu - velen2)**2))
     # [3] we want a special function for faces whose vmags are different signs
     if global_field_sign is None:
         f_sign = op.compose(op.piecewise(0, ((-np.inf, 0), -op.identity)), vms*vmt)
