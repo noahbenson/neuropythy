@@ -3955,7 +3955,8 @@ def paths_to_labels(hemi, traces, null=0, fix_outer=True):
         the trace. If fix_outer is True, then traces that specify an outer ROI are
         automatically inverted.
     '''
-    assert ny.is_cortex(hemi), "hemi must be a Cortex object"
+    import neuropythy.mri as mri
+    assert mri.is_cortex(hemi), "hemi must be a Cortex object"
     assert pimms.is_map(traces), "traces must be a dictionary or mapping"
     # the result we will return:
     lbls = np.full(hemi.vertex_count, null, dtype=np.asarray(list(traces.keys())).dtype)
