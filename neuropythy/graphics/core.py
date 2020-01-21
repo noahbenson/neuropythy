@@ -12,7 +12,7 @@ import neuropythy.mri      as mri
 import neuropythy.io       as nyio
 import os, sys, six, itertools, atexit, shutil, tempfile, warnings, pimms
 
-from ..util            import (times, zdivide, plus, minus, to_hemi_str)
+from ..util            import (times, zdivide, plus, minus, to_hemi_str, nanlog)
 from ..vision          import (visual_area_names, visual_area_numbers)
 
 # 2D Graphics ######################################################################################
@@ -36,6 +36,7 @@ cmap_log_eccentricity = _matplotlib_load_error
 cmap_radius = _matplotlib_load_error
 cmap_log_radius = _matplotlib_load_error
 cmap_log_cmag = _matplotlib_load_error
+cmap_eccenflat = _matplotlib_load_error
 label_cmap = _matplotlib_load_error
 
 try:
@@ -245,6 +246,21 @@ try:
     itself runs linearly from 0 to 1, so cortical magnification data should be log-transformed
     then scaled before being passed.
     '''
+    cmap_eccenflat = blend_cmap(
+        'eccenflat',
+        [(0,     (  0,  0,  0)),
+         (1.0/7, (  0,  0,0.5)),
+         (2.0/7, (  1,  0,  1)),
+         (3.0/7, (0.5,  0,  0)),
+         (4.0/7, (  1,  1,  0)),
+         (5.0/7, (  0,0.5,  0)),
+         (6.0/7, (  0,  1,  1)),
+         (1,     (  1,  1,  1))])
+    cmap_eccenflat.__doc__ = '''
+    cmap_eccenflat is a colormap for plotting the log of eccentricity; in fact, it is identical
+    to the cmap_log_eccentricity colorscale, but when used with neuropythy it is assumed to be
+    linear instead of logarithmic.
+    '''
     # A few other handy colormaps:
     cmap_temperature_dark = blend_cmap('temperature_dark',
                                        [(0,1,1), (0,0,1), (0,0,0), (1,0,0), (1,1,0)])
@@ -289,6 +305,7 @@ try:
         'log_cmag2':        (cmap_log_cmag,         (np.log(0.25), np.log(512.25)), 'mm**2/deg**2'),
         'cmag':             (cmap_cmag,             (0.5, 256.5), 'mm/deg'),
         'log_cmag':         (cmap_log_cmag,         (np.log(0.5), np.log(256.5)), 'mm/deg'),
+        'eccenflat':        (cmap_eccenflat,        (0, 1)),
         # the handy but non-neuroscience-based ones:
         'temperature':      (cmap_temperature,      (-1,1)),
         'temperature_dark': (cmap_temperature_dark, (-1,1)),
@@ -388,7 +405,7 @@ def scale_for_cmap(cmap, x, vmin=Ellipsis, vmax=Ellipsis, unit=Ellipsis):
         x = np.log(x + emn)
     vmin = np.nanmin(x) if vmin is None else vmin
     vmax = np.nanmax(x) if vmax is None else vmax
-    return (x - vmin) / (vmax - vmin)
+    return zdivide(x - vmin, vmax - vmin, null=np.nan)
 def visual_field_legend(cmap, on=Ellipsis, max_eccentricity=12, transform=Ellipsis, pixels=288,
                         background=None, boundary_pixels=0):
     '''
@@ -433,15 +450,18 @@ def visual_field_legend(cmap, on=Ellipsis, max_eccentricity=12, transform=Ellips
             elif 'theta' in cmap: on = 'theta'
             elif 'log_eccentricity' in cmap:
                 on = 'eccentricity'
-                (mn,mx) = np.log([0.5, 0.5 + max_eccentricity])
+                (mn,mx) = np.log([0.75, 0.75 + max_eccentricity])
                 if transform is Ellipsis:
-                    transform = lambda x: (np.log(x + 0.5) - mn) / (mx - mn)
+                    transform = lambda x: (np.log(x + 0.75) - mn) / (mx - mn)
             elif 'eccentricity' in cmap: on = 'eccentricity'
         if cmap in colormaps:
             (cm, (mn,mx)) = colormaps[cmap][:2]
             if transform is Ellipsis:
-                if cmap.startswith('log'): transform = lambda x: (np.log(x) - mn) / (mx - mn)
-                else:                      transform = lambda x: (x - mn) / (mx - mn)
+                if cmap.startswith('log'):
+                    emn = np.exp(mn)
+                    transform = lambda x: (np.log(x+emn) - mn) / (mx - mn)
+                else:
+                    transform = lambda x: (x - mn) / (mx - mn)
             cmap = cm
         else:
             cmap = getattr(matplotlib.cm, cmap)
@@ -875,19 +895,33 @@ def guess_cortex_cmap(pname):
                 if pname.startswith(k):
                     cm = v
                     break
-        if cm is not None:
-            return cm if len(cm) == 3 else cm + (None,)
-    return (cmap_log_eccentricity, (None, None), None)
-def apply_cmap(zs, cmap, vmin=None, vmax=None):
+    # we prefer log-eccentricity when possible
+    if cm is None: return (cmap_eccenflat, (None, None), None)
+    if cm[0] is cmap_eccentricity: cm = colormaps['log_eccentricity']
+    return cm if len(cm) == 3 else cm + (None,)
+def apply_cmap(zs, cmap, vmin=None, vmax=None, logrescale=False):
     '''
-    apply_cmap(z, cmap) applies the given cmap to the values in z; if vmin and/or vmad are passed,
+    apply_cmap(z, cmap) applies the given cmap to the values in z; if vmin and/or vmax are passed,
       they are used to scale z.
+
+    Note that this function can automatically rescale data into log-space if the colormap is a
+    neuropythy log-space colormap such as log_eccentricity. To enable this behaviour use the
+    optional argument logrescale=True.
     '''
     zs = np.asarray(zs, dtype='float')
     if vmin is None: vmin = np.nanmin(zs)
     if vmax is None: vmax = np.nanmax(zs)
-    if pimms.is_str(cmap): cmap = matplotlib.cm.get_cmap(cmap)
-    return cmap((zs - vmin) / (vmax - vmin))
+    if pimms.is_str(cmap):
+        if cmap in colormaps:
+            logtr = cmap.startswith('log_')
+        cmap = matplotlib.cm.get_cmap(cmap)
+    else:
+        logtr = cmap.name in colormaps and cmap.name.startswith('log_')
+    if logrescale and logtr:
+        mn = np.exp(vmin)
+        return cmap(zdivide(nanlog(zs + vmin), (vmax - vmin)))
+    else:        
+        return cmap(zdivide(zs - vmin, vmax - vmin, null=np.nan))
 
 def cortex_cmap_plot_2D(the_map, zs, cmap, vmin=None, vmax=None, axes=None, triangulation=None):
     '''
@@ -940,7 +974,7 @@ def cortex_plot_colors(the_map,
             arguments are used to generate colors
           * a function that, when passed a single argument, a dict of the properties of a single
             vertex, yields an RGB or RGBA list for that vertex.
-      * cmap (default: 'log_eccentricity') specifies the colormap to use in plotting if the color
+      * cmap (default: 'eccenflat') specifies the colormap to use in plotting if the color
         argument provided is a property.
       * vmin (default: None) specifies the minimum value for scaling the property when one is passed
         as the color option. None means to use the min value of the property.
@@ -964,6 +998,15 @@ def cortex_plot_colors(the_map,
     if color is None:
         color = np.full((the_map.vertex_count, 4), 0.5)
         color[:,3] = 0
+    elif pimms.is_map(color) and len(color) == 1:
+        (k,v) = next(six.iteritems(color))
+        try: ktag = np.random.randint(sys.maxsize)
+        except Exception: ktag = np.random.randint(sys.maxint)
+        ktag = '%016x_%s' % (ktag, k)
+        the_map = the_map.with_prop({ktag:v})
+        return cortex_plot_colors(the_map, color=ktag,
+                                  cmap=cmap, vmin=vmin, vmax=vmax, alpha=alpha,
+                                  underlay=underlay, mask=mask)
     try:
         clr = matplotlib.colors.to_rgba(color)
         # This is an rgb color to plot...
@@ -979,7 +1022,9 @@ def cortex_plot_colors(the_map,
             if vmin is None: vmin = vmn
             if vmax is None: vmax = vmx
         else: p = pimms.mag(p)
-        color = apply_cmap(p, cmap, vmin=vmin, vmax=vmax)
+        # we use logrescale here because we assume that if color was 'eccentricity' or similar,
+        # we want to rescale according to that colormap:
+        color = apply_cmap(p, cmap, vmin=vmin, vmax=vmax, logrescale=True)
     if not pimms.is_matrix(color):
         # must be a function; let's try it...
         color = to_rgba(the_map.map(color))
@@ -1026,7 +1071,7 @@ def cortex_plot_2D(the_map,
             arguments are used to generate colors
           * a function that, when passed a single argument, a dict of the properties of a single
             vertex, yields an RGB or RGBA list for that vertex.
-      * cmap (default: 'log_eccentricity') specifies the colormap to use in plotting if the color
+      * cmap (default: 'eccenflat') specifies the colormap to use in plotting if the color
         argument provided is a property.
       * vmin (default: None) specifies the minimum value for scaling the property when one is passed
         as the color option. None means to use the min value of the property.
@@ -1096,7 +1141,7 @@ try:
             arguments are used to generate colors
           * a function that, when passed a single argument, a dict of the properties of a single
             vertex, yields an RGB or RGBA list for that vertex.
-      * cmap (default: 'log_eccentricity') specifies the colormap to use in plotting if the color
+      * cmap (default: 'eccenflat') specifies the colormap to use in plotting if the color
         argument provided is a property.
       * vmin (default: None) specifies the minimum value for scaling the property when one is passed
         as the color option. None means to use the min value of the property.
@@ -1241,7 +1286,7 @@ def cortex_plot(mesh, *args, **opts):
             arguments are used to generate colors
           * a function that, when passed a single argument, a dict of the properties of a single
             vertex, yields an RGB or RGBA list for that vertex.
-      * cmap (default: 'log_eccentricity') specifies the colormap to use in plotting if the color
+      * cmap (default: 'eccenflat') specifies the colormap to use in plotting if the color
         argument provided is a property.
       * vmin (default: None) specifies the minimum value for scaling the property when one is passed
         as the color option. None means to use the min value of the property.
