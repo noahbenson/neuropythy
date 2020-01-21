@@ -44,7 +44,7 @@ USER root
 
 # Copy the README and license over.
 RUN apt-get update && apt-get install -y --no-install-recommends curl
-RUN apt-get install -y default-jdk
+RUN apt-get install -y default-jdk fonts-open-sans
 COPY ./LICENSE.txt              /LICENSE.txt
 COPY ./README.md                /README.md
 RUN mkdir -p /data/required_subjects
