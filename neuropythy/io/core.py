@@ -433,7 +433,8 @@ def to_nifti(obj, like=None, header=None, affine=None, extensions=Ellipsis, vers
         else:
             raise ValueError('Could not interpret like argument with type %s' % type(like))
     # check to make sure that we have to change something:
-    elif ((version == 1 and isinstance(obj, nib.nifti1.Nifti1Image)) or
+    elif ((version == 1 and (isinstance(obj, nib.nifti1.Nifti1Image) and
+                             not isinstance(obj, nib.nifti2.Nifti2Image))) or
           (version == 2 and isinstance(obj, nib.nifti2.Nifti2Image))):
         if ((header is None or obj.header is header) and
             (extensions is Ellipsis or extensions is obj.header.extensions or
