@@ -1387,8 +1387,9 @@ class ROIDrawer:
             if rd is self: self.trace.meta_data = self.trace.meta_data.discard('roi_drawer')
             self.trace.persist()
         else: self.trace = None
-        for conn in self.connections:
-            self.line.figure.canvas.mpl_disconnect(conn)
+        if self.line:
+            for conn in self.connections:
+                self.line.figure.canvas.mpl_disconnect(conn)
         # redraw the final version:
         if self.closed:
             self.xs.append(self.xs[0])
