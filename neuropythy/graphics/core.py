@@ -1179,7 +1179,7 @@ try:
         mesh = []
         for arg in (obj if pimms.is_vector(obj) else [obj]):
             if   geo.is_mesh(arg): mesh.append(arg)
-            elif geo.is_topo(arg): mesh.append(geo.to_mesh((mesh, surface)))
+            elif geo.is_topo(arg): mesh.append(geo.to_mesh((arg, surface)))
             elif mri.is_subject(arg):
                 for h in (hemi if pimms.is_vector(hemi) else [hemi]):
                     if geo.is_topo(h) or geo.is_mesh(h): hh = [h]
