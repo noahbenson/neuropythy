@@ -401,7 +401,7 @@ def scale_for_cmap(cmap, x, vmin=Ellipsis, vmax=Ellipsis, unit=Ellipsis):
     if unit is Ellipsis: unit = None
     x = pimms.mag(x) if unit is None else pimms.mag(x, unit)
     if name is not None and name.startswith('log_'):
-        emn = np.exp(mn)
+        emn = np.exp(vmin)
         x = np.log(x + emn)
     vmin = np.nanmin(x) if vmin is None else vmin
     vmax = np.nanmax(x) if vmax is None else vmax
@@ -881,25 +881,27 @@ def guess_cortex_cmap(pname):
     '''
     import matplotlib as mpl
     if isinstance(pname, mpl.colors.Colormap): pname = pname.name
-    if not pimms.is_str(pname): return (cmap_log_eccentricity, (None, None), None)
+    if not pimms.is_str(pname): return ('eccenflat', cmap_eccenflat, (None, None), None)
     if pname in colormaps: cm = colormaps[pname]
     else:
         # check each manually
         cm = None
         for (k,v) in six.iteritems(colormaps):
             if pname.endswith(k):
-                cm = v
+                (cmname,cm) = (k,v)
                 break
         if cm is None:
             for (k,v) in six.iteritems(colormaps):
                 if pname.startswith(k):
-                    cm = v
+                    (cmname,cm) = (k,v)
                     break
     # we prefer log-eccentricity when possible
-    if cm is None: return (cmap_eccenflat, (None, None), None)
-    if cm[0] is cmap_eccentricity: cm = colormaps['log_eccentricity']
-    return cm if len(cm) == 3 else cm + (None,)
-def apply_cmap(zs, cmap, vmin=None, vmax=None, logrescale=False):
+    if cm is None: return ('eccenflat', cmap_eccenflat, (None, None), None)
+    if ('log_'+cmname) in colormaps:
+        cmname = 'log_'+cmname
+        cm = colormaps[cmname]
+    return (cmname,) + (cm if len(cm) == 3 else cm + (None,))
+def apply_cmap(zs, cmap, vmin=None, vmax=None, unit=None, logrescale=False):
     '''
     apply_cmap(z, cmap) applies the given cmap to the values in z; if vmin and/or vmax are passed,
       they are used to scale z.
@@ -908,19 +910,17 @@ def apply_cmap(zs, cmap, vmin=None, vmax=None, logrescale=False):
     neuropythy log-space colormap such as log_eccentricity. To enable this behaviour use the
     optional argument logrescale=True.
     '''
+    zs = pimms.mag(zs) if unit is None else pimms.mag(zs, unit)
     zs = np.asarray(zs, dtype='float')
-    nn = vmin is None and vmax is None
-    if vmin is None: vmin = np.nanmin(zs)
-    if vmax is None: vmax = np.nanmax(zs)
-    if pimms.is_str(cmap):
-        logtr = cmap.startswith('log_') if cmap in colormaps else False
-        cmap = matplotlib.cm.get_cmap(cmap)
-    else:
-        logtr = cmap.name in colormaps and cmap.name.startswith('log_')
-    if nn and logrescale and logtr:
+    if pimms.is_str(cmap): cmap = matplotlib.cm.get_cmap(cmap)
+    if logrescale:
+        if vmin is None: vmin = np.log(np.nanmin(zs))
+        if vmax is None: vmax = np.log(np.nanmax(zs))
         mn = np.exp(vmin)
-        return cmap(zdivide(nanlog(zs + vmin), (vmax - vmin)))
+        return cmap(zdivide(nanlog(zs + mn) - vmin, vmax - vmin, null=np.nan))
     else:        
+        if vmin is None: vmin = np.nanmin(zs)
+        if vmax is None: vmax = np.nanmax(zs)
         return cmap(zdivide(zs - vmin, vmax - vmin, null=np.nan))
 
 def cortex_cmap_plot_2D(the_map, zs, cmap, vmin=None, vmax=None, axes=None, triangulation=None):
@@ -1016,15 +1016,23 @@ def cortex_plot_colors(the_map,
         # it's a property that gets interpreted via the colormap
         p = the_map.property(color)
         # if the colormap is none, we can try to guess it
+        logtr = False
         if cmap is None:
-            (cmap,(vmn,vmx),unit) = guess_cortex_cmap(color)
-            p = pimms.mag(p) if unit is None else pimms.mag(p, unit)
-            if vmin is None: vmin = vmn
-            if vmax is None: vmax = vmx
-        else: p = pimms.mag(p)
+            (cmapname,cmap,(vmn,vmx),unit) = guess_cortex_cmap(color)
+            logtr = cmapname.startswith('log_')
+        else:
+            cmapname = cmap if pimms.is_str(cmap) else cmap.name
+            if cmapname in colormaps:
+                q = colormaps[cmapname]
+                (cmap,(vmn,vmx),unit) = q if len(q) == 3 else (q + (None,))
+            else:
+                (vmn,vmx,unit) = (np.nanmin(p), np.nanmax(p), None)
+        p = pimms.mag(p) if unit is None else pimms.mag(p, unit)
+        if vmin is None: vmin = vmn
+        if vmax is None: vmax = vmx
         # we use logrescale here because we assume that if color was 'eccentricity' or similar,
         # we want to rescale according to that colormap:
-        color = apply_cmap(p, cmap, vmin=vmin, vmax=vmax, logrescale=True)
+        color = apply_cmap(p, cmap, vmin=vmin, vmax=vmax, unit=unit, logrescale=logtr)
     if not pimms.is_matrix(color):
         # must be a function; let's try it...
         color = to_rgba(the_map.map(color))
