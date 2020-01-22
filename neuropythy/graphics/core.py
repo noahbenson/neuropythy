@@ -912,8 +912,7 @@ def apply_cmap(zs, cmap, vmin=None, vmax=None, logrescale=False):
     if vmin is None: vmin = np.nanmin(zs)
     if vmax is None: vmax = np.nanmax(zs)
     if pimms.is_str(cmap):
-        if cmap in colormaps:
-            logtr = cmap.startswith('log_')
+        logtr = cmap.startswith('log_') if cmap in colormaps else False
         cmap = matplotlib.cm.get_cmap(cmap)
     else:
         logtr = cmap.name in colormaps and cmap.name.startswith('log_')
