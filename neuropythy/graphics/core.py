@@ -299,8 +299,8 @@ try:
         'theta_rh':         (cmap_theta_rh,         (-np.pi,np.pi), 'rad'),
         'eccentricity':     (cmap_eccentricity,     (0,90), 'deg'),
         'log_eccentricity': (cmap_log_eccentricity, (np.log(0.75), np.log(90.75)), 'deg'),
-        'radius':           (cmap_radius,           (0, 40), 'deg'), 
-        'log_radius':       (cmap_log_radius,       (np.log(0.25), np.log(40.25)), 'deg'),
+        'radius':           (cmap_radius,           (0, 30), 'deg'), 
+        'log_radius':       (cmap_log_radius,       (np.log(0.25), np.log(30.25)), 'deg'),
         'cmag2':            (cmap_cmag,             (0.25, 512.25), 'mm**2/deg**2'),
         'log_cmag2':        (cmap_log_cmag,         (np.log(0.25), np.log(512.25)), 'mm**2/deg**2'),
         'cmag':             (cmap_cmag,             (0.5, 256.5), 'mm/deg'),
@@ -909,6 +909,7 @@ def apply_cmap(zs, cmap, vmin=None, vmax=None, logrescale=False):
     optional argument logrescale=True.
     '''
     zs = np.asarray(zs, dtype='float')
+    nn = vmin is None and vmax is None
     if vmin is None: vmin = np.nanmin(zs)
     if vmax is None: vmax = np.nanmax(zs)
     if pimms.is_str(cmap):
@@ -916,7 +917,7 @@ def apply_cmap(zs, cmap, vmin=None, vmax=None, logrescale=False):
         cmap = matplotlib.cm.get_cmap(cmap)
     else:
         logtr = cmap.name in colormaps and cmap.name.startswith('log_')
-    if logrescale and logtr:
+    if nn and logrescale and logtr:
         mn = np.exp(vmin)
         return cmap(zdivide(nanlog(zs + vmin), (vmax - vmin)))
     else:        
