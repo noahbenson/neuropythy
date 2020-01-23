@@ -185,7 +185,7 @@ _retinotopy_style_fns = {
     'visual-rad':   lambda t,e: (_clean_angle_rad(np.pi/2 - t), e * np.pi/180.0),
     'spherical':    lambda t,e: (_clean_angle_rad(t), e*np.pi/180.0),
     'standard':     lambda t,e: (_clean_angle_rad(t), e),
-    'cartesian':    lambda t,e: (np.pi/180.0 * e * np.cos(t), np.pi/180.0 * e * np.sin(t)),
+    'cartesian':    lambda t,e: (e * np.cos(t), e * np.sin(t)),
     'geographical': lambda t,e: (e * np.cos(t), e * np.sin(t)),
     'complex':      lambda t,e: e * np.exp(t * 1j),
     'complex-rad':  lambda t,e: np.pi/180.0 * e * np.exp(t * 1j),
@@ -278,7 +278,7 @@ def as_retinotopy(data, output_style='visual', units=Ellipsis, prefix=None, suff
         for aliases in [['polar_angle', 'polar angle', 'angle', 'ang', 'polang', 'theta'],
                         ['eccentricity', 'eccen', 'ecc', 'rho'],
                         ['x', 'longitude', 'lon'], ['y', 'latitude', 'lat'],
-                        ['z', 'complex', 'complex-rad', 'coordinate']]]
+                        ['z', 'complex', 'complex-rad', 'complex_rad', 'coordinate']]]
     rad2deg = 180.0 / np.pi
     deg2rad = np.pi / 180.0
     (hpi, dpi) = (np.pi / 2.0, np.pi * 2.0)
