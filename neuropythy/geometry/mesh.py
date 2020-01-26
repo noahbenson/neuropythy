@@ -539,7 +539,8 @@ class TesselationIndex(object):
             if m.shape[0] != 2 and m.shape[0] != 3: m = m.T
             if m.shape[0] == 2:
                 (u,v) = m
-                xx = np.where((u < 0) | (v < 0) | (u >= mtx.shape[0]) | (v >= mtx.shape[1]))[0]
+                emtx = self.edge_matrix
+                xx = np.where((u < 0) | (v < 0) | (u >= emtx.shape[0]) | (v >= emtx.shape[1]))[0]
                 if len(xx) > 0:
                     (u,v) = [np.array(x) for x in (u,v)]
                     u[xx] = 0
@@ -1108,6 +1109,79 @@ class Mesh(VertexSet):
         for a in args: pp = pp.discard(a)
         return new_mesh if pp is new_mesh._properties else new_mesh.copy(_properties=pp)
 
+    def upsample(self, split_edges=True):
+        '''
+        mesh.upsample_data yields a tuple (upmesh, face_vertices, edge_vertices, upmatrix) where
+          upmesh is the upsampled version of the given mesh and upmatrix is a sparse matrix whose
+          rows represent vertices in the original mesh and whose values represent faces in the
+          upmesh; upmatrix[i,j] is 1 if mesh's vertex i is a corner of upmesh's face j and otherwise
+          is 0, allowing for easy summation of face properties in upmesh back onto the vertices
+          of mesh. The face_vertices and edge_vertices are arrays such that the upmesh vertices made
+          from mesh.faces are found in upmesh.labels[face_vertices] and the vertices made from the
+          middle of edges are found in upmesh.labels[edge_vertices]. The original vertices of mesh
+          are always upmesh.labels[:mesh.vertex_count].
+
+        The optional argument split_edges may be set to False to reduce the number of vertices in
+        the upsampled mesh. By default, the upsampled mesh will always have a vertex cound equal to
+        mesh.vertex_count, + mesh.edge_count + mesh.face_count and will have a face count equal to
+        6 * mesh.face_count. This is guaranteed by splitting each original face into 6 triangles,
+        each of which has 1 corner at the original face's centroid, 1 corner at one of the original
+        face's corners, and one corner at the midpoint of one of the original face's edges. If
+        split_edges is set to False, then each face is split into 3 triangles at the midpoint and
+        corners instead. The advantage of the former method is that it can be used to construct
+        the voronoi-like polygons around the original mesh's vertices, thus allowing for
+        calculations of vertex surface areas either in cortical spaces or mapped spaces like visual
+        space.
+
+        Note that if split_edges is False, then the return value is alwaus (upmesh, face_vertices, 
+        None, None).
+        '''
+        #TODO: this function should have an options that lets you interpolate properties onto the
+        # new mesh automatically
+        (n, m, o) = (self.vertex_count, self.tess.face_count, self.tess.edge_count)
+        minlbl = np.max(self.labels) + 1
+        (a,b,c) = self.tess.indexed_faces
+        xy = self.coordinates
+        # we will need the face midpoints
+        (xy_a, xy_b, xy_c) = [xy[:,a], xy[:,b], xy[:,c]]
+        xy_f = np.mean([xy_a, xy_b, xy_c], axis=0)
+        xy = np.hstack([xy, xy_f])
+        f = np.arange(minlbl, minlbl + m, dtype='int')
+        if not split_edges:
+            # each face becomes 3 faces:
+            faces = np.hstack([(a,b,f), (b,c,f), (c,a,f)])
+            fvtcs = np.arange(n, n+m, dtype=np.int)
+            mtx = None
+            evtcs = None
+        else:
+            # we need the edge midpoints also
+            (u,v) = self.tess.indexed_edges
+            xy_e = np.mean([xy[:,u], xy[:,v]], axis=0)
+            xy = np.hstack([xy, xy_e])
+            e = np.arange(minlbl + m, minlbl + m + o, dtype='int')
+            # figure out how each edge translates into an edge index:
+            emids = np.hstack([(a,b), (b,c), (c,a)])
+            emids = np.array([self.labels[uu] for uu in emids])
+            emids = self.tess.index[emids] + n + m
+            (ab,bc,ca) = (emids[:m], emids[m:2*m], emids[2*m:])
+            # each face becomes 6 faces:
+            faces = np.hstack([(a,ab,f), (ab,b,f),
+                               (b,bc,f), (bc,c,f),
+                               (c,ca,f), (ca,a,f)])
+            fvtcs = np.arange(n, n+m, dtype=np.int)
+            evtcs = np.arange(n+m, n+m+o, dtype=np.int)
+            coords = np.hstack([xy, xy_e])
+            rr = np.concatenate([a,b,b,c,c,a])
+            mtx = sps.csr_matrix(
+                (np.ones(m*6), (rr, np.arange(6*m))),
+                shape=(n, m*6),
+                dtype='bool')
+        # make a tess out of these faces:
+        tt = tess(faces, meta_data={'source_mesh': self})
+        # make a mesh out of these faces...
+        msh = tt.make_mesh(xy)
+        return (msh,fvtcs,evtcs,mtx)
+        
     def submesh(self, vertices, tag=None, tag_tess=Ellipsis):
         '''
         mesh.submesh(vertices) yields a sub-mesh of the given mesh object that only contains the
