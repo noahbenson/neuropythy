@@ -2212,8 +2212,8 @@ def clean_retinotopy(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=Ellipsis,
                      visual_area_field_signs=Ellipsis,
                      measurement_uncertainty=0.4, measurement_knob=1,
                      magnification_knob=2, fieldsign_knob=8, edge_knob=0, rt_knob=None,
-                     yield_report=False, steps=400, rounds=5, output_style='visual',
-                     jitter=None, average=(5,1)):
+                     yield_report=False, steps=400, rounds=1, output_style='visual',
+                     jitter=None, average=None):
 
     '''
     clean_retinotopy(hemi) attempts to cleanup the retinotopic maps on the given cortical mesh by
@@ -2231,14 +2231,14 @@ def clean_retinotopy(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=Ellipsis,
         where the report is the return value of the scipy.optimization.minimize function.
     '''
     # parse our args
-    if jitter in [True, Ellipsis, 'auto', 'automatic']: jitter = (4, 0.05, 1)
+    if jitter in [True, Ellipsis, 'auto', 'automatic']: jitter = (3, 0.05, 1)
     if is_tuple(jitter) and len(jitter) > 0:
         if len(jitter) > 3:  raise ValueError('jitter tuple must be (mod, scale, phase)')
         if len(jitter) == 1: jitter = jitter + (0.005,)
         if len(jitter) == 2: jitter = jitter + (1,)
         (jitter_mod, jitter_scale, jitter_phase) = jitter
     else: jitter = None
-    if average in [True, Ellipsis, 'auto', 'automatic']: average = (4, 3)
+    if average in [True, Ellipsis, 'auto', 'automatic']: average = (3, 2)
     if is_tuple(average) and len(average) > 0:
         if len(average) > 2:  raise ValueError('average tuple must be (mod, phase)')
         if len(average) == 1: average = average + (3,)

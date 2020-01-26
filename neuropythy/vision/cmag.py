@@ -80,7 +80,7 @@ def mag_data(hemi, retinotopy='any', surface='midgray', mask=None,
     retino = retinotopy_data(hemi, retinotopy)
     # we can process the rest the mask now, including weights and ranges
     if weights is Ellipsis: weights = retino.get('variance_explained', None)
-    mask = hemi.mask(mask, indices=True)
+    mask = hemi.indices if mask is None else hemi.mask(mask, indices=True)
     (arng,erng) = (polar_angle_range, eccentricity_range)
     (ang,ecc) = (retino['polar_angle'], retino['eccentricity'])
     if pimms.is_str(arng):
@@ -129,7 +129,8 @@ def mag_data(hemi, retinotopy='any', surface='midgray', mask=None,
     def finish_mag_data(mask):
         if len(mask) == 0: return None
         # now that we have the mask, we can subsample
-        submesh = mesh.submesh(mask)
+        if np.array_equal(mask, mesh.indices): submesh = mesh
+        else:                                  submesh = mesh.submesh(mask)
         mask = mesh.tess.index(submesh.labels)
         mdata = pyr.pmap({k:(v[mask]   if pimms.is_vector(v) else
                              v[:,mask] if pimms.is_matrix(v) else
@@ -169,6 +170,18 @@ def is_mag_data(mdat):
         if k not in mdat: return False
     return True
 
+def parse_toopt_facevertex(to):
+    '''
+    Parses the `to` optional-argument of the functions below; returns either 'vertex' or 'face',
+    or raises an error.
+    '''
+    if to in [None,Ellipsis]: return 'vertex'
+    if not pimms.is_str(to): raise ValueError('could not parse `to` argument: %s' % (to,))
+    to = to.lower()
+    if to in ['vertices','vertex','nodes','node','points','v','vtx','vtcs','pts']: return 'vertex'
+    elif to in ['faces','f','triangles','t','tri','tris','face','triangle']: return 'face'
+    else: raise ValueError('could not parse `to` argument: %s' % (to,))
+    
 def rtmag_potential(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=Ellipsis,
                     surface='midgray', min_weight=Ellipsis, min_eccentricity=0.75,
                     visual_area=None, map_visual_areas=Ellipsis,
@@ -299,7 +312,7 @@ def rtmag_potential(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=Ellipsis,
         f_rt = op.sum((bpre_x-bx)**2 + (bpre_y-by)**2 + (cpre_x-cx)**2 + (cpre_y-cy)**2) * 0.5/o
         f_vmag = f_rtsmooth # + f_rt #TODO: the rt part of this needs to be debugged
         wgt = 0 if rt_knob is None else 2.0**rt_knob
-        f = f_r if rt_knob is None else (f_r + f_vmag) if rt_knob == 0 else (f_r + w*f_vmag)
+        f = f_r if rt_knob is None else (f_r + f_vmag) if rt_knob == 0 else (f_r + wgt*f_vmag)
         md = pimms.merge(f_r.meta_data,
                          dict(f_retinotopy=f_r, f_vmag=f_vmag, f_rtsmooth=f_rtsmooth, f_rt=f_rt))
         object.__setattr__(f, 'meta_data', md)
@@ -410,14 +423,32 @@ def face_vmag(hemi, retinotopy='any', to=None, **kw):
           * 'vertices': returns a property of the visual magnification value of each vertex, as
             determined by averaging the magnification 
     '''
-    mdat = mag_data(hemi, retinotopy=retinotopy, **kw)
-    if pimms.is_vector(mdat): return tuple([face_vmag(m, to=to) for m in mdat])
-    elif pimms.is_map(mdat.keys(), 'int'):
-        return pimms.lazy_map({k: curry(lambda k: face_vmag(mdat[k], to=to), k)
-                               for k in six.iterkeys(mdat)})
-    #TODO: implement the face_vmag calculation using mdat
-    # convert to the appropriate type according to the to param
-    raise NotImplementedError()
+    to = parse_toopt_facevertex(to)
+    if pimms.is_vector(hemi):
+        return tuple([face_vmag(m, to=to) for m in mdat])
+    if not is_mag_data(hemi):
+        if pimms.is_map(hemi) and all(pimms.is_int(k) for k in six.iterkeys(hemi)):
+            m = {k: curry(lambda k: face_vmag(mdat[k], to=to), k) for k in ks}
+            return pimms.lmap(m)
+        else:
+            return face_vmag(mag_data(hemi, retinotopy=retinotopy, **kw), to=to)
+    mdat = hemi
+    # Okay, we have a single mag-data dict; get the face visual and cortical areas:
+    mesh = mdat['mesh']
+    vismesh = mesh.copy(coordinates=mdat['visual_coordinates'])
+    face_vmags = zdivide(vismesh.face_areas, mesh.face_areas, null=0)
+    # convert these if the to argument so-requires it:
+    if to == 'face': return face_vmags
+    # possible #TODO here: super-tesselate the mesh and calculate the actual visual vertex areas
+    # then divide by the vertex cortical surface ares to do this properly.
+    vmag = np.zeros(mesh.vertex_count)
+    for (vtx,faces) in six.iteritems(mdat['submesh'].tess.vertex_face_index):
+        tmp = face_vmags[list(faces)]
+        ii = mesh.tess.index(vtx)
+        jj = np.where(np.isfinite(tmp))[0]
+        jj = jj[tmp[jj] > 0]
+        if len(jj) > 0: vmag[ii] = np.mean(tmp[jj])
+    return vmag
 
 @pimms.immutable
 class FieldOfView(object):
@@ -425,7 +456,8 @@ class FieldOfView(object):
     FieldOfView is a class that represents and calculates the field of view in a cortical area.
     '''
     def __init__(self, angle, eccen, sigma,
-                 scale=None, weight=None, search_scale=3.0, bins=6):
+                 scale=None, weight=None, search_scale=3.0, bins=6,
+                 normalize_weights=True, weights_method='height'):
         self.polar_angle = angle
         self.eccentricity = eccen
         self.sigma = sigma
@@ -433,6 +465,8 @@ class FieldOfView(object):
         self.bins = bins
         self.search_scale = search_scale
         self.scale = scale
+        self.normalize_weights = normalize_weights
+        self.weights_method = weights_method
     @pimms.param
     def polar_angle(pa):  return pimms.imm_array(pa)
     @pimms.param
@@ -442,10 +476,18 @@ class FieldOfView(object):
     @pimms.param
     def scale(s): return s
     @pimms.param
+    def normalize_weights(nw): return bool(nw)
+    @pimms.param
+    def weights_method(wm):
+        if wm is None or wm is Ellipsis: return 'height'
+        wm = wm.lower()
+        if wm in ['height', 'h', 'z']: return 'height'
+        elif wm in ['volume', 'vol', 'v']: return 'volume'
+        else: raise ValueError('unrecognized weights_method: %s' % (wm,))
+    @pimms.param
     def weight(w):
         if w is None: return None
         w = np.array(w)
-        w /= np.sum(w)
         w.setflags(write=False)
         return w
     @pimms.param
@@ -461,11 +503,15 @@ class FieldOfView(object):
         y = eccentricity * np.sin(theta)
         return pimms.imm_array(np.transpose([x,y]))
     @pimms.value
-    def _weight(weight, polar_angle):
-        if weight is None: weight = np.ones(len(polar_angle))
-        weight = weight / np.sum(weight)
-        weight.setflags(write=False)
-        return weight
+    def _weight(weight, polar_angle, normalize_weights, sigma, weights_method):
+        if weight is None:
+            weight = np.ones(len(polar_angle))
+            normalize_weights = True
+        if normalize_weights:
+            weight = weight / np.sum(weight)
+        if weights_method == 'volume':
+            weight = weight / (2 * np.pi * sigma)
+        return pimms.imm_array(weight)
     @pimms.value
     def sigma_bin_walls(sigma, bins):
         import scipy, scipy.cluster, scipy.cluster.vq as vq
@@ -501,28 +547,29 @@ class FieldOfView(object):
         sig = self.sigma
         wts = self._weight
         res = np.zeros(x.shape[0])
-        c1 = 1.0 / np.sqrt(2.0 * np.pi)
         for (sh, qd, bi) in zip(self.spatial_hashes, self.bin_query_distances, self.sigma_bins):
             neis = sh.query_ball_point(x, qd)
             res += [
-                np.sum(wts[ii] * c1/s * np.exp(-0.5 * d2/s**2))
+                np.sum(w * np.exp(-0.5 * d2/s**2))
                 for (ni,pt) in zip(neis,x)
                 for ii in [bi[ni]]
-                for (s,d2) in [(sig[ii], np.sum((crd[ii] - pt)**2, axis=1))]]
+                for (w,s,d2) in [(wts[ii], sig[ii], np.sum((crd[ii] - pt)**2, axis=1))]]
         return res
-def field_of_view(mesh, retinotopy='any', mask=None, search_scale=3.0, bins=6):
+def field_of_view(mesh, retinotopy='any', mask=None, search_scale=3.0, bins=6, weights=Ellipsis,
+                  normalize_weights=True, weights_method='height'):
     '''
     field_of_view(obj) yields a field-of-view function for the given vertex-set object or mapping of
       retinotopy data obj.
 
     The field-of-view function is a measurement of how much total pRF weight there is at each point
     in the visual field; essentially it is the sum of all visual-field Gaussian pRFs, where the
-    Gaussian's are normalized both by the pRF size (i.e., each pRF is a 2D normal distribution whose
+    Gaussians are normalized both by the pRF size (i.e., each pRF is a 2D normal distribution whose
     center comes from its polar angle and eccentricity and whose sigma parameter is the pRF radius)
     and the weight (if any weight such as the variance explained is included in the retinotopy data,
     then the normal distributions are multiplied by this weight, otherwise weights are considered to
     be uniform). Note that the weights are normalized by their sum, so the resulting field-of-view
-    function should be a valid probability distribution over the visual field.
+    function should be a valid probability distribution over the visual field. To disable this,
+    you can use the nomalize_weights=False option.
 
     The returned object fov = field_of_view(obj) is a special field-of-view object that can be
     called as fov(x, y) or fov(coord) where x and y may be lists or values and coord may be a 2D
@@ -540,6 +587,13 @@ def field_of_view(mesh, retinotopy='any', mask=None, search_scale=3.0, bins=6):
       * bins (default: 6) specifies the number of bins to divide the pRFs into based on the radius
         value; this is used to prune the search of pRFs that overlap a point to just those
         reasonanly close to the point in question
+      * weights (default: Ellipsis) specifies the weights that should be used. Ellipsis inidicates
+        that whatever weights are found in the retinotopy data should be used and none should be
+        used otherwise.
+      * normalize_weights (default: True) may be set to False to prevent normalization of the
+        weights. The default value of True normalizes the weights to be equal to 1.
+      * weights_method (default: 'height') specifies whether the weights should be considered the
+        heights or the volumes of the Gaussians pRFs.
     '''
     # First, find the retino data
     if pimms.is_str(retinotopy):
@@ -551,11 +605,17 @@ def field_of_view(mesh, retinotopy='any', mask=None, search_scale=3.0, bins=6):
     if 'radius' not in retino:
         raise ValueError('Retinotopy data must contain a radius, sigma, or size value')
     sig = retino['radius']
-    wgt = next((retino[q] for q in ('variance_explained', 'weight') if q in retino), None)
+    if weights is Ellipsis or weights is True:
+        wgt = next((retino[q] for q in ('variance_explained', 'weight') if q in retino), None)
+    elif weights is None or weights is False:
+        wgt = None
+    else:
+        wgt = mesh.property(weights)
     # Get the indices we care about
     ii = geo.to_mask(mesh, mask, indices=True)
     return FieldOfView(ang[ii], ecc[ii], sig[ii], weight=wgt[ii],
-                       search_scale=search_scale, bins=bins)
+                       search_scale=search_scale, bins=bins,
+                       normalize_weights=normalize_weights, weights_method=weights_method)
 
 @pimms.immutable
 class ArealCorticalMagnification(object):
