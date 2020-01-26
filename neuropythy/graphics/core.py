@@ -882,7 +882,7 @@ def guess_cortex_cmap(pname):
     import matplotlib as mpl
     if isinstance(pname, mpl.colors.Colormap): pname = pname.name
     if not pimms.is_str(pname): return ('eccenflat', cmap_eccenflat, (None, None), None)
-    if pname in colormaps: cm = colormaps[pname]
+    if pname in colormaps: (cm,cmname) = (colormaps[pname],pname)
     else:
         # check each manually
         cm = None
