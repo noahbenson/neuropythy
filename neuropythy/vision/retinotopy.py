@@ -2203,8 +2203,6 @@ def clean_retinotopy_potential(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=
          (0 if k_magn == 0 else fs[1]) +
          (0 if k_sign == 0 else fs[2]) +
          (0 if k_edge == 0 else fs[3])) / (k_meas + k_magn + k_sign + k_edge)
-    for ii in range(len(fs)):
-        print(ii, fs[ii])
     xy0 = np.reshape(xy0, (-1,2))
     object.__setattr__(f, 'meta_data',
                        pyr.m(f_meas=f_meas, f_magn=f_magn, f_sign=f_sign, f_edge=f_edge,
