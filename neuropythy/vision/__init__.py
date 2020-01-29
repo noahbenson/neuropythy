@@ -2,7 +2,8 @@
 # Models and routines used in visual neuroscience.
 # By Noah C. Benson
 
-from .models     import (load_fmm_model, visual_area_names, visual_area_numbers,
+from .models     import (load_fmm_model, visual_area_names,
+                         visual_area_numbers, visual_area_field_signs,
                          RetinotopyModel, RetinotopyMeshModel, RegisteredRetinotopyModel,
                          SchiraModel)
 from .retinotopy import (empirical_retinotopy_data, predicted_retinotopy_data, retinotopy_data,
