@@ -21,6 +21,8 @@ from functools            import reduce
 
 from .models import (RetinotopyModel, SchiraModel, RetinotopyMeshModel, RegisteredRetinotopyModel,
                      load_fmm_model, visual_area_names, visual_area_numbers)
+# due to parameter name clash we import this one special:
+from .models import visual_area_field_signs as global_visual_area_field_signs
 
 # Tools for extracting retinotopy data from a subject:
 _empirical_retinotopy_names = {
@@ -2002,10 +2004,17 @@ def clean_retinotopy_potential(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=
         that have the same fieldsign and non-zero for faces that have different fieldsigns. The
         form of fs(X) is the sum over all pairs of adjacent triangles (s,t) of -vmag(s)*vmag(t) if
         vmag(s) and vmag(t) have different fieldsigns, otherwise 0.
-      * The edge potential. Finally, the potential function attempts to force edges to be smooth by
-        penalizing edges whose endpoints are far apart in the visual field. The edge potential
-        function fe(X) is equal to the sum for all edges (u,v) of
+      * The edge potential. Additionally, the potential function attempts to force edges to be
+        smooth by penalizing edges whose endpoints are far apart in the visual field. The edge
+        potential function fe(X) is equal to the sum for all edges (u,v) of
         (x[u] - x[v])**2 + (y[u] - y[v])**2 / mean(eccen(u), eccen(v)).
+      * The radial/tangential magnification potential. Finally, the smoothness of the cortical
+        magnification, not just in terms of area, but also interms of its geometric orientation,
+        is forced to be smooth across the visual field. This term of the potential field models
+        the neighborhood vertices of each vertex as an ellipse in the visual field and minimizes
+        the difference between the radial and tangential components of neighboring vertices (i.e.,
+        makes sure that the radial and tangential components are each smooth across the cortical
+        surface).
 
     Note additionally that all four potential functions are normalized by a factor intended to keep
     them on similar scales (this factor is not mentioned above or below, but it is automatically
@@ -2081,18 +2090,21 @@ def clean_retinotopy_potential(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=
     else: mask = hemi.mask(mask, indices=True)
     global_field_sign = None
     # if we are splitting on visual area, we should do that here:
-    if map_visual_areas and lbls is not None:
+    if pimms.is_vector(map_visual_areas) and len(map_visual_areas) == 0: map_visual_areas = None
+    if map_visual_areas not in (False, None) and lbls is not None:
         # get the visual areas
         vas = (np.unique(lbls)                    if map_visual_areas == 'all'           else
                np.setdiff1d(np.unique(lbls), [0]) if map_visual_areas in [True,Ellipsis] else
                np.unique(map_visual_areas))
         # we also want to have the field-sign map handy if provided
-        if   visual_area_field_signs is None:     visual_area_field_signs = {}
-        elif visual_area_field_signs is Ellipsis: visual_area_field_signs = {1:-1, 2:1, 3:-1, 4:1}
+        if   visual_area_field_signs is None:
+            visual_area_field_signs = {}
+        elif visual_area_field_signs is Ellipsis:
+            visual_area_field_signs = global_visual_area_field_signs
         # special case when map_visual_areas is an integer/string (label)
         if pimms.is_int(map_visual_areas) or pimms.is_str(map_visual_areas):
             mask = np.intersect1d(mask, np.where(lbls == map_visual_areas)[0])
-            global_field_sign = visual_area_field_signs.get(map_visual_areas)
+            global_field_sign = visual_area_field_signs.get(map_visual_areas, None)
         else: # otherwise we return a lazy map
             kw = dict(retinotopy=rdat, mask=mask, weight=wght,
                       surface=surface, min_weight=min_weight, min_eccentricity=min_eccentricity,
@@ -2209,14 +2221,34 @@ def clean_retinotopy_potential(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=
                              mesh=mesh, X0=xy0, mask=mask))
     return f
 
-def clean_retinotopy(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=Ellipsis,
-                     surface='midgray', min_weight=Ellipsis, min_eccentricity=0.5,
-                     visual_area=Ellipsis, map_visual_areas=Ellipsis,
-                     visual_area_field_signs=Ellipsis, method=['L-BFGS-B', 'TNC'],
-                     measurement_uncertainty=0.4, measurement_knob=1,
-                     magnification_knob=2, fieldsign_knob=8, edge_knob=0, rt_knob=1,
-                     yield_report=False, steps=500, output_style='visual',
-                     jitter=None, average=None, initial_retinotopy=None, round_fn=None):
+clret_default_steps   = [  50,    50,   25,    50,   25,    50,     50,    50,    25,    25,   200]
+clret_default_jitter  = [   0,  0.15,    0,  0.15,    0,  0.15,    0.1,   0.1,  0.05,  0.05,  0.01]
+clret_default_average = [True, False, True, False, False, False, False, False, False, False, False]
+clret_default_msknob  = [None,    -2,   -1,    -1,    -1,     0,     0,     0,     1,     1,     1]
+def clean_retinotopy(hemi,
+                     retinotopy=Ellipsis,
+                     mask=Ellipsis,
+                     weight=Ellipsis,
+                     surface='midgray',
+                     min_weight=Ellipsis,
+                     min_eccentricity=0.5,
+                     visual_area=Ellipsis,
+                     map_visual_areas=Ellipsis,
+                     visual_area_field_signs=Ellipsis,
+                     method=['L-BFGS-B', 'TNC'],
+                     measurement_uncertainty=0.4,
+                     measurement_knob=clret_default_msknob,
+                     magnification_knob=2,
+                     fieldsign_knob=8,
+                     edge_knob=0,
+                     rt_knob=1,
+                     yield_report=False,
+                     steps=clret_default_steps,
+                     jitter=clret_default_jitter,
+                     average=clret_default_average,
+                     initial_retinotopy=None,
+                     output_style='visual',
+                     round_fn=None):
 
     '''
     clean_retinotopy(hemi) attempts to cleanup the retinotopic maps on the given cortical mesh by
@@ -2230,22 +2262,22 @@ def clean_retinotopy(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=Ellipsis,
     clean_retinotopy(). The following additional options are also accepted:
       * output_style (default: 'visual') specifies the style of the output data that should be
         returned; this should be a string understood by as_retinotopy.
-      * steps (default: 400) specifies the max number of minimization steps to run. A list of step
+      * steps (default: below) specifies the max number of minimization steps to run. A list of step
         numbers may be given, in which case, that many minimization rounds are used with a different
         number of steps in each.
       * method (default: ['L-BFGS-B', 'TNC']) specifies the method to be used in each of the
         minimization rounds (as determined by the number of elements in the steps argument). If
         fewer methods than rounds are specified, then the method argument is repeated as needed.
-      * jitter (default: None) specifies whether and how to jitter the vertices during minimization.
-        Jittering adds a customizable amount of exponentially-distributed random noise to the
-        vertex position at the start of certain minimization rounds. The jitter should be specified
-        as a list of jitter scales for each round (rounds are determined by the number of integers
-        in the steps option). For a vertex with an eccentricity of e, the jitter is added in a
-        uniformly-distributed direction with a length drawn from an exponential distribution with a
-        mean of (scale * e). If jitter is set to True, Ellipsis, or 'auto', then [0, 0.05, 0] is
-        used. If the number of rounds is greater than the number of jitter entries, then the jitter
-        list is considered to be repeated indefinitely.
-      * average (default: None) specifies whether and how to average the vertices during
+      * jitter (default: below) specifies whether and how to jitter the vertices during
+        minimization. Jittering adds a customizable amount of exponentially-distributed random noise
+        to the vertex position at the start of certain minimization rounds. The jitter should be
+        specified as a list of jitter scales for each round (rounds are determined by the number of
+        integers in the steps option). For a vertex with an eccentricity of e, the jitter is added
+        in a uniformly-distributed direction with a length drawn from an exponential distribution
+        with a mean of (scale * e). If jitter is set to True, Ellipsis, or 'auto', then [0, 0.05, 0]
+        is used. If the number of rounds is greater than the number of jitter entries, then the
+        jitter list is considered to be repeated indefinitely.
+      * average (default: below) specifies whether and how to average the vertices during
         minimization. Averaging is similar to jittering in that it is run prior to minimization in
         customizable steps. However, unlike jittering, averaging has no scale and so is specified
         by a list of True or False values. In a round during which averaging is being done, all
@@ -2267,6 +2299,16 @@ def clean_retinotopy(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=Ellipsis,
     options may be declared in a round-specific manner, as with jitter and average (see above).
     These options are: jitter, average, measurement_uncertainty, and all the knob options (e.g.,
     measurement_knob).
+
+    The default behavior of clean_retinotopy is to follow a cleaning plan that unfolds over several
+    rounds; the initial rounds are fast but include large jittering and/or averaging in order to
+    escape local minima and to jump-start the trajectory. Additionally, the measurement_knob is
+    gradually turned up overrr the course of the minimization. The default arguments are as follows
+    (msknob is the measurement knob):
+    steps   = [  50,    50,   25,    50,   25,    50,     50,    50,    25,    25,   200]
+    jitter  = [   0,  0.15,    0,  0.15,    0,  0.15,    0.1,   0.1,  0.05,  0.05,  0.01]
+    average = [True, False, True, False, False, False, False, False, False, False, False]
+    msknob  = [None,    -2,   -1,    -1,    -1,     0,     0,     0,     1,     1,     1]
     '''
     # Parse our args.
     if jitter in [True, Ellipsis, 'auto', 'automatic']: jitter = [0, 0.05, 0]
