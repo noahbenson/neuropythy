@@ -321,12 +321,24 @@ def rtmag_potential(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=Ellipsis,
         return pimms.lazy_map({va: curry(make_potential, va) for va in six.iterkeys(f_ret)})
     else: return make_potential(None)
 
-def disk_vmag(hemi, retinotopy='any', to=None, **kw):
+def disk_vmag(hemi, retinotopy='any', yields='axes', min_cod=0, **kw):
     '''
     disk_vmag(mesh) yields the visual magnification based on the projection of disks on the cortical
       surface into the visual field.
 
-    All options accepted by mag_data() are accepted by disk_vmag().
+    All options accepted by mag_data() are accepted by disk_vmag(). In addition, the parameters
+    yields and min_cod may be provided. The min_cod parameter indicates the minimum coefficient of
+    determination (r-squared), calculated between the fitted-ellipse and the vetex neighbor's raw
+    positions, that is needed to be included in the returrn values. The yields option determines 
+    what the return value should be. The default value is 'axes', but the following values are
+    accepted:
+      * 'axes' indicates that the return value should be an (n x 2 x 2) array where n is the number
+        of vertices in the mesh or cortex; each 2x2 matrix is the [rad_x rad_y; tan_x tan_y] axes.
+      * 'cod' indicates that only the coefficient of determination for the least-squares fit should
+        be returned.
+      * 'all' indicates that the return value should be (axes, cod).
+    In all cases, nans indicate vertices that were not part of the retinotopy mask, that did not
+    have CODs above the threshold, or that had too few neighbors to fit an ellipse.
     '''
     mdat = mag_data(hemi, retinotopy=retinotopy, **kw)
     if pimms.is_vector(mdat): return tuple([face_vmag(m, to=to) for m in mdat])
@@ -372,7 +384,7 @@ def disk_vmag(hemi, retinotopy='any', to=None, **kw):
     irs  = zinv(vrs)
     coss = vxy[:,0] * irs
     sins = vxy[:,1] * irs
-    # rotating each ellipse by negative-theta gives us x-radial and y=tangential
+    # rotating each ellipse by negative-theta gives us x=radial and y=tangential
     cels = (coss * ellipses.T)
     sels = (sins * ellipses.T)
     rots = np.transpose([cels[0] + sels[1], cels[1] - sels[0]], [1,2,0])
@@ -395,16 +407,23 @@ def disk_vmag(hemi, retinotopy='any', to=None, **kw):
         fs = np.transpose([c,s])
         try:
             (ab,rss,rnk,svs) = np.linalg.lstsq(fs, r, rcond=None)
-            if len(rss) == 0 or rnk < 2 or np.min(svs/np.sum(svs)) < 0.01: continue
+            if len(rss) == 0 or rnk < 2: continue # or np.min(svs/np.sum(svs)) < 0.01: continue
+            cod = 1 - rss[0]*zinv(np.sum(r**2))
+            if cod < min_cod: continue
             axes.append(np.abs(ab) * irad)
-            cods.append(1 - rss[0]*zinv(np.sum(r**2)))
+            cods.append(cod)
             idxs.append(i)
         except Exception as e: continue
     (axes, cods, idxs) = [np.asarray(u) for u in (axes, cods, idxs)]
-    return (idxs, axes, cods)
-    #return res
-    # convert to the appropriate type according to the to param
-    #raise NotImplementedError()
+    # make the return value; this is a 2x2 matrix for each vertex
+    if yields != 'cod':
+        raxes = np.full((n, 2), np.nan)
+        raxes[idxs] = axes
+    if yields == 'axes': return raxes
+    rcods = np.full(n, np.nan)
+    rcods[idxs] = cods
+    if yields == 'cod': return rcods
+    return (raxes, rcods)
 
 def face_vmag(hemi, retinotopy='any', to=None, **kw):
     '''
