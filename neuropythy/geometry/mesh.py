@@ -162,7 +162,7 @@ class VertexSet(ObjectWithMetaData):
                            weight_min=weight_min, weight_transform=weight_transform,
                            mask=mask,             valid_range=valid_range,
                            transform=transform,   yield_weight=yield_weight)
-    def property_search(self, *patterns, case_sensitive=False, result='first', wildcard='*'):
+    def property_search(self, *patterns, **kw):
         '''
         vset.property_search(patterns...) searches for any match among the properties in the given
           vertex set vset to any of the given patterns.
@@ -184,6 +184,11 @@ class VertexSet(ObjectWithMetaData):
             when no match is found.
         '''
         # process args
+        # kw args: case_sensitive=False, result='first', wildcard='*'
+        case_sensitive = kw.pop('case_sensitive', None)
+        result = kw.pop('result', 'first')
+        wildcard = kw.pop('wildcard', '*')
+        if len(kw) != 0: raise ValueError('unrecognized keywords given to property_search()')
         result = result.lower()
         if result not in ['fisrt', 'all']: raise ValueError('result must be "first" or "all"')
         rfirst = (result == 'first')
@@ -218,8 +223,7 @@ class VertexSet(ObjectWithMetaData):
                 if rfirst: return res[0]
         if result == 'first': raise ValueError('no matches found to given patterns')
         return res
-    def mask_search(self, *patterns,
-                    case_sensitive=False, result='first', wildcard='*', indices=False):
+    def mask_search(self, *patterns, **kw):
         '''
         vset.mask_search(patterns...) searches for any match among the properties in the given
           vertex set vset to any of the given patterns and yields the mask or masks that match.
@@ -242,6 +246,12 @@ class VertexSet(ObjectWithMetaData):
           * indices (default: False) specifies whether to yield indices (True) or labels (False).
         '''
         # process args
+        # kw args: case_sensitive=False, result='first', wildcard='*', indices=False
+        case_sensitive = kw.pop('case_sensitive', None)
+        result = kw.pop('result', 'first')
+        wildcard = kw.pop('wildcard', '*')
+        indices = kw.pop('indices', False)
+        if len(kw) != 0: raise ValueError('unrecognized keywords given to mask_search()')
         result = result.lower()
         if result not in ['fisrt', 'all']: raise ValueError('result must be "first" or "all"')
         rfirst = (result == 'first')
