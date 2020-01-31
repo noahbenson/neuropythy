@@ -74,8 +74,8 @@ from   .mri        import (is_subject, is_cortex, to_cortex, to_image, to_image_
                            is_pimage)
 from   .vision     import (retinotopy_data, empirical_retinotopy_data, predicted_retinotopy_data,
                            register_retinotopy, retinotopy_anchors, retinotopy_model,
-                           neighborhood_cortical_magnification, as_retinotopy, retinotopy_data,
-                           retinotopy_comparison, as_retinotopy, to_logeccen)
+                           neighborhood_cortical_magnification, as_retinotopy,
+                           retinotopy_comparison, to_logeccen)
 from   .geometry   import (mesh, tess, topo, map_projection, path_trace, 
                            is_vset, is_mesh, is_tess, is_topo, is_flatmap, paths_to_labels,
                            is_map_projection, is_path, is_path_trace, close_path_traces,
