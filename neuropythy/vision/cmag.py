@@ -182,144 +182,118 @@ def parse_toopt_facevertex(to):
     elif to in ['faces','f','triangles','t','tri','tris','face','triangle']: return 'face'
     else: raise ValueError('could not parse `to` argument: %s' % (to,))
     
-def rtmag_potential(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=Ellipsis,
-                    surface='midgray', min_weight=Ellipsis, min_eccentricity=0.75,
-                    visual_area=None, map_visual_areas=Ellipsis,
-                    visual_area_field_signs=Ellipsis,
-                    measurement_uncertainty=0.4, measurement_knob=1,
-                    magnification_knob=2, fieldsign_knob=8, edge_knob=0, rt_knob=0):
-    from neuropythy.vision.retinotopy import clean_retinotopy_potential
+def rtmag_potential(submesh, X0, mask=Ellipsis, fieldsign=None):
+    '''
+    rtmag_potential(mesh, viscoords, ...) yields the
+      radial/tangential cortical magnification term of the potential field.
+
+    This should generally not be called directly and instead should be obtained from the
+    clean_retinotopy_potential() function instead.
+    '''
     import neuropythy.optimize as op
-    f_ret = clean_retinotopy_potential(hemi, retinotopy=retinotopy, mask=mask, weight=weight,
-                                       surface=surface, min_weight=min_weight,
-                                       min_eccentricity=min_eccentricity,
-                                       visual_area=visual_area, map_visual_areas=map_visual_areas,
-                                       visual_area_field_signs=visual_area_field_signs,
-                                       measurement_uncertainty=measurement_uncertainty,
-                                       measurement_knob=measurement_knob,
-                                       magnification_knob=magnification_knob,
-                                       fieldsign_knob=fieldsign_knob, edge_knob=edge_knob)
-    # process a few additional arguments:
-    if   visual_area_field_signs is None:     visual_area_field_signs = {}
-    elif visual_area_field_signs is Ellipsis: visual_area_field_signs = {1:-1, 2:1, 3:-1, 4:1}
-    # this may be a lazy map of visual areas; we want to operate on all of them lazily, so wrap the
-    # rest of this model up in a function:
-    def make_potential(va):
-        global_field_sign = None if va is None else visual_area_field_signs.get(va)
-        f_r = f_ret if va is None else f_ret[va]
-        # The initial parameter vector is stored in the meta-data:
-        X0 = f_r.meta_data['X0']
-        # A few other handy pieces of data we can extract:
-        fieldsign = visual_area_field_signs.get(va)
-        submesh = f_r.meta_data['mesh']
-        sxyz = submesh.coordinates
-        n = submesh.vertex_count
-        (u,v) = submesh.tess.indexed_edges
-        selen = submesh.edge_lengths
-        sarea = submesh.face_areas
-        m = submesh.tess.edge_count
-        fs = submesh.tess.indexed_faces
-        neis = submesh.tess.indexed_neighborhoods
-        fangs = submesh.face_angles
-        # we're adding r and t (radial and tangential visual magnification) pseudo-parameters to
-        # each vertex; r and t are derived from the position of other vertices; our first step is
-        # to derive these values; for this we start with the parameters themselves:
-        (x,y) = [op.identity[np.arange(k, 2*n, 2)] for k in (0,1)]
-        # okay, we need to setup a bunch of least-squares solutions, one for each vertex:
-        nneis = np.asarray([len(nn) for nn in neis])
-        maxneis = np.max(nneis)
-        thts = op.atan2(y, x)
-        eccs = op.compose(op.piecewise(op.identity, ((-1e-9, 1e-9), 1)),
-                          op.sqrt(x**2 + y**2))
-        coss = x/eccs
-        sins = y/eccs
-        # organize neighbors:
-        # neis becomes a list of rows of 1st neighbor, second neighbor etc. with -1 indicating none
-        neis = np.transpose([nei + (-1,)*(maxneis - len(nei)) for nei in neis])
-        qnei = (neis > -1) # mark where there are actually neighbors
-        neis[~qnei] = 0 # we want the -1s (now 0s) to behave okay when passed to a potential index
-        # okay, walk through the neighbors setting up the least squares
-        (r, t) = (None, None)
-        for (k,q,nei) in zip(range(len(neis)), qnei.astype('float'), neis):
-            xx = x[nei] - x
-            yy = y[nei] - y
-            sd = np.sum((sxyz[:,nei].T - sxyz[:,k])**2, axis=1)
-            (xx, yy) = (xx*coss + yy*sins, yy*coss - xx*sins)
-            xterm = (op.abs(xx) * q)
-            yterm = (op.abs(yy) * q)
-            r = xterm if r is None else (r + xterm)
-            t = yterm if t is None else (t + yterm)
-        (r, t) = [uu * zinv(nneis) for uu in (r, t)]
-        # for neighboring edges, we want r and t to be similar to each other
-        f_rtsmooth = op.sum((r[v]-r[u])**2 + (t[v]-t[u])**2) / m
-        # we also want r and t to predict the radial and tangential magnification of the node, so
-        # we want to make sure that edges are the right distances away from each other based on the
-        # surface edge lengths and the distance around the vertex at the center
-        # for this we'll want some constant info about the surface edges/angles
-        # okay, in terms of the visual field coordinates of the parameters, we will want to know
-        # the angular position of each node
-        # organize face info
-        mnden   = 0.0001
-        (e,qs,qt) = np.transpose([(i,e[0],e[1]) for (i,e) in enumerate(submesh.tess.edge_faces)
-                                  if len(e) == 2 and selen[i] > mnden
-                                  if sarea[e[0]] > mnden and sarea[e[1]] > mnden])
-        (fis,q) = np.unique(np.concatenate([qs,qt]), return_inverse=True)
-        (qs,qt)   = np.reshape(q, (2,-1))
-        o       = len(fis)
-        faces   = fs[:,fis]
-        fangs   = fangs[:,fis]
-        varea   = op.signed_face_areas(faces)
-        srfangmtx = sps.csr_matrix(
-            (fangs.flatten(),
-             (faces.flatten(), np.concatenate([np.arange(o), np.arange(o), np.arange(o)]))),
-            (n, o))
-        srfangtot = flattest(srfangmtx.sum(axis=1))
-        # normalize this angle matrix by the total and put it back in the same order as faces
-        srfangmtx = zdivide(srfangmtx, srfangtot / (np.pi*2)).tocsr().T
-        nrmsrfang = np.array([sps.find(srfangmtx[k])[2][np.argsort(fs[:,k])] for k in range(o)]).T
-        # okay, now compare these to the actual angles;
-        # we also want to know, for each edge, the angle relative to the radial axis; let's start
-        # by organizing the faces into the units we compute over:
-        (fa,fb,fc) = [np.concatenate([faces[k], faces[(k+1)%3], faces[(k+2)%3]]) for k in range(3)]
-        atht = thts[fa]
-        # we only have to worry about the (a,b) and (a,c) edges now; from the perspective of a...
-        bphi = op.atan2(y[fb] - y[fa], x[fb] - x[fa]) - atht
-        cphi = op.atan2(y[fc] - y[fa], x[fc] - x[fa]) - atht
-        ((bcos,bsin),(ccos,csin)) = bccssn = [(op.cos(q),op.sin(q)) for q in (bphi,cphi)]
-        # the distance should be predicted by surface edge length times ellipse-magnification
-        # prediction; we have made uphi and vphi so that radial axis is x axis and tan axis is y
-        (ra,ta) = (op.abs(r[fa]), op.abs(t[fa]))
-        bslen = np.sqrt(np.sum((sxyz[:,fb] - sxyz[:,fa])**2, axis=0))
-        cslen = np.sqrt(np.sum((sxyz[:,fc] - sxyz[:,fa])**2, axis=0))
-        bpre_x = bcos * ra * bslen
-        bpre_y = bsin * ta * bslen
-        cpre_x = ccos * ra * cslen
-        cpre_y = csin * ta * cslen
-        # if there's a global field sign, we want to invert these predictions when the measured
-        # angle is the wrong sign
-        if global_field_sign is not None:
-            varea_f = varea[np.concatenate([np.arange(o) for _ in range(3)])] * global_field_sign
-            fspos = (op.sign(varea_f) + 1)/2
-            fsneg = 1 - fspos
-            (bpre_x,bpre_y,cpre_x,cpre_y) = (
-                bpre_x*fspos - cpre_x*fsneg, bpre_y*fspos - cpre_y*fsneg,
-                cpre_x*fspos - bpre_x*fsneg, cpre_y*fspos - bpre_y*fsneg)
-        (ax,ay,bx,by,cx,cy) = [x[fa],y[fa],x[fb],y[fb],x[fc],y[fc]]
-        (cost,sint) = [op.cos(atht), op.sin(atht)]
-        (bpre_x, bpre_y) = (bpre_x*cost - bpre_y*sint + ax, bpre_x*sint + bpre_y*cost + ay)
-        (cpre_x, cpre_y) = (cpre_x*cost - cpre_y*sint + ax, cpre_x*sint + cpre_y*cost + ay)
-        # okay, we can compare the positions now...
-        f_rt = op.sum((bpre_x-bx)**2 + (bpre_y-by)**2 + (cpre_x-cx)**2 + (cpre_y-cy)**2) * 0.5/o
-        f_vmag = f_rtsmooth # + f_rt #TODO: the rt part of this needs to be debugged
-        wgt = 0 if rt_knob is None else 2.0**rt_knob
-        f = f_r if rt_knob is None else (f_r + f_vmag) if rt_knob == 0 else (f_r + wgt*f_vmag)
-        md = pimms.merge(f_r.meta_data,
-                         dict(f_retinotopy=f_r, f_vmag=f_vmag, f_rtsmooth=f_rtsmooth, f_rt=f_rt))
-        object.__setattr__(f, 'meta_data', md)
-        return f
-    if pimms.is_map(f_ret):
-        return pimms.lazy_map({va: curry(make_potential, va) for va in six.iterkeys(f_ret)})
-    else: return make_potential(None)
+    if fieldsign == 0: fieldsign = None
+    # A few other handy pieces of data we can extract:
+    sxyz = submesh.coordinates
+    n = submesh.vertex_count
+    (u,v) = submesh.tess.indexed_edges
+    selen = submesh.edge_lengths
+    sarea = submesh.face_areas
+    m = submesh.tess.edge_count
+    fs = submesh.tess.indexed_faces
+    neis = submesh.tess.indexed_neighborhoods
+    fangs = submesh.face_angles
+    # we're adding r and t (radial and tangential visual magnification) pseudo-parameters to
+    # each vertex; r and t are derived from the position of other vertices; our first step is
+    # to derive these values; for this we start with the parameters themselves:
+    (x,y) = [op.identity[np.arange(k, 2*n, 2)] for k in (0,1)]
+    # okay, we need to setup a bunch of least-squares solutions, one for each vertex:
+    nneis = np.asarray([len(nn) for nn in neis])
+    maxneis = np.max(nneis)
+    thts = op.atan2(y, x)
+    eccs = op.compose(op.piecewise(op.identity, ((-1e-9, 1e-9), 1)),
+                      op.sqrt(x**2 + y**2))
+    coss = x/eccs
+    sins = y/eccs
+    # organize neighbors:
+    # neis becomes a list of rows of 1st neighbor, second neighbor etc. with -1 indicating none
+    neis = np.transpose([nei + (-1,)*(maxneis - len(nei)) for nei in neis])
+    qnei = (neis > -1) # mark where there are actually neighbors
+    neis[~qnei] = 0 # we want the -1s (now 0s) to behave okay when passed to a potential index
+    # okay, walk through the neighbors setting up the least squares
+    (r, t) = (None, None)
+    for (k,q,nei) in zip(range(len(neis)), qnei.astype('float'), neis):
+        xx = x[nei] - x
+        yy = y[nei] - y
+        sd = np.sum((sxyz[:,nei].T - sxyz[:,k])**2, axis=1)
+        (xx, yy) = (xx*coss + yy*sins, yy*coss - xx*sins)
+        xterm = (op.abs(xx) * q)
+        yterm = (op.abs(yy) * q)
+        r = xterm if r is None else (r + xterm)
+        t = yterm if t is None else (t + yterm)
+    (r, t) = [uu * zinv(nneis) for uu in (r, t)]
+    # for neighboring edges, we want r and t to be similar to each other
+    f_rtsmooth = op.sum((r[v]-r[u])**2 + (t[v]-t[u])**2) / m
+    # we also want r and t to predict the radial and tangential magnification of the node, so
+    # we want to make sure that edges are the right distances away from each other based on the
+    # surface edge lengths and the distance around the vertex at the center
+    # for this we'll want some constant info about the surface edges/angles
+    # okay, in terms of the visual field coordinates of the parameters, we will want to know
+    # the angular position of each node
+    # organize face info
+    mnden   = 0.0001
+    (e,qs,qt) = np.transpose([(i,e[0],e[1]) for (i,e) in enumerate(submesh.tess.edge_faces)
+                              if len(e) == 2 and selen[i] > mnden
+                              if sarea[e[0]] > mnden and sarea[e[1]] > mnden])
+    (fis,q) = np.unique(np.concatenate([qs,qt]), return_inverse=True)
+    (qs,qt)   = np.reshape(q, (2,-1))
+    o       = len(fis)
+    faces   = fs[:,fis]
+    fangs   = fangs[:,fis]
+    varea   = op.signed_face_areas(faces)
+    srfangmtx = sps.csr_matrix(
+        (fangs.flatten(),
+         (faces.flatten(), np.concatenate([np.arange(o), np.arange(o), np.arange(o)]))),
+        (n, o))
+    srfangtot = flattest(srfangmtx.sum(axis=1))
+    # normalize this angle matrix by the total and put it back in the same order as faces
+    srfangmtx = zdivide(srfangmtx, srfangtot / (np.pi*2)).tocsr().T
+    nrmsrfang = np.array([sps.find(srfangmtx[k])[2][np.argsort(fs[:,k])] for k in range(o)]).T
+    # okay, now compare these to the actual angles;
+    # we also want to know, for each edge, the angle relative to the radial axis; let's start
+    # by organizing the faces into the units we compute over:
+    (fa,fb,fc) = [np.concatenate([faces[k], faces[(k+1)%3], faces[(k+2)%3]]) for k in range(3)]
+    atht = thts[fa]
+    # we only have to worry about the (a,b) and (a,c) edges now; from the perspective of a...
+    bphi = op.atan2(y[fb] - y[fa], x[fb] - x[fa]) - atht
+    cphi = op.atan2(y[fc] - y[fa], x[fc] - x[fa]) - atht
+    ((bcos,bsin),(ccos,csin)) = bccssn = [(op.cos(q),op.sin(q)) for q in (bphi,cphi)]
+    # the distance should be predicted by surface edge length times ellipse-magnification
+    # prediction; we have made uphi and vphi so that radial axis is x axis and tan axis is y
+    (ra,ta) = (op.abs(r[fa]), op.abs(t[fa]))
+    bslen = np.sqrt(np.sum((sxyz[:,fb] - sxyz[:,fa])**2, axis=0))
+    cslen = np.sqrt(np.sum((sxyz[:,fc] - sxyz[:,fa])**2, axis=0))
+    bpre_x = bcos * ra * bslen
+    bpre_y = bsin * ta * bslen
+    cpre_x = ccos * ra * cslen
+    cpre_y = csin * ta * cslen
+    # if there's a global field sign, we want to invert these predictions when the measured
+    # angle is the wrong sign
+    if fieldsign is not None:
+        varea_f = varea[np.concatenate([np.arange(o) for _ in range(3)])] * fieldsign
+        fspos = (op.sign(varea_f) + 1)/2
+        fsneg = 1 - fspos
+        (bpre_x,bpre_y,cpre_x,cpre_y) = (
+            bpre_x*fspos - cpre_x*fsneg, bpre_y*fspos - cpre_y*fsneg,
+            cpre_x*fspos - bpre_x*fsneg, cpre_y*fspos - bpre_y*fsneg)
+    (ax,ay,bx,by,cx,cy) = [x[fa],y[fa],x[fb],y[fb],x[fc],y[fc]]
+    (cost,sint) = [op.cos(atht), op.sin(atht)]
+    (bpre_x, bpre_y) = (bpre_x*cost - bpre_y*sint + ax, bpre_x*sint + bpre_y*cost + ay)
+    (cpre_x, cpre_y) = (cpre_x*cost - cpre_y*sint + ax, cpre_x*sint + cpre_y*cost + ay)
+    # okay, we can compare the positions now...
+    f_rt = op.sum((bpre_x-bx)**2 + (bpre_y-by)**2 + (cpre_x-cx)**2 + (cpre_y-cy)**2) * 0.5/o
+    f_vmag = f_rtsmooth # + f_rt #TODO: the rt part of this needs to be debugged
+    object.__setattr__(f_vmag, 'meta_data', pyr.m(f_rtsmooth=f_rtsmooth, f_rt=f_rt))
+    return f_vmag
 
 def disk_vmag(hemi, retinotopy='any', yields='axes', min_cod=0, **kw):
     '''
@@ -391,7 +365,7 @@ def disk_vmag(hemi, retinotopy='any', yields='axes', min_cod=0, **kw):
     # now we fit the best rad/tan-oriented ellipse we can with the given center
     rsrt = np.sqrt(np.sum(rots**2, axis=2)).T
     (csrt,snrt) = zinv(rsrt) * rots.T
-    # ... a*cos(rots) + b*sin(rots) ~= r(rots) where a = radial vmag and b = tangential vmag
+    # ... (a*cos(rots))**2 + (b*sin(rots))**2 ~= r(rots) where a = radial vmag and b = tan vmag
     axes = []
     cods = []
     idxs = []
@@ -404,9 +378,10 @@ def disk_vmag(hemi, retinotopy='any', yields='axes', min_cod=0, **kw):
         mudst = np.sqrt(np.sum(np.mean([x, y], axis=1)**2))
         if mudst > np.min(r): continue
         # okay, fit an ellipse...
-        fs = np.transpose([c,s])
+        fs = np.transpose([c,s])**2
         try:
-            (ab,rss,rnk,svs) = np.linalg.lstsq(fs, r, rcond=None)
+            (ab,rss,rnk,svs) = np.linalg.lstsq(fs, r**2, rcond=None)
+            ab = np.sqrt(np.abs(ab))
             if len(rss) == 0 or rnk < 2: continue # or np.min(svs/np.sum(svs)) < 0.01: continue
             cod = 1 - rss[0]*zinv(np.sum(r**2))
             if cod < min_cod: continue
