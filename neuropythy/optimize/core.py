@@ -366,15 +366,17 @@ class PotentialPart(PotentialFunction):
             jm = jm.copy()
             jm.resize((jm.shape[0], len(params)))
         return safe_into(into, jm)
-def part(f, ii):
+def part(f, ii=None, input_len=None):
     '''
     part(u, ii) for constant or constant potential u yields a constant-potential form of u[ii].
     part(f, ii) for potential function f yields a potential function g(x) that is equivalent to
-      f(x[ii]).
+      f(x)[ii].
+    part(ii) is equivalent to part(identity, ii); i.e., pat of the input parameters to the function.
     '''
+    if ii is None: return PotentialPart(f, input_len=input_len)
     f = to_potential(f)
     if is_const_potential(f): return PotentialConstant(f.c[ii])
-    else:                     return compose(PotentialPart(ii), to_potential(f))
+    else:                     return compose(PotentialPart(ii, input_len=input_len), f)
 @pimms.immutable
 class PotentialPlusPotential(PotentialFunction):
     def __init__(self, g, h):
