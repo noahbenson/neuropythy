@@ -23,6 +23,12 @@ visual_area_names = (None,
                      'V1', 'V2', 'V3', 'hV4', 'VO1', 'VO2', 'LO1', 'LO2',
                      'TO1', 'TO2', 'V3b', 'V3a')
 visual_area_numbers = pyr.pmap({v:k for (k,v) in enumerate(visual_area_names)})
+visual_area_field_signs = (0,
+                           -1, 1, -1, 1, -1, 1, 1, -1,
+                           1, -1, 1, -1)
+visual_area_field_signs = pyr.pmap(
+    {k:v for (k,v) in zip(tuple(range(len(visual_area_numbers))) + visual_area_names,
+                          visual_area_field_signs * 2)})
 
 @pimms.immutable
 class RetinotopyModel(object):

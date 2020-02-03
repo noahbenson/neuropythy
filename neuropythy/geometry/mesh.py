@@ -162,6 +162,131 @@ class VertexSet(ObjectWithMetaData):
                            weight_min=weight_min, weight_transform=weight_transform,
                            mask=mask,             valid_range=valid_range,
                            transform=transform,   yield_weight=yield_weight)
+    def property_search(self, *patterns, **kw):
+        '''
+        vset.property_search(patterns...) searches for any match among the properties in the given
+          vertex set vset to any of the given patterns.
+
+        Patterns may be any of the following:
+          * valid properties (i.e., x such that vset.property(x) yields a valid property vector;
+          * a tuple (prop, opts) that when passed to vset.property(prop, **opts) yields a valid
+            property vector;
+          * either of the above, but where a property name, such as 'visual_area' is replaced
+            with a wildcard string such as '*visual_area' or 'visual_area*'--note that either of
+            these is valid, but stars elsewhere are ignored.
+
+        The following options are allowed:
+          * case_sensitive (default: False) specifies whether or not property names should be
+            compared in a case-sensitive manner.
+          * result (default: 'first') specifies whether the first match or a list of all matches
+            is returned ('all'). If 'all' is passed, the result is always a list; an empty list is
+            returned when no match is found. However, if 'first' is passed, then an error is raised
+            when no match is found.
+        '''
+        # process args
+        # kw args: case_sensitive=False, result='first', wildcard='*'
+        case_sensitive = kw.pop('case_sensitive', None)
+        result = kw.pop('result', 'first')
+        wildcard = kw.pop('wildcard', '*')
+        if len(kw) != 0: raise ValueError('unrecognized keywords given to property_search()')
+        result = result.lower()
+        if result not in ['fisrt', 'all']: raise ValueError('result must be "first" or "all"')
+        rfirst = (result == 'first')
+        wc = wildcard
+        tr = (lambda s: s) if case_sennsitive else (lambda s: s.lower())
+        # we're looking through the property names for this object:
+        if not case_sensitive: pnames = [p.lower() for p in pnames]
+        res = []
+        for pattern in patterns:
+            if pimms.is_tuple(patt): (pattern, opts) = pattern
+            else: opts = {}
+            poss = []
+            if pimms.is_str(pattern):
+                patt = tr(pattern[1:-1])
+                if patt.startswith(wc) and patt.endswith(wc):
+                    for k in pnames:
+                        if patt in tr(k): poss.append(k)
+                elif patt.startswith(wc):
+                    for k in pnames:
+                        if tr(k).endswith(patt): poss.append(k)
+                elif patt.startswith(wc):
+                    for k in pnames:
+                        if tr(k).endswith(patt): poss.append(k)
+                else:
+                    for k in pnames:
+                        if tr(k) == patt: poss.append(k)
+            else: poss.append(pattern)
+            # check the elements in poss
+            for p in poss:
+                try: res.append(self.property(p, **opts))
+                except Exception: pass
+                if rfirst: return res[0]
+        if result == 'first': raise ValueError('no matches found to given patterns')
+        return res
+    def mask_search(self, *patterns, **kw):
+        '''
+        vset.mask_search(patterns...) searches for any match among the properties in the given
+          vertex set vset to any of the given patterns and yields the mask or masks that match.
+
+        Patterns may be any of the following:
+          * valid properties (i.e., x such that vset.property(x) yields a valid property vector;
+          * a tuple (prop, opts) that when passed to vset.mask(prop, **opts) yields a valid
+            mask vector;
+          * either of the above, but where a property name, such as 'visual_area' is replaced
+            with a wildcard string such as '*visual_area' or 'visual_area*'--note that either of
+            these is valid, but stars elsewhere are ignored.
+
+        The following options are allowed:
+          * case_sensitive (default: False) specifies whether or not property names should be
+            compared in a case-sensitive manner.
+          * result (default: 'first') specifies whether the first match or a list of all matches
+            is returned ('all'). If 'all' is passed, the result is always a list; an empty list is
+            returned when no match is found. However, if 'first' is passed, then an error is raised
+            when no match is found.
+          * indices (default: False) specifies whether to yield indices (True) or labels (False).
+        '''
+        # process args
+        # kw args: case_sensitive=False, result='first', wildcard='*', indices=False
+        case_sensitive = kw.pop('case_sensitive', None)
+        result = kw.pop('result', 'first')
+        wildcard = kw.pop('wildcard', '*')
+        indices = kw.pop('indices', False)
+        if len(kw) != 0: raise ValueError('unrecognized keywords given to mask_search()')
+        result = result.lower()
+        if result not in ['fisrt', 'all']: raise ValueError('result must be "first" or "all"')
+        rfirst = (result == 'first')
+        wc = wildcard
+        tr = (lambda s: s) if case_sennsitive else (lambda s: s.lower())
+        # we're looking through the property names for this object:
+        if not case_sensitive: pnames = [p.lower() for p in pnames]
+        res = []
+        for pattern in patterns:
+            if pimms.is_tuple(patt): (pattern, opts) = pattern
+            else: opts = {}
+            poss = []
+            if pimms.is_str(pattern):
+                patt = tr(pattern[1:-1])
+                if patt.startswith(wc) and patt.endswith(wc):
+                    for k in pnames:
+                        if patt in tr(k): poss.append(k)
+                elif patt.startswith(wc):
+                    for k in pnames:
+                        if tr(k).endswith(patt): poss.append(k)
+                elif patt.startswith(wc):
+                    for k in pnames:
+                        if tr(k).endswith(patt): poss.append(k)
+                else:
+                    for k in pnames:
+                        if tr(k) == patt: poss.append(k)
+            else: poss.append(pattern)
+            # check the elements in poss
+            for p in poss:
+                try: res.append(self.mask(p, **opts))
+                except Exception: pass
+                if rfirst: return res[0]
+        if result == 'first': raise ValueError('no matches found to given patterns')
+        return res
+    
     def isolines(self, prop, val, **kw):
         '''
         vset.isolines(prop, val, options...) is equivalent to isolines(tess, prop, val, options...).
@@ -208,6 +333,7 @@ class VertexSet(ObjectWithMetaData):
         vertex indices instead of the vertex labels.
         '''
         return to_mask(self, m, indices=indices)
+
 def is_vset(v):
     '''
     is_vset(v) yields True if v is a VertexSet object and False otherwise. Note that topologies,
@@ -539,7 +665,8 @@ class TesselationIndex(object):
             if m.shape[0] != 2 and m.shape[0] != 3: m = m.T
             if m.shape[0] == 2:
                 (u,v) = m
-                xx = np.where((u < 0) | (v < 0) | (u >= mtx.shape[0]) | (v >= mtx.shape[1]))[0]
+                emtx = self.edge_matrix
+                xx = np.where((u < 0) | (v < 0) | (u >= emtx.shape[0]) | (v >= emtx.shape[1]))[0]
                 if len(xx) > 0:
                     (u,v) = [np.array(x) for x in (u,v)]
                     u[xx] = 0
@@ -1108,6 +1235,79 @@ class Mesh(VertexSet):
         for a in args: pp = pp.discard(a)
         return new_mesh if pp is new_mesh._properties else new_mesh.copy(_properties=pp)
 
+    def upsample(self, split_edges=True):
+        '''
+        mesh.upsample_data yields a tuple (upmesh, face_vertices, edge_vertices, upmatrix) where
+          upmesh is the upsampled version of the given mesh and upmatrix is a sparse matrix whose
+          rows represent vertices in the original mesh and whose values represent faces in the
+          upmesh; upmatrix[i,j] is 1 if mesh's vertex i is a corner of upmesh's face j and otherwise
+          is 0, allowing for easy summation of face properties in upmesh back onto the vertices
+          of mesh. The face_vertices and edge_vertices are arrays such that the upmesh vertices made
+          from mesh.faces are found in upmesh.labels[face_vertices] and the vertices made from the
+          middle of edges are found in upmesh.labels[edge_vertices]. The original vertices of mesh
+          are always upmesh.labels[:mesh.vertex_count].
+
+        The optional argument split_edges may be set to False to reduce the number of vertices in
+        the upsampled mesh. By default, the upsampled mesh will always have a vertex cound equal to
+        mesh.vertex_count, + mesh.edge_count + mesh.face_count and will have a face count equal to
+        6 * mesh.face_count. This is guaranteed by splitting each original face into 6 triangles,
+        each of which has 1 corner at the original face's centroid, 1 corner at one of the original
+        face's corners, and one corner at the midpoint of one of the original face's edges. If
+        split_edges is set to False, then each face is split into 3 triangles at the midpoint and
+        corners instead. The advantage of the former method is that it can be used to construct
+        the voronoi-like polygons around the original mesh's vertices, thus allowing for
+        calculations of vertex surface areas either in cortical spaces or mapped spaces like visual
+        space.
+
+        Note that if split_edges is False, then the return value is alwaus (upmesh, face_vertices, 
+        None, None).
+        '''
+        #TODO: this function should have an options that lets you interpolate properties onto the
+        # new mesh automatically
+        (n, m, o) = (self.vertex_count, self.tess.face_count, self.tess.edge_count)
+        minlbl = np.max(self.labels) + 1
+        (a,b,c) = self.tess.indexed_faces
+        xy = self.coordinates
+        # we will need the face midpoints
+        (xy_a, xy_b, xy_c) = [xy[:,a], xy[:,b], xy[:,c]]
+        xy_f = np.mean([xy_a, xy_b, xy_c], axis=0)
+        xy = np.hstack([xy, xy_f])
+        f = np.arange(minlbl, minlbl + m, dtype='int')
+        if not split_edges:
+            # each face becomes 3 faces:
+            faces = np.hstack([(a,b,f), (b,c,f), (c,a,f)])
+            fvtcs = np.arange(n, n+m, dtype=np.int)
+            mtx = None
+            evtcs = None
+        else:
+            # we need the edge midpoints also
+            (u,v) = self.tess.indexed_edges
+            xy_e = np.mean([xy[:,u], xy[:,v]], axis=0)
+            xy = np.hstack([xy, xy_e])
+            e = np.arange(minlbl + m, minlbl + m + o, dtype='int')
+            # figure out how each edge translates into an edge index:
+            emids = np.hstack([(a,b), (b,c), (c,a)])
+            emids = np.array([self.labels[uu] for uu in emids])
+            emids = self.tess.index[emids] + n + m
+            (ab,bc,ca) = (emids[:m], emids[m:2*m], emids[2*m:])
+            # each face becomes 6 faces:
+            faces = np.hstack([(a,ab,f), (ab,b,f),
+                               (b,bc,f), (bc,c,f),
+                               (c,ca,f), (ca,a,f)])
+            fvtcs = np.arange(n, n+m, dtype=np.int)
+            evtcs = np.arange(n+m, n+m+o, dtype=np.int)
+            coords = np.hstack([xy, xy_e])
+            rr = np.concatenate([a,b,b,c,c,a])
+            mtx = sps.csr_matrix(
+                (np.ones(m*6), (rr, np.arange(6*m))),
+                shape=(n, m*6),
+                dtype='bool')
+        # make a tess out of these faces:
+        tt = tess(faces, meta_data={'source_mesh': self})
+        # make a mesh out of these faces...
+        msh = tt.make_mesh(xy)
+        return (msh,fvtcs,evtcs,mtx)
+        
     def submesh(self, vertices, tag=None, tag_tess=Ellipsis):
         '''
         mesh.submesh(vertices) yields a sub-mesh of the given mesh object that only contains the
@@ -2228,7 +2428,7 @@ class MapProjection(ObjectWithMetaData):
         rs = np.sqrt(np.sum(mesh.coordinates**2, axis=0))
         mu = np.mean(rs)
         sd = np.std(rs)
-        if sd/mu > 0.05: warnings.war('Given mesh does not appear to be a sphere centered at 0')
+        if sd/mu > 0.05: warnings.warn('Given mesh does not appear to be a sphere centered at 0')
         return mu
     @pimms.value
     def repr(chirality, registration):
@@ -2949,6 +3149,94 @@ class Topology(VertexSet):
                              sphere_radius=sphere_radius,
                              pre_affine=pre_affine, post_affine=post_affine)
         return proj(self, tag=tag)
+    def mask_projection(self, mask, map_right=Ellipsis,
+                        radius=Ellipsis, method=Ellipsis, registration='native',
+                        pre_affine=Ellipsis, post_affine=Ellipsis,
+                        name=None, meta_data=Ellipsis):
+        '''
+        hemi.mask_projection(mask) yields a map-projectionn object of the given hemisphere that
+          is centered on the middle of the given mask.
+        
+        The following options may be given:
+          * radius (default: Ellipsis) is passed along to the map_projection() function.
+          * method (default: Ellipsis) is passed along to the map_projection() function.
+          * pre_affine (default: Ellipsis) is passed along to the map_projection() function.
+          * post_affine (default: Ellipsis) is passed along to the map_projection() function.
+          * meta_data (default: Ellipsis) is passed along to the map_projection() function.
+          * name (default: None) is passed along to the map_projection() function.
+          * map_right (default: Ellipsis) may be a direction ('anterior', 'posterior', 'inferior',
+            'superior', 'left', or 'right') which should be aligned with the right-hand-side of the
+            2D map. A value of None indicates that this should not be explicitly set. A value of
+            Ellipsis uses 'anterior' for the LH and 'posterior' for the RH.
+        '''
+        # get the roi first:
+        mask = self.mask(mask, indices=True)
+        # and the native sphere from which we will project
+        sphere = self.surface(registration)
+        # find the center of the ROI:
+        center = np.mean(sphere.coordinates[:,mask], axis=1)
+        # figure out the map direction; we use the most inflated mesh we can find:
+        if map_right is Ellipsis: map_right = 'anterior' if self.chirality == 'lh' else 'posterior'
+        if map_right is None:
+            center_right = Ellipsis
+        else:
+            map_right = map_right.lower()
+            if   map_right in ['anterior', 'ant', 'front', 'a', 'f', '+y']:
+                map_right = (1, np.argmax)
+            elif map_right in ['posterior', 'post', 'back', 'b', 'p', '-y']:
+                map_right = (1, np.argmin)
+            elif map_right in ['right', 'r', '+x']:
+                map_right = (0, np.argmax)
+            elif map_right in ['left', 'l', '-x']:
+                map_right = (0, np.argmin)
+            elif map_right in ['superior', 'sup', 's', 'top', 't', '+z']:
+                map_right = (2, np.argmax)
+            elif map_right in ['inferior', 'inf', 'i', 'bottom', 'bot', 'b', '-z']:
+                map_right = (2, np.argmin)
+            else:
+                raise ValueError('could not parse map_right argument: %s' % (map_right,))
+            (dim,fn) = map_right
+            try: infmesh = self.surface('very_inflated')
+            except Exception: infmesh = None
+            if infmesh is None:
+                try: infmesh = self.surface('inflated')
+                except Exception: infmesh = None
+            if infmesh is None:
+                warnings.warn('failed to find inflated mesh; using sphere mesh: '
+                              ' map_right argument may not be interpreted correctly')
+                infmesh = sphere
+            # find the vertex farthest in the given direction
+            center_right = sphere.coordinates[:, fn(infmesh.coordinates[dim])]
+        # okay, make the map projection:
+        p = map_projection(name=name, chirality=self.chirality,
+                           center=center, center_right=center_right, radius=radius,
+                           method=method, registration='native',
+                           pre_affine=pre_affine, post_affine=post_affine,
+                           meta_data=meta_data)
+        return p
+    def mask_flatmap(self, mask, map_right='anterior',
+                     radius=Ellipsis, method=Ellipsis,
+                     pre_affine=Ellipsis, post_affine=Ellipsis,
+                     meta_data=Ellipsis):
+        '''
+        hemi.mask_flatmap(mask) yields a flatmap of the given hemisphere that is centered on the
+          middle of the given mask.
+        
+        The following options may be given:
+          * radius (default: Ellipsis) is passed along to the map_projection() function.
+          * method (default: Ellipsis) is passed along to the map_projection() function.
+          * pre_affine (default: Ellipsis) is passed along to the map_projection() function.
+          * post_affine (default: Ellipsis) is passed along to the map_projection() function.
+          * meta_data (default: Ellipsis) is passed along to the map_projection() function.
+          * map_right (default: 'anterior') may be a direction ('anterior', 'posterior', 'inferior',
+            'superior', 'left', or 'right') which should be aligned with the right-hand-side of the
+            2D map.
+        '''
+        mp = self.mask_projection(mask, map_right=map_right, radius=radius, method=method,
+                                  pre_affine=pre_affine, post_affine=post_affine,
+                                  meta_data=meta_data)
+        return mp(self)
+
 def is_topo(obj):
     '''
     is_topo(obj) yields True if obj is a Topology object and False otherwise.

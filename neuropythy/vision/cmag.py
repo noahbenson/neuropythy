@@ -80,7 +80,7 @@ def mag_data(hemi, retinotopy='any', surface='midgray', mask=None,
     retino = retinotopy_data(hemi, retinotopy)
     # we can process the rest the mask now, including weights and ranges
     if weights is Ellipsis: weights = retino.get('variance_explained', None)
-    mask = hemi.mask(mask, indices=True)
+    mask = hemi.indices if mask is None else hemi.mask(mask, indices=True)
     (arng,erng) = (polar_angle_range, eccentricity_range)
     (ang,ecc) = (retino['polar_angle'], retino['eccentricity'])
     if pimms.is_str(arng):
@@ -129,7 +129,8 @@ def mag_data(hemi, retinotopy='any', surface='midgray', mask=None,
     def finish_mag_data(mask):
         if len(mask) == 0: return None
         # now that we have the mask, we can subsample
-        submesh = mesh.submesh(mask)
+        if np.array_equal(mask, mesh.indices): submesh = mesh
+        else:                                  submesh = mesh.submesh(mask)
         mask = mesh.tess.index(submesh.labels)
         mdata = pyr.pmap({k:(v[mask]   if pimms.is_vector(v) else
                              v[:,mask] if pimms.is_matrix(v) else
@@ -169,151 +170,149 @@ def is_mag_data(mdat):
         if k not in mdat: return False
     return True
 
-def rtmag_potential(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=Ellipsis,
-                    surface='midgray', min_weight=Ellipsis, min_eccentricity=0.75,
-                    visual_area=None, map_visual_areas=Ellipsis,
-                    visual_area_field_signs=Ellipsis,
-                    measurement_uncertainty=0.4, measurement_knob=1,
-                    magnification_knob=2, fieldsign_knob=8, edge_knob=0, rt_knob=0):
-    from neuropythy.vision.retinotopy import clean_retinotopy_potential
-    import neuropythy.optimize as op
-    f_ret = clean_retinotopy_potential(hemi, retinotopy=retinotopy, mask=mask, weight=weight,
-                                       surface=surface, min_weight=min_weight,
-                                       min_eccentricity=min_eccentricity,
-                                       visual_area=visual_area, map_visual_areas=map_visual_areas,
-                                       visual_area_field_signs=visual_area_field_signs,
-                                       measurement_uncertainty=measurement_uncertainty,
-                                       measurement_knob=measurement_knob,
-                                       magnification_knob=magnification_knob,
-                                       fieldsign_knob=fieldsign_knob, edge_knob=edge_knob)
-    # process a few additional arguments:
-    if   visual_area_field_signs is None:     visual_area_field_signs = {}
-    elif visual_area_field_signs is Ellipsis: visual_area_field_signs = {1:-1, 2:1, 3:-1, 4:1}
-    # this may be a lazy map of visual areas; we want to operate on all of them lazily, so wrap the
-    # rest of this model up in a function:
-    def make_potential(va):
-        global_field_sign = None if va is None else visual_area_field_signs.get(va)
-        f_r = f_ret if va is None else f_ret[va]
-        # The initial parameter vector is stored in the meta-data:
-        X0 = f_r.meta_data['X0']
-        # A few other handy pieces of data we can extract:
-        fieldsign = visual_area_field_signs.get(va)
-        submesh = f_r.meta_data['mesh']
-        sxyz = submesh.coordinates
-        n = submesh.vertex_count
-        (u,v) = submesh.tess.indexed_edges
-        selen = submesh.edge_lengths
-        sarea = submesh.face_areas
-        m = submesh.tess.edge_count
-        fs = submesh.tess.indexed_faces
-        neis = submesh.tess.indexed_neighborhoods
-        fangs = submesh.face_angles
-        # we're adding r and t (radial and tangential visual magnification) pseudo-parameters to
-        # each vertex; r and t are derived from the position of other vertices; our first step is
-        # to derive these values; for this we start with the parameters themselves:
-        (x,y) = [op.identity[np.arange(k, 2*n, 2)] for k in (0,1)]
-        # okay, we need to setup a bunch of least-squares solutions, one for each vertex:
-        nneis = np.asarray([len(nn) for nn in neis])
-        maxneis = np.max(nneis)
-        thts = op.atan2(y, x)
-        eccs = op.compose(op.piecewise(op.identity, ((-1e-9, 1e-9), 1)),
-                          op.sqrt(x**2 + y**2))
-        coss = x/eccs
-        sins = y/eccs
-        # organize neighbors:
-        # neis becomes a list of rows of 1st neighbor, second neighbor etc. with -1 indicating none
-        neis = np.transpose([nei + (-1,)*(maxneis - len(nei)) for nei in neis])
-        qnei = (neis > -1) # mark where there are actually neighbors
-        neis[~qnei] = 0 # we want the -1s (now 0s) to behave okay when passed to a potential index
-        # okay, walk through the neighbors setting up the least squares
-        (r, t) = (None, None)
-        for (k,q,nei) in zip(range(len(neis)), qnei.astype('float'), neis):
-            xx = x[nei] - x
-            yy = y[nei] - y
-            sd = np.sum((sxyz[:,nei].T - sxyz[:,k])**2, axis=1)
-            (xx, yy) = (xx*coss + yy*sins, yy*coss - xx*sins)
-            xterm = (op.abs(xx) * q)
-            yterm = (op.abs(yy) * q)
-            r = xterm if r is None else (r + xterm)
-            t = yterm if t is None else (t + yterm)
-        (r, t) = [uu * zinv(nneis) for uu in (r, t)]
-        # for neighboring edges, we want r and t to be similar to each other
-        f_rtsmooth = op.sum((r[v]-r[u])**2 + (t[v]-t[u])**2) / m
-        # we also want r and t to predict the radial and tangential magnification of the node, so
-        # we want to make sure that edges are the right distances away from each other based on the
-        # surface edge lengths and the distance around the vertex at the center
-        # for this we'll want some constant info about the surface edges/angles
-        # okay, in terms of the visual field coordinates of the parameters, we will want to know
-        # the angular position of each node
-        # organize face info
-        mnden   = 0.0001
-        (e,qs,qt) = np.transpose([(i,e[0],e[1]) for (i,e) in enumerate(submesh.tess.edge_faces)
-                                  if len(e) == 2 and selen[i] > mnden
-                                  if sarea[e[0]] > mnden and sarea[e[1]] > mnden])
-        (fis,q) = np.unique(np.concatenate([qs,qt]), return_inverse=True)
-        (qs,qt)   = np.reshape(q, (2,-1))
-        o       = len(fis)
-        faces   = fs[:,fis]
-        fangs   = fangs[:,fis]
-        varea   = op.signed_face_areas(faces)
-        srfangmtx = sps.csr_matrix(
-            (fangs.flatten(),
-             (faces.flatten(), np.concatenate([np.arange(o), np.arange(o), np.arange(o)]))),
-            (n, o))
-        srfangtot = flattest(srfangmtx.sum(axis=1))
-        # normalize this angle matrix by the total and put it back in the same order as faces
-        srfangmtx = zdivide(srfangmtx, srfangtot / (np.pi*2)).tocsr().T
-        nrmsrfang = np.array([sps.find(srfangmtx[k])[2][np.argsort(fs[:,k])] for k in range(o)]).T
-        # okay, now compare these to the actual angles;
-        # we also want to know, for each edge, the angle relative to the radial axis; let's start
-        # by organizing the faces into the units we compute over:
-        (fa,fb,fc) = [np.concatenate([faces[k], faces[(k+1)%3], faces[(k+2)%3]]) for k in range(3)]
-        atht = thts[fa]
-        # we only have to worry about the (a,b) and (a,c) edges now; from the perspective of a...
-        bphi = op.atan2(y[fb] - y[fa], x[fb] - x[fa]) - atht
-        cphi = op.atan2(y[fc] - y[fa], x[fc] - x[fa]) - atht
-        ((bcos,bsin),(ccos,csin)) = bccssn = [(op.cos(q),op.sin(q)) for q in (bphi,cphi)]
-        # the distance should be predicted by surface edge length times ellipse-magnification
-        # prediction; we have made uphi and vphi so that radial axis is x axis and tan axis is y
-        (ra,ta) = (op.abs(r[fa]), op.abs(t[fa]))
-        bslen = np.sqrt(np.sum((sxyz[:,fb] - sxyz[:,fa])**2, axis=0))
-        cslen = np.sqrt(np.sum((sxyz[:,fc] - sxyz[:,fa])**2, axis=0))
-        bpre_x = bcos * ra * bslen
-        bpre_y = bsin * ta * bslen
-        cpre_x = ccos * ra * cslen
-        cpre_y = csin * ta * cslen
-        # if there's a global field sign, we want to invert these predictions when the measured
-        # angle is the wrong sign
-        if global_field_sign is not None:
-            varea_f = varea[np.concatenate([np.arange(o) for _ in range(3)])] * global_field_sign
-            fspos = (op.sign(varea_f) + 1)/2
-            fsneg = 1 - fspos
-            (bpre_x,bpre_y,cpre_x,cpre_y) = (
-                bpre_x*fspos - cpre_x*fsneg, bpre_y*fspos - cpre_y*fsneg,
-                cpre_x*fspos - bpre_x*fsneg, cpre_y*fspos - bpre_y*fsneg)
-        (ax,ay,bx,by,cx,cy) = [x[fa],y[fa],x[fb],y[fb],x[fc],y[fc]]
-        (cost,sint) = [op.cos(atht), op.sin(atht)]
-        (bpre_x, bpre_y) = (bpre_x*cost - bpre_y*sint + ax, bpre_x*sint + bpre_y*cost + ay)
-        (cpre_x, cpre_y) = (cpre_x*cost - cpre_y*sint + ax, cpre_x*sint + cpre_y*cost + ay)
-        # okay, we can compare the positions now...
-        f_rt = op.sum((bpre_x-bx)**2 + (bpre_y-by)**2 + (cpre_x-cx)**2 + (cpre_y-cy)**2) * 0.5/o
-        f_vmag = f_rtsmooth # + f_rt #TODO: the rt part of this needs to be debugged
-        wgt = 0 if rt_knob is None else 2.0**rt_knob
-        f = f_r if rt_knob is None else (f_r + f_vmag) if rt_knob == 0 else (f_r + w*f_vmag)
-        md = pimms.merge(f_r.meta_data,
-                         dict(f_retinotopy=f_r, f_vmag=f_vmag, f_rtsmooth=f_rtsmooth, f_rt=f_rt))
-        object.__setattr__(f, 'meta_data', md)
-        return f
-    if pimms.is_map(f_ret):
-        return pimms.lazy_map({va: curry(make_potential, va) for va in six.iterkeys(f_ret)})
-    else: return make_potential(None)
+def parse_toopt_facevertex(to):
+    '''
+    Parses the `to` optional-argument of the functions below; returns either 'vertex' or 'face',
+    or raises an error.
+    '''
+    if to in [None,Ellipsis]: return 'vertex'
+    if not pimms.is_str(to): raise ValueError('could not parse `to` argument: %s' % (to,))
+    to = to.lower()
+    if to in ['vertices','vertex','nodes','node','points','v','vtx','vtcs','pts']: return 'vertex'
+    elif to in ['faces','f','triangles','t','tri','tris','face','triangle']: return 'face'
+    else: raise ValueError('could not parse `to` argument: %s' % (to,))
+    
+def rtmag_potential(submesh, X0, mask=Ellipsis, fieldsign=None):
+    '''
+    rtmag_potential(mesh, viscoords, ...) yields the
+      radial/tangential cortical magnification term of the potential field.
 
-def disk_vmag(hemi, retinotopy='any', to=None, **kw):
+    This should generally not be called directly and instead should be obtained from the
+    clean_retinotopy_potential() function instead.
+    '''
+    import neuropythy.optimize as op
+    if fieldsign == 0: fieldsign = None
+    # A few other handy pieces of data we can extract:
+    sxyz = submesh.coordinates
+    n = submesh.vertex_count
+    (u,v) = submesh.tess.indexed_edges
+    selen = submesh.edge_lengths
+    sarea = submesh.face_areas
+    m = submesh.tess.edge_count
+    fs = submesh.tess.indexed_faces
+    neis = submesh.tess.indexed_neighborhoods
+    fangs = submesh.face_angles
+    # we're adding r and t (radial and tangential visual magnification) pseudo-parameters to
+    # each vertex; r and t are derived from the position of other vertices; our first step is
+    # to derive these values; for this we start with the parameters themselves:
+    (x,y) = [op.identity[np.arange(k, 2*n, 2)] for k in (0,1)]
+    # okay, we need to setup a bunch of least-squares solutions, one for each vertex:
+    nneis = np.asarray([len(nn) for nn in neis])
+    maxneis = np.max(nneis)
+    thts = op.atan2(y, x)
+    eccs = op.compose(op.piecewise(op.identity, ((-1e-9, 1e-9), 1)),
+                      op.sqrt(x**2 + y**2))
+    coss = x/eccs
+    sins = y/eccs
+    # organize neighbors:
+    # neis becomes a list of rows of 1st neighbor, second neighbor etc. with -1 indicating none
+    neis = np.transpose([nei + (-1,)*(maxneis - len(nei)) for nei in neis])
+    qnei = (neis > -1) # mark where there are actually neighbors
+    neis[~qnei] = 0 # we want the -1s (now 0s) to behave okay when passed to a potential index
+    # okay, walk through the neighbors setting up the least squares
+    (r, t) = (None, None)
+    for (k,q,nei) in zip(range(len(neis)), qnei.astype('float'), neis):
+        xx = x[nei] - x
+        yy = y[nei] - y
+        sd = np.sum((sxyz[:,nei].T - sxyz[:,k])**2, axis=1)
+        (xx, yy) = (xx*coss + yy*sins, yy*coss - xx*sins)
+        xterm = (op.abs(xx) * q)
+        yterm = (op.abs(yy) * q)
+        r = xterm if r is None else (r + xterm)
+        t = yterm if t is None else (t + yterm)
+    (r, t) = [uu * zinv(nneis) for uu in (r, t)]
+    # for neighboring edges, we want r and t to be similar to each other
+    f_rtsmooth = op.sum((r[v]-r[u])**2 + (t[v]-t[u])**2) / m
+    # we also want r and t to predict the radial and tangential magnification of the node, so
+    # we want to make sure that edges are the right distances away from each other based on the
+    # surface edge lengths and the distance around the vertex at the center
+    # for this we'll want some constant info about the surface edges/angles
+    # okay, in terms of the visual field coordinates of the parameters, we will want to know
+    # the angular position of each node
+    # organize face info
+    mnden   = 0.0001
+    (e,qs,qt) = np.transpose([(i,e[0],e[1]) for (i,e) in enumerate(submesh.tess.edge_faces)
+                              if len(e) == 2 and selen[i] > mnden
+                              if sarea[e[0]] > mnden and sarea[e[1]] > mnden])
+    (fis,q) = np.unique(np.concatenate([qs,qt]), return_inverse=True)
+    (qs,qt)   = np.reshape(q, (2,-1))
+    o       = len(fis)
+    faces   = fs[:,fis]
+    fangs   = fangs[:,fis]
+    varea   = op.signed_face_areas(faces)
+    srfangmtx = sps.csr_matrix(
+        (fangs.flatten(),
+         (faces.flatten(), np.concatenate([np.arange(o), np.arange(o), np.arange(o)]))),
+        (n, o))
+    srfangtot = flattest(srfangmtx.sum(axis=1))
+    # normalize this angle matrix by the total and put it back in the same order as faces
+    srfangmtx = zdivide(srfangmtx, srfangtot / (np.pi*2)).tocsr().T
+    nrmsrfang = np.array([sps.find(srfangmtx[k])[2][np.argsort(fs[:,k])] for k in range(o)]).T
+    # okay, now compare these to the actual angles;
+    # we also want to know, for each edge, the angle relative to the radial axis; let's start
+    # by organizing the faces into the units we compute over:
+    (fa,fb,fc) = [np.concatenate([faces[k], faces[(k+1)%3], faces[(k+2)%3]]) for k in range(3)]
+    atht = thts[fa]
+    # we only have to worry about the (a,b) and (a,c) edges now; from the perspective of a...
+    bphi = op.atan2(y[fb] - y[fa], x[fb] - x[fa]) - atht
+    cphi = op.atan2(y[fc] - y[fa], x[fc] - x[fa]) - atht
+    ((bcos,bsin),(ccos,csin)) = bccssn = [(op.cos(q),op.sin(q)) for q in (bphi,cphi)]
+    # the distance should be predicted by surface edge length times ellipse-magnification
+    # prediction; we have made uphi and vphi so that radial axis is x axis and tan axis is y
+    (ra,ta) = (op.abs(r[fa]), op.abs(t[fa]))
+    bslen = np.sqrt(np.sum((sxyz[:,fb] - sxyz[:,fa])**2, axis=0))
+    cslen = np.sqrt(np.sum((sxyz[:,fc] - sxyz[:,fa])**2, axis=0))
+    bpre_x = bcos * ra * bslen
+    bpre_y = bsin * ta * bslen
+    cpre_x = ccos * ra * cslen
+    cpre_y = csin * ta * cslen
+    # if there's a global field sign, we want to invert these predictions when the measured
+    # angle is the wrong sign
+    if fieldsign is not None:
+        varea_f = varea[np.concatenate([np.arange(o) for _ in range(3)])] * fieldsign
+        fspos = (op.sign(varea_f) + 1)/2
+        fsneg = 1 - fspos
+        (bpre_x,bpre_y,cpre_x,cpre_y) = (
+            bpre_x*fspos - cpre_x*fsneg, bpre_y*fspos - cpre_y*fsneg,
+            cpre_x*fspos - bpre_x*fsneg, cpre_y*fspos - bpre_y*fsneg)
+    (ax,ay,bx,by,cx,cy) = [x[fa],y[fa],x[fb],y[fb],x[fc],y[fc]]
+    (cost,sint) = [op.cos(atht), op.sin(atht)]
+    (bpre_x, bpre_y) = (bpre_x*cost - bpre_y*sint + ax, bpre_x*sint + bpre_y*cost + ay)
+    (cpre_x, cpre_y) = (cpre_x*cost - cpre_y*sint + ax, cpre_x*sint + cpre_y*cost + ay)
+    # okay, we can compare the positions now...
+    f_rt = op.sum((bpre_x-bx)**2 + (bpre_y-by)**2 + (cpre_x-cx)**2 + (cpre_y-cy)**2) * 0.5/o
+    f_vmag = f_rtsmooth # + f_rt #TODO: the rt part of this needs to be debugged
+    object.__setattr__(f_vmag, 'meta_data', pyr.m(f_rtsmooth=f_rtsmooth, f_rt=f_rt))
+    return f_vmag
+
+def disk_vmag(hemi, retinotopy='any', yields='axes', min_cod=0, **kw):
     '''
     disk_vmag(mesh) yields the visual magnification based on the projection of disks on the cortical
       surface into the visual field.
 
-    All options accepted by mag_data() are accepted by disk_vmag().
+    All options accepted by mag_data() are accepted by disk_vmag(). In addition, the parameters
+    yields and min_cod may be provided. The min_cod parameter indicates the minimum coefficient of
+    determination (r-squared), calculated between the fitted-ellipse and the vetex neighbor's raw
+    positions, that is needed to be included in the returrn values. The yields option determines 
+    what the return value should be. The default value is 'axes', but the following values are
+    accepted:
+      * 'axes' indicates that the return value should be an (n x 2 x 2) array where n is the number
+        of vertices in the mesh or cortex; each 2x2 matrix is the [rad_x rad_y; tan_x tan_y] axes.
+      * 'cod' indicates that only the coefficient of determination for the least-squares fit should
+        be returned.
+      * 'all' indicates that the return value should be (axes, cod).
+    In all cases, nans indicate vertices that were not part of the retinotopy mask, that did not
+    have CODs above the threshold, or that had too few neighbors to fit an ellipse.
     '''
     mdat = mag_data(hemi, retinotopy=retinotopy, **kw)
     if pimms.is_vector(mdat): return tuple([face_vmag(m, to=to) for m in mdat])
@@ -359,14 +358,14 @@ def disk_vmag(hemi, retinotopy='any', to=None, **kw):
     irs  = zinv(vrs)
     coss = vxy[:,0] * irs
     sins = vxy[:,1] * irs
-    # rotating each ellipse by negative-theta gives us x-radial and y=tangential
+    # rotating each ellipse by negative-theta gives us x=radial and y=tangential
     cels = (coss * ellipses.T)
     sels = (sins * ellipses.T)
     rots = np.transpose([cels[0] + sels[1], cels[1] - sels[0]], [1,2,0])
     # now we fit the best rad/tan-oriented ellipse we can with the given center
     rsrt = np.sqrt(np.sum(rots**2, axis=2)).T
     (csrt,snrt) = zinv(rsrt) * rots.T
-    # ... a*cos(rots) + b*sin(rots) ~= r(rots) where a = radial vmag and b = tangential vmag
+    # ... (a*cos(rots))**2 + (b*sin(rots))**2 ~= r(rots) where a = radial vmag and b = tan vmag
     axes = []
     cods = []
     idxs = []
@@ -379,19 +378,27 @@ def disk_vmag(hemi, retinotopy='any', to=None, **kw):
         mudst = np.sqrt(np.sum(np.mean([x, y], axis=1)**2))
         if mudst > np.min(r): continue
         # okay, fit an ellipse...
-        fs = np.transpose([c,s])
+        fs = np.transpose([c,s])**2
         try:
-            (ab,rss,rnk,svs) = np.linalg.lstsq(fs, r, rcond=None)
-            if len(rss) == 0 or rnk < 2 or np.min(svs/np.sum(svs)) < 0.01: continue
+            (ab,rss,rnk,svs) = np.linalg.lstsq(fs, r**2, rcond=None)
+            ab = np.sqrt(np.abs(ab))
+            if len(rss) == 0 or rnk < 2: continue # or np.min(svs/np.sum(svs)) < 0.01: continue
+            cod = 1 - rss[0]*zinv(np.sum(r**2))
+            if cod < min_cod: continue
             axes.append(np.abs(ab) * irad)
-            cods.append(1 - rss[0]*zinv(np.sum(r**2)))
+            cods.append(cod)
             idxs.append(i)
         except Exception as e: continue
     (axes, cods, idxs) = [np.asarray(u) for u in (axes, cods, idxs)]
-    return (idxs, axes, cods)
-    #return res
-    # convert to the appropriate type according to the to param
-    #raise NotImplementedError()
+    # make the return value; this is a 2x2 matrix for each vertex
+    if yields != 'cod':
+        raxes = np.full((n, 2), np.nan)
+        raxes[idxs] = axes
+    if yields == 'axes': return raxes
+    rcods = np.full(n, np.nan)
+    rcods[idxs] = cods
+    if yields == 'cod': return rcods
+    return (raxes, rcods)
 
 def face_vmag(hemi, retinotopy='any', to=None, **kw):
     '''
@@ -410,14 +417,32 @@ def face_vmag(hemi, retinotopy='any', to=None, **kw):
           * 'vertices': returns a property of the visual magnification value of each vertex, as
             determined by averaging the magnification 
     '''
-    mdat = mag_data(hemi, retinotopy=retinotopy, **kw)
-    if pimms.is_vector(mdat): return tuple([face_vmag(m, to=to) for m in mdat])
-    elif pimms.is_map(mdat.keys(), 'int'):
-        return pimms.lazy_map({k: curry(lambda k: face_vmag(mdat[k], to=to), k)
-                               for k in six.iterkeys(mdat)})
-    #TODO: implement the face_vmag calculation using mdat
-    # convert to the appropriate type according to the to param
-    raise NotImplementedError()
+    to = parse_toopt_facevertex(to)
+    if pimms.is_vector(hemi):
+        return tuple([face_vmag(m, to=to) for m in mdat])
+    if not is_mag_data(hemi):
+        if pimms.is_map(hemi) and all(pimms.is_int(k) for k in six.iterkeys(hemi)):
+            m = {k: curry(lambda k: face_vmag(mdat[k], to=to), k) for k in ks}
+            return pimms.lmap(m)
+        else:
+            return face_vmag(mag_data(hemi, retinotopy=retinotopy, **kw), to=to)
+    mdat = hemi
+    # Okay, we have a single mag-data dict; get the face visual and cortical areas:
+    mesh = mdat['mesh']
+    vismesh = mesh.copy(coordinates=mdat['visual_coordinates'])
+    face_vmags = zdivide(vismesh.face_areas, mesh.face_areas, null=0)
+    # convert these if the to argument so-requires it:
+    if to == 'face': return face_vmags
+    # possible #TODO here: super-tesselate the mesh and calculate the actual visual vertex areas
+    # then divide by the vertex cortical surface ares to do this properly.
+    vmag = np.zeros(mesh.vertex_count)
+    for (vtx,faces) in six.iteritems(mdat['submesh'].tess.vertex_face_index):
+        tmp = face_vmags[list(faces)]
+        ii = mesh.tess.index(vtx)
+        jj = np.where(np.isfinite(tmp))[0]
+        jj = jj[tmp[jj] > 0]
+        if len(jj) > 0: vmag[ii] = np.mean(tmp[jj])
+    return vmag
 
 @pimms.immutable
 class FieldOfView(object):
@@ -425,7 +450,8 @@ class FieldOfView(object):
     FieldOfView is a class that represents and calculates the field of view in a cortical area.
     '''
     def __init__(self, angle, eccen, sigma,
-                 scale=None, weight=None, search_scale=3.0, bins=6):
+                 scale=None, weight=None, search_scale=3.0, bins=6,
+                 normalize_weights=True, weights_method='height'):
         self.polar_angle = angle
         self.eccentricity = eccen
         self.sigma = sigma
@@ -433,6 +459,8 @@ class FieldOfView(object):
         self.bins = bins
         self.search_scale = search_scale
         self.scale = scale
+        self.normalize_weights = normalize_weights
+        self.weights_method = weights_method
     @pimms.param
     def polar_angle(pa):  return pimms.imm_array(pa)
     @pimms.param
@@ -442,10 +470,18 @@ class FieldOfView(object):
     @pimms.param
     def scale(s): return s
     @pimms.param
+    def normalize_weights(nw): return bool(nw)
+    @pimms.param
+    def weights_method(wm):
+        if wm is None or wm is Ellipsis: return 'height'
+        wm = wm.lower()
+        if wm in ['height', 'h', 'z']: return 'height'
+        elif wm in ['volume', 'vol', 'v']: return 'volume'
+        else: raise ValueError('unrecognized weights_method: %s' % (wm,))
+    @pimms.param
     def weight(w):
         if w is None: return None
         w = np.array(w)
-        w /= np.sum(w)
         w.setflags(write=False)
         return w
     @pimms.param
@@ -461,11 +497,15 @@ class FieldOfView(object):
         y = eccentricity * np.sin(theta)
         return pimms.imm_array(np.transpose([x,y]))
     @pimms.value
-    def _weight(weight, polar_angle):
-        if weight is None: weight = np.ones(len(polar_angle))
-        weight = weight / np.sum(weight)
-        weight.setflags(write=False)
-        return weight
+    def _weight(weight, polar_angle, normalize_weights, sigma, weights_method):
+        if weight is None:
+            weight = np.ones(len(polar_angle))
+            normalize_weights = True
+        if normalize_weights:
+            weight = weight / np.sum(weight)
+        if weights_method == 'volume':
+            weight = weight / (2 * np.pi * sigma)
+        return pimms.imm_array(weight)
     @pimms.value
     def sigma_bin_walls(sigma, bins):
         import scipy, scipy.cluster, scipy.cluster.vq as vq
@@ -501,28 +541,29 @@ class FieldOfView(object):
         sig = self.sigma
         wts = self._weight
         res = np.zeros(x.shape[0])
-        c1 = 1.0 / np.sqrt(2.0 * np.pi)
         for (sh, qd, bi) in zip(self.spatial_hashes, self.bin_query_distances, self.sigma_bins):
             neis = sh.query_ball_point(x, qd)
             res += [
-                np.sum(wts[ii] * c1/s * np.exp(-0.5 * d2/s**2))
+                np.sum(w * np.exp(-0.5 * d2/s**2))
                 for (ni,pt) in zip(neis,x)
                 for ii in [bi[ni]]
-                for (s,d2) in [(sig[ii], np.sum((crd[ii] - pt)**2, axis=1))]]
+                for (w,s,d2) in [(wts[ii], sig[ii], np.sum((crd[ii] - pt)**2, axis=1))]]
         return res
-def field_of_view(mesh, retinotopy='any', mask=None, search_scale=3.0, bins=6):
+def field_of_view(mesh, retinotopy='any', mask=None, search_scale=3.0, bins=6, weights=Ellipsis,
+                  normalize_weights=True, weights_method='height'):
     '''
     field_of_view(obj) yields a field-of-view function for the given vertex-set object or mapping of
       retinotopy data obj.
 
     The field-of-view function is a measurement of how much total pRF weight there is at each point
     in the visual field; essentially it is the sum of all visual-field Gaussian pRFs, where the
-    Gaussian's are normalized both by the pRF size (i.e., each pRF is a 2D normal distribution whose
+    Gaussians are normalized both by the pRF size (i.e., each pRF is a 2D normal distribution whose
     center comes from its polar angle and eccentricity and whose sigma parameter is the pRF radius)
     and the weight (if any weight such as the variance explained is included in the retinotopy data,
     then the normal distributions are multiplied by this weight, otherwise weights are considered to
     be uniform). Note that the weights are normalized by their sum, so the resulting field-of-view
-    function should be a valid probability distribution over the visual field.
+    function should be a valid probability distribution over the visual field. To disable this,
+    you can use the nomalize_weights=False option.
 
     The returned object fov = field_of_view(obj) is a special field-of-view object that can be
     called as fov(x, y) or fov(coord) where x and y may be lists or values and coord may be a 2D
@@ -540,6 +581,13 @@ def field_of_view(mesh, retinotopy='any', mask=None, search_scale=3.0, bins=6):
       * bins (default: 6) specifies the number of bins to divide the pRFs into based on the radius
         value; this is used to prune the search of pRFs that overlap a point to just those
         reasonanly close to the point in question
+      * weights (default: Ellipsis) specifies the weights that should be used. Ellipsis inidicates
+        that whatever weights are found in the retinotopy data should be used and none should be
+        used otherwise.
+      * normalize_weights (default: True) may be set to False to prevent normalization of the
+        weights. The default value of True normalizes the weights to be equal to 1.
+      * weights_method (default: 'height') specifies whether the weights should be considered the
+        heights or the volumes of the Gaussians pRFs.
     '''
     # First, find the retino data
     if pimms.is_str(retinotopy):
@@ -551,11 +599,17 @@ def field_of_view(mesh, retinotopy='any', mask=None, search_scale=3.0, bins=6):
     if 'radius' not in retino:
         raise ValueError('Retinotopy data must contain a radius, sigma, or size value')
     sig = retino['radius']
-    wgt = next((retino[q] for q in ('variance_explained', 'weight') if q in retino), None)
+    if weights is Ellipsis or weights is True:
+        wgt = next((retino[q] for q in ('variance_explained', 'weight') if q in retino), None)
+    elif weights is None or weights is False:
+        wgt = None
+    else:
+        wgt = mesh.property(weights)
     # Get the indices we care about
     ii = geo.to_mask(mesh, mask, indices=True)
     return FieldOfView(ang[ii], ecc[ii], sig[ii], weight=wgt[ii],
-                       search_scale=search_scale, bins=bins)
+                       search_scale=search_scale, bins=bins,
+                       normalize_weights=normalize_weights, weights_method=weights_method)
 
 @pimms.immutable
 class ArealCorticalMagnification(object):
