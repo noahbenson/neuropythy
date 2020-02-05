@@ -779,7 +779,7 @@ def image_interpolate(img, points, affine=None, method=None, fill=0, dtype=None,
     # now find the nearest voxel centers...
     # if we are doing nearest neighbor; we're basically done already:
     image = np.asarray(image)
-    imsh = np.reshape(image.shape, (3,1))
+    imsh = np.reshape(image.shape[:3], (3,1))
     if method == 'nearest':
         ijk = np.asarray(np.round(xyz), dtype=np.int)
         ok = np.all(ijk >= 0, axis=0) & np.all(ijk < imsh, axis=0)
