@@ -78,6 +78,7 @@ def mag_data(hemi, retinotopy='any', surface='midgray', mask=None,
     mesh = geo.to_mesh((hemi, surface))
     # First, find the retino data
     retino = retinotopy_data(hemi, retinotopy)
+    retino = dict(retino)
     # we can process the rest the mask now, including weights and ranges
     if weights is Ellipsis: weights = retino.get('variance_explained', None)
     mask = hemi.indices if mask is None else hemi.mask(mask, indices=True)
@@ -322,6 +323,7 @@ def disk_vmag(hemi, retinotopy='any', yields='axes', min_cod=0, **kw):
     # for disk cmag we start by making sets of circular points around each vertex
     msh  = mdat['submesh']
     n    = msh.vertex_count
+    N    = hemi.vertex_count
     vxy  = mdat['visual_coordinates'].T
     sxy  = msh.coordinates.T
     neis = msh.tess.indexed_neighborhoods
@@ -389,13 +391,13 @@ def disk_vmag(hemi, retinotopy='any', yields='axes', min_cod=0, **kw):
             cods.append(cod)
             idxs.append(i)
         except Exception as e: continue
-    (axes, cods, idxs) = [np.asarray(u) for u in (axes, cods, idxs)]
+    (axes,cods,idxs) = [np.asarray(u) for u in (axes, cods, idxs)]
     # make the return value; this is a 2x2 matrix for each vertex
     if yields != 'cod':
-        raxes = np.full((n, 2), np.nan)
+        raxes = np.full((N, 2), np.nan)
         raxes[idxs] = axes
     if yields == 'axes': return raxes
-    rcods = np.full(n, np.nan)
+    rcods = np.full(N, np.nan)
     rcods[idxs] = cods
     if yields == 'cod': return rcods
     return (raxes, rcods)
