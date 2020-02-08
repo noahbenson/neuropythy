@@ -57,7 +57,7 @@ def calc_subject(argv, worklog):
 @pimms.calc('atlas_map', 'atlas_subject')
 def calc_atlases(worklog, atlas_subject_id='fsaverage'):
     '''
-    cacl_atlases finds all available atlases in the possible subject directories of the given atlas
+    calc_atlases finds all available atlases in the possible subject directories of the given atlas
     subject.
 
     In order to be a template, it must either be a collection of files (either mgh/mgz or FreeSurfer
