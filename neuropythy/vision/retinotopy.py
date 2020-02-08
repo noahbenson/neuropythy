@@ -2506,4 +2506,3 @@ def visual_field_mesh(max_eccentricity=12, hemi='lr', resolution=0.18):
     xy = np.asarray([x,y])
     tt = Delaunay(xy.T)
     return mesh(tt.simplices.T, xy)
-
