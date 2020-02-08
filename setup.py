@@ -1,7 +1,7 @@
 #! /usr/bin/env python
 
-import os
-from setuptools import setup
+import os, numpy as np
+from setuptools import (setup, Extension)
 
 # Deduce the version from the __init__.py file:
 version = None
@@ -61,6 +61,9 @@ setup(
               'neuropythy.datasets',
               'neuropythy.commands',
               'neuropythy.test'],
+    # not part of library; just included as an example of how this would work
+    #ext_modules=[Extension('neuropythy.c_label', sources=['src/c_label.c'],
+    #                       include_dirs=[np.get_include()])],
     include_package_data=True,
     package_data={
         '': ['LICENSE.txt',
