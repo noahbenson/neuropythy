@@ -281,9 +281,9 @@ def calc_images(subject, atlas_properties, image_template, worklog, volume_expor
     hemis = list(six.iterkeys(next(six.itervalues(next(six.itervalues(atlas_properties))))))
     addr = pimms.lmap({h: curry(lambda h: subject.hemis[h].image_address(image_template), h)
                        for h in hemis})
-    worklog('Preparing images...')
+    worklog('Preparing Images...')
     def _make_images(vd, m):
-        worklog('Constructing %s images...' % (m,))
+        #worklog('Constructing %s images...' % (m,))
         dat = {h: vd[h][m] for h in six.iterkeys(vd)}
         lk = next(iter(sorted(k for k in six.iterkeys(dat) if k.lower().startswith('lh'))), None)
         rk = next(iter(sorted(k for k in six.iterkeys(dat) if k.lower().startswith('rh'))), None)
