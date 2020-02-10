@@ -2186,9 +2186,9 @@ def clean_retinotopy_potential(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=
     ecc0    = np.sqrt(x0**2 + y0**2)
     ii      = np.where(ecc0 > min_eccentricity)[0]
     minw    = (0                             if min_weight is None          else
-               np.percentile(wght[ii], 5)    if min_weight is Ellipsis      else
                min_weight                    if pimms.is_number(min_weight) else
                0                             if np.std(wght[ii]) < 0.00001  else
+               np.percentile(wght[ii], 5)    if min_weight is Ellipsis      else
                np.percentile(wght[ii], min_weight[0]))
     ii      = np.intersect1d(ii, np.where(wght > minw)[0])
     wsum    = np.sum(wght[ii])
