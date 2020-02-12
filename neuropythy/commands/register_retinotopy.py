@@ -528,6 +528,21 @@ def save_surface_files(note, error, registrations, subject,
             flnm = os.path.join(path, h + '.' + registration_name + '.sphere.reg')
             fsio.write_geometry(flnm, pmesh.coordinates.T, pmesh.tess.faces.T)
     return {'surface_files': tuple(files)}
+def get_subject_image(subject):
+    try: im = subject.images['brain']
+    except Exception: im = None
+    if im is None:
+        try: im = subject.images['ribbon']
+        except Exception: im = None
+    if im is None:
+        try: im = subject.images['original']
+        except Exception: im = None
+    if im is None:
+        raise ValueError('Subject %s is missing files: no known images' % (subject.path,))
+    return im
+def get_subject_affine(subject):
+    im = get_subject_image(subject)
+    return im.affine
 @pimms.calc('volume_files')
 def save_volume_files(note, error, registrations, subject,
                       no_vol_export, volume_format, volume_path,
@@ -540,7 +555,7 @@ def save_volume_files(note, error, registrations, subject,
     if no_vol_export: return {'volume_files': ()}
     volume_format = volume_format.lower()
     # make an exporter for properties:
-    affmatrix = subject.images['brain'].affine
+    affmatrix = get_subject_affine(subject)
     if volume_format in ['mgh', 'mgz', 'auto', 'automatic', 'default']:
         volume_format = 'mgh' if volume_format == 'mgh' else 'mgz'
         def export(flnm, d):
@@ -567,7 +582,7 @@ def save_volume_files(note, error, registrations, subject,
     hemis = [registrations[h]['predicted_mesh'] if h in registrations else None
              for h in ['lh', 'rh']]
     note('Addressing image...')
-    im = subject.images['brain']
+    im = get_subject_image(subject)
     addr = (subject.lh.image_address(im), subject.rh.image_address(im))
     for (pname,tag) in zip(['polar_angle', 'eccentricity', 'visual_area', 'radius'],
                            [angle_tag, eccen_tag, label_tag, radius_tag]):
@@ -575,7 +590,7 @@ def save_volume_files(note, error, registrations, subject,
         dat = tuple([None if h is None else h.prop(pname) for h in hemis])
         (mtd,dt) = ('nearest',np.int32) if pname == 'visual_area' else ('linear',np.float32)
         note('Constructing %s image...' % pname)
-        img = subject.cortex_to_image(dat, image_clear(subject.images['brain']),
+        img = subject.cortex_to_image(dat, image_clear(im),
                                       method=mtd, dtype=dt, address=addr)
         flnm = export(os.path.join(path, tag), img)
         files.append(flnm)
