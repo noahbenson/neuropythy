@@ -35,6 +35,7 @@ cmap_eccentricity = _matplotlib_load_error
 cmap_log_eccentricity = _matplotlib_load_error
 cmap_radius = _matplotlib_load_error
 cmap_log_radius = _matplotlib_load_error
+cmap_cmag = _matplotlib_load_error
 cmap_log_cmag = _matplotlib_load_error
 cmap_eccenflat = _matplotlib_load_error
 label_cmap = _matplotlib_load_error
