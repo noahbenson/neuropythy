@@ -635,17 +635,17 @@ def images_from_filemap(fmap):
     '''
     ims = {}
     raw_images = fmap.data_tree.raw_image
-    def _make_imm_mask(arr, val, eq=True):
-        rib = raw_images['ribbon']
+    def _make_imm_mask(rib, val, eq=True):
+        arr = np.asarray(rib.dataobj)
         arr = (arr == val) if eq else (arr != val)
         arr.setflags(write=False)
         return fsmgh.MGHImage(arr, rib.affine, rib.header)
     # start with the ribbon:
-    ims['lh_gray_mask']  = lambda:_make_imm_mask(raw_images['ribbon'].dataobj, 3)
-    ims['lh_white_mask'] = lambda:_make_imm_mask(raw_images['ribbon'].dataobj, 2)
-    ims['rh_gray_mask']  = lambda:_make_imm_mask(raw_images['ribbon'].dataobj, 42)
-    ims['rh_white_mask'] = lambda:_make_imm_mask(raw_images['ribbon'].dataobj, 41)
-    ims['brain_mask']    = lambda:_make_imm_mask(raw_images['ribbon'].dataobj, 0, False)
+    ims['lh_gray_mask']  = lambda:_make_imm_mask(raw_images['ribbon'], 3)
+    ims['lh_white_mask'] = lambda:_make_imm_mask(raw_images['ribbon'], 2)
+    ims['rh_gray_mask']  = lambda:_make_imm_mask(raw_images['ribbon'], 42)
+    ims['rh_white_mask'] = lambda:_make_imm_mask(raw_images['ribbon'], 41)
+    ims['brain_mask']    = lambda:_make_imm_mask(raw_images['ribbon'], 0, False)
     # merge in with the typical images
     return pimms.merge(fmap.data_tree.image, pimms.lazy_map(ims))
 def subject_from_filemap(fmap, name=None, meta_data=None, check_path=True):
@@ -1068,7 +1068,7 @@ def save_freesurfer_annot(filename, obj, index=None):
     lbls = [e.id for e in es]
     fsio.write_annot(filename, ris, clrs, nms, fill_ctab=True)
     return filename
-    
+
 # A few annot labels we can just save:
 brodmann_label_index = label_index(
     np.arange(15),
