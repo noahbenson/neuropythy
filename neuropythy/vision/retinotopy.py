@@ -148,7 +148,7 @@ _default_polar_angle_axis = {
     'polarangle':  'UVM',
     'polang':      'UVM',
     'angle':       'RHM',
-    'ang':         'RHM'
+    'ang':         'RHM',
     'polar_theta': 'UVM',
     'polartheta':  'UVM',
     'poltht':      'UVM',
