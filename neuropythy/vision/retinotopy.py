@@ -134,31 +134,42 @@ def extract_retinotopy_argument(obj, retino_type, arg, default='any'):
 
 _default_polar_angle_units = {
     'polar_angle': 'deg',
-    'polar angle': 'deg',
-    'angle':       'rad',
-    'theta':       'rad',
+    'polarangle':  'deg',
     'polang':      'deg',
-    'ang':         'rad'}
+    'angle':       'deg',
+    'ang':         'deg',
+    'polar_theta': 'rad',
+    'polartheta':  'rad',
+    'poltht':      'rad',
+    'theta':       'rad',
+    'tht':         'rad'}
 _default_polar_angle_axis = {
     'polar_angle': 'UVM',
-    'polar angle': 'UVM',
-    'angle':       'RHM',
-    'theta':       'RHM',
+    'polarangle':  'UVM',
     'polang':      'UVM',
-    'ang':         'RHM'}
+    'angle':       'RHM',
+    'ang':         'RHM'
+    'polar_theta': 'UVM',
+    'polartheta':  'UVM',
+    'poltht':      'UVM',
+    'theta':       'RHM',
+    'tht':         'RHM'}
 _default_polar_angle_dir = {
     'polar_angle': 'cw',
-    'polar angle': 'cw',
-    'angle':       'ccw',
-    'theta':       'ccw',
+    'polarangle':  'cw',
     'polang':      'cw',
-    'ang':         'ccw'}
+    'angle':       'ccw',
+    'ang':         'ccw',
+    'polar_theta': 'cw',
+    'polartheta':  'cw',
+    'poltht':      'cw',
+    'theta':       'ccw',
+    'tht':         'ccw'}
 _default_eccentricity_units = {
     'eccentricity': 'deg',
     'eccen':        'deg',
-    'rho':          'rad',
     'ecc':          'deg',
-    'radius':       'rad'}
+    'rho':          'rad'}
 _default_x_units = {
     'x':            'deg',
     'longitude':    'deg',
@@ -186,8 +197,10 @@ _retinotopy_style_fns = {
     'visual':       lambda t,e: (_clean_angle_deg(90.0 - 180.0/np.pi * t), e),
     'visual-rad':   lambda t,e: (_clean_angle_rad(np.pi/2 - t), e * np.pi/180.0),
     'spherical':    lambda t,e: (_clean_angle_rad(t), e*np.pi/180.0),
+    'spherical-deg':lambda t,e: (_clean_angle_deg(180.0/np.pi*t), e),
     'standard':     lambda t,e: (_clean_angle_rad(t), e),
     'cartesian':    lambda t,e: (e * np.cos(t), e * np.sin(t)),
+    'cartesian-rad':lambda t,e: (np.pi/180.0 * e * np.cos(t), np.pi/180.0 * e * np.sin(t)),
     'geographical': lambda t,e: (e * np.cos(t), e * np.sin(t)),
     'complex':      lambda t,e: e * np.exp(t * 1j),
     'complex-rad':  lambda t,e: np.pi/180.0 * e * np.exp(t * 1j),
