@@ -1540,7 +1540,8 @@ def register_retinotopy(hemi,
     return m if yield_imap else m['predicted_mesh']
 
 # Tools for registration-free retinotopy prediction:
-def predict_retinotopy(sub, template='benson14', registration='fsaverage', sym_angle=True):
+def predict_retinotopy(sub, template='benson14', registration='fsaverage', sym_angle=True,
+                       names='files'):
     '''
     predict_retinotopy(subject) yields a pair of dictionaries each with four keys: angle, eccen,
       sigma, and varea. Each of these keys maps to a numpy array with one entry per vertex.  The
@@ -1557,7 +1558,16 @@ def predict_retinotopy(sub, template='benson14', registration='fsaverage', sym_a
         yields the symmetric retinotopy, meaning that in LH and RH the polar angles range from 0 
         (UVM) to 180 (LVM). If sym_angle is set to False, then the RH values will be negative and
         the LH values will be positive.
+      * names (default: 'files') specifies whether the returned property map should use short keys
+        appropriate for inclusion in traditional filenames ('files') or longer keys appropriate for
+        use as properties and with other neuropythy functions ('properties'). For historical
+        reasons, this is 'files' by default, but at some future version may change to 'properties'.
+        "files":      "angle",       "eccen",        "sigma",  "varea"
+        "properties": "polar_angle", "eccentricity", "radius", "visual_area"
     '''
+    names = names.lower()
+    if names not in ['files', 'properties']:
+        raise ValueError('bad argument for names: %s' % (names,))
     template = template.lower()
     retino_tmpls = predict_retinotopy.retinotopy_templates[registration]
     hemis = ['lh','rh'] if registration == 'fsaverage' else ['sym']
@@ -1622,6 +1632,10 @@ def predict_retinotopy(sub, template='benson14', registration='fsaverage', sym_a
         a[bad] = 0
         e[bad] = 0
         tpl.append(pimms.assoc(pimms.dissoc(dat, 'x', 'y'), angle=a, eccen=e))
+    if names == 'properties':
+        # convert the keys of each map:
+        tr = dict(angle='polar_angle', eccen='eccentricity', sigma='radius', varea='visual_area')
+        tpl = [{tr[k]:v for (k,v) in six.iteritems(u)} for u in tpl]
     return tpl[0] if len(tpl) == 1 else tuple(tpl)
 predict_retinotopy.retinotopy_templates = pyr.m(fsaverage={}, fsaverage_sym={})
 
