@@ -8,6 +8,7 @@ import nibabel                      as nib
 import nibabel.freesurfer.io        as fsio
 import nibabel.freesurfer.mghformat as fsmgh
 import pyrsistent                   as pyr
+from   six.moves                import collections_abc as collections
 import os, warnings, six, pimms
 
 from .. import geometry as geo
@@ -160,7 +161,7 @@ def is_freesurfer_subject_path(path):
     if   is_pseudo_path(path): return all(path.find(d) is not None for d in needed)
     elif os.path.isdir(path): return all(os.path.isdir(os.path.join(path, d)) for d in needed)
     else:                     return False
-
+  
 def find_subject_path(sub, check_path=True):
     '''
     find_subject_path(sub) yields the full path of a Freesurfer subject with the name given by the
@@ -803,6 +804,95 @@ def tkr_vox2ras(img, zooms=None):
                        [  0, -dR,   0,  nR],
                        [  0,   0,   0,   1]])
 
+class SubjectDir(collections.Mapping):
+    '''
+    SubjectsDir objects are dictionary-like objects that represent a particular subject directory.
+    They satisfy their queries (such as `'bert' in spath`) by querying the filesystem itself.
+
+    For more information see the subjects_path function.
+    '''
+    def __init__(self, path, bids=False, filter=None, meta_data=None, check_path=True):
+        path = os.path.expanduser(os.path.expandvars(path))
+        self.path = os.path.abspath(path)
+        if not os.path.isdir(self.path): raise ValueError('given path is not a directory')
+        self.bids = bool(bids)
+        self.options = dict(filter=filter, meta_data=meta_data, check_path=bool(check_path))
+    def __contains__(self, sub):
+        # first check the item straight-up:
+        sd = os.path.join(self.path, sub)
+        if os.path.isdir(sd) and (not check_path or is_freesurfer_subject_path(sd)): return True
+        if not bids: return False
+        if sub.startswith('sub-'): sd = os.path.join(self.path, sub[4:])
+        else: sd = os.path.join(self.path, 'sub-' + sub)
+        return os.path.isdir(sd) and (not check_path or is_freesurfer_subject_path(sd))
+    def _get_subject(self, sd, name):
+        opts = dict(**self.options)
+        opts['name'] = name
+        return subject(sd, **opts)
+    def __getitem__(self, sub):
+        check_path = self.options['check_path']
+        if self.bids:
+            if sub.startswith('sub-'): (sub, name) = (sub, name[4:])
+            else: (sub,name) = ('sub-' + sub, sub)
+        else: name = sub
+        sd = os.path.join(self.path, sub)
+        if os.path.isdir(sd) and (not check_path or is_freesurfer_subject_path(sd)):
+            return self._get_subject(sd, name)
+        if not bids: return False
+        # try without the 'sub-' (e.g. for fsaverage)
+        sub = name
+        sd = os.path.join(self.path, sub)
+        if os.path.isdir(sd) and (not check_path or is_freesurfer_subject_path(sd)):
+            return self._get_subject(sd, name)
+        raise KeyError(sub)
+    def asmap(self):
+        check_path = self.options['check_path']
+        # search through the subjects in this directory
+        res = {}
+        for sub in os.listdir(self.path):
+            if self.bids and sub.startswith('sub-'): (sub,name) = (sub,sub[4:])
+            else: name = sub
+            sdir = os.path.join(self.path, sub)
+            if not check_path or is_freesurfer_subject_path(sdir):
+                res[name] = curry(self._get_subject, sdir, name)
+        return pimms.lmap(res)
+    def __len__(self): return len(self.asmap())
+    def __iter__(self): return iter(self.asmap())
+    def __repr__(self): return 'freesurfer.SubjectDir(' + repr(self.asmap()) + ')'
+    def __str__(self): return 'freesurfer.SubjectDir(' + str(self.asmap()) + ')'
+# Functions for handling freesurfer subject directories themselves
+def is_freesurfer_subject_dir_path(path):
+    '''
+    is_freesurfer_subject_dir_path(path) yields True if path is a directory that contains at least
+      one FreeSurfer subejct subdirectory.
+    '''
+    if not os.path.isdir(path): return False
+    for p in os.listdir(path):
+        pp = os.path.join(path, p)
+        if not os.path.isdir(pp): continue
+        if is_freesurfer_subject_path(pp): return True
+    return False
+@nyio.importer('freesurfer_subject_dir', sniff=is_freesurfer_subject_dir_path)
+def subject_dir(path, bids=False, filter=None, meta_data=None, check_path=True):
+    '''
+    subject_dir(path yields a dictionary-like object containing the subjects in the FreeSurfer
+      subjects directory given by path.
+
+    The following optional arguments are accepted:
+      * bids (default: False) may be set to True to indicate that the directory is part of a BIDS
+        directory; in this case the 'sub-' prefix is stripped from directory names to deduce subject
+        names.
+      * check_path (default: True) may optionally be set to False to ignore the requirement that a
+        subject directory contain at least the mri/, label/, and surf/ directories to be considered
+        a valid FreeSurfer subject directory. See help(neuropythy.freesurfer.subject) for more
+        information.
+      * filter (default: None) may optionally specify a filter that should be applied to the subject
+        before returning. See help(neuropythy.freesurfer.subject) for more information.
+      * meta_data (default: None) may optionally be a map that contains meta-data to be passed along
+        to the subject object (note that this meta-data will not be cached).
+    '''
+    return SubjectDir(path, bids=bids, filter=filter, meta_data=meta_data, check_path=check_path)
+
 ####################################################################################################
 # import/export code that works with neuropythy.io
 
@@ -1075,4 +1165,3 @@ brodmann_label_index = label_index(
     ['none', 'BA1', 'BA2', 'BA3a', 'BA3b', 'BA4a', 'BA4p', 'BA6', 'BA44', 'BA45', 'V1', 'V2', 'MT',
      'perirhinal', 'enterorhinal'])
 label_indices['freesurfer_brodmann'] = brodmann_label_index.persist()
-

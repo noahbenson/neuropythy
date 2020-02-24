@@ -8,6 +8,7 @@ import nibabel                      as nib
 import nibabel.freesurfer.io        as fsio
 import nibabel.freesurfer.mghformat as fsmgh
 import pyrsistent                   as pyr
+from   six.moves                import collections_abc as collections
 import os, warnings, six, pimms
 
 from ..        import geometry      as geo
@@ -313,5 +314,100 @@ def download(sid):
     import neuropythy as ny
     return ny.data['hcp'].download(sid)
 
+# This is copied from ny.freesurfer.core; changes here should be duplicated there. This isn't really
+# a good way to organize this--#TODO is to unify the subject-path interfaces somehow.
+class SubjectDir(collections.Mapping):
+    '''
+    SubjectsDir objects are dictionary-like objects that represent a particular subject directory.
+    They satisfy their queries (such as `111312 in spath`) by querying the filesystem itself.
+
+    For more information see the subjects_path function.
+    '''
+    def __init__(self, path, bids=False, filter=None, meta_data=None, check_path=True):
+        path = os.path.expanduser(os.path.expandvars(path))
+        self.path = os.path.abspath(path)
+        if not os.path.isdir(self.path): raise ValueError('given path is not a directory')
+        self.bids = bool(bids)
+        self.options = dict(filter=filter, meta_data=meta_data, check_path=bool(check_path))
+    def __contains__(self, sub):
+        if pimms.is_int(sub): sub = str(sub)
+        # first check the item straight-up:
+        sd = os.path.join(self.path, sub)
+        if os.path.isdir(sd) and (not check_path or is_hcp_subject_path(sd)): return True
+        if not bids: return False
+        if sub.startswith('sub-'): sd = os.path.join(self.path, sub[4:])
+        else: sd = os.path.join(self.path, 'sub-' + sub)
+        return os.path.isdir(sd) and (not check_path or is_hcp_subject_path(sd))
+    def _get_subject(self, sd, name):
+        try:
+            if name == str(int(name)): name = int(name)
+        except Exception: pass
+        opts = dict(**self.options)
+        opts['name'] = name
+        return subject(sd, **opts)
+    def __getitem__(self, sub):
+        if pimms.is_int(sub): sub = str(sub)
+        check_path = self.options['check_path']
+        if self.bids:
+            if sub.startswith('sub-'): (sub, name) = (sub, name[4:])
+            else: (sub,name) = ('sub-' + sub, sub)
+        else: name = sub
+        sd = os.path.join(self.path, sub)
+        if os.path.isdir(sd) and (not check_path or is_hcp_subject_path(sd)):
+            return self._get_subject(sd, name)
+        if not bids: return False
+        # try without the 'sub-' (e.g. for fsaverage)
+        sub = name
+        sd = os.path.join(self.path, sub)
+        if os.path.isdir(sd) and (not check_path or is_hcp_subject_path(sd)):
+            return self._get_subject(sd, name)
+        raise KeyError(sub)
+    def asmap(self):
+        check_path = self.options['check_path']
+        # search through the subjects in this directory
+        res = {}
+        for sub in os.listdir(self.path):
+            if self.bids and sub.startswith('sub-'): (sub,name) = (sub,sub[4:])
+            else: name = sub
+            sdir = os.path.join(self.path, sub)
+            if not check_path or is_hcp_subject_path(sdir):
+                res[name] = curry(self._get_subject, sdir, name)
+        return pimms.lmap(res)
+    def __len__(self): return len(self.asmap())
+    def __iter__(self): return iter(self.asmap())
+    def __repr__(self): return 'freesurfer.SubjectsPath(' + repr(self.asmap()) + ')'
+    def __str__(self): return 'freesurfer.SubjectsPath(' + str(self.asmap()) + ')'
+# Functions for handling freesurfer subject directories themselves
+def is_hcp_subject_dir_path(path):
+    '''
+    is_hcp_subject_dir_path(path) yields True if path is a directory that contains at least
+      one HCP subejct subdirectory.
+    '''
+    if not os.path.isdir(path): return False
+    for p in os.listdir(path):
+        pp = os.path.join(path, p)
+        if not os.path.isdir(pp): continue
+        if is_hcp_subject_path(pp): return True
+    return False
+@nyio.importer('hcp_subject_dir', sniff=is_hcp_subject_dir_path)
+def subject_dir(path, bids=False, filter=None, meta_data=None, check_path=True):
+    '''
+    subject_dir(path) yields a dictionary-like object containing the subjects in the FreeSurfer
+      subjects directory given by path.
+
+    The following optional arguments are accepted:
+      * bids (default: False) may be set to True to indicate that the directory is part of a BIDS
+        directory; in this case the 'sub-' prefix is stripped from directory names to deduce subject
+        names.
+      * check_path (default: True) may optionally be set to False to ignore the requirement that a
+        subject directory contain at least the mri/, label/, and surf/ directories to be considered
+        a valid FreeSurfer subject directory. See help(neuropythy.freesurfer.subject) for more
+        information.
+      * filter (default: None) may optionally specify a filter that should be applied to the subject
+        before returning. See help(neuropythy.freesurfer.subject) for more information.
+      * meta_data (default: None) may optionally be a map that contains meta-data to be passed along
+        to the subject object (note that this meta-data will not be cached).
+    '''
+    return SubjectDir(path, bids=bids, filter=filter, meta_data=meta_data, check_path=check_path)
     
     

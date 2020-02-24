@@ -71,7 +71,7 @@ from   .util       import label_indices as labels
 from   .io         import (load, save, to_nifti)
 from   .mri        import (is_subject, is_cortex, to_cortex, to_image, to_image_spec,
                            is_image_spec, image_interpolate, image_apply, image_copy, image_clear,
-                           is_pimage)
+                           is_pimage, to_image_type)
 from   .vision     import (retinotopy_data, empirical_retinotopy_data, predicted_retinotopy_data,
                            register_retinotopy, retinotopy_anchors, retinotopy_model,
                            neighborhood_cortical_magnification, as_retinotopy,
