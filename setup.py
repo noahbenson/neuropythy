@@ -114,6 +114,7 @@ setup(
              'neuropythy/lib/data/fs_LR/rh.atlasroi.164k_fs_LR.shape.gii']},
     install_requires=['numpy>=1.13',
                       'scipy>=1.1',
+                      'six >= 1.13',
                       'nibabel>=2.0',
                       'pyrsistent>=0.11',
                       'pint>=0.7',
