@@ -25,8 +25,8 @@ def to_subject_paths(paths):
     '''
     if paths is None: return []
     if pimms.is_str(paths): paths = paths.split(':')
-    paths = [os.path.expanduser(p) for p in paths]
-    return [p for p in paths if os.path.isdir(p)]
+    pp = [os.path.expanduser(os.path.expandvars(p)) for p in paths]
+    return [p for p in pp if os.path.isdir(p)]
 config.declare('hcp_subject_paths', environ_name='HCP_SUBJECTS_DIR', filter=to_subject_paths)
 def subject_paths():
     '''
