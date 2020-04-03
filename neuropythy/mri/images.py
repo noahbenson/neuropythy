@@ -178,7 +178,7 @@ class MGHImageType(ImageType):
         return dtype
     @classmethod
     def meta_data(self, img):
-        d = super(self, MGHImageType).meta_data(img)
+        d = super(MGHImageType, self).meta_data(img)
         hdr = to_image_header(img)
         try:    d['vox2ras'] = hdr.get_vox2ras()
         except Exception: pass
@@ -207,7 +207,7 @@ class Nifti1ImageType(ImageType):
     @classmethod
     def meta_data(self, img):
         from nibabel.nifti1 import (slice_order_codes, unit_codes)
-        d = super(self, Nifti1ImageType).meta_data(img)
+        d = super(Nifti1ImageType, self).meta_data(img)
         hdr = to_image_header(img)
         try: d['dimension_information'] = hdr.get_dim_info()
         except Exception: pass
@@ -412,7 +412,7 @@ class PARRECImageType(ImageType):
     def aliases(self): return ()
     @classmethod
     def meta_data(self, img):
-        d = super(self, PARRECImageType).meta_data(img)
+        d = super(PARRECImageType, self).meta_data(img)
         hdr = to_image_header(img)
         try:
             (bvals,bvec) = hdr.get_bvals_bvecs()
@@ -449,7 +449,7 @@ class EcatImageType(ImageType):
     def aliases(self): return ()
     @classmethod
     def meta_data(self, img):
-        d = super(self, EcatImageType).meta_data(img)
+        d = super(EcatImageType, self).meta_data(img)
         hdr = to_image_header(img)
         try: d['filetype'] = hdr.get_filetype()
         except Exception: pass
