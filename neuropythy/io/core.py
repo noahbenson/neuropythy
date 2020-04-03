@@ -65,22 +65,32 @@ def load(filename, format=None, **kwargs):
     # use the pseudo-path interface for the filename:
     pdir = to_pseudo_path(filename)
     filename = pdir.local_path()
+    obj = None
     if format is None:
+        # Try to guess first; if this fails, we try others...
         format = guess_import_format(filename, **kwargs)
+        if format is not None:
+            try:
+                (f,_,_,md) = importers[format]
+                obj = f(filename, **kwargs)
+            except Exception: format = None
+        # no good guess, try them all:
         if format is None:
-            # try formats and see if one works!
             for (k,(f,_,_,md)) in six.iteritems(importers):
+                if obj is not None: break
                 if not bool(md.get('auto', True)): continue
-                try:              return f(filename, **kwargs)
+                try:              obj = f(filename, **kwargs)
                 except Exception: pass
+        if obj is None:
             raise ValueError('Could not deduce format of file %s' % filename)
-    format = format.lower()
-    if format not in importers:
-        raise ValueError('Format \'%s\' not recognized by neuropythy' % format)
-    (f,_,_,_) = importers[format]
-    obj = f(filename, **kwargs)
-    if isinstance(obj, ObjectWithMetaData): return obj.with_meta(source_filename=filename)
-    else: return obj
+    else:
+        format = format.lower()
+        if format not in importers:
+            raise ValueError('Format \'%s\' not recognized by neuropythy' % format)
+        (f,_,_,_) = importers[format]
+        obj = f(filename, **kwargs)
+    if isinstance(obj, ObjectWithMetaData): obj = obj.with_meta(source_filename=filename)
+    return obj
 def importer(name, extensions=None, sniff=None, auto=True):
     '''
     @importer(name) is a decorator that declares that the following function is an file loading
@@ -396,7 +406,7 @@ def load_nifti(filename, to='auto'):
             return img
     else:
         raise ValueError('unrecognized \'to\' argument \'%s\'' % to)
-def to_nifti(obj, like=None, header=None, affine=None, extensions=Ellipsis, version=1):
+def to_nifti(obj, like=None, header=None, affine=None, extensions=Ellipsis, version=None):
     '''
     to_nifti(obj) yields a Nifti2Image object that is as equivalent as possible to the given object
       obj. If obj is a Nifti2Image already, then it is returned unmolested; other deduction rules
@@ -415,10 +425,12 @@ def to_nifti(obj, like=None, header=None, affine=None, extensions=Ellipsis, vers
         in the header. The default value, Ellipsis, indicates that the extensions should not be
         changed, and that None should be used if extensions are not implied in obj (if, for example,
         obj is a data array rather than an image object with a header already.
-      * version (default: 2) may be specified as 1 or 2 for a Nifti1Image or Nifti2Image object,
-        respectively.
+      * version (default: None) may be specified as 1 or 2 for a Nifti1Image or Nifti2Image object,
+        respectively; if the option None is passed, then any object that is already a nifti1 or
+        nifti2 object is kept as the same version, otherwise nifti1 is used when possible and nifti2
+        when not possible.
     '''
-    from neuropythy.mri import Subject
+    from neuropythy.mri import (Subject, to_image)
     obj0 = obj
     # First go from like to explicit versions of affine and header:
     if like is not None:
@@ -432,33 +444,41 @@ def to_nifti(obj, like=None, header=None, affine=None, extensions=Ellipsis, vers
             if affine is None: affine = like.images['brain'].affine
         else:
             raise ValueError('Could not interpret like argument with type %s' % type(like))
-    # check to make sure that we have to change something:
-    elif ((version == 1 and (isinstance(obj, nib.nifti1.Nifti1Image) and
-                             not isinstance(obj, nib.nifti2.Nifti2Image))) or
-          (version == 2 and isinstance(obj, nib.nifti2.Nifti2Image))):
-        if ((header is None or obj.header is header) and
-            (extensions is Ellipsis or extensions is obj.header.extensions or
-             (extensions is None and len(obj.header.extensions) == 0))):
-            return obj
-    # okay, now look at the header and affine etc.
-    if header is None:
-        if isinstance(obj, nib.analyze.SpatialImage):
-            header = obj.header
-        else:
-            header = nib.nifti1.Nifti1Header() if version == 1 else nib.nifti2.Nifti2Header()
-    if affine is None:
-        if isinstance(obj, nib.analyze.SpatialImage):
-            affine = obj.affine
-        else:
-            affine = np.eye(4)
-    if extensions is None:
-        extensions = nib.nifti1.Nifti1Extensions()
     # Figure out what the data is
     if isinstance(obj, nib.analyze.SpatialImage):
         obj = obj.dataobj
     elif not pimms.is_nparray(obj):
         obj = np.asarray(obj)
-    if len(obj.shape) < 3: obj = np.asarray([[obj]])
+    if   len(obj.shape) == 3: obj = np.reshape(obj, obj.shape + (1,))
+    elif len(obj.shape) == 2: obj = np.reshape(obj, obj.shape + (1,1))
+    elif len(obj.shape) == 1: obj = np.reshape(obj, obj.shape + (1,1,1))
+    elif len(obj.shape) != 4: raise ValueError('nifti objects must be 1D, 2D, 3D, or 4D')
+    # figure out version if needed
+    if version is None:
+        if   isinstance(obj0, nib.nifti2.Nifti2Image): version = 2
+        elif any(sh > 32767 for sh in obj.shape):      version = 2
+        else:                                          version = 1
+    # check to make sure that we have to change something:
+    elif ((version == 1 and (isinstance(obj0, nib.nifti1.Nifti1Image) and
+                             not isinstance(obj0, nib.nifti2.Nifti2Image))) or
+          (version == 2 and isinstance(obj0, nib.nifti2.Nifti2Image))):
+        if ((header is None or obj0.header is header) and
+            (extensions is Ellipsis or extensions is obj0.header.extensions or
+             (extensions is None and len(obj0.header.extensions) == 0))):
+            return obj0
+    # okay, now look at the header and affine etc.
+    if header is None:
+        if isinstance(obj0, nib.analyze.SpatialImage):
+            header = obj0.header
+        else:
+            header = nib.nifti1.Nifti1Header() if version == 1 else nib.nifti2.Nifti2Header()
+    if affine is None:
+        if isinstance(obj0, nib.analyze.SpatialImage):
+            affine = obj0.affine
+        else:
+            affine = np.eye(4)
+    if extensions is None:
+        extensions = nib.nifti1.Nifti1Extensions()
     # Okay, make a new object now...
     if version == 1:
         obj = nib.nifti1.Nifti1Image(obj, affine, header)
@@ -472,7 +492,8 @@ def to_nifti(obj, like=None, header=None, affine=None, extensions=Ellipsis, vers
     # Okay, that's it!
     return obj
 @exporter('nifti', ('nii', 'nii.gz'))
-def save_nifti(filename, obj, like=None, header=None, affine=None, extensions=Ellipsis, version=1):
+def save_nifti(filename, obj, like=None, header=None, affine=None, extensions=Ellipsis,
+               version=None):
     '''
     save_nifti(filename, obj) saves the given object to the given filename in the nifti format and
       returns the filename.
