@@ -493,7 +493,9 @@ def visual_field_legend(cmap, on=Ellipsis, max_eccentricity=12, transform=Ellips
     elif on == 'y':            p = y
     else: raise ValueError('unrecognized plot parameter: %s' % (on,))
     # okay, transform p:
-    p = p if transform is None else transform(p)
+    p = np.asarray(p if transform is None else transform(p))
+    # if there are nans, let's get rid of them
+    p[np.isnan(p)] = -np.inf
     # and run it through the cmap...
     clrs = cmap(p)
     # and set the appropriate pixels...
@@ -918,11 +920,13 @@ def apply_cmap(zs, cmap, vmin=None, vmax=None, unit=None, logrescale=False):
         if vmin is None: vmin = np.log(np.nanmin(zs))
         if vmax is None: vmax = np.log(np.nanmax(zs))
         mn = np.exp(vmin)
-        return cmap(zdivide(nanlog(zs + mn) - vmin, vmax - vmin, null=np.nan))
+        u = zdivide(nanlog(zs + mn) - vmin, vmax - vmin, null=np.nan)
     else:        
         if vmin is None: vmin = np.nanmin(zs)
         if vmax is None: vmax = np.nanmax(zs)
-        return cmap(zdivide(zs - vmin, vmax - vmin, null=np.nan))
+        u = zdivide(zs - vmin, vmax - vmin, null=np.nan)
+    u[np.isnan(u)] = -np.inf
+    return cmap(u)
 
 def cortex_cmap_plot_2D(the_map, zs, cmap, vmin=None, vmax=None, axes=None, triangulation=None):
     '''
