@@ -14,7 +14,7 @@ from .. import geometry       as geo
 from .. import freesurfer     as nyfs
 from .. import mri            as mri
 from .. import io             as nyio
-from ..util               import (zinv, library_path, is_tuple, is_list)
+from ..util               import (zinv, library_path, is_tuple, is_list, nangt, nanlt)
 from ..registration       import (mesh_register, java_potential_term)
 from ..java               import (to_java_doubles, to_java_ints)
 from functools            import reduce
@@ -2161,6 +2161,10 @@ def clean_retinotopy_potential(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=
             kw['edge_knob'] = 0 if edge_knob is None else edge_knob
             kw['visual_area'] = np.isin(lbls, vas).astype('int')
             f_edge = clean_retinotopy_potential(hemi, map_visual_areas=1, **kw)
+            X0fe = f_edge.meta_data['X0']
+            # If there are nans in this, we should make them 0's; we assume these just indicate
+            # low confidence of a value
+            X0fe[~np.isfinite(X0fe)] = 0
             # okay, now add up all of these individual potential fields with the edge field
             submesh = f_edge.meta_data['mesh']
             nparams = 2 * submesh.vertex_count
@@ -2170,6 +2174,9 @@ def clean_retinotopy_potential(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=
             for (k,v) in six.iteritems(pemap):
                 if v == 0: continue
                 mm = np.isin(submesh.labels, v.meta_data['mesh'].labels)
+                # Check for nans here also
+                X0v = v.meta_data['X0']
+                X0v[~np.isfinite(X0v)] = 0
                 assert np.array_equal(v.meta_data['X0'], f_edge.meta_data['X0'][mm,:])
                 mm = xyii[mm, :].flatten()
                 partmap[k] = v.compose(op.part(mm, input_len=nparams))
@@ -2211,7 +2218,7 @@ def clean_retinotopy_potential(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=
     (x0,y0) = xy0.T
     xy0     = xy0.flatten()
     ecc0    = np.sqrt(x0**2 + y0**2)
-    ii      = np.where(ecc0 > min_eccentricity)[0]
+    ii      = np.where(nangt(ecc0, min_eccentricity))[0]
     minw    = (0                             if min_weight is None          else
                min_weight                    if pimms.is_number(min_weight) else
                0                             if np.std(wght[ii]) < 0.00001  else
