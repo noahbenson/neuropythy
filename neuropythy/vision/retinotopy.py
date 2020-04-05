@@ -2177,7 +2177,7 @@ def clean_retinotopy_potential(hemi, retinotopy=Ellipsis, mask=Ellipsis, weight=
                 # Check for nans here also
                 X0v = v.meta_data['X0']
                 X0v[~np.isfinite(X0v)] = 0
-                assert np.array_equal(v.meta_data['X0'], f_edge.meta_data['X0'][mm,:])
+                assert np.isclose(v.meta_data['X0'], f_edge.meta_data['X0'][mm,:]).all()
                 mm = xyii[mm, :].flatten()
                 partmap[k] = v.compose(op.part(mm, input_len=nparams))
                 f = partmap[k] + f
