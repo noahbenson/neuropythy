@@ -18,7 +18,7 @@ import os, sys, six, types, logging, warnings, gzip, json, pimms
 from .util  import (triangle_area, triangle_address, alignment_matrix_3D, rotation_matrix_3D,
                     cartesian_to_barycentric_3D, cartesian_to_barycentric_2D, vector_angle_cos,
                     segment_intersection_2D, segments_overlapping, points_close, point_in_segment,
-                    barycentric_to_cartesian, point_in_triangle)
+                    barycentric_to_cartesian, point_in_triangle, line_segment_intersection_2D)
 from ..util import (ObjectWithMetaData, to_affine, zinv, is_image, is_address, address_data, curry,
                     curve_spline, CurveSpline, chop, zdivide, flattest, inner, config, library_path,
                     dirpath_to_list, to_hemi_str, is_tuple, is_list, is_set, close_curves,
@@ -3364,8 +3364,6 @@ class Path(ObjectWithMetaData):
             zs = np.isclose(w, 0, atol=1e-5)
             nz = np.sum(zs)
             pcur.append(ii)
-            if np.isin(f, [1508]).any():
-                print(' -- ', ii, f, nz, zs, w)
             if nz == 0: # inside the triangle--no crossings
                 lastf = f
                 continue
@@ -4035,6 +4033,17 @@ def is_path(p):
     '''
     return isinstance(p, Path)
 
+# Utility function for below
+def bcfull(bc):
+    '''
+    bcfull(bc) converts the 2D or 2xN barycentric coordinate data into 3D or 3xN where the third
+      dimension is simply 1 - bc[0] - bc[1].
+    '''
+    bc = np.asarray(bc)
+    bc = np.asarray([bc, [1 - bc[0] - bc[1]]])
+    if len(bc.shape) == 1: return np.concatenate(bc)
+    else: return np.vstack(bc)
+
 @pimms.immutable
 class PathTrace(ObjectWithMetaData):
     '''
@@ -4103,44 +4112,187 @@ class PathTrace(ObjectWithMetaData):
         with the given path-trace's map_projection; this is recommended only if you know what you are
         doing and need to save computational resources.
         '''
+        ztol = 1e-5
         # make a flat-map of whatever we've been given...
         if   flatmap is not None: fmap = flatmap
         elif isinstance(obj, Mesh) and obj.coordinates.shape[0] == 2: fmap = obj
         else: fmap = self.map_projection(obj)
+        fmap_fcrds = np.transpose(fmap.face_coordinates, [2,1,0])
+        fmap_crds = fmap.coordinates.T
+        fnei = fmap.tess.face_neighbors
         crv = self.curve
         cids = fmap.container(crv.coordinates)
         pts = crv.coordinates.T
         if self.closed and not np.array_equal(pts[0], pts[-1]):
             pts = np.concatenate([pts, [pts[0]]])
-        allpts = []
-        allfaces = []
-        allbarys = []
+        addrs = fmap.address(pts)
+        faces = fmap.tess.index(addrs['faces'])
+        barys = addrs['coordinates']
+        barys = bcfull(barys)
+        f = faces[:,0] # we start in the first face of the first point
+        bc = barys[:,0]
+        allfaces = [f]
+        allbarys = [bc]
         for ii in range(len(pts) - 1):
-            allpts.append([pts[ii]])
-            seg  = pts[[ii,ii+1]]
-            ipts = segment_intersection_2D(seg, fmap.edge_coordinates)
-            ipts0 = np.transpose(ipts)
-            ww = np.where(np.isfinite(ipts0[:,0]))[0]
-            ipts = ipts0[ww,:]
-            # sort these by distance along the vector...
-            dists = np.dot(ipts, seg[1] - seg[0])
-            allpts.append(ipts[np.argsort(dists)])
-            # and append addresses
-            addr0 = fmap.address(pts[ii])
-            allfaces.append([addr0['faces']])
-            addbarys.append([addr0['coordinates']])
-            #TODO
-        allpts.append([pts[-1]])
-        allpts = np.concatenate(allpts)
-        print(allpts[102:105,:])
-        idcs = [0]
-        for ii in range(1, len(allpts)):
-            d = np.sqrt(np.sum((allpts[idcs[-1]] - allpts[ii])**2))
-            if np.isclose(d, 0): continue
-            idcs.append(ii)
-        allpts = allpts[idcs]
-        # okay, we have the points--address them and make a path
-        addrs = fmap.address(allpts)
+            (pt0,pt1) = pts[[ii, ii+1]]
+            seg = [pt0, pt1]
+            pt = pt0
+            bc0 = bc
+            # bc and f are already set appropriately from above or the previous iteration
+            while True:
+                fcrds = fmap_crds[f]
+                fii = fmap.tess.index[tuple(fmap.labels[list(f)])]
+                # First of all, check the end condition: if pt1 is in the current face, we are
+                # finished with this trace-segment.
+                bc1 = bcfull(cartesian_to_barycentric_2D(fcrds, pt1))
+                if (bc1 > 0).all() and np.isclose(np.sum(bc1), 1):
+                    bc = bc1
+                    allfaces.append(f)
+                    allbarys.append(bc1)
+                    break
+                # Let's gatther a bit of information about the current triangle:
+                f = np.asarray(f)
+                bc = np.asarray(bc)
+                fnii = fnei[fii]
+                fns  = fmap.tess.indexed_faces[:,list(fnii)].T
+                fe   = np.asarray([np.intersect1d(f, fn) for fn in fns])
+                fex  = np.transpose([fmap_crds[uv] for uv in fe], (1,2,0))
+                z = np.isclose(bc, 0, atol=ztol)
+                zs = np.sum(z)
+                u = None # this is set to a vertex of f if seg is leaving through a vertex of f
+                uv = None # this is set to the side of the new face is seg is entering through new f
+                # If pt1 isn't in the triangle, we want to move on to the next triangle on the way
+                # toward it. There are several possibilities here:
+                if zs == 0: # (1) the current point is in the middle of the triangle
+                    assert pt is pt0, 'midpoint in middle of triangle is not initial point'
+                    # in this case we need to find the exit that is along seg
+                    ipts = np.transpose(segment_intersection_2D(seg, fex))
+                    ok = np.where(np.isfinite(ipts[:,0]))[0]
+                    if len(ok) == 2:
+                        # if there are 2 intersections, it's intersecting at a vertex
+                        assert u in f, 'face point-intersection: %d not in %s (%d)' % (u, f, fii)
+                        u = np.intersect1d(fe[ok[0]], fe[ok[1]])[0]
+                    else:
+                        # if there is 1 intersection, it's exiting through an edge
+                        assert \
+                            len(ok) == 1, \
+                            'invalid triangle exit found for point %s %s %s %s' % (pt,ok,fex,ipts)
+                        ok = ok[0]
+                        # this adjacent face will be the new one
+                        f = fns[ok]
+                        uv = fe[ok]
+                elif zs == 1: # (2) the current point is on an edge boundary with f0
+                    # in this case, there are a few possibilities:
+                    if pt is pt0:
+                        # (a) the line might need to cross over f (if it's pt0)
+                        # The seg could exit through a vertex or an edge; check vertices first
+                        if   point_in_segment(seg, fmap_crds[f[0]]): u = f[0]
+                        elif point_in_segment(seg, fmap_crds[f[1]]): u = f[1]
+                        elif point_in_segment(seg, fmap_crds[f[2]]): u = f[2]
+                        else:
+                            # okay, it crosses an edge; which one?
+                            ipts = np.transpose(segment_intersection_2D(seg, fex))
+                            dists2 = np.sum((ipts - pt1)**2, axis=1)
+                            mn = np.nanargmin(dists2)
+                            uv = fe[mn] # The edge we're exiting the triangle through
+                            # is this the same edges that pt is on?
+                            if len(np.union1d(fe[mn], f[~z])) == 2:
+                                # the point is alreaday on the exit side; we basically just update
+                                # the previous point to be in this new triangle
+                                allfaces.pop()
+                                allbarys.pop()
+                            f = fns[mn] # the new triangle
+                    else:
+                        # (b) the line needs to exit f to the next triangle by walking along a
+                        #     different edge than the one it entered through
+                        # which edge is the current point on?
+                        e = f[~z]
+                        o = f[z][0]
+                        # possibly, the departure is through point o
+                        if point_in_segment(seg, fmap_crds[o]): u = o
+                        else:
+                            eii = np.where([np.isin(e, fn).all() for fn in fns])[0][0]
+                            (eii1,eii2) = ((eii+1) % 3, (eii+2) % 3)
+                            # one and only one of the other edges will intersect seg
+                            fex = fex[:,:,[eii1,eii2]]
+                            ipts = np.transpose(segment_intersection_2D(seg, fex))
+                            eiii = 0 if np.isfinite(ipts[0]).all() else 1
+                            assert \
+                                np.isfinite(ipts[eiii]).all(), \
+                                'no exit edge found for face %s %s %s %s %s' % (f,fcrds,pt, e, o)
+                            eii = [eii1,eii2][eiii]
+                            uv = fe[eii]
+                            f = fns[eii]
+                elif zs == 2: # (3) the current point is on one of the vertices exactly
+                    oths = f[z]
+                    othcrds = fcrds[z]
+                    # In this case, there are 2 possibilities:
+                    if pt is pt0:
+                        # (a) this is the initial point, which happened to be on a vertex; in this
+                        #     case, the initially-found face is not important; we just want to find
+                        #     the next face in the code below.
+                        (u, f) = (f[~z][0], Ellipsis)
+                    elif point_in_segment(seg, othcrds[0]):
+                        # (b) the next intersection is one of the other points
+                        u = oths[0]
+                    elif point_in_segment(seg, othcrds[1]):
+                        u = oths[1]
+                    else:
+                        # (c) the next intersection is on the edge named by oths
+                        ipt = segment_intersection_2D(seg, othcrds)
+                        assert \
+                            np.isfinite(ipt).all(), \
+                            'no exit for point %s on face %d / %s / %s' % (bc, fii, f, fcrds)
+                        f = next(fn for fn in fns if np.isin(oths, fn).all())
+                        uv = oths
+                else: raise ValueError('invalid number of zero coordinates')
+                # At this point, it's possible that we are handling the exit through a vertex or
+                # through a side; in either case we process this to have the correct bc values
+                if u is not None:
+                    # Exiting through a vertex; we need to find bc *and* the new f, which should be
+                    # different than the current f; if f is Ellipsis, that means we started on a
+                    # vertex and we can find any f.
+                    # Start by getting the neighborhood of this point u
+                    if f is Ellipsis: f = []
+                    neis = fmap.tess.indexed_neighborhoods[u]
+                    # First see if any of these vertices intersect the segment
+                    (ii,nei) = next(((ii,nei) for (ii,nei) in enumerate(neis)
+                                     if nei not in f and point_in_segment(seg,fmap_crds[nei])),
+                                    (None, None))
+                    if ii is not None:
+                        # it does intersect one of the neighborhood points
+                        f = [u, nei, neis[(ii+1) % len(neis)]]
+                        bc = [0, 1, 0]
+                    else:
+                        # it must intersect one of the edges; we test for line-intersection here
+                        # instead of segment intersection because it's possible that pt1 is in the
+                        # triangle
+                        (ii,uv) = next(
+                            (ii,uv) for (ii,uv) in enumerate(zip(neis, np.roll(neis, -1)))
+                            if not np.isin(uv, f).all()
+                            for ipt in [line_segment_intersection_2D(seg, fmap_crds[list(uv)])]
+                            if np.isfinite(ipt).all())
+                        f = [u, uv[0], uv[1]]
+                        bc = [1, 0, 0]
+                elif uv is not None:
+                    # Exiting through a side; we just need to find bc only
+                    (ux, vx) = fmap_crds[list(uv)]
+                    ipt = segment_intersection_2D(seg, [ux,vx])
+                    assert \
+                        np.isfinite(ipt).all(), \
+                        'found exit side but not exit point: %s, %s, %s, %s' % (f, pt, uv, [ux,vx])
+                    (du, dv) = [np.sqrt(np.sum(xx - ipt)**2) for xx in (ux, vx)]
+                    tot = du + dv
+                    bc = np.zeros(3)
+                    bc[f == uv[0]] = dv / tot
+                    bc[f == uv[1]] = du / tot
+                else: raise ValueError('incorrect ending to loop')
+                allfaces.append(f)
+                allbarys.append(bc)
+                pt = np.dot(fmap_crds[f].T, bc)
+        allfaces = np.transpose([fmap.labels[f] for f in allfaces])
+        allbarys = np.transpose(allbarys)
+        addrs = {'faces':allfaces, 'coordinates':allbarys}
         return Path(obj, addrs, meta_data={'source_trace': self})
     def save(self, filename):
         '''
