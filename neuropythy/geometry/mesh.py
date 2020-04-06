@@ -1927,7 +1927,7 @@ class Mesh(VertexSet):
                                for null in [np.full((3, selfx.shape[0]), np.nan)]
                                for ff in faces.T],
                               (2,1,0))
-        elif faces == -1:
+        elif not np.isfinite(selfx).all():
             return np.full(selfx.shape[0], np.nan)
         else:
             tx = selfx[:,faces].T
@@ -3364,6 +3364,8 @@ class Path(ObjectWithMetaData):
             zs = np.isclose(w, 0, atol=1e-5)
             nz = np.sum(zs)
             pcur.append(ii)
+            if np.isin(f, [1508]).any():
+                print(' -- ', ii, f, nz, zs, w)
             if nz == 0: # inside the triangle--no crossings
                 lastf = f
                 continue
@@ -4111,17 +4113,26 @@ class PathTrace(ObjectWithMetaData):
         if self.closed and not np.array_equal(pts[0], pts[-1]):
             pts = np.concatenate([pts, [pts[0]]])
         allpts = []
+        allfaces = []
+        allbarys = []
         for ii in range(len(pts) - 1):
             allpts.append([pts[ii]])
             seg  = pts[[ii,ii+1]]
             ipts = segment_intersection_2D(seg, fmap.edge_coordinates)
-            ipts = np.transpose(ipts)
-            ipts = ipts[np.isfinite(ipts[:,0])]
+            ipts0 = np.transpose(ipts)
+            ww = np.where(np.isfinite(ipts0[:,0]))[0]
+            ipts = ipts0[ww,:]
             # sort these by distance along the vector...
             dists = np.dot(ipts, seg[1] - seg[0])
             allpts.append(ipts[np.argsort(dists)])
+            # and append addresses
+            addr0 = fmap.address(pts[ii])
+            allfaces.append([addr0['faces']])
+            addbarys.append([addr0['coordinates']])
+            #TODO
         allpts.append([pts[-1]])
         allpts = np.concatenate(allpts)
+        print(allpts[102:105,:])
         idcs = [0]
         for ii in range(1, len(allpts)):
             d = np.sqrt(np.sum((allpts[idcs[-1]] - allpts[ii])**2))
