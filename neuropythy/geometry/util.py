@@ -133,11 +133,13 @@ def point_on_line(ab, c):
             np.isclose(np.sqrt(np.sum(vcb**2, axis=0)), 0) |
             np.isclose(np.abs(np.sum(uba*uca, axis=0)), 1))
 
-def point_on_segment(ab, c):
+def point_on_segment(ab, c, atol=1e-8):
     '''
     point_on_segment((a,b), c) yields True if point x is on segment (a,b) and False otherwise. Note
     that this differs from point_in_segment in that a point that if c is equal to a or b it is
     considered 'on' but not 'in' the segment.
+    The option atol can be given and is used only to test for difference from 0; by default it is
+    1e-8.
     '''
     (a,c) = ac
     abc = [np.asarray(u) for u in (a,b,c)]
@@ -149,12 +151,14 @@ def point_on_segment(ab, c):
     dab = np.sqrt(np.sum(vab**2, axis=0))
     dbc = np.sqrt(np.sum(vbc**2, axis=0))
     dac = np.sqrt(np.sum(vac**2, axis=0))
-    return np.isclose(dab + dbc, dac)
-def point_in_segment(ac, b):
+    return np.isclose(dab + dbc - dac, 0, atol=atol)
+def point_in_segment(ac, b, atol=1e-8):
     '''
     point_in_segment((a,b), c) yields True if point x is in segment (a,b) and False otherwise. Note
     that this differs from point_on_segment in that a point that if c is equal to a or b it is
     considered 'on' but not 'in' the segment.
+    The option atol can be given and is used only to test for difference from 0; by default it is
+    1e-8.
     '''
     (a,c) = ac
     abc = [np.asarray(u) for u in (a,b,c)]
@@ -166,7 +170,9 @@ def point_in_segment(ac, b):
     dab = np.sqrt(np.sum(vab**2, axis=0))
     dbc = np.sqrt(np.sum(vbc**2, axis=0))
     dac = np.sqrt(np.sum(vac**2, axis=0))
-    return np.isclose(dab + dbc, dac) & ~np.isclose(dac,dab) & ~np.isclose(dac,dbc)
+    return (np.isclose(dab + dbc - dac, 0, atol=atol) &
+            ~np.isclose(dac - dab, 0, atol=atol) &
+            ~np.isclose(dac - dbc, 0, atol=atol))
 
 def lines_colinear(ab, cd):
     '''

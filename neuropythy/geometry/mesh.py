@@ -4101,18 +4101,21 @@ class PathTrace(ObjectWithMetaData):
             if not np.isclose(np.linalg.norm(xx - x0), 0):
                 points = np.hstack([points, np.reshape(x0, (2,1))])
         return curve_spline(points[0], points[1], order=1, periodic=closed).persist()
-    def to_path(self, obj, flatmap=None):
+    def to_path(self, obj, flatmap=None, atol=1e-12):
         '''
         trace.to_path(subj) yields a path reified on the given subject's cortical surface; the
           returned value is a Path object.
         trace.to_path(topo) yields a path reified on the given topology/cortex object topo.
         trace.to_path(mesh) yields a path reified on the given spherical mesh.
 
-        The optional argument flatmap (default: None) may be given if a flatmap has already been made
-        with the given path-trace's map_projection; this is recommended only if you know what you are
-        doing and need to save computational resources.
+        The following optional arguments bay be given:
+          * flatmap (default: None) may be given if a flatmap has already been made with the given
+            path-trace's map_projection; this is recommended only if you know what you are doing and
+            need to save computational resources.
+          * atol (default: 1e-12) is used as the atol argument to numpy.isclose(x, 0); i.e., if
+            a number is within this distance of 0, it is considered to be exactly 0.
         '''
-        ztol = 1e-5
+        ztol = atol
         # make a flat-map of whatever we've been given...
         if   flatmap is not None: fmap = flatmap
         elif isinstance(obj, Mesh) and obj.coordinates.shape[0] == 2: fmap = obj
@@ -4186,9 +4189,9 @@ class PathTrace(ObjectWithMetaData):
                     if pt is pt0:
                         # (a) the line might need to cross over f (if it's pt0)
                         # The seg could exit through a vertex or an edge; check vertices first
-                        if   point_in_segment(seg, fmap_crds[f[0]]): u = f[0]
-                        elif point_in_segment(seg, fmap_crds[f[1]]): u = f[1]
-                        elif point_in_segment(seg, fmap_crds[f[2]]): u = f[2]
+                        if   point_in_segment(seg, fmap_crds[f[0]], atol=ztol): u = f[0]
+                        elif point_in_segment(seg, fmap_crds[f[1]], atol=ztol): u = f[1]
+                        elif point_in_segment(seg, fmap_crds[f[2]], atol=ztol): u = f[2]
                         else:
                             # okay, it crosses an edge; which one?
                             ipts = np.transpose(segment_intersection_2D(seg, fex))
@@ -4209,7 +4212,7 @@ class PathTrace(ObjectWithMetaData):
                         e = f[~z]
                         o = f[z][0]
                         # possibly, the departure is through point o
-                        if point_in_segment(seg, fmap_crds[o]): u = o
+                        if point_in_segment(seg, fmap_crds[o], atol=ztol): u = o
                         else:
                             eii = np.where([np.isin(e, fn).all() for fn in fns])[0][0]
                             (eii1,eii2) = ((eii+1) % 3, (eii+2) % 3)
@@ -4232,10 +4235,10 @@ class PathTrace(ObjectWithMetaData):
                         #     case, the initially-found face is not important; we just want to find
                         #     the next face in the code below.
                         (u, f) = (f[~z][0], Ellipsis)
-                    elif point_in_segment(seg, othcrds[0]):
+                    elif point_in_segment(seg, othcrds[0], atol=ztol):
                         # (b) the next intersection is one of the other points
                         u = oths[0]
-                    elif point_in_segment(seg, othcrds[1]):
+                    elif point_in_segment(seg, othcrds[1], atol=ztol):
                         u = oths[1]
                     else:
                         # (c) the next intersection is on the edge named by oths
@@ -4257,7 +4260,8 @@ class PathTrace(ObjectWithMetaData):
                     neis = fmap.tess.indexed_neighborhoods[u]
                     # First see if any of these vertices intersect the segment
                     (ii,nei) = next(((ii,nei) for (ii,nei) in enumerate(neis)
-                                     if nei not in f and point_in_segment(seg,fmap_crds[nei])),
+                                     if nei not in f
+                                     if point_in_segment(seg, fmap_crds[nei], atol=ztol)),
                                     (None, None))
                     if ii is not None:
                         # it does intersect one of the neighborhood points
