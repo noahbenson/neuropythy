@@ -4039,10 +4039,20 @@ def bcfull(bc):
     bcfull(bc) converts the 2D or 2xN barycentric coordinate data into 3D or 3xN where the third
       dimension is simply 1 - bc[0] - bc[1].
     '''
+    if len(bc) == 3: return np.asarray(bc)
     bc = np.asarray(bc)
     bc = np.asarray([bc, [1 - bc[0] - bc[1]]])
-    if len(bc.shape) == 1: return np.concatenate(bc)
-    else: return np.vstack(bc)
+    if len(bc.shape) == 1: bc = np.concatenate(bc)
+    else: bc = np.vstack(bc)
+    return bc
+def bcfix(bc, atol=1e-8):
+    '''
+    bcfix(bc) rounds near-zero values of the given barycentric coordinates to 0 and returns the
+      rescaled coordinates.
+    '''
+    bc = bcfull(bc)
+    bc[np.isclose(bc, 0, atol=atol)] = 0
+    return bc / np.sum(bc, axis=0)
 
 @pimms.immutable
 class PathTrace(ObjectWithMetaData):
@@ -4128,12 +4138,9 @@ class PathTrace(ObjectWithMetaData):
         pts = crv.coordinates.T
         if self.closed and not np.array_equal(pts[0], pts[-1]):
             pts = np.concatenate([pts, [pts[0]]])
-        addrs = fmap.address(pts)
-        faces = fmap.tess.index(addrs['faces'])
-        barys = addrs['coordinates']
-        barys = bcfull(barys)
-        f = faces[:,0] # we start in the first face of the first point
-        bc = barys[:,0]
+        addr = fmap.address(pts[0])
+        f = fmap.tess.index(addr['faces'])
+        bc = bcfix(addr['coordinates'], atol=ztol)
         allfaces = [f]
         allbarys = [bc]
         for ii in range(len(pts) - 1):
@@ -4141,14 +4148,16 @@ class PathTrace(ObjectWithMetaData):
             seg = [pt0, pt1]
             pt = pt0
             bc0 = bc
+            #print(seg)
             # bc and f are already set appropriately from above or the previous iteration
             while True:
+                #print(' - ', pt, f, bc)
                 fcrds = fmap_crds[f]
                 fii = fmap.tess.index[tuple(fmap.labels[list(f)])]
                 # First of all, check the end condition: if pt1 is in the current face, we are
                 # finished with this trace-segment.
-                bc1 = bcfull(cartesian_to_barycentric_2D(fcrds, pt1))
-                if (bc1 > 0).all() and np.isclose(np.sum(bc1), 1):
+                bc1 = bcfix(cartesian_to_barycentric_2D(fcrds, pt1), atol=ztol)
+                if (bc1 >= 0).all() and np.isclose(np.sum(bc1), 1):
                     bc = bc1
                     allfaces.append(f)
                     allbarys.append(bc1)
@@ -4169,7 +4178,7 @@ class PathTrace(ObjectWithMetaData):
                 if zs == 0: # (1) the current point is in the middle of the triangle
                     assert pt is pt0, 'midpoint in middle of triangle is not initial point'
                     # in this case we need to find the exit that is along seg
-                    ipts = np.transpose(segment_intersection_2D(seg, fex))
+                    ipts = np.transpose(segment_intersection_2D(seg, fex, atol=ztol))
                     ok = np.where(np.isfinite(ipts[:,0]))[0]
                     if len(ok) == 2:
                         # if there are 2 intersections, it's intersecting at a vertex
@@ -4194,9 +4203,14 @@ class PathTrace(ObjectWithMetaData):
                         elif point_in_segment(seg, fmap_crds[f[2]], atol=ztol): u = f[2]
                         else:
                             # okay, it crosses an edge; which one?
-                            ipts = np.transpose(segment_intersection_2D(seg, fex))
+                            ipts = np.transpose(segment_intersection_2D(seg, fex, atol=ztol))
                             dists2 = np.sum((ipts - pt1)**2, axis=1)
-                            mn = np.nanargmin(dists2)
+                            if np.isfinite(dists2).any():
+                                mn = np.nanargmin(dists2)
+                            else:
+                                # it doesn't cross an edge, so it must lean away;
+                                e = f[~z]
+                                mn = next(k for k in [0,1,2] if np.isin(e, fe[k]).all())
                             uv = fe[mn] # The edge we're exiting the triangle through
                             # is this the same edges that pt is on?
                             if len(np.union1d(fe[mn], f[~z])) == 2:
@@ -4218,7 +4232,7 @@ class PathTrace(ObjectWithMetaData):
                             (eii1,eii2) = ((eii+1) % 3, (eii+2) % 3)
                             # one and only one of the other edges will intersect seg
                             fex = fex[:,:,[eii1,eii2]]
-                            ipts = np.transpose(segment_intersection_2D(seg, fex))
+                            ipts = np.transpose(segment_intersection_2D(seg, fex, atol=ztol))
                             eiii = 0 if np.isfinite(ipts[0]).all() else 1
                             assert \
                                 np.isfinite(ipts[eiii]).all(), \
@@ -4242,7 +4256,7 @@ class PathTrace(ObjectWithMetaData):
                         u = oths[1]
                     else:
                         # (c) the next intersection is on the edge named by oths
-                        ipt = segment_intersection_2D(seg, othcrds)
+                        ipt = segment_intersection_2D(seg, othcrds, atol=ztol)
                         assert \
                             np.isfinite(ipt).all(), \
                             'no exit for point %s on face %d / %s / %s' % (bc, fii, f, fcrds)
@@ -4274,14 +4288,16 @@ class PathTrace(ObjectWithMetaData):
                         (ii,uv) = next(
                             (ii,uv) for (ii,uv) in enumerate(zip(neis, np.roll(neis, -1)))
                             if not np.isin(uv, f).all()
-                            for ipt in [line_segment_intersection_2D(seg, fmap_crds[list(uv)])]
+                            for ipt in [line_segment_intersection_2D(seg,
+                                                                     fmap_crds[list(uv)],
+                                                                     atol=ztol)]
                             if np.isfinite(ipt).all())
                         f = [u, uv[0], uv[1]]
                         bc = [1, 0, 0]
                 elif uv is not None:
                     # Exiting through a side; we just need to find bc only
                     (ux, vx) = fmap_crds[list(uv)]
-                    ipt = segment_intersection_2D(seg, [ux,vx])
+                    ipt = line_segment_intersection_2D(seg, [ux,vx], atol=ztol)
                     assert \
                         np.isfinite(ipt).all(), \
                         'found exit side but not exit point: %s, %s, %s, %s' % (f, pt, uv, [ux,vx])

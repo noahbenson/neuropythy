@@ -117,7 +117,7 @@ def alignment_matrix_2D(u, v):
     '''
     return rotation_matrix_2D(vector_angle(u, v, direction=True))
 
-def point_on_line(ab, c):
+def point_on_line(ab, c, atol=1e-8):
     '''
     point_on_line((a,b), c) yields True if point x is on line (a,b) and False otherwise.
     '''
@@ -129,9 +129,9 @@ def point_on_line(ab, c):
     vcb = b - c
     uba = czdivide(vba, np.sqrt(np.sum(vba**2, axis=0)))
     uca = czdivide(vca, np.sqrt(np.sum(vca**2, axis=0)))
-    return (np.isclose(np.sqrt(np.sum(vca**2, axis=0)), 0) |
-            np.isclose(np.sqrt(np.sum(vcb**2, axis=0)), 0) |
-            np.isclose(np.abs(np.sum(uba*uca, axis=0)), 1))
+    return (np.isclose(np.sqrt(np.sum(vca**2, axis=0)), 0, atol=atol) |
+            np.isclose(np.sqrt(np.sum(vcb**2, axis=0)), 0, atol=atol) |
+            np.isclose(np.abs(np.sum(uba*uca, axis=0)), 1, atol=atol))
 
 def point_on_segment(ab, c, atol=1e-8):
     '''
@@ -174,16 +174,16 @@ def point_in_segment(ac, b, atol=1e-8):
             ~np.isclose(dac - dab, 0, atol=atol) &
             ~np.isclose(dac - dbc, 0, atol=atol))
 
-def lines_colinear(ab, cd):
+def lines_colinear(ab, cd, atol=1e-8):
     '''
     liness_colinear((a, b), (c, d)) yields True if the lines containing points (a,b) and points (c,d)
     are colinear and false otherwise. All of a, b, c, and d must be (x,y) coordinates or 2xN (x,y)
     coordinate matrices, or (x,y,z) or 3xN matrices.
     '''
     # simple check: a and b must be on (c,d)
-    return point_on_line(ab, cd[0]) & point_on_line(ab, cd[1])
+    return point_on_line(ab, cd[0], atol=atol) & point_on_line(ab, cd[1], atol=atol)
 
-def segments_colinear(ab, cd):
+def segments_colinear(ab, cd, atol=1e-8):
     '''
     segments_colinear_2D((a, b), (c, d)) yields True if either a or b is on the line segment (c,d) or
     if c or d is on the line segment (a,b) and the lines are colinear; otherwise yields False. All
@@ -192,19 +192,19 @@ def segments_colinear(ab, cd):
     '''
     (a,b) = ab
     (c,d) = cd
-    ss = [point_on_segment(ab, c), point_on_segment(ab, d),
-          point_on_segment(cd, a), point_on_segment(cd, b)]
+    ss = [point_on_segment(ab, c, atol=atol), point_on_segment(ab, d, atol=atol),
+          point_on_segment(cd, a, atol=atol), point_on_segment(cd, b, atol=atol)]
     return np.sum(ss, axis=0) > 1
 
-def points_close(a,b):
+def points_close(a,b, atol=1e-8):
     '''
     points_close(a,b) yields True if points a and b are close to each other and False otherwise.
     '''
     (a,b) = [np.asarray(u) for u in (a,b)]
     if len(a.shape) == 2 or len(b.shape) == 2: (a,b) = [np.reshape(u,(len(u),-1)) for u in (a,b)]
-    return np.isclose(np.sqrt(np.sum((a - b)**2, axis=0)), 0)
+    return np.isclose(np.sqrt(np.sum((a - b)**2, axis=0)), 0, atol=atol)
 
-def segments_overlapping(ab, cd):
+def segments_overlapping(ab, cd, atol=1e-8):
     '''
     segments_overlapping((a, b), (c, d)) yields True if the line segments (a,b) and (c,d) are both
     colinear and have a non-finite overlap. If (a,b) and (c,d) touch at a single point, they are not
@@ -212,14 +212,14 @@ def segments_overlapping(ab, cd):
     '''
     (a,b) = ab
     (c,d) = cd
-    ss = [point_in_segment(ab, c), point_in_segment(ab, d),
-          point_in_segment(cd, a), point_in_segment(cd, b)]
-    return (~(points_close(a,b) | points_close(c,d)) & 
+    ss = [point_in_segment(ab, c, atol=atol), point_in_segment(ab, d, atol=atol),
+          point_in_segment(cd, a, atol=atol), point_in_segment(cd, b, atol=atol)]
+    return (~(points_close(a,b) | points_close(c,d, atol=atol)) & 
             ((np.sum(ss, axis=0) > 1) |
-             (points_close(a,c) & points_close(b,d)) |
-             (points_close(a,d) & points_close(b,c))))
+             (points_close(a,c, atol=atol) & points_close(b,d, atol=atol)) |
+             (points_close(a,d, atol=atol) & points_close(b,c, atol=atol))))
 
-def line_intersection_2D(abarg, cdarg):
+def line_intersection_2D(abarg, cdarg, atol=1e-8):
     '''
     line_intersection((a, b), (c, d)) yields the intersection point between the lines that pass
     through the given pairs of points. If any lines are parallel, (numpy.nan, numpy.nan) is
@@ -232,7 +232,7 @@ def line_intersection_2D(abarg, cdarg):
     dy12 = (y1 - y2)
     dy34 = (y3 - y4)
     denom = dx12*dy34 - dy12*dx34
-    unit = np.isclose(denom, 0)
+    unit = np.isclose(denom, 0, atol=atol)
     if unit is True: return (np.nan, np.nan)
     denom = unit + denom
     q12 = (x1*y2 - y1*x2) / denom
@@ -248,7 +248,7 @@ def line_intersection_2D(abarg, cdarg):
         yi[unit] = np.nan
         return (xi, yi)
 
-def segment_intersection_2D(p12arg, p34arg):
+def segment_intersection_2D(p12arg, p34arg, atol=1e-8):
     '''
     segment_intersection((a, b), (c, d)) yields the intersection point between the line segments
     that pass from point a to point b and from point c to point d. If there is no intersection
@@ -256,7 +256,7 @@ def segment_intersection_2D(p12arg, p34arg):
     '''
     (p1,p2) = p12arg
     (p3,p4) = p34arg
-    pi = np.asarray(line_intersection_2D(p12arg, p34arg))
+    pi = np.asarray(line_intersection_2D(p12arg, p34arg, atol=atol))
     p1 = np.asarray(p1)
     p2 = np.asarray(p2)
     p3 = np.asarray(p3)
@@ -286,21 +286,23 @@ def segment_intersection_2D(p12arg, p34arg):
         yi[bad] = np.nan
         return (xi,yi)
 
-def lines_touch_2D(ab, cd):
+def lines_touch_2D(ab, cd, atol=1e-8):
     '''
     lines_touch_2D((a,b), (c,d)) is equivalent to lines_colinear((a,b), (c,d)) |
     numpy.isfinite(line_intersection_2D((a,b), (c,d))[0])
     '''
-    return lines_colinear(ab, cd) | np.isfinite(line_intersection_2D(ab, cd)[0])
+    return (lines_colinear(ab, cd, atol=atol) |
+            np.isfinite(line_intersection_2D(ab, cd, atol=atol)[0]))
 
-def segments_touch_2D(ab, cd):
+def segments_touch_2D(ab, cd, atol=1e-8):
     '''
     segmentss_touch_2D((a,b), (c,d)) is equivalent to segments_colinear((a,b), (c,d)) |
     numpy.isfinite(segment_intersection_2D((a,b), (c,d))[0])
     '''
-    return segments_colinear(ab, cd) | np.isfinite(segment_intersection_2D(ab, cd)[0])
+    return (segments_colinear(ab, cd, atol=atol) |
+            np.isfinite(segment_intersection_2D(ab, cd, atol=atol)[0]))
 
-def line_segment_intersection_2D(p12arg, p34arg):
+def line_segment_intersection_2D(p12arg, p34arg, atol=1e-8):
     '''
     line_segment_intersection((a, b), (c, d)) yields the intersection point between the line
     passing through points a and b and the line segment that passes from point c to point d. If
@@ -308,7 +310,7 @@ def line_segment_intersection_2D(p12arg, p34arg):
     '''
     (p1,p2) = p12arg
     (p3,p4) = p34arg
-    pi = np.asarray(line_intersection_2D(p12arg, p34arg))
+    pi = np.asarray(line_intersection_2D(p12arg, p34arg, atol=atol))
     p3 = np.asarray(p3)
     u34 = p4 - p3
     cfn = lambda px,iis: (px if iis is None or len(px.shape) == 1 or px.shape[1] == len(iis) else
