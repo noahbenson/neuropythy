@@ -4156,7 +4156,11 @@ class PathTrace(ObjectWithMetaData):
                 # First of all, check the end condition: if pt1 is in the current face, we are
                 # finished with this trace-segment.
                 bc1 = bcfix(cartesian_to_barycentric_2D(fcrds, pt1), atol=ztol)
-                #print(' - ', pt, f, bc, bc1)
+                inq = point_in_triangle(fcrds, pt1, atol=ztol)
+                # sometimes the BC coordinates are a bit off, so we use inq to fix them if need-be
+                if inq:
+                    bc1[bc1 < 0] = 0
+                    bc1 = bcfix(bc1, atol=ztol)
                 if (bc1 >= 0).all() and np.isclose(np.sum(bc1), 1):
                     bc = bc1
                     allfaces.append(f)
@@ -4242,8 +4246,8 @@ class PathTrace(ObjectWithMetaData):
                             ipts = np.transpose(segment_intersection_2D(seg, fex, atol=ztol))
                             eiii = 0 if np.isfinite(ipts[0]).all() else 1
                             assert \
-                                np.isfinite(ipts[eiii]).all(), \
-                                'no exit edge found for face %s %s %s %s %s' % (f,fcrds,pt, e, o)
+                                np.isfinite(ipts[eiii]).any(), \
+                                'no exit edge found for face; %s' % ((f,fcrds,pt,e,o,bc,z,seg),)
                             eii = [eii1,eii2][eiii]
                             uv = fe[eii]
                             f = fns[eii]
@@ -4306,7 +4310,7 @@ class PathTrace(ObjectWithMetaData):
                     ipt = line_segment_intersection_2D(seg, [ux,vx], atol=ztol)
                     assert \
                         np.isfinite(ipt).all(), \
-                        'found exit side but not exit point: %s, %s, %s, %s' % (f, pt, uv, [ux,vx])
+                        'found exit side but not exit point: %s' % ((f,pt,seg,uv,[ux,vx]),)
                     (du, dv) = [np.sqrt(np.sum(xx - ipt)**2) for xx in (ux, vx)]
                     tot = du + dv
                     bc = np.zeros(3)
