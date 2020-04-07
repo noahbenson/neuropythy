@@ -4052,7 +4052,7 @@ def bcfix(bc, atol=1e-8):
     '''
     bc = bcfull(bc)
     bc[np.isclose(bc, 0, atol=atol)] = 0
-    return bc / np.sum(bc, axis=0)
+    return bc * zinv(np.sum(np.abs(bc), axis=0))
 
 @pimms.immutable
 class PathTrace(ObjectWithMetaData):
@@ -4151,12 +4151,12 @@ class PathTrace(ObjectWithMetaData):
             #print(seg)
             # bc and f are already set appropriately from above or the previous iteration
             while True:
-                #print(' - ', pt, f, bc)
                 fcrds = fmap_crds[f]
                 fii = fmap.tess.index[tuple(fmap.labels[list(f)])]
                 # First of all, check the end condition: if pt1 is in the current face, we are
                 # finished with this trace-segment.
                 bc1 = bcfix(cartesian_to_barycentric_2D(fcrds, pt1), atol=ztol)
+                #print(' - ', pt, f, bc, bc1)
                 if (bc1 >= 0).all() and np.isclose(np.sum(bc1), 1):
                     bc = bc1
                     allfaces.append(f)
@@ -4178,22 +4178,27 @@ class PathTrace(ObjectWithMetaData):
                 if zs == 0: # (1) the current point is in the middle of the triangle
                     assert pt is pt0, 'midpoint in middle of triangle is not initial point'
                     # in this case we need to find the exit that is along seg
-                    ipts = np.transpose(segment_intersection_2D(seg, fex, atol=ztol))
+                    ipts = np.transpose(segment_intersection_2D(seg, fex, atol=0))
                     ok = np.where(np.isfinite(ipts[:,0]))[0]
                     if len(ok) == 2:
                         # if there are 2 intersections, it's intersecting at a vertex
                         assert u in f, 'face point-intersection: %d not in %s (%d)' % (u, f, fii)
                         u = np.intersect1d(fe[ok[0]], fe[ok[1]])[0]
-                    else:
+                    elif len(ok) == 1:
                         # if there is 1 intersection, it's exiting through an edge
-                        assert \
-                            len(ok) == 1, \
-                            'invalid triangle exit found for point %s %s %s %s' % (pt,ok,fex,ipts)
                         ok = ok[0]
                         # this adjacent face will be the new one
                         f = fns[ok]
                         uv = fe[ok]
-                elif zs == 1: # (2) the current point is on an edge boundary with f0
+                    else:
+                        # This can sometimes happen (no intersections) if the point is very close
+                        # to one of the sides, but isn't quite a zero for the bc
+                        amn = np.argmin(bc)
+                        z[amn] = True
+                        bc[amn] = 0
+                        bc = bcfix(bc)
+                        zs = 1
+                if zs == 1: # (2) the current point is on an edge boundary with f0
                     # in this case, there are a few possibilities:
                     if pt is pt0:
                         # (a) the line might need to cross over f (if it's pt0)
@@ -4210,7 +4215,9 @@ class PathTrace(ObjectWithMetaData):
                             else:
                                 # it doesn't cross an edge, so it must lean away;
                                 e = f[~z]
-                                mn = next(k for k in [0,1,2] if np.isin(e, fe[k]).all())
+                                mn = next((k for k in [0,1,2] if np.isin(e, fe[k]).all()), None)
+                                if mn is None:
+                                    raise ValueError('error in initial node', pt, f, bc, e, z, fe)
                             uv = fe[mn] # The edge we're exiting the triangle through
                             # is this the same edges that pt is on?
                             if len(np.union1d(fe[mn], f[~z])) == 2:
@@ -4262,7 +4269,6 @@ class PathTrace(ObjectWithMetaData):
                             'no exit for point %s on face %d / %s / %s' % (bc, fii, f, fcrds)
                         f = next(fn for fn in fns if np.isin(oths, fn).all())
                         uv = oths
-                else: raise ValueError('invalid number of zero coordinates')
                 # At this point, it's possible that we are handling the exit through a vertex or
                 # through a side; in either case we process this to have the correct bc values
                 if u is not None:
@@ -4306,7 +4312,7 @@ class PathTrace(ObjectWithMetaData):
                     bc = np.zeros(3)
                     bc[f == uv[0]] = dv / tot
                     bc[f == uv[1]] = du / tot
-                else: raise ValueError('incorrect ending to loop')
+                else: raise ValueError('incorrect ending to loop', z, zs, f, pt, bc)
                 allfaces.append(f)
                 allbarys.append(bc)
                 pt = np.dot(fmap_crds[f].T, bc)

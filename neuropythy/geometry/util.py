@@ -420,7 +420,7 @@ def cartesian_to_barycentric_3D(tri, xy):
     l3 = unit * (d00 * d21 - d01 * d20) / den
     return np.asarray([1.0 - l2 - l3, l2])
     
-def cartesian_to_barycentric_2D(tri, xy):
+def cartesian_to_barycentric_2D(tri, xy, atol=1e-8):
     '''
     cartesian_to_barycentric_2D(tri, xy) yields a (2 x n) barycentric coordinate matrix 
     (or just a tuple if xy is a single (x, y) coordinate) of the first two barycentric coordinates
@@ -457,7 +457,7 @@ def cartesian_to_barycentric_2D(tri, xy):
     num1 = (y2_y3*x_x3  + x3_x2*y_y3)
     num2 = (-y1_y3*x_x3 + x1_x3*y_y3)
     den  = (y2_y3*x1_x3 + x3_x2*y1_y3)
-    zero = np.isclose(den, 0)
+    zero = np.isclose(den, 0, atol=atol)
     den += zero
     unit = 1 - zero
     l1 = unit * num1 / den
@@ -559,12 +559,12 @@ def triangle_unaddress(fx, tr):
     bc = fx[2] - fx[1]
     return np.asarray([ax + tr[1]*(abx + tr[0]*bcx) for (ax, bcx, abx) in zip(fx[0], bc, ab)])
 
-def point_in_triangle(tri, pt):
+def point_in_triangle(tri, pt, atol=1e-13):
     tri = np.asarray(tri)
     pt  = np.asarray(pt)
     if len(tri.shape) == 2 and len(pt.shape) == 1:
         if len(pt) == 2:
-            tol = 1e-13
+            tol = atol
             v0 = tri[2] - tri[0]
             v1 = tri[1] - tri[0]
             v2 = pt - tri[0]
@@ -590,7 +590,7 @@ def point_in_triangle(tri, pt):
         if len(pt) != len(tri):
             raise ValueError('the number of triangles and points must be equal')
         if pt.shape[1] == 2:
-            tol = 1e-13
+            tol = atol
             v0 = tri[:,2] - tri[:,0]
             v1 = tri[:,1] - tri[:,0]
             v2 = pt - tri[:,0]
