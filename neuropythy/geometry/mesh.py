@@ -4245,10 +4245,20 @@ class PathTrace(ObjectWithMetaData):
                             fex = fex[:,:,[eii1,eii2]]
                             ipts = np.transpose(segment_intersection_2D(seg, fex, atol=ztol))
                             eiii = 0 if np.isfinite(ipts[0]).all() else 1
-                            assert \
-                                np.isfinite(ipts[eiii]).any(), \
-                                'no exit edge found for face; %s' % ((f,fcrds,pt,e,o,bc,z,seg),)
-                            eii = [eii1,eii2][eiii]
+                            if not np.isfinite(ipts[eiii]).any():
+                                # this is sometimes because the pt1 is *just* inside/outside of the
+                                # triangle, the the numerical error in one function doesn't agree
+                                # with that of the other. We can hack this case into working by
+                                # taking the smallest bc1 value and zeroing it, then using the
+                                # corresponding edge as the exit.
+                                bc1 = np.abs(bc1)
+                                bc1[np.argmin(bc1)] = 0
+                                bc = bcfix(bc1)
+                                allfaces.append(f)
+                                allbarys.append(bc)
+                                break
+                            else:
+                                eii = [eii1,eii2][eiii]
                             uv = fe[eii]
                             f = fns[eii]
                 elif zs == 2: # (3) the current point is on one of the vertices exactly
