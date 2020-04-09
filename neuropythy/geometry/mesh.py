@@ -4260,7 +4260,7 @@ class PathTrace(ObjectWithMetaData):
                             ipts = np.transpose(segment_intersection_2D(seg, fex, atol=ztol))
                             eiii = 0 if np.isfinite(ipts[0]).all() else 1
                             assert \
-                                np.isfinite(ipts[eiii]).any() \
+                                np.isfinite(ipts[eiii]).any(), \
                                 ('no valid exit found for triangle %s; this may indicate a bad '
                                  'or malformed tesselation or embedding of the map' % (f,))
                             eii = [eii1,eii2][eiii]
