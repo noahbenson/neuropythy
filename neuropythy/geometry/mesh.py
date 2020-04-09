@@ -4281,7 +4281,7 @@ class PathTrace(ObjectWithMetaData):
                         ipt = segment_intersection_2D(seg, othcrds, atol=ztol)
                         assert \
                             np.isfinite(ipt).all(), \
-                            'no exit for point %s on face %d: %s' % (bc, fii, (f, fcrds, seg, pt, z, bc))
+                            'no exit for point %s on face %d: %s' % (bc, fii, (f, fcrds, seg, pt))
                         f = fns[~z][0]
                         uv = oths
                 # At this point, it's possible that we are handling the exit through a vertex or
@@ -4298,6 +4298,13 @@ class PathTrace(ObjectWithMetaData):
                                      if nei not in f
                                      if point_in_segment(seg, fmap_crds[nei], atol=ztol)),
                                     (None, None))
+                    if ii is None:
+                        # or pt1 might be in one of these triangles...
+                        (ii,nei) = next(((ii,nei)
+                                         for (ii,(nei,nn)) in enumerate(zip(neis, np.roll(neis,-1)))
+                                         if nei not in f or nn not in f
+                                         if point_in_triangle(fmap_crds[[u,nei,nn]],pt1,atol=ztol)),
+                                        (None, None))
                     if ii is not None:
                         # it does intersect one of the neighborhood points
                         f = [u, nei, neis[(ii+1) % len(neis)]]
@@ -4309,9 +4316,9 @@ class PathTrace(ObjectWithMetaData):
                         (ii,uv) = next(
                             (ii,uv) for (ii,uv) in enumerate(zip(neis, np.roll(neis, -1)))
                             if not np.isin(uv, f).all()
-                            for ipt in [line_segment_intersection_2D(seg,
-                                                                     fmap_crds[list(uv)],
-                                                                     atol=ztol)]
+                            for ipt in [segment_intersection_2D(seg,
+                                                                fmap_crds[list(uv)],
+                                                                atol=ztol)]
                             if np.isfinite(ipt).all())
                         f = [u, uv[0], uv[1]]
                         bc = [1, 0, 0]
