@@ -133,7 +133,7 @@ def point_on_line(ab, c, atol=1e-8):
             np.isclose(np.sqrt(np.sum(vcb**2, axis=0)), 0, atol=atol) |
             np.isclose(np.abs(np.sum(uba*uca, axis=0)), 1, atol=atol))
 
-def point_on_segment(ab, c, atol=1e-8):
+def point_on_segment(ac, b, atol=1e-8):
     '''
     point_on_segment((a,b), c) yields True if point x is on segment (a,b) and False otherwise. Note
     that this differs from point_in_segment in that a point that if c is equal to a or b it is
@@ -574,18 +574,22 @@ def point_in_triangle(tri, pt, atol=1e-13):
             d11 = np.dot(v1, v1)
             d12 = np.dot(v1, v2)
             invDenom = (d00*d11 - d01*d01)
-            if np.isclose(invDenom, 0): return False
+            if np.isclose(invDenom, 0, atol=atol): return False
             s = (d11*d02 - d01*d12) / invDenom
             if (s + tol) < 0 or (s - tol) >= 1: return False
             t = (d00*d12 - d01*d02) / invDenom
-            return False if (t + tol) < 0 or (s + t - tol) > 1 else True
+            #return False if (t + tol) < 0 or (s + t - tol) > 1 else True
+            s = s + t
+            tp = np.isclose(t, 0, atol=tol) or t >= 0
+            tn = np.isclose(s - 1, 0, atol=tol) or s <= 1
+            return tn and tp
         else:
             dp1 = np.dot(pt - tri[0], np.cross(tri[0], tri[1] - tri[0]))
             dp2 = np.dot(pt - tri[1], np.cross(tri[1], tri[2] - tri[1]))
             db3 = np.dot(pt - tri[2], np.cross(tri[2], tri[0] - tri[2]))
-            return ((dp1 > 0 or np.isclose(dp1, 0)) and
-                    (dp2 > 0 or np.isclose(dp2, 0)) and
-                    (dp3 > 0 or np.isclose(dp3, 0)))
+            return ((dp1 > 0 or np.isclose(dp1, 0, atol=atol)) and
+                    (dp2 > 0 or np.isclose(dp2, 0, atol=atol)) and
+                    (dp3 > 0 or np.isclose(dp3, 0, atol=atol)))
     elif len(tri.shape) == 3 and len(pt.shape) == 2:
         if len(pt) != len(tri):
             raise ValueError('the number of triangles and points must be equal')
@@ -604,14 +608,22 @@ def point_in_triangle(tri, pt, atol=1e-13):
             invDenom[zeros] = 1.0
             s = (d11*d02 - d01*d12) / invDenom
             t = (d00*d12 - d01*d02) / invDenom
-            return ~((s + tol < 0) | (s - tol >= 1) | (t + tol < 0) | (s + t - tol > 1) | zeros)
+            #return ~((s + tol < 0) | (s - tol >= 1) | (t + tol < 0) | (s + t - tol > 1) | zeros)
+            #return (~(s + tol < 0) & ~(s - tol >= 1) & ~(t + tol < 0) & ~(s + t - tol > 1) & ~zeros)
+            #return ((s + tol >= 0) & (s - tol < 1) & (t + tol >= 0) & (s + t - tol <= 1) & ~zeros)
+            st = s + t
+            q1 = np.isclose(s, 0, atol=atol) | (s > 0)
+            q2 = ~np.isclose(s - 1, 0, atol=atol) & (s < 1)
+            q3 = np.isclose(t, 0, atol=atol) | (t > 0)
+            q4 = np.isclose(st - 1, 0, atol=atol) | (st < 1)
+            return q1 * q2 & q3 & q4 & ~zeros
         else:
             x0 = np.sum((pt - tri[:,0]) * np.cross(tri[:,0], tri[:,1] - tri[:,0], axis=1), axis=1)
             x1 = np.sum((pt - tri[:,1]) * np.cross(tri[:,1], tri[:,2] - tri[:,1], axis=1), axis=1)
             x2 = np.sum((pt - tri[:,2]) * np.cross(tri[:,2], tri[:,0] - tri[:,2], axis=1), axis=1)
-            return (((x0 > 0) | np.isclose(x0, 0)) &
-                    ((x1 > 0) | np.isclose(x1, 0)) &
-                    ((x2 > 0) | np.isclose(x2, 0)))
+            return (((x0 > 0) | np.isclose(x0, 0, atol=atol)) &
+                    ((x1 > 0) | np.isclose(x1, 0, atol=atol)) &
+                    ((x2 > 0) | np.isclose(x2, 0, atol=atol)))
     elif len(tri.shape) == 3 and len(pt.shape) == 1:
         return point_in_triangle(tri, np.asarray([pt for _ in tri]))
     elif len(tri.shape) == 2 and len(pt.shape) == 1:

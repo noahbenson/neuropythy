@@ -18,8 +18,8 @@ import os, sys, six, types, logging, warnings, gzip, json, pimms
 from .util  import (triangle_area, triangle_address, alignment_matrix_3D, rotation_matrix_3D,
                     cartesian_to_barycentric_3D, cartesian_to_barycentric_2D, vector_angle_cos,
                     segment_intersection_2D, segments_overlapping, points_close, point_in_segment,
-                    barycentric_to_cartesian, point_in_triangle, line_segment_intersection_2D,
-                    segments_touch_2D)
+                    point_on_segment, barycentric_to_cartesian, point_in_triangle,
+                    line_segment_intersection_2D, segments_touch_2D)
 from ..util import (ObjectWithMetaData, to_affine, zinv, is_image, is_address, address_data, curry,
                     curve_spline, CurveSpline, chop, zdivide, flattest, inner, config, library_path,
                     dirpath_to_list, to_hemi_str, is_tuple, is_list, is_set, close_curves,
@@ -4156,24 +4156,24 @@ class PathTrace(ObjectWithMetaData):
                 fii = fmap.tess.index[tuple(fmap.labels[list(f)])]
                 # First of all, check the end condition: if pt1 is in the current face, we are
                 # finished with this trace-segment.
-                bc1 = bcfix(cartesian_to_barycentric_2D(fcrds, pt1), atol=ztol)
-                inq = point_in_triangle(fcrds, pt1, atol=ztol)
-                # sometimes the BC coordinates are a bit off, so we use inq to fix them if need-be
-                if inq:
-                    bc1[bc1 < 0] = 0
-                    bc1 = bcfix(bc1, atol=ztol)
-                if np.isclose(np.sum(bc1), 1, atol=ztol):
-                    bc = bc1
+                if point_in_triangle(fcrds, pt1, atol=ztol):
+                    bc = bcfix(cartesian_to_barycentric_2D(fcrds, pt1), atol=ztol)
+                    # sometimes the BC coordinates are a bit off, so we fix them if need-be
+                    bc[bc < 0] = 0
+                    bc = bcfix(bc, atol=ztol)
                     allfaces.append(f)
-                    allbarys.append(bc1)
+                    allbarys.append(bc)
                     break
-                # Let's gatther a bit of information about the current triangle:
+                # Let's gather a bit of information about the current triangle:
                 f = np.asarray(f)
                 bc = np.asarray(bc)
                 fnii = fnei[fii]
                 fns  = fmap.tess.indexed_faces[:,list(fnii)].T
-                fe   = np.asarray([np.intersect1d(f, fn) for fn in fns])
+                fe   = np.array([np.intersect1d(f, fn) for fn in fns])
+                fe   = np.array([next(ee for ee in fe if fv not in ee) for fv in f])
+                fns  = np.array([next(fn for fn in fns if fv not in fn) for fv in f])
                 fex  = np.transpose([fmap_crds[uv] for uv in fe], (1,2,0))
+                #z = point_on_segment(fex, pt, atol=ztol)
                 z = np.isclose(bc, 0, atol=ztol)
                 zs = np.sum(z)
                 u = None # this is set to a vertex of f if seg is leaving through a vertex of f
@@ -4183,7 +4183,7 @@ class PathTrace(ObjectWithMetaData):
                 if zs == 0: # (1) the current point is in the middle of the triangle
                     assert pt is pt0, 'midpoint in middle of triangle is not initial point'
                     # in this case we need to find the exit that is along seg
-                    ipts = np.transpose(segment_intersection_2D(seg, fex, atol=0))
+                    ipts = np.transpose(segment_intersection_2D(seg, fex, atol=ztol))
                     ok = np.where(np.isfinite(ipts[:,0]))[0]
                     if len(ok) == 2:
                         # if there are 2 intersections, it's intersecting at a vertex
@@ -4200,85 +4200,81 @@ class PathTrace(ObjectWithMetaData):
                         # to one of the sides, but isn't quite a zero for the bc
                         amn = np.argmin(bc)
                         z[amn] = True
+                        if not np.isclose(bc[amn], 0, atol=ztol*4):
+                            warnings.warn('fixing non-zero BC to conform: %s' % (list(bc),))
                         bc[amn] = 0
                         bc = bcfix(bc)
                         zs = 1
                 if zs == 1: # (2) the current point is on an edge boundary with f0
+                    # the edge the point is on (in fe, fns, etc)
+                    eii = np.where(z)[0][0]
                     # in this case, there are a few possibilities:
                     if pt is pt0:
                         # (a) the line might need to cross over f (if it's pt0)
                         # The seg could exit through a vertex or an edge; check vertices first
-                        if   point_in_segment(seg, fmap_crds[f[0]], atol=ztol): u = f[0]
-                        elif point_in_segment(seg, fmap_crds[f[1]], atol=ztol): u = f[1]
-                        elif point_in_segment(seg, fmap_crds[f[2]], atol=ztol): u = f[2]
+                        if   point_on_segment(seg, fcrds[0], atol=ztol): u = f[0]
+                        elif point_on_segment(seg, fcrds[1], atol=ztol): u = f[1]
+                        elif point_on_segment(seg, fcrds[2], atol=ztol): u = f[2]
                         else:
                             # okay, it crosses an edge; which one?
                             ipts = np.transpose(segment_intersection_2D(seg, fex, atol=ztol))
-                            dists2 = np.sum((ipts - pt1)**2, axis=1)
-                            if np.isfinite(dists2).any():
-                                mn = np.nanargmin(dists2)
+                            isects = np.where(np.isfinite(ipts[:,0]))[0]
+                            # it should cross only 1 edge that isn't the current edge
+                            assert \
+                                len(isects) < 3, \
+                                'segment intersects all edges of a face: %s' % ([seg,pt,f,bc],)
+                            isects = np.setdiff1d(isects, [eii])
+                            if len(isects) == 1:
+                                # it crosses this particular edge:
+                                isects = isects[0]
+                                uv = fe[isects]
+                                f = fns[isects]
                             else:
-                                # it doesn't cross an edge, so it must lean away or be colinear
-                                e = f[~z]
-                                mn = next((k for k in [0,1,2] if np.isin(e, fe[k]).all()), None)
-                                if mn is None:
-                                    raise ValueError('error in initial node', pt, f, bc, e, z, fe)
-                                # it's possible that seg is exactly on the edge...
-                                if point_in_segment(fmap_crds[mn], pt1, atol=ztol):
-                                    bc1[bc1 < 0] = 0
-                                    bc1 = bcfix(bc1)
-                                    bc = bc1
-                                    allfaces.append(f)
-                                    allbarys.append(bc1)
-                                    break
-                            uv = fe[mn] # The edge we're exiting the triangle through
-                            f_old = f
-                            f = fns[mn] # the new triangle
-                            # is this the same edges that pt is on?
-                            if len(np.intersect1d(f, f_old[~z])) == 2:
-                                # the point is alreaday on the exit side; we basically just update
-                                # the previous point to be in this new triangle
-                                allfaces.pop()
-                                allbarys.pop()
-                                bc = bcfull(cartesian_to_barycentric_2D(fmap_crds[f], pt))
-                                bc[bc < 0] = 0
+                                # It doesn't cross an edge, so it must lean away; it could be
+                                # colinear, but we already know that pt1 isn't in this triangle
+                                # and none of the vertices of this triangle are on seg. In this
+                                # case we basically want to reset pt0 to be the other triangle
+                                # then to start this loop over. However, this could cause an
+                                # infinite loop in unusual cases of numerical error, so we also
+                                # make sure pt is not identical to pt0 anymore.
+                                fnew = fns[eii]
+                                bc = bcfix(cartesian_to_barycentric_2D(fmap_crds[fnew], pt))
+                                bc[~np.isin(fnew, f)] = 0
                                 bc = bcfix(bc)
-                                uv = None
+                                f = fnew
+                                pt = np.array(pt) # pt is not pt0
+                                continue
                     else:
                         # (b) the line needs to exit f to the next triangle by walking along a
                         #     different edge than the one it entered through
                         # which edge is the current point on?
-                        e = f[~z]
+                        e = fe[eii]
                         o = f[z][0]
                         # possibly, the departure is through point o
-                        if point_in_segment(seg, fmap_crds[o], atol=ztol): u = o
+                        if point_on_segment(seg, fmap_crds[o], atol=ztol): u = o
                         else:
-                            eii = np.where([np.isin(e, fn).all() for fn in fns])[0][0]
-                            (eii1,eii2) = ((eii+1) % 3, (eii+2) % 3)
-                            # one and only one of the other edges will intersect seg
-                            fex = fex[:,:,[eii1,eii2]]
-                            ipts = np.transpose(segment_intersection_2D(seg, fex, atol=ztol))
-                            eiii = 0 if np.isfinite(ipts[0]).all() else 1
+                            # otherwise it is through one of the edges
+                            ipts = np.transpose(segment_intersection_2D(seg, fex[:,:,~z], atol=ztol))
+                            ifin = np.isfinite(ipts[:,0])
                             assert \
-                                np.isfinite(ipts[eiii]).any(), \
-                                ('no valid exit found for triangle %s; this may indicate a bad '
-                                 'or malformed tesselation or embedding of the map' % (f,))
-                            eii = [eii1,eii2][eiii]
-                            uv = fe[eii]
-                            f = fns[eii]
+                                np.sum(ifin) == 1, \
+                                ('no. of exits found for triangle %s != 1; this may indicate a bad'
+                                 ' or malformed tesselation or embedding of the map' % (f,))
+                            uv = fe[~z][ifin][0]
+                            f = fns[~z][ifin][0]
                 elif zs == 2: # (3) the current point is on one of the vertices exactly
                     oths = f[z]
                     othcrds = fcrds[z]
-                    # In this case, there are 2 possibilities:
+                    # In this case, there are 3 possibilities:
                     if pt is pt0:
                         # (a) this is the initial point, which happened to be on a vertex; in this
                         #     case, the initially-found face is not important; we just want to find
                         #     the next face in the code below.
                         (u, f) = (f[~z][0], Ellipsis)
-                    elif point_in_segment(seg, othcrds[0], atol=ztol):
+                    elif point_on_segment(seg, othcrds[0], atol=ztol):
                         # (b) the next intersection is one of the other points
                         u = oths[0]
-                    elif point_in_segment(seg, othcrds[1], atol=ztol):
+                    elif point_on_segment(seg, othcrds[1], atol=ztol):
                         u = oths[1]
                     else:
                         # (c) the next intersection is on the edge named by oths
@@ -4286,7 +4282,7 @@ class PathTrace(ObjectWithMetaData):
                         assert \
                             np.isfinite(ipt).all(), \
                             'no exit for point %s on face %d: %s' % (bc, fii, (f, fcrds, seg, pt, z, bc1))
-                        f = next(fn for fn in fns if np.isin(oths, fn).all())
+                        f = fns[~z][0]
                         uv = oths
                 # At this point, it's possible that we are handling the exit through a vertex or
                 # through a side; in either case we process this to have the correct bc values
