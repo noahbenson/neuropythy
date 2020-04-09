@@ -4281,7 +4281,7 @@ class PathTrace(ObjectWithMetaData):
                         ipt = segment_intersection_2D(seg, othcrds, atol=ztol)
                         assert \
                             np.isfinite(ipt).all(), \
-                            'no exit for point %s on face %d: %s' % (bc, fii, (f, fcrds, seg, pt, z, bc1))
+                            'no exit for point %s on face %d: %s' % (bc, fii, (f, fcrds, seg, pt, z, bc))
                         f = fns[~z][0]
                         uv = oths
                 # At this point, it's possible that we are handling the exit through a vertex or
