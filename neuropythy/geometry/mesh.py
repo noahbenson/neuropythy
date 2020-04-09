@@ -18,7 +18,8 @@ import os, sys, six, types, logging, warnings, gzip, json, pimms
 from .util  import (triangle_area, triangle_address, alignment_matrix_3D, rotation_matrix_3D,
                     cartesian_to_barycentric_3D, cartesian_to_barycentric_2D, vector_angle_cos,
                     segment_intersection_2D, segments_overlapping, points_close, point_in_segment,
-                    barycentric_to_cartesian, point_in_triangle, line_segment_intersection_2D)
+                    barycentric_to_cartesian, point_in_triangle, line_segment_intersection_2D,
+                    segments_touch_2D)
 from ..util import (ObjectWithMetaData, to_affine, zinv, is_image, is_address, address_data, curry,
                     curve_spline, CurveSpline, chop, zdivide, flattest, inner, config, library_path,
                     dirpath_to_list, to_hemi_str, is_tuple, is_list, is_set, close_curves,
@@ -4161,7 +4162,7 @@ class PathTrace(ObjectWithMetaData):
                 if inq:
                     bc1[bc1 < 0] = 0
                     bc1 = bcfix(bc1, atol=ztol)
-                if (bc1 >= 0).all() and np.isclose(np.sum(bc1), 1):
+                if np.isclose(np.sum(bc1), 1, atol=ztol):
                     bc = bc1
                     allfaces.append(f)
                     allbarys.append(bc1)
@@ -4217,19 +4218,32 @@ class PathTrace(ObjectWithMetaData):
                             if np.isfinite(dists2).any():
                                 mn = np.nanargmin(dists2)
                             else:
-                                # it doesn't cross an edge, so it must lean away;
+                                # it doesn't cross an edge, so it must lean away or be colinear
                                 e = f[~z]
                                 mn = next((k for k in [0,1,2] if np.isin(e, fe[k]).all()), None)
                                 if mn is None:
                                     raise ValueError('error in initial node', pt, f, bc, e, z, fe)
+                                # it's possible that seg is exactly on the edge...
+                                if point_in_segment(fmap_crds[mn], pt1, atol=ztol):
+                                    bc1[bc1 < 0] = 0
+                                    bc1 = bcfix(bc1)
+                                    bc = bc1
+                                    allfaces.append(f)
+                                    allbarys.append(bc1)
+                                    break
                             uv = fe[mn] # The edge we're exiting the triangle through
+                            f_old = f
+                            f = fns[mn] # the new triangle
                             # is this the same edges that pt is on?
-                            if len(np.union1d(fe[mn], f[~z])) == 2:
+                            if len(np.intersect1d(f, f_old[~z])) == 2:
                                 # the point is alreaday on the exit side; we basically just update
                                 # the previous point to be in this new triangle
                                 allfaces.pop()
                                 allbarys.pop()
-                            f = fns[mn] # the new triangle
+                                bc = bcfull(cartesian_to_barycentric_2D(fmap_crds[f], pt))
+                                bc[bc < 0] = 0
+                                bc = bcfix(bc)
+                                uv = None
                     else:
                         # (b) the line needs to exit f to the next triangle by walking along a
                         #     different edge than the one it entered through
@@ -4245,20 +4259,11 @@ class PathTrace(ObjectWithMetaData):
                             fex = fex[:,:,[eii1,eii2]]
                             ipts = np.transpose(segment_intersection_2D(seg, fex, atol=ztol))
                             eiii = 0 if np.isfinite(ipts[0]).all() else 1
-                            if not np.isfinite(ipts[eiii]).any():
-                                # this is sometimes because the pt1 is *just* inside/outside of the
-                                # triangle, the the numerical error in one function doesn't agree
-                                # with that of the other. We can hack this case into working by
-                                # taking the smallest bc1 value and zeroing it, then using the
-                                # corresponding edge as the exit.
-                                bc1 = np.abs(bc1)
-                                bc1[np.argmin(bc1)] = 0
-                                bc = bcfix(bc1)
-                                allfaces.append(f)
-                                allbarys.append(bc)
-                                break
-                            else:
-                                eii = [eii1,eii2][eiii]
+                            assert \
+                                np.isfinite(ipts[eiii]).any() \
+                                ('no valid exit found for triangle %s; this may indicate a bad '
+                                 'or malformed tesselation or embedding of the map' % (f,))
+                            eii = [eii1,eii2][eiii]
                             uv = fe[eii]
                             f = fns[eii]
                 elif zs == 2: # (3) the current point is on one of the vertices exactly
@@ -4280,7 +4285,7 @@ class PathTrace(ObjectWithMetaData):
                         ipt = segment_intersection_2D(seg, othcrds, atol=ztol)
                         assert \
                             np.isfinite(ipt).all(), \
-                            'no exit for point %s on face %d / %s / %s' % (bc, fii, f, fcrds)
+                            'no exit for point %s on face %d: %s' % (bc, fii, (f, fcrds, seg, pt, z, bc1))
                         f = next(fn for fn in fns if np.isin(oths, fn).all())
                         uv = oths
                 # At this point, it's possible that we are handling the exit through a vertex or
@@ -4326,7 +4331,6 @@ class PathTrace(ObjectWithMetaData):
                     bc = np.zeros(3)
                     bc[f == uv[0]] = dv / tot
                     bc[f == uv[1]] = du / tot
-                else: raise ValueError('incorrect ending to loop', z, zs, f, pt, bc)
                 allfaces.append(f)
                 allbarys.append(bc)
                 pt = np.dot(fmap_crds[f].T, bc)
