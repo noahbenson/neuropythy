@@ -4042,8 +4042,8 @@ def bcfull(bc):
     '''
     if len(bc) == 3: return np.asarray(bc)
     bc = np.asarray(bc)
-    bc = np.asarray([bc, [1 - bc[0] - bc[1]]])
-    if len(bc.shape) == 1: bc = np.concatenate(bc)
+    bc = [bc, [1 - bc[0] - bc[1]]]
+    if len(bc[0].shape) == 1: bc = np.concatenate(bc)
     else: bc = np.vstack(bc)
     return bc
 def bcfix(bc, atol=1e-8):
@@ -4052,6 +4052,7 @@ def bcfix(bc, atol=1e-8):
       rescaled coordinates.
     '''
     bc = bcfull(bc)
+    bc = bc * zinv(np.sum(np.abs(bc), axis=0))
     bc[np.isclose(bc, 0, atol=atol)] = 0
     return bc * zinv(np.sum(np.abs(bc), axis=0))
 
@@ -4144,6 +4145,7 @@ class PathTrace(ObjectWithMetaData):
         bc = bcfix(addr['coordinates'], atol=ztol)
         allfaces = [f]
         allbarys = [bc]
+        #hist = [None] #dbg
         for ii in range(len(pts) - 1):
             (pt0,pt1) = pts[[ii, ii+1]]
             seg = [pt0, pt1]
@@ -4172,6 +4174,7 @@ class PathTrace(ObjectWithMetaData):
                     bc = bcfix(bc, atol=ztol)
                     allfaces.append(f)
                     allbarys.append(bc)
+                    #hist.append((f, bc, None, None)) #dbg
                     break
                 z = np.isclose(bc, 0, atol=ztol)
                 zs = np.sum(z)
@@ -4237,9 +4240,15 @@ class PathTrace(ObjectWithMetaData):
                                 # infinite loop in unusual cases of numerical error, so we also
                                 # make sure pt is not identical to pt0 anymore.
                                 fnew = fns[eii]
-                                bc = bcfix(cartesian_to_barycentric_2D(fmap_crds[fnew], pt))
-                                bc[~np.isin(fnew, f)] = 0
-                                bc = bcfix(bc)
+                                # new bc coordinates should have a zero for the vertex not in the
+                                # current face and should otherwise be based on side distance
+                                bc = np.zeros(3)
+                                (ux,vx) = np.transpose(fex, (2,0,1))[eii]
+                                (u,v) = fe[eii]
+                                dist = np.sqrt(np.sum((ux - vx)**2))
+                                bc[f == u] = np.sqrt(np.sum((vx - pt)**2)) / dist
+                                bc[f == v] = np.sqrt(np.sum((ux - pt)**2)) / dist
+                                #hist.append(tmp) #dbg
                                 f = fnew
                                 pt = np.array(pt) # pt is not pt0
                                 continue
@@ -4283,6 +4292,7 @@ class PathTrace(ObjectWithMetaData):
                             'no exit for point %s on face %d: %s' % (bc, fii, (f, fcrds, seg, pt))
                         f = fns[~z][0]
                         uv = oths
+                #hist.append((f, bc, z, (u, uv))) #dbg
                 # At this point, it's possible that we are handling the exit through a vertex or
                 # through a side; in either case we process this to have the correct bc values
                 if u is not None:
