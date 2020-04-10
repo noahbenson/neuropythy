@@ -4154,16 +4154,6 @@ class PathTrace(ObjectWithMetaData):
             while True:
                 fcrds = fmap_crds[f]
                 fii = fmap.tess.index[tuple(fmap.labels[list(f)])]
-                # First of all, check the end condition: if pt1 is in the current face, we are
-                # finished with this trace-segment.
-                if point_in_triangle(fcrds, pt1, atol=ztol):
-                    bc = bcfix(cartesian_to_barycentric_2D(fcrds, pt1), atol=ztol)
-                    # sometimes the BC coordinates are a bit off, so we fix them if need-be
-                    bc[bc < 0] = 0
-                    bc = bcfix(bc, atol=ztol)
-                    allfaces.append(f)
-                    allbarys.append(bc)
-                    break
                 # Let's gather a bit of information about the current triangle:
                 f = np.asarray(f)
                 bc = np.asarray(bc)
@@ -4173,7 +4163,16 @@ class PathTrace(ObjectWithMetaData):
                 fe   = np.array([next(ee for ee in fe if fv not in ee) for fv in f])
                 fns  = np.array([next(fn for fn in fns if fv not in fn) for fv in f])
                 fex  = np.transpose([fmap_crds[uv] for uv in fe], (1,2,0))
-                #z = point_on_segment(fex, pt, atol=ztol)
+                # First of all, check the end condition: if pt1 is in the current face, we are
+                # finished with this trace-segment.
+                if point_in_triangle(fcrds, pt1, atol=ztol) or point_on_segment(fex, pt1).any():
+                    bc = bcfix(cartesian_to_barycentric_2D(fcrds, pt1), atol=ztol)
+                    # sometimes the BC coordinates are a bit off, so we fix them if need-be
+                    bc[bc < 0] = 0
+                    bc = bcfix(bc, atol=ztol)
+                    allfaces.append(f)
+                    allbarys.append(bc)
+                    break
                 z = np.isclose(bc, 0, atol=ztol)
                 zs = np.sum(z)
                 u = None # this is set to a vertex of f if seg is leaving through a vertex of f
@@ -4254,8 +4253,10 @@ class PathTrace(ObjectWithMetaData):
                         if point_on_segment(seg, fmap_crds[o], atol=ztol): u = o
                         else:
                             # otherwise it is through one of the edges
-                            ipts = np.transpose(segment_intersection_2D(seg, fex[:,:,~z], atol=ztol))
+                            ipts = np.transpose(segment_intersection_2D(seg,fex[:,:,~z],atol=ztol))
                             ifin = np.isfinite(ipts[:,0])
+                            if np.sum(ifin) != 1:
+                                raise ValueError('??', f, fcrds, seg, pt, z, bc, allfaces, allbarys, (fex, z, ipts))
                             assert \
                                 np.sum(ifin) == 1, \
                                 ('no. of exits found for triangle %s != 1; this may indicate a bad'
