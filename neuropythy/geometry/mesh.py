@@ -4255,8 +4255,6 @@ class PathTrace(ObjectWithMetaData):
                             # otherwise it is through one of the edges
                             ipts = np.transpose(segment_intersection_2D(seg,fex[:,:,~z],atol=ztol))
                             ifin = np.isfinite(ipts[:,0])
-                            if np.sum(ifin) != 1:
-                                raise ValueError('??', f, fcrds, seg, pt, z, bc, allfaces, allbarys, (fex, z, ipts))
                             assert \
                                 np.sum(ifin) == 1, \
                                 ('no. of exits found for triangle %s != 1; this may indicate a bad'
