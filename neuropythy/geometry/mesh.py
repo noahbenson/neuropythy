@@ -4255,10 +4255,10 @@ class PathTrace(ObjectWithMetaData):
                             # otherwise it is through one of the edges
                             ipts = np.transpose(segment_intersection_2D(seg,fex[:,:,~z],atol=ztol))
                             ifin = np.isfinite(ipts[:,0])
-                            assert \
-                                np.sum(ifin) == 1, \
-                                ('no. of exits found for triangle %s != 1; this may indicate a bad'
-                                 ' or malformed tesselation or embedding of the map' % (f,))
+                            if np.sum(ifin) != 1:
+                                raise ValueError('number of exits from face %s is not equal to 1; '
+                                                 'this is typically due to inverted mesh triangles'
+                                                 % (list(f)))
                             uv = fe[~z][ifin][0]
                             f = fns[~z][ifin][0]
                 elif zs == 2: # (3) the current point is on one of the vertices exactly
