@@ -4317,7 +4317,7 @@ class PathTrace(ObjectWithMetaData):
                     if ii is not None:
                         # it does intersect one of the neighborhood points
                         f = [u, nei, neis[(ii+1) % len(neis)]]
-                        bc = [0, 1, 0]
+                        bc = [1, 0, 0]
                     else:
                         # it must intersect one of the edges; we test for line-intersection here
                         # instead of segment intersection because it's possible that pt1 is in the
