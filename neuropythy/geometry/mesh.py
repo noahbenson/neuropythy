@@ -3264,10 +3264,11 @@ class Path(ObjectWithMetaData):
     To create a Path object, it is generally encourated that one use the path() function instead of
     the Path() constructor.
     '''
-    def __init__(self, surface, addrs, meta_data=None):
+    def __init__(self, surface, addrs, meta_data=None, atol=1e-12):
         ObjectWithMetaData.__init__(self, meta_data)
         self.surface   = surface
         self.addresses = addrs
+        self.atol = atol
     @pimms.param
     def surface(s):
         '''
@@ -3282,6 +3283,15 @@ class Path(ObjectWithMetaData):
         '''
         if not is_address(addrs): raise ValueError('addresses must be a valid address structure')
         return pimms.persist(addrs)
+    @pimms.param
+    def atol(a):
+        '''
+        path.atol is the epsilon value used to test if a number is different than 0. Typically this
+        is 1e-12.
+        '''
+        a = float(a)
+        if a < 0: raise ValueError('atol must be non-negative')
+        return a
     @staticmethod
     def addresses_to_coordinates(surface, addresses):
         '''
@@ -3332,7 +3342,7 @@ class Path(ObjectWithMetaData):
             if closed: return np.sum(np.sqrt(np.sum((x - np.roll(x, -1))**2, axis=0)))
             else:      return np.sum(np.sqrt(np.sum((x[:,:-1] - x[:,1:])**2, axis=0)))
     @pimms.value
-    def edge_data(addresses, closed):
+    def edge_data(addresses, closed, atol):
         '''
         path.edge_data is a tuple of (u, v, wu, wv, fs, ps) where u and v are arrays such that each
         edge in path.surface that intersects the given path is given by one of the (u[i],v[i]), and
@@ -3362,7 +3372,7 @@ class Path(ObjectWithMetaData):
         maxv = np.max(faces) + 1
         mtx = sps.dok_matrix((maxv,maxv))
         for (ii,f,w) in zip(range(n), faces.T, coords.T):
-            zs = np.isclose(w, 0, atol=1e-5)
+            zs = np.isclose(w, 0, atol=atol)
             nz = np.sum(zs)
             pcur.append(ii)
             if nz == 0: # inside the triangle--no crossings
@@ -3572,7 +3582,7 @@ class Path(ObjectWithMetaData):
         res.setflags(write=False)
         return res
     @pimms.value
-    def intersected_face_paths(edge_data, addresses, closed):
+    def intersected_face_paths(edge_data, addresses, closed, atol):
         '''
         path.intersected_face_paths is a dict of all the faces intersected by the the given path
         along with the barycentric coordinates of all points that lie in that face. This means that
@@ -3588,9 +3598,9 @@ class Path(ObjectWithMetaData):
             for (f,x) in zip(f0,x0):
                 # if the node is not found we use a much more tolerant version of the error--such a
                 # situation likely indicates a rounding error at an exact node crossing
-                if   np.isclose(x, 0, atol=1e-5): continue
+                if   np.isclose(x, 0, atol=atol): continue #atol=1e-5 #dbg
                 elif f in ftarg:                  r[f == ftarg] = x
-                elif np.isclose(x, 0, atol=1e-3): continue
+                elif np.isclose(x, 0, atol=4*atol): continue #atol=1e-3 #dbg
                 else: raise ValueError('Non-zero bc-conv value',
                                        dict(edge_data=edge_data, addresses=addresses, closed=closed,
                                             f0=f0, x0=x0, ftarg=ftarg, f=f, x=x))
@@ -3613,7 +3623,7 @@ class Path(ObjectWithMetaData):
             if len(e.args) > 1 and isinstance(e.args[1], dict): e.args[1]['idx'] = idx
             raise
     @staticmethod
-    def tesselate_triangle_paths(paths):
+    def tesselate_triangle_paths(paths, atol=1e-12):
         '''
         tesselate_triangle_paths([path1, path2...]) yields a (3x2xN) array of N 2D triangles that
           tesselate a triangle without crossing any of the given paths. The paths themselves should
@@ -3650,7 +3660,8 @@ class Path(ObjectWithMetaData):
         for (ii,x) in enumerate(coords):
             if idcs[ii] < ii: continue
             dists = np.sqrt(np.sum((coords[ii:] - x)**2, axis=1))
-            idcs_eq = np.where(np.isclose(dists, 0, atol=1e-4))[0]
+            #idcs_eq = np.where(np.isclose(dists, 0, atol=1e-4))[0] #dbg
+            idcs_eq = np.where(np.isclose(dists, 0, atol=atol))[0]
             idcs[idcs_eq + ii] = n
             n += 1
             ridcs.append(ii)
@@ -3695,7 +3706,8 @@ class Path(ObjectWithMetaData):
             # to have points along the edge that we enter/exit on
             bcx = bccoords[pii]
             x   = coords[pii]
-            zz = np.isclose(bcx, 0, atol=1e-5)
+            #zz = np.isclose(bcx, 0, atol=1e-5) #dbg
+            zz = np.isclose(bcx, 0, atol=atol)
             (k0,ke) = (1, len(bcx) - 2)
             for (k_, _k, dr) in zip([k0,ke], [ke,k0], [1,-1]):
                 while dr*k_ < dr*_k and np.sum(zz[k_]) > 0:
@@ -3704,13 +3716,13 @@ class Path(ObjectWithMetaData):
                     k_ = k_ + dr
                 if dr == 1: k0 = k_
                 else:       ke = k_
-            if np.sum(np.isclose(bcx[k0:ke], 0, atol=1e-5)) > 0:
+            if np.sum(np.isclose(bcx[k0:ke], 0, atol=atol)) > 0: #atol=1e-5
                 raise ValueError('path middle touches edge',
                                  dict(coords0=coords0, bccoords0=bccoords0,
                                       coords=coords, bccoords=bccoords,
                                       pii=pii, pidcs=pidcs, idcs=idcs, ridcs=ridcs))
             (p0,p1) = bcx[[0,-1]]
-            (z0,z1) = [np.isclose(p,0,atol=1e-4) for p in (p0,p1)]
+            (z0,z1) = [np.isclose(p,0,atol=atol) for p in (p0,p1)] #atol=1e-4 #dbg
             (s0,s1) = [np.sum(z)                 for z in (z0,z1)]
             (e0,e1) = [((0 if     z[2] else 1 if     z[0] else 2) if s == 1 else
                         (0 if not z[0] else 1 if not z[1] else 2) if s == 2 else
@@ -3834,7 +3846,7 @@ class Path(ObjectWithMetaData):
                       for hs in (lhs,rhs)
                       for ll in [[bccoords[abc] for abc in np.asarray(list(hs))]]])
     @pimms.value
-    def all_border_triangle_addresses(edge_data, addresses, closed, intersected_face_paths):
+    def all_border_triangle_addresses(edge_data, addresses, closed, intersected_face_paths, atol):
         '''
         path.all_border_triangle_addresses contains a nested tuple ((a,b,c), (d,e,f)); each of the
         (a,b,c) and (d,e,f) tuples represent arrays of triangles--each of the a-f represent an
@@ -3853,7 +3865,7 @@ class Path(ObjectWithMetaData):
         # of the tesselated triangles are inside/outside the mesh
         (lhs,rhs,lfs,rfs) = ([],[],[],[])
         for (abc,bcxs) in six.iteritems(intersected_face_paths):
-            try: (ll,rr) = Path.tesselate_triangle_paths(bcxs)
+            try: (ll,rr) = Path.tesselate_triangle_paths(bcxs, atol)
             except ValueError as e:
                 if len(e.args) > 1 and isinstance(e.args[1], dict):
                     e.args[1]['abc'] = abc
@@ -4014,7 +4026,7 @@ class Path(ObjectWithMetaData):
           considered to contain all the vertices not contained by path if path is closed).
         '''
         addrs = {k:np.fliplr(v) for (k,v) in six.iteritems(self.addresses)}
-        return Path(self.surface, addrs, meta_data=meta_data)
+        return Path(self.surface, addrs, meta_data=meta_data, atol=atol)
     def boundary_vertices(self, distance, outer=False, indices=False):
         '''
         path.boundary_vertices(d) yields an array of vertex labels representing all vertices that
@@ -4349,7 +4361,7 @@ class PathTrace(ObjectWithMetaData):
         allfaces = np.transpose([fmap.labels[f] for f in allfaces])
         allbarys = np.transpose(allbarys)
         addrs = {'faces':allfaces, 'coordinates':allbarys}
-        return Path(obj, addrs, meta_data={'source_trace': self})
+        return Path(obj, addrs, meta_data={'source_trace': self}, atol=ztol)
     def save(self, filename):
         '''
         path_trace.save(filename) saves the given path_trace object to the given filename. If
