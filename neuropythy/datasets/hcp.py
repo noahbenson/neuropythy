@@ -319,6 +319,10 @@ def calc_native_properties(native_hemi, fs_LR_hemi, prefix, resolution, subject_
         try: return {k:nyio.load(v, 'mgh') for (k,v) in six.iteritems(fls)}
         except Exception: pass
     else: fls = None
+
+    # make sure we can grab one of the properties before we print anything...
+    ptest = native_hemi.prop(prefix+hcp_retinotopy_property_names[0])
+    # if that didn't fail, print the message...
     logging.info('HCP Dataset: Interpolating retinotopy for HCP subject %s / %s (method: %s)...'
                  % (subject_id, native_hemi.chirality, method))
     p = fs_LR_hemi.interpolate(native_hemi,
