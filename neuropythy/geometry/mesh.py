@@ -4257,9 +4257,11 @@ class PathTrace(ObjectWithMetaData):
                                 bc = np.zeros(3)
                                 (ux,vx) = np.transpose(fex, (2,0,1))[eii]
                                 (u,v) = fe[eii]
-                                dist = np.sqrt(np.sum((ux - vx)**2))
-                                bc[f == u] = np.sqrt(np.sum((vx - pt)**2)) / dist
-                                bc[f == v] = np.sqrt(np.sum((ux - pt)**2)) / dist
+                                udist = np.sqrt(np.sum((ux - pt)**2))
+                                vdist = np.sqrt(np.sum((vx - pt)**2))
+                                dist = udist + vdist
+                                bc[fnew == u] = vdist / dist
+                                bc[fnew == v] = udist / dist
                                 #hist.append(tmp) #dbg
                                 f = fnew
                                 pt = np.array(pt) # pt is not pt0
@@ -4279,7 +4281,7 @@ class PathTrace(ObjectWithMetaData):
                             if np.sum(ifin) != 1:
                                 raise ValueError('number of exits from face %s is not equal to 1; '
                                                  'this is typically due to inverted mesh triangles'
-                                                 % (list(f)))
+                                                 % (list(f),))
                             uv = fe[~z][ifin][0]
                             f = fns[~z][ifin][0]
                 elif zs == 2: # (3) the current point is on one of the vertices exactly
