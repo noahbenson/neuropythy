@@ -3660,8 +3660,8 @@ class Path(ObjectWithMetaData):
         for (ii,x) in enumerate(coords):
             if idcs[ii] < ii: continue
             dists = np.sqrt(np.sum((coords[ii:] - x)**2, axis=1))
-            #idcs_eq = np.where(np.isclose(dists, 0, atol=1e-4))[0] #dbg
-            idcs_eq = np.where(np.isclose(dists, 0, atol=atol))[0]
+            idcs_eq = np.where(np.isclose(dists, 0, atol=1e-4))[0] #dbg
+            #idcs_eq = np.where(np.isclose(dists, 0, atol=atol))[0]
             idcs[idcs_eq + ii] = n
             n += 1
             ridcs.append(ii)
@@ -3706,8 +3706,8 @@ class Path(ObjectWithMetaData):
             # to have points along the edge that we enter/exit on
             bcx = bccoords[pii]
             x   = coords[pii]
-            #zz = np.isclose(bcx, 0, atol=1e-5) #dbg
-            zz = np.isclose(bcx, 0, atol=atol)
+            zz = np.isclose(bcx, 0, atol=1e-5) #dbg
+            #zz = np.isclose(bcx, 0, atol=atol)
             (k0,ke) = (1, len(bcx) - 2)
             for (k_, _k, dr) in zip([k0,ke], [ke,k0], [1,-1]):
                 while dr*k_ < dr*_k and np.sum(zz[k_]) > 0:
@@ -3722,7 +3722,8 @@ class Path(ObjectWithMetaData):
                                       coords=coords, bccoords=bccoords,
                                       pii=pii, pidcs=pidcs, idcs=idcs, ridcs=ridcs))
             (p0,p1) = bcx[[0,-1]]
-            (z0,z1) = [np.isclose(p,0,atol=atol) for p in (p0,p1)] #atol=1e-4 #dbg
+            (z0,z1) = [np.isclose(p,0,atol=1e-4) for p in (p0,p1)] #dbg
+            #(z0,z1) = [np.isclose(p,0,atol=atol) for p in (p0,p1)]
             (s0,s1) = [np.sum(z)                 for z in (z0,z1)]
             (e0,e1) = [((0 if     z[2] else 1 if     z[0] else 2) if s == 1 else
                         (0 if not z[0] else 1 if not z[1] else 2) if s == 2 else
