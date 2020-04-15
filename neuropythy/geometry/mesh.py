@@ -1930,6 +1930,7 @@ class Mesh(VertexSet):
           address dictionary A in the given mesh. See also mesh.address.
         '''
         (faces, coords) = address_data(data, 2)
+        if faces is None: return np.zeros((self.coordinates.shape[0], 0))
         faces = self.tess.index(faces)
         selfx = self.coordinates
         if all(len(np.shape(x)) > 1 for x in (faces, coords)):
@@ -3616,6 +3617,7 @@ class Path(ObjectWithMetaData):
             return r
         # walk along edge data; mostly this isn't too hard
         (fs,ps) = edge_data[4:6]
+        if len(fs) == 0: return pyr.pmap({})
         if fs[-1] is None: fs = fs[:-1]
         # standardize them all without reflecting them
         fs = np.asarray([np.roll(f, -np.argmin(f)) for f in fs])
@@ -3887,10 +3889,14 @@ class Path(ObjectWithMetaData):
             rhs.append(rr)
             lfs.append(np.matlib.repmat([abc],ll.shape[2],1))
             rfs.append(np.matlib.repmat([abc],rr.shape[2],1))
-        lhs = np.concatenate(lhs, axis=2)
-        rhs = np.concatenate(rhs, axis=2)
-        lfs = np.vstack(lfs).T
-        rfs = np.vstack(rfs).T
+        if len(lhs) == 0: lhs = np.zeros((3,3,0), dtype='float')
+        else: lhs = np.concatenate(lhs, axis=2)
+        if len(rhs) == 0: rhs = np.zeros((3,3,0), dtype='float')
+        else: rhs = np.concatenate(rhs, axis=2)
+        if len(lfs) == 0: lfs = np.zeros((3,0), dtype='int')
+        else: lfs = np.vstack(lfs).T
+        if len(rfs) == 0: rfs = np.zeros((3,0), dtype='int')
+        else: rfs = np.vstack(rfs).T
         for x in (lhs,rhs,lfs,rfs): x.setflags(write=False)
         return tuple([tuple([pyr.m(faces=fs, coordinates=xs) for xs in hs])
                       for (hs,fs) in zip([lhs,rhs],[lfs,rfs])])
@@ -3946,7 +3952,7 @@ class Path(ObjectWithMetaData):
         remains None.
         '''
         if not closed: return None
-        contained_faces = surface.tess.index(contained_faces)
+        contained_faces = surface.tess.index(contained_faces).astype('int')
         def sarea(srf):
             if pimms.is_str(srf): (srf,btris) = (surface.surfaces[srf],border_triangles[srf])
             else: btris = border_triangles

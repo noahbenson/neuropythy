@@ -507,9 +507,11 @@ def address_data(data, dims=None, surface=0.5, strict=True):
         raise ValueError('address data faces and coordinates are different shapes')
     elif len(faces) == 0: return (None, None)
     if len(faces.shape) == 2 and faces.shape[0] != 3: faces = faces.T
+    if len(faces.shape) == 2 and faces.shape[1] == 0: return (None, None)
     if faces.shape[0] != 3: raise ValueError('address contained bad face matrix')
     if len(coords.shape) == 2 and coords.shape[0] not in (2,3): coords = coords.T
     if coords.shape[0] not in (2,3): raise ValueError('address coords are neither 2D nor 3D')
+    if len(coords.shape) == 2 and coords.shape[1] == 0: return (None, None)
     if dims is None: dims = coords.shape[0]
     elif coords.shape[0] != dims:
         if dims == 2: coords = coords[:2]
