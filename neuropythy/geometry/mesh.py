@@ -1739,16 +1739,25 @@ class Mesh(VertexSet):
             raise ValueError('cannot interpret input data argument')
         elif len(data) != n:
             return tuple([self.apply_interpolation(interp, d) for d in data])
-        elif pimms.is_vector(data, 'number'):
-            return inner(interp, data)
         else:
             maxs = flattest(interp.argmax(axis=1))
-            bads = (~np.isfinite(interp.sum(axis=1))) | np.isclose(0, interp[(np.arange(m),maxs)])
-            bads = np.where(bads)[0]
-            if len(bads) == 0: res = data[maxs]
+            tot = interp.sum(axis=1)
+            bads = ~np.isfinite(tot)
+            if pimms.is_vector(data, 'number'):
+                res = inner(interp, data)
+                bads |= np.isclose(0, tot)
+                bads = np.where(bads)[0]
+                if len(bads) > 0:
+                    if pimms.is_array(res, 'int'):
+                        res = np.array(res, 'float')
+                    res[bads] = np.nan
             else:
-                res = np.array(data[maxs], dtype=np.object)
-                res[bads] = np.nan
+                res = data[maxs]
+                bads |= np.isclose(0, interp[(np.arange(m),maxs)])
+                bads = np.where(bads)[0]
+                if len(bads) > 0:
+                    res = np.array(res, dtype=np.object)
+                    res[bads] = np.nan
             return res
     def interpolation_matrix(self, x, mask=None, weights=None, method='linear', n_jobs=-1):
         '''
@@ -4361,6 +4370,18 @@ class PathTrace(ObjectWithMetaData):
                 allfaces.append(f)
                 allbarys.append(bc)
                 pt = np.dot(fmap_crds[f].T, bc)
+        # one possibility to check for before we return: if the last point is on an edge of the
+        # first face but not listed by the same face (if we're closed)
+        if self.closed:
+            (f0,f1) = (allfaces[0], allfaces[-1])
+            b1 = allbarys[-1]
+            z1 = np.isclose(b1, 0, atol=ztol)
+            e = [u for u in f1 if u in f0]
+            if len(e) == 2 and np.sum(z1) == 1:
+                allfaces[-1] = f0
+                allbarys[-1] = np.zeros(3)
+                for u in e:
+                    allbarys[-1][f0 == u] = b1[f1 == u]
         allfaces = np.transpose([fmap.labels[f] for f in allfaces])
         allbarys = np.transpose(allbarys)
         addrs = {'faces':allfaces, 'coordinates':allbarys}
