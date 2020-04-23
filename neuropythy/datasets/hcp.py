@@ -321,7 +321,7 @@ def calc_native_properties(native_hemi, fs_LR_hemi, prefix, resolution, subject_
     else: fls = None
 
     # make sure we can grab one of the properties before we print anything...
-    ptest = native_hemi.prop(prefix+hcp_retinotopy_property_names[0])
+    ptest = fs_LR_hemi.prop(prefix+hcp_retinotopy_property_names[0])
     # if that didn't fail, print the message...
     logging.info('HCP Dataset: Interpolating retinotopy for HCP subject %s / %s (method: %s)...'
                  % (subject_id, native_hemi.chirality, method))
@@ -484,6 +484,7 @@ class HCPRetinotopyDataset(Dataset):
             import h5py
             flnm = HCPRetinotopyDataset.retinotopy_files[res]
             logging.info('HCPRetinotopyDataset: Loading split %d from file %s...' % (split, flnm))
+            # Before we get this from the 
             flnm = pseudo_path.local_path(flnm)
             with h5py.File(flnm, 'r') as f:
                 sids = np.array(f['subjectids'][0], dtype='int')
@@ -651,9 +652,16 @@ class HCPRetinotopyDataset(Dataset):
                 raise ValueError('no retinotopy successfully loaded for hemi', hemi)
             def _interp_nat(h, align):
                 # okay, let's get the hemisphere we are modifying...
-                hemi = hems1['%s_native_%s' % (h, align)]
+                hemi = hem0 = hems1['%s_native_%s' % (h, align)]
                 # we're going to interp from both the 32k and 59k meshes (if possible)
-                for res in [32, 59]: hemi = _interp_hem(hemi, h, res, align)
+                for res in [32, 59]:
+                    # These may fail due to not having files for one or the other (if not loading
+                    # from S3); this is okay, though.
+                    try: hemi = _interp_hem(hemi, h, res, align)
+                    except Exception: pass
+                if hemi is hem0:
+                    warnings.warn('unable to interpolate retinotopy for any hemisphere '
+                                  'of hcp_retinotopy subject')
                 # add the 'best/standard' prf header:
                 pfx = HCPRetinotopyDataset.retinotopy_prefix
                 lm = pimms.lazy_map({(pfx + '_' + k): curry(_get_highest_res, hemi, k)
