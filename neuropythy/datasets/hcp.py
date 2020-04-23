@@ -31,12 +31,19 @@ def to_nonempty(s):
     '''
     if not pimms.is_str(s) or s == '': raise ValueError('cannot convert object to non-empty string')
     return s
+def to_nonempty_path(dat):
+    '''
+    to_nonempty_path(s) yields s if s is a nonempty string and otherwise raises an exception. If s
+      is a string, then the variable- and user-expanded form is returned.
+    '''
+    if not pimms.is_str(s) or s == '': raise ValueError('cannot convert object to non-empty string')
+    return os.path.expanduser(os.path.expandvars(s))
 config.declare('hcp_auto_release', environ_name='HCP_AUTO_RELEASE', default_value='HCP_1200',
                filter=to_nonempty)
 config.declare('hcp_auto_database',environ_name='HCP_AUTO_DATABASE',default_value='hcp-openaccess',
                filter=to_nonempty)
 config.declare('hcp_auto_path',    environ_name='HCP_AUTO_PATH',    default_value=Ellipsis,
-               filter=to_nonempty)
+               filter=to_nonempty_path)
 config.declare('hcp_auto_default_alignment',
                environ_name='HCP_AUTO_DEFAULT_ALIGNMENT',
                default_value='MSMAll',
