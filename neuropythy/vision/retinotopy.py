@@ -436,6 +436,8 @@ def to_logeccen(ecc, vmin=0, vmax=90, offset=0.75):
       which are extracted in degrees.
     to_logeccen(xy_matrix) rescales all the (x,y) points in the given matrix to have lox-spaced
       eccentricity values.
+
+    to_logeccen is the inverse of from_logeccen.
     '''
     if pimms.is_matrix(ecc):
         xy = np.asarray(pimms.mag(ecc, 'deg'))
@@ -451,6 +453,30 @@ def to_logeccen(ecc, vmin=0, vmax=90, offset=0.75):
         log_ecc = np.log(ecc + offset)
         (vmin, vmax) = [np.log(u + offset) for u in (vmin, vmax)]
         return (log_ecc - vmin) / (vmax - vmin)
+def from_logeccen(logecc, vmin=0, vmax=90, offset=0.75):
+    '''
+    from_logeccen(logecc) yields a rescaled linear-space version of the log-eccentricity value (or
+      values) logecc.
+    from_logeccen(logxy_matrix) rescales all the (x,y) points in the given matrix to have
+      linearly-spaced eccentricity values.
+
+    from_logeccen is the inverse of to_logeccen.
+    '''
+    if pimms.is_matrix(logecc):
+        xy = np.asarray(logecc)
+        trq = xy.shape[0] != 2
+        xy = np.transpose(xy) if trq else np.asarray(xy)
+        r = np.sqrt(np.sum(xy**2, axis=0))
+        esc = from_logeccen(r, vmin=vmin, vmax=vmax, offset=offset)
+        ecc = zinv(r)
+        xy = xy * [ecc,ecc] * [esc,esc]
+        return xy.T if trq else xy
+    else:
+        logecc = np.asarray(logecc)
+        (vmin,vmax,offset) = [np.asarray(u) for u in (vmin,vmax,offset)]
+        (vmin, vmax) = [np.log(u + offset) for u in (vmin, vmax)]
+        logecc = logecc*(vmax - vmin) + vmin
+        return np.exp(logecc) - offset
 
 pRF_data_Wandell2015 = pyr.pmap(
     {k.lower():pyr.pmap(v)
