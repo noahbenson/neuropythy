@@ -77,7 +77,7 @@ class config(object):
         if config._rc is None:
             # First: We check to see if we have been given a custom nptyhrc file:
             npythyrc_path = os.path.expanduser('~/.npythyrc')
-            if 'NPYTHRC' in os.environ:
+            if 'NPYTHYRC' in os.environ:
                 npythyrc_path = os.path.expanduser(os.path.expandvars(os.environ['NPYTHYRC']))
             # the default config:
             if os.path.isfile(npythyrc_path):
