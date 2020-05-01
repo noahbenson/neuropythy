@@ -1448,7 +1448,7 @@ class Mesh(VertexSet):
         '''
         tri_no = np.asarray(tri_no)
         pt = np.asarray(pt)
-        if tri_no.shape is () and len(pt.shape) == 1:
+        if tri_no.shape == () and len(pt.shape) == 1:
             tx = self.coordinates[:, self.tess.faces[:, tri_no]]
             n = self.face_normals[:, tri_no]
             d = np.dot(n, pt - tx[0])
