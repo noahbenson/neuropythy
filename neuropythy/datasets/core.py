@@ -111,7 +111,8 @@ class Dataset(ObjectWithMetaData):
         if it cannot be found.
         '''
         if os.path.isdir(cache_directory): return True
-        if not create_directories: raise ValueError('dataset cache directory not found: %s')
+        if not create_directories:
+            raise ValueError('dataset cache directory not found: %s' % (cache_directory,))
         os.makedirs(os.path.abspath(cache_directory), create_mode)
         return True
 # We create the dataset repository: this is just a lazy map; to add a dataset to iit, use the

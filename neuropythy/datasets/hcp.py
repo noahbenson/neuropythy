@@ -31,7 +31,7 @@ def to_nonempty(s):
     '''
     if not pimms.is_str(s) or s == '': raise ValueError('cannot convert object to non-empty string')
     return s
-def to_nonempty_path(dat):
+def to_nonempty_path(s):
     '''
     to_nonempty_path(s) yields s if s is a nonempty string and otherwise raises an exception. If s
       is a string, then the variable- and user-expanded form is returned.
@@ -691,3 +691,198 @@ class HCPRetinotopyDataset(Dataset):
         # we just need to call down to this prep function lazily:
         return pimms.lazy_map({sid: curry(_prep, sid) for sid in six.iterkeys(retinotopy_data)})
 add_dataset('hcp_retinotopy', lambda:HCPRetinotopyDataset().persist())
+
+config.declare('hcp_metadata_path', environ_name='HCP_METADATA_PATH', default_value=None,
+               filter=to_nonempty_path)
+config.declare('hcp_behavioral_path', environ_name='HCP_BEHAVIORAL_PATH', default_value=None,
+               filter=to_nonempty_path)
+config.declare('hcp_genetic_path', environ_name='HCP_GENETIC_PATH', default_value=None,
+               filter=to_nonempty_path)
+@pimms.immutable
+class HCPMetaDataset(Dataset):
+    '''
+    The HCPMetaDataset (in neuropythy.data['hcp_metadata'] is a common repository for the various
+    behavioral/genetic/meta-data provided by the Human Connectome Project. Because these data are
+    not generally available for auto-download and/or are behind a registration process, you have
+    to obtain these data manually then configure neuropythy to know about them. Neuropythy does not
+    actually use these itself, but other datasets can use them and simply require you to configure
+    the dataset through this interface instead of telling each dataset individually where it should
+    find the files. A couple of summaries (gender and agegroup) are also provided here.
+
+    To tell neuropythy where to find the relevant files, you use the configuration interface,
+    ideally by making a JSON file named .npythyrc in your home directory that contains the paths for
+    the relevant files. These files and configuration names are described below. If any of these
+    paths is omitted from the configuration, there are a couple of default places that neuropythy
+    will look for files with particular names. These are in the "hcp_subjects_path", in the
+    "cache_data_root", and in the "hcp_metadata" and "hcp/metadata" subdirectories of the 
+    "cache_data_root" configuration item. Both "hcp_subject_paths" and "cache_data_root" are
+    configured via neuropythy.config as well and are documented elsewhere. If multiple HCP subject
+    paths are included, then all of them are searched. Finally, the optional configuration item,
+    "hcp_metadata_path" can be set to a directory which should be searched for files with the
+    default names.
+
+      * "hcp_behavioral_path" should be the path of the behavioral data CSV file provided by the
+        Human Connectome Project (https://db.humanconnectome.org/). The default search name for
+        this file is behvaioral_data_1200_subjects.csv.
+      * "hcp_genetic_path" should be the path of the restricted family-structure data CSV file
+        provided by the Human Connectome Project. The default search name for this file is the
+        "RESTRICTED_hcpfamilystructure.csv"
+
+    If you have declared the object `data = neuropythy.data['hcp_metadata']` then the following
+    are the relevant members of data.
+      * data.
+    '''
+
+    def __init__(self, metadata_path=None, genetic_path=None, behavioral_path=None, meta_data=None):
+        '''
+        HCPMetaDataset() creates a new HCP meta-dataset object. Constructing a new object will
+        reset the object based on the current state of the neuropythy config data; alternately,
+        values for metadata_path, genetic_path, and behavioral_path may be passed.
+        '''
+        Dataset.__init__(self, 'hcp_metadata',
+                         meta_data=meta_data,
+                         custom_directory='.',
+                         create_directories=False)
+        self.metadata_path = metadata_path
+        self._genetic_path = genetic_path
+        self._behavioral_path = behavioral_path
+    # How we search for a file
+    @staticmethod
+    def _findfile(paths, name):
+        import os
+        for path in paths:
+            if path is None or path is Ellipsis: continue
+            path = os.path.expanduser(os.path.expandvars(path))
+            fname = os.path.join(path, name)
+            if os.path.isfile(fname): return fname
+        return None
+    @pimms.param
+    def metadata_path(p):
+        '''
+        metadata_path is either None (when no metadata-path has been provided/configured) or the
+        path to the meta-data directory of the HCP. This directory is simply a location in which
+        neuropythy will look for behavioral and genetic metadata about HCP subjects.
+        '''
+        import os
+        if p is None or p is Ellipsis:
+            # We want to see if it's in the config (this is None if not)
+            return config['hcp_metadata_path']
+        else:
+            p = os.path.expanduser(os.path.expandvars(p))
+            if not os.path.isdir(p):
+                raise ValueError('metadata_path must be a directory')
+            return p
+    @pimms.param
+    def _behavioral_path(p):
+        '''
+        _behavioral_path is the path to the behavioral/meta-data CSV file provided by the Human
+        Connectome Project. This is the argument given to the dataset, not the actual name of
+        the file used (which may be found elsewhere if None is given, for example).
+        '''
+        import os
+        if p is None or p is Ellipsis: return None
+        if not pimms.is_str(p): raise ValueError('behavioral_path must be None or a string')
+        return os.path.expanduser(os.path.expandvars(p))
+    @pimms.param
+    def _genetic_path(p):
+        '''
+        _genetic_path is the path to the family-structure data CSV file provided by the Human
+        Connectome Project. This is the argument given to the dataset, not the actual name of
+        the file used (which may be found elsewhere if None is given, for example).
+        '''
+        import os
+        if p is None or p is Ellipsis: return None
+        if not pimms.is_str(p): raise ValueError('genetic_path must be None or a string')
+        return os.path.expanduser(os.path.expandvars(p))
+    @pimms.value
+    def behavioral_path(_behavioral_path, metadata_path):
+        '''
+        behavioral_path is the path of the file being used for behavioral data. If no such file
+        is found this is None.
+        '''
+        if _behavioral_path is not None:
+            if not os.path.isfile(_behavioral_path):
+                raise ValueError('provided behavioral_path is not a file')
+            return _behavioral_path
+        f = config['hcp_behavioral_path']
+        if f is not None:
+            if os.path.isfile(f): return f
+            else: warnings.warn('provided config item hcp_behavioral_path is not a file')
+        # we look through a few default places
+        hcps = config['hcp_subject_paths']
+        hcps = [] if hcps is None else hcps
+        paths = [metadata_path] + hcps + [config['data_cache_root']]
+        f = HCPMetaDataset._findfile(paths, 'behavioral_data_1200_subjects.csv')
+        return f
+    @pimms.value
+    def genetic_path(_genetic_path, metadata_path):
+        '''
+        genetic_path is the path of the file being used for the restricted family-structure data.
+        If no such file is found this is None.
+        '''
+        if _genetic_path is not None:
+            if not os.path.isfile(_genetic_path):
+                raise ValueError('provided genetic_path is not a file')
+            return _genetic_path
+        f = config['hcp_genetic_path']
+        if f is not None:
+            if os.path.isfile(f): return f
+            else: warnings.warn('provided config item hcp_genetic_path is not a file')
+        # we look through a few default places
+        hcps = config['hcp_subject_paths']
+        hcps = [] if hcps is None else hcps
+        paths = [metadata_path] + hcps + [config['data_cache_root']]
+        f = HCPMetaDataset._findfile(paths, 'RESTRICTED_hcpfamilystructure.csv')
+        return f
+    @pimms.value
+    def behavioral_table(behavioral_path):
+        '''
+        behavioral_table is a pandas datafame of the behavioral data provided by the Human
+        Connectome Project.
+        '''
+        if behavioral_path is None: return None
+        return nyio.load(behavioral_path)
+    @pimms.value
+    def behavioral_maps(behavioral_table):
+        '''
+        behavioral_maps is a dictionary of meta-data dictionaries, one per subject by subject ID.
+        '''
+        from pyrsistent import pmap
+        from neuropythy.util import dataframe_select
+        if behavioral_table is None: return None
+        mdat = {}
+        sids = np.unique(behavioral_table['Subject'].values)
+        for sid in sids:
+            tmp = dataframe_select(behavioral_table, Subject=sid)
+            mdat[sid] = pmap(dict(tmp.iloc[0]))
+        return pmap(mdat)
+    @pimms.value
+    def gender(behavioral_maps):
+        '''
+        gender is a dictionary of genders ('F' or 'M') for each subject, based on the behavioral
+        data provided by the HCP.
+        '''
+        from pyrsistent import pmap
+        from six import iteritems
+        if behavioral_maps is None: return None
+        return pmap({sid: v['Gender'] for (sid,v) in iteritems(behavioral_maps)})
+    @pimms.value
+    def agegroup(behavioral_maps):
+        '''
+        agegroup is a dictionary of agegroup numbers, as provided by the HCP's behavioral data.
+        The agegroup number is the mean of the highest and lowest age in the agegroup except for
+        the '36+' agegroup, which is coded as a 40.
+        '''
+        from pyrsistent import pmap
+        from six import iteritems
+        if behavioral_maps is None: return None
+        agegroup = pyr.pmap(
+            {sid: np.mean([int(a1), int(a2)])
+             for (sid,v) in iteritems(behavioral_maps)
+             for age in [v['Age']]
+             for (a1,a2) in [age.split('-') if age != '36+' else ['40','40']]})
+        return pmap(agegroup)
+add_dataset('hcp_metadata', lambda:HCPMetaDataset().persist())
+
+
+    
