@@ -732,17 +732,21 @@ class HCPMetaDataset(Dataset):
     are the relevant members of data.
       * data.
     '''
-
-    def __init__(self, metadata_path=None, genetic_path=None, behavioral_path=None, meta_data=None):
+    def __init__(self, name='hcp_metadata', cache_directory=None,
+                 metadata_path=None, genetic_path=None, behavioral_path=None,
+                 create_mode=0o755, create_directories=False,
+                 meta_data=None, cache_required=False):
         '''
         HCPMetaDataset() creates a new HCP meta-dataset object. Constructing a new object will
         reset the object based on the current state of the neuropythy config data; alternately,
         values for metadata_path, genetic_path, and behavioral_path may be passed.
         '''
-        Dataset.__init__(self, 'hcp_metadata',
+        Dataset.__init__(self, name,
                          meta_data=meta_data,
-                         custom_directory='.',
-                         create_directories=False)
+                         custom_directory=cache_directory,
+                         create_directories=create_directories,
+                         create_mode=create_mode,
+                         cache_required=cache_required)
         self.metadata_path = metadata_path
         self._genetic_path = genetic_path
         self._behavioral_path = behavioral_path
@@ -843,6 +847,14 @@ class HCPMetaDataset(Dataset):
         if behavioral_path is None: return None
         return nyio.load(behavioral_path)
     @pimms.value
+    def genetic_table(genetic_path):
+        '''
+        genetic_table is a pandas dataframe of the restricted genetic data for all subjects from
+        the HCP.
+        '''
+        if genetic_path is None: return None
+        return nyio.load(genetic_path)
+    @pimms.value
     def behavioral_maps(behavioral_table):
         '''
         behavioral_maps is a dictionary of meta-data dictionaries, one per subject by subject ID.
@@ -882,6 +894,107 @@ class HCPMetaDataset(Dataset):
              for age in [v['Age']]
              for (a1,a2) in [age.split('-') if age != '36+' else ['40','40']]})
         return pmap(agegroup)
+    @pimms.value
+    def siblings(genetic_table):
+        '''
+        siblings is a mapping of the siblings in the HCP restricted genetics dataset.
+        '''
+        families = {}
+        for (ii,r) in genetic_table.iterrows():
+            (sid,fid,zyg) = [r[k] for k in ('Subject','Family_ID','ZygosityGT')]
+            zyg = zyg.strip()
+            if fid not in families: families[fid] = {}
+            fam = families[fid]
+            if zyg not in fam: fam[zyg] = []
+            fam[zyg].append(sid)
+        siblings = {'':{}, 'MZ':{}, 'DZ':{}}
+        for (ii,r) in genetic_table.iterrows():
+            (sid,fid,zyg) = [r[k] for k in ('Subject','Family_ID','ZygosityGT')]
+            zyg = zyg.strip()
+            sib = siblings[zyg]
+            rel = families[fid][zyg]
+            sib[sid] = [k for k in rel if k != sid]
+        # clean the siblings up (twins have only one entry so clear the lists)
+        for tw in ['DZ','MZ']: siblings[tw] = {k:v[0] for (k,v) in six.iteritems(siblings[tw])}
+        siblings[''] = {k:v for (k,v) in six.iteritems(siblings['']) if len(v) > 0}
+        return pimms.persist(siblings)
+    @pimms.value
+    def retinotopy_siblings(siblings):
+        '''
+        retinotopy_siblings is a mapping like siblings but restricted to just the subjects with
+        retinotopic maps.
+        '''
+        # make the retinotopy subset of subjects:
+        slist = HCPRetinotopyDataset.subject_ids
+        retinotopy_siblings = {
+            kk: {k:v for (k,v) in six.iteritems(vv)
+                 if k in slist
+                 if all(u in slist for u in ([v] if pimms.is_int(v) else v))}
+            for (kk,vv) in six.iteritems(siblings)}
+        return pimms.persist(retinotopy_siblings)
+    @staticmethod
+    def _siblings_to_pairs(rs):
+        subject_list = [u for v in six.itervalues(rs)
+                        for uuu in [[six.iterkeys(v)], six.itervalues(v)]
+                        for uu in uuu for u in ([uu] if pimms.is_int(uu) else uu)]
+        subject_list = np.unique(subject_list)
+        # setup twin numbers so that we can export anonymized twin data (i.e.,
+        # files containing twin data but not the subject IDs)
+        twin_pairs = {tw: pimms.imm_array(list(sorted(dat)))
+                      for tw  in ['MZ','DZ']
+                      for dat in [set([tuple(sorted([k,v])) for (k,v) in six.iteritems(rs[tw])])]}
+        # also get a list of all siblings so we can track who is/isn't related
+        siblings = {}
+        for s1 in subject_list:
+            q = []
+            for sibs in six.itervalues(rs):
+                if s1 not in sibs: continue
+                ss = sibs[s1]
+                if pimms.is_int(ss): ss = [ss]
+                for s2 in ss: q.append(s2)
+            if len(q) > 0: siblings[s1] = q
+        # Make up a list of all possible unrelated pairs
+        unrelated_pairs = []
+        for sid in subject_list:
+            # find a random subject to pair them with
+            urs = np.setdiff1d(subject_list, [sid] + siblings.get(sid,[]))
+            unrelated_pairs.append([urs, np.full(len(urs), sid)])
+        unrelated_pairs = np.unique(np.sort(np.hstack(unrelated_pairs), axis=0), axis=1).T
+        unrelated_pairs.setflags(write=False)
+        # Having made those unrelated pairs, we can add them to the twin pairs
+        twin_pairs['UR'] = unrelated_pairs
+        # finally, let's figure out the non-twin siblings:
+        sibs = [(k,v) for (k,vv) in six.iteritems(rs['']) for v in vv]
+        twin_pairs['SB'] = np.unique(np.sort(sibs, axis=1), axis=0)
+        twin_pairs['SB'].setflags(write=False)
+        return pyr.pmap({'monozygotic_twins': twin_pairs['MZ'],
+                         'dizygotic_twins':   twin_pairs['DZ'],
+                         'nontwin_siblings':  twin_pairs['SB'],
+                         'unrelated_pairs':   twin_pairs['UR']})
+    @pimms.value
+    def sibling_pairs(siblings):
+        '''
+        sibling_pairs is a persistent map of twin pairs, sibling pairs, and unrelated
+        pairs; each of these categories stores a (n x 2) matrix of the n pairs of subjects
+        associated with that category.
+
+        The keys are 'monozygotic_twins', 'dizygotic_twins', 'nontwin_siblings',
+        and 'unrelated_pairs'.
+        '''
+        return HCPMetaDataset._siblings_to_pairs(siblings)
+    @pimms.value
+    def retinotopy_sibling_pairs(retinotopy_siblings):
+        '''
+        retinotopy_sibling_pairs is a persistent map of twin pairs, sibling pairs, and
+        unrelated pairs; each of these categories stores a (n x 2) matrix of the n pairs of subjects
+        associated with that category. This dataset is equivalent to sibling_pairs, except that it
+        is restricted to subjects with retinotopic mapping data.
+
+        The keys are 'monozygotic_twins', 'dizygotic_twins', 'nontwin_siblings',
+        and 'unrelated_pairs'.
+        '''
+        return HCPMetaDataset._siblings_to_pairs(retinotopy_siblings)
+
 add_dataset('hcp_metadata', lambda:HCPMetaDataset().persist())
 
 

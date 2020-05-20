@@ -24,13 +24,14 @@ class Dataset(ObjectWithMetaData):
     thus be easy to evaluate help(ny.data[name]) to see help on the given dataset. If you overload
     this class, be sure to overload the documentation.
     '''
-    def __init__(self, name, meta_data=None, custom_directory=None,
+    def __init__(self, name, meta_data=None, custom_directory=None, cache_required=True,
                  create_directories=True, create_mode=0o755):
         ObjectWithMetaData.__init__(self, meta_data)
         self.custom_directory = custom_directory
         self.name = name
         self.create_directories = create_directories
         self.create_mode = create_mode
+        self.cache_required = cache_required
     def __repr__(self): return self.repr
     @pimms.value
     def repr(name):
@@ -82,6 +83,13 @@ class Dataset(ObjectWithMetaData):
         dataset. If dataset.name is a tuple, then the first element must be a string.
         '''
         return Dataset.to_name(nm)
+    @pimms.param
+    def cache_required(cr):
+        '''
+        dataset.cache_required is True if the dataset requires a cache directory and False
+        otherwise.
+        '''
+        return cr
     @pimms.value
     def cache_root(custom_directory):
         '''
@@ -105,11 +113,12 @@ class Dataset(ObjectWithMetaData):
                                          name[0] if len(name) == 1     else
                                          '%s_%x' % (name[0], hash(name[1:]))))
     @pimms.require
-    def ensure_cache_directory(cache_directory, create_directories, create_mode):
+    def ensure_cache_directory(cache_directory, create_directories, create_mode, cache_required):
         '''
         ensure_cache_directory requires that a dataset's cache directory exists and raises an error
         if it cannot be found.
         '''
+        if not cache_required: return True
         if os.path.isdir(cache_directory): return True
         if not create_directories:
             raise ValueError('dataset cache directory not found: %s' % (cache_directory,))
