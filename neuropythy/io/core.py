@@ -313,7 +313,7 @@ def load_csv(filename, **kw):
         with gzip.open(filename, 'rt') as fl: data = pandas.read_csv(fl, **kw)
     else:
         with open(filename, 'rt') as fl: data = pandas.read_csv(fl, **kw)
-    return data    
+    return data
 @exporter('csv', ('csv', 'csv.gz', 'csv.bz2', 'csv.lzma'))
 def save_csv(filename, dat, index=False, **kw):
     '''
@@ -330,7 +330,7 @@ def save_csv(filename, dat, index=False, **kw):
         with gzip.open(filename, 'wt', newlines='') as fl: d.to_csv(fl, index=index, **kw)
     else:
         with open(filename, 'wt') as fl: d.to_csv(fl, index=index, **kw)
-    return dat
+    return filename
 @importer('tsv', ('tsv', 'tsv.gz', 'tsv.bz2', 'tsv.lzma'))
 def load_tsv(filename, sep='\t', **kw):
     '''
@@ -365,7 +365,7 @@ def save_tsv(filename, dat, sep='\t', index=False, **kw):
         with gzip.open(filename, 'wt', newlines='') as fl: d.to_csv(fl, sep=sep, index=index, **kw)
     else:
         with open(filename, 'wt') as fl: d.to_csv(fl, sep=sep, index=index, **kw)
-    return dat
+    return filename
 
 # Nifti!
 @importer('nifti', ('nii', 'nii.gz', 'nii.bz2', 'nii.lzma'))
