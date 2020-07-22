@@ -1,6 +1,6 @@
 #! /usr/bin/env python
 
-import os, numpy as np
+import os
 from setuptools import (setup, Extension)
 
 # Deduce the version from the __init__.py file:
