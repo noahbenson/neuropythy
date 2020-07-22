@@ -1753,7 +1753,7 @@ class Mesh(VertexSet):
                     res[bads] = np.nan
             else:
                 res = data[maxs]
-                bads |= np.isclose(0, interp[(np.arange(m),maxs)])
+                bads |= np.isclose(0, interp[(np.arange(m),maxs)])[:,0]
                 bads = np.where(bads)[0]
                 if len(bads) > 0:
                     res = np.array(res, dtype=np.object)
