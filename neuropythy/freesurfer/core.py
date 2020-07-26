@@ -240,7 +240,7 @@ freesurfer_subject_filemap_instructions = [
         'orig_nu.mgz',             ({'raw_image':'orig_nu'},
                                     {'image':'conformed'}),               
         'nu.mgz',                  ({'raw_image':'nu'},
-                                    {'image':'uniform'}),                 
+                                    {'image':'uniform'}),
         'T1.mgz',                  ({'raw_image':'T1'},
                                     {'image':'intensity_normalized'}),    
         'brainmask.auto.mgz',      ({'raw_image':'brainmask.auto'},
