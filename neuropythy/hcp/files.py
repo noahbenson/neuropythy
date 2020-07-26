@@ -436,6 +436,15 @@ def _prop_msmall(name, hemibase, format='gifti', key='property', filt=None):
 def _prop_cifti(name, hemires, filt=None):
     return (_prop_msmall(name, 'lh_LR%dk' % hemires, format='cifti', filt=filt) + 
             _prop_msmall(name, 'rh_LR%dk' % hemires, format='cifti', filt=filt))
+def _load_imm_img(flnm, u):
+    import neuropythy.mri as mri, neuropythy.io as nyio
+    im = nyio.load(flnm)
+    try: im.dataobj.flags['WRITEABLE'] = False
+    except Exception:
+        d = np.asanyarray(im.dataobj)
+        d.flags['WRITEABLE'] = False
+        im = type(im)(d, im.affine, im.header)
+    return im
 
 hcp_filemap_data_hierarchy = [['image'], ['raw_image'], ['flatmap'],
                               ['hemi', 'surface'], ['hemi', 'tess'],
@@ -446,21 +455,21 @@ hcp_filemap_data_hierarchy = [['image'], ['raw_image'], ['flatmap'],
                               ['hemi', 'annot'], ['hemi', 'alt_annot']]
 hcp_filemap_instructions = [
     'T1w', [
-        'BiasField_acpc_dc.nii.gz',         {'image':'bias'},
-        'T1wDividedByT2w.nii.gz',           {'image':'T1_to_T2_ratio_all'},
-        'T1wDividedByT2w_ribbon.nii.gz',    {'image':'T1_to_T2_ratio'},
-        'T1w_acpc_dc_restore.nii.gz',       {'image':'T1'},
-        'T1w_acpc_dc.nii.gz',               {'image':'T1_unrestored'},
-        'T1w_acpc_dc_restore_brain.nii.gz', {'image':'brain'},
-        'T2w_acpc_dc_restore.nii.gz',       {'image':'T2'},
-        'T2w_acpc_dc.nii.gz',               {'image':'T2_unrestored'},
-        'T2w_acpc_dc_restore_brain.nii.gz', {'image':'T2_brain'},
-        'aparc+aseg.nii.gz',                {'image':'Desikan06_parcellation'},
-        'aparc.a2009s+aseg.nii.gz',         ({'image':'parcellation'},
-                                             {'image':'Destrieux09_parcellation'}),
-        'brainmask_fs.nii.gz',              {'image':'masked_brain'},
-        'ribbon.nii.gz',                    {'image':'ribbon'},
-        'wmparc.nii.gz',                    {'image':'white_parcellation'},
+        'BiasField_acpc_dc.nii.gz',         {'image':'bias', 'load':_load_imm_img},
+        'T1wDividedByT2w.nii.gz',           {'image':'T1_to_T2_ratio_all', 'load':_load_imm_img},
+        'T1wDividedByT2w_ribbon.nii.gz',    {'image':'T1_to_T2_ratio', 'load':_load_imm_img},
+        'T1w_acpc_dc_restore.nii.gz',       {'image':'T1', 'load':_load_imm_img},
+        'T1w_acpc_dc.nii.gz',               {'image':'T1_unrestored', 'load':_load_imm_img},
+        'T1w_acpc_dc_restore_brain.nii.gz', {'image':'brain', 'load':_load_imm_img},
+        'T2w_acpc_dc_restore.nii.gz',       {'image':'T2', 'load':_load_imm_img},
+        'T2w_acpc_dc.nii.gz',               {'image':'T2_unrestored', 'load':_load_imm_img},
+        'T2w_acpc_dc_restore_brain.nii.gz', {'image':'T2_brain', 'load':_load_imm_img},
+        'aparc+aseg.nii.gz',                {'image':'Desikan06_parcellation', 'load':_load_imm_img},
+        'aparc.a2009s+aseg.nii.gz',         ({'image':'parcellation', 'load':_load_imm_img},
+                                             {'image':'Destrieux09_parcellation', 'load':_load_imm_img}),
+        'brainmask_fs.nii.gz',              {'image':'masked_brain', 'load':_load_imm_img},
+        'ribbon.nii.gz',                    {'image':'ribbon', 'load':_load_imm_img},
+        'wmparc.nii.gz',                    {'image':'white_parcellation', 'load':_load_imm_img},
         '{id}', hcp_adapted_freesurfer_subject_filemap_instructions,
         'Native', [
             '{id}.L.white.native.surf.gii',         _surf('white', 'lh_native', tess=True),
@@ -538,19 +547,19 @@ hcp_filemap_instructions = [
                                                                                  'rh_nat59k',
                                                                                  tess=True)]],
     'MNINonLinear', [
-        'BiasField.nii.gz',         {'image':'bias_warped'},
-        'T1w_restore.nii.gz',       {'image':'T1_warped'},
-        'T1w.nii.gz',               {'image':'T1_warped_unrestored'},
-        'T1w_restore_brain.nii.gz', {'image':'brain_warped'},
-        'T2w_restore.nii.gz',       {'image':'T2_warped'},
-        'T2w.nii.gz',               {'image':'T2_warped_unrestored'},
-        'T2w_restore_brain.nii.gz', {'image':'T2_brain_warped'},
-        'aparc+aseg.nii.gz',        {'image':'Desikan06_parcellation_warped'},
-        'aparc.a2009s+aseg.nii.gz', ({'image':'parcellation_warped'},
-                                     {'image':'Destrieux09_parcellation_warped'}),
-        'brainmask_fs.nii.gz',      {'image':'masked_brain_warped'},
-        'ribbon.nii.gz',            {'image':'ribbon_warped'},
-        'wmparc.nii.gz',            {'image':'white_parcellation_warped'},
+        'BiasField.nii.gz',         {'image':'bias_warped', 'load':_load_imm_img},
+        'T1w_restore.nii.gz',       {'image':'T1_warped', 'load':_load_imm_img},
+        'T1w.nii.gz',               {'image':'T1_warped_unrestored', 'load':_load_imm_img},
+        'T1w_restore_brain.nii.gz', {'image':'brain_warped', 'load':_load_imm_img},
+        'T2w_restore.nii.gz',       {'image':'T2_warped', 'load':_load_imm_img},
+        'T2w.nii.gz',               {'image':'T2_warped_unrestored', 'load':_load_imm_img},
+        'T2w_restore_brain.nii.gz', {'image':'T2_brain_warped', 'load':_load_imm_img},
+        'aparc+aseg.nii.gz',        {'image':'Desikan06_parcellation_warped', 'load':_load_imm_img},
+        'aparc.a2009s+aseg.nii.gz', ({'image':'parcellation_warped', 'load':_load_imm_img},
+                                     {'image':'Destrieux09_parcellation_warped', 'load':_load_imm_img}),
+        'brainmask_fs.nii.gz',      {'image':'masked_brain_warped', 'load':_load_imm_img},
+        'ribbon.nii.gz',            {'image':'ribbon_warped', 'load':_load_imm_img},
+        'wmparc.nii.gz',            {'image':'white_parcellation_warped', 'load':_load_imm_img},
         '{id}.L.ArealDistortion_FS.164k_fs_LR.shape.gii',      _prop_fs('areal_distortion',
                                                                         'lh_LR164k'),
         '{id}.L.ArealDistortion_MSMSulc.164k_fs_LR.shape.gii', _prop_msmsulc('areal_distortion',
