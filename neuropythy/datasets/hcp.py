@@ -544,7 +544,12 @@ class HCPRetinotopyDataset(Dataset):
         # how we load data:
         def _load_LR(split, sid, h, res, prop, flpatt):
             pth = os.path.join(cache_directory, str(sid), 'retinotopy')
-            if not os.path.exists(pth) and create_directories: os.makedirs(pth, create_mode)
+            if not os.path.exists(pth) and create_directories:
+                try:
+                    os.makedirs(pth, create_mode)
+                except Exception as e:
+                    w = "an exception of type %s was raised while trying to make cache directory %s"
+                    warnings.warn(w % (type(e), pth))
             flnm = os.path.join(pth, flpatt % (h,split))
             # deduce the generic property name from the given prop name
             pp = rpfx + prop.split(rpfx)[1]
@@ -562,7 +567,10 @@ class HCPRetinotopyDataset(Dataset):
                     warnings.warn('failed to load HCP retinotopy cache file %s'%flnm)
                     okwrite = False
                 dat = cdat[res][h][pp][sii]
-            if okwrite: nyio.save(flnm, dat)
+            if okwrite:
+                try: nyio.save(flnm, dat)
+                except Exception as e:
+                    warnings.warn("Error when trying to save cache file: %s" % (type(e),))
             return dat
         # okay, the base properties for the 32k and 59k meshes:
         trs = HCPRetinotopyDataset._retinotopy_cache_tr
@@ -651,10 +659,10 @@ class HCPRetinotopyDataset(Dataset):
                 return hemi.with_prop(lm)
             def _get_highest_res(hemi, k):
                 try: x = hemi.prop(hpfx + '_' + k)
-                except Exception: x = None
+                except Exception as e: x = None
                 if x is not None: return x
                 try: return hemi.prop(lpfx + '_' +  k)
-                except Exception: x = None
+                except Exception as e: x = None
                 if x is not None: return x
                 raise ValueError('no retinotopy successfully loaded for hemi', hemi)
             def _interp_nat(h, align):

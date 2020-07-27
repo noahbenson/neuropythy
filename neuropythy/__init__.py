@@ -95,4 +95,4 @@ try:
 except Exception: pass
 
 # Version information...
-__version__ = '0.11.7'
+__version__ = '0.11.8'
