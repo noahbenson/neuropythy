@@ -11,7 +11,7 @@
 FROM jupyter/scipy-notebook
 
 # Note the Maintainer.
-MAINTAINER Noah C. Benson <nben@nyu.edu>
+MAINTAINER Noah C. Benson <nben@uw.edu>
 
 # Install some stuff...
 RUN conda update --yes -n base conda && conda install --yes py4j nibabel s3fs
