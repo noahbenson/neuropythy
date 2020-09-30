@@ -3165,7 +3165,7 @@ class Topology(VertexSet):
                         pre_affine=Ellipsis, post_affine=Ellipsis,
                         name=None, meta_data=Ellipsis):
         '''
-        hemi.mask_projection(mask) yields a map-projectionn object of the given hemisphere that
+        hemi.mask_projection(mask) yields a map-projection object of the given hemisphere that
           is centered on the middle of the given mask.
         
         The following options may be given:
@@ -3221,14 +3221,14 @@ class Topology(VertexSet):
         # okay, make the map projection:
         p = map_projection(name=name, chirality=self.chirality,
                            center=center, center_right=center_right, radius=radius,
-                           method=method, registration='native',
+                           method=method, registration=registration,
                            pre_affine=pre_affine, post_affine=post_affine,
                            meta_data=meta_data)
         return p
     def mask_flatmap(self, mask, map_right='anterior',
                      radius=Ellipsis, method=Ellipsis,
                      pre_affine=Ellipsis, post_affine=Ellipsis,
-                     meta_data=Ellipsis):
+                     meta_data=Ellipsis, registration='native'):
         '''
         hemi.mask_flatmap(mask) yields a flatmap of the given hemisphere that is centered on the
           middle of the given mask.
@@ -3245,7 +3245,7 @@ class Topology(VertexSet):
         '''
         mp = self.mask_projection(mask, map_right=map_right, radius=radius, method=method,
                                   pre_affine=pre_affine, post_affine=post_affine,
-                                  meta_data=meta_data)
+                                  meta_data=meta_data, registration=registration)
         return mp(self)
 
 def is_topo(obj):
