@@ -283,6 +283,7 @@ def cifti_split(cii, label=('lh', 'rh', 'rest'), subject=None, hemi=None, null=n
       * subject (default: None) may specify the subject
       * hemi (default: None) can specify the hemisphere object that 
     '''
+    if cii is None: raise ValueError('cifti_split() called with argument None')
     dat = np.asanyarray(cii.dataobj if is_image(cii) else cii)
     n = dat.shape[-1]
     atlas = cifti_split._size_data.get(n, None)
@@ -816,7 +817,7 @@ hcp_filemap_instructions = [
                                                                                  59),
             '{id}.curvature_1.6mm_MSMAll.59k_fs_LR.shape.nii', _prop_cifti('curvature', 59,
                                                                            filt=lambda c:-c),
-            '{id}.sulc_1.6mm_MSMAll.59k_fs_LR.shape.nii', _prop_cifti('convexity', 59),
+            '{id}.sulc_1.6mm_MSMAll.59k_fs_LR.dscalar.nii', _prop_cifti('convexity', 59),
             '{id}.thickness_1.6mm_MSMAll.59k_fs_LR.dscalar.nii',_prop_cifti('thickness_uncorrected',
                                                                             59),
             '{id}.corrThickness_1.6mm_MSMAll.59k_fs_LR.dscalar.nii', _prop_cifti('thickness', 59)],
@@ -914,7 +915,7 @@ hcp_filemap_instructions = [
             '{id}.ArealDistortion_MSMAll.32k_fs_LR.shape.nii', _prop_cifti('areal_distortion', 32),
             '{id}.curvature_MSMAll.32k_fs_LR.shape.nii', _prop_cifti('curvature', 32,
                                                                      filt=lambda c:-c),
-            '{id}.sulc_MSMAll.32k_fs_LR.shape.nii', _prop_cifti('convexity', 32),
+            '{id}.sulc_MSMAll.32k_fs_LR.dscalar.nii', _prop_cifti('convexity', 32),
             '{id}.thickness_MSMAll.32k_fs_LR.dscalar.nii', _prop_cifti('thickness_uncorrected', 32),
             '{id}.corrThickness_MSMAll.32k_fs_LR.dscalar.nii', _prop_cifti('thickness', 32)]]]
 
