@@ -196,9 +196,9 @@ class VisualPerformanceFieldsDataset(HCPMetaDataset):
         import six, numpy as np
         cols = ['sid','hemi','prf_polar_angle', 'prf_eccentricity', 'prf_variance_explained',
                 'prf_radius', 'visual_area', 'inf_polar_angle', 'inf_eccentricity',
-                'ventral', 'dorsal','ventral_distance', 'dorsal_distance']
+                'ventral', 'dorsal','horizontal_distance', 'ventral_distance', 'dorsal_distance']
         df = {k:[] for k in cols}
-        for sid in data.subject_list:
+        for sid in subject_list:
             sub = ny.hcp_subject(sid)
             for h in ('lh','rh'):
                 hemi  = sub.hemis[h]
@@ -223,8 +223,9 @@ class VisualPerformanceFieldsDataset(HCPMetaDataset):
                        'inf_eccentricity':iecc[mask],
                        'ventral':vnt[mask],
                        'dorsal':drs[mask],
-                       'ventral_distance':dists['V1_ventral'][mask],
-                       'dorsal_distance':dists['V1_dorsal'][mask]}
+                       'horizontal_distance':dists['horizontal'][mask],
+                       'ventral_distance':dists['ventral'][mask],
+                       'dorsal_distance':dists['dorsal'][mask]}
                 for (k,v) in six.iteritems(dat): 
                     df[k].append(v)
         df = {k:np.concatenate(v) for (k,v) in six.iteritems(df)}
