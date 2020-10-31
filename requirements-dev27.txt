@@ -4,7 +4,7 @@ six >= 1.13.0
 nibabel >= 2.0.0
 pyrsistent == 0.14.11
 pint >= 0.7.0
-pimms >= 0.3.16
+pimms >= 0.3.18
 py4j >= 0.10
 s3fs >= 0.1.5
 h5py >= 2.8.0
