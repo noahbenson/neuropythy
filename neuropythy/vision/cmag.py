@@ -355,6 +355,7 @@ def disk_vmag(hemi, retinotopy='any', yields='axes', min_cod=0, **kw):
         uxy2 = xyn * np.transpose([dfr, dfr])
         uxy = (uxy1 + uxy2)
         ellipses[wh,k,:] = uxy - xy0
+    # At this point, ellipses dimensions repesent (vetices, neighbors, x/y coords)
     # we want to rotate the points to be along their center's implied rad/tan axis
     vrs  = np.sqrt(np.sum(vxy**2, axis=1))
     irs  = zinv(vrs)
@@ -364,9 +365,11 @@ def disk_vmag(hemi, retinotopy='any', yields='axes', min_cod=0, **kw):
     cels = (coss * ellipses.T)
     sels = (sins * ellipses.T)
     rots = np.transpose([cels[0] + sels[1], cels[1] - sels[0]], [1,2,0])
+    # At this point, rots dimensions repesent (neighbors, vetices, x/y coords)
     # now we fit the best rad/tan-oriented ellipse we can with the given center
     rsrt = np.sqrt(np.sum(rots**2, axis=2)).T
     (csrt,snrt) = zinv(rsrt) * rots.T
+    # At this point, csrt and snrt have dimensions that represent (vertices, neighbors)
     # ... (a*cos(rots))**2 + (b*sin(rots))**2 ~= r(rots) where a = radial vmag and b = tan vmag
     axes = []
     cods = []
