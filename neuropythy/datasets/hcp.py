@@ -630,7 +630,8 @@ class HCPRetinotopyDataset(Dataset):
                 hcp = data['hcp']
                 sub = hcp._subjects[sid]
             except Exception: hcp = None
-            if hcp is None: raise ValueError('could not load subject object for sid %s' % (sid,))
+            if sid > 999990: raise ValueError("IDs 999997-999999 are not real HCP subjects")
+            elif hcp is None: raise ValueError('could not load subject object for sid %s' % (sid,))
             # okay, we need to prep this subject; the initial part is easy: copy the properties
             # for the fs_LR meshes over to them:
             hems = hems0 = sub.hemis
