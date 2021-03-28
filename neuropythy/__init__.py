@@ -36,6 +36,7 @@ submodules = ('neuropythy.util.conf',
               'neuropythy.datasets.benson_winawer_2018',
               'neuropythy.datasets.hcp',
               'neuropythy.datasets.visual_performance_fields',
+              'neuropythy.datasets.hcp_lines',
               'neuropythy.datasets',
               'neuropythy.commands.surface_to_ribbon',
               'neuropythy.commands.benson14_retinotopy',
@@ -96,4 +97,4 @@ try:
 except Exception: pass
 
 # Version information...
-__version__ = '0.11.9'
+__version__ = '0.12.0'

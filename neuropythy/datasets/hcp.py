@@ -63,6 +63,29 @@ config.declare('hcp_retinotopy_interpolation_method',
                environ_name='HCP_RETINOTOPY_INTERPOLATION_METHOD',
                default_value='nearest', filter=to_interpolation_method)
 # See if the config/environment lets auto-downloading start in the "on" state
+def to_boolean(arg):
+    '''
+    to_boolean(arg) yields True or False based on the given arg. This function is intended to
+      convert a neuropythy config argument into a boolean value. Accordingly, it accepts True or
+      False values, numbers, or the strings "true", "on", "yes", "1", etc. as true and "false",
+      "off", etc. as false. If arg has no clear True or False value (such as an arbitrary non-empty
+      string) then None is returned.
+    '''
+    # Basically, we want to do a boolean test, but there are some special cases.
+    if   arg is None: return False
+    elif arg is Ellipsis: return None
+    elif pimms.is_str(arg):
+        arg = arg.strip().lower()
+        return (True  if arg in ('true',  't', 'yes', '1',  'on', '+') else
+                False if arg in ('false', 'f',  'no', '0', 'off',  '') else
+                None)
+    elif pimms.is_number(arg):
+        return None if np.isnan(arg) else (arg != 0)
+    elif pimms.is_nparray(arg):
+        # Handle numpy arrays specially, because they don't like being bool'ed.
+        return np.prod(arg.shape) > 0
+    else:
+        return bool(arg)
 def to_auto_download_state(arg):
     '''
     to_auto_download_state(arg) attempts to coerce the given argument into a valid auto-downloading
@@ -71,14 +94,8 @@ def to_auto_download_state(arg):
       special value Ellipsis yields True if the 'hcp_credentials' have been provided and False
       otherwise.
     '''
-    if   arg is Ellipsis:       return config['hcp_credentials'] is not None
-    elif not pimms.is_str(arg): return arg in (True, 1)
-    elif arg.strip() == '': raise ValueError('auto-download argument may not be an empty string')
-    else:
-        arg = arg.lower().strip()
-        return (True        if arg in ('on', 'yes', 'true', '1')            else
-                'structure' if arg in ('struct', 'structure', 'structural') else
-                False)
+    if arg is Ellipsis: return config['hcp_credentials'] is not None
+    else:               return to_boolean(arg)
 config.declare('hcp_auto_download', environ_name='HCP_AUTO_DOWNLOAD',
                filter=to_auto_download_state, default_value=Ellipsis)
 

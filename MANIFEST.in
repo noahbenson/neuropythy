@@ -47,3 +47,4 @@ include neuropythy/lib/data/fs_LR/lh.atlasroi.59k_fs_LR.shape.gii
 include neuropythy/lib/data/fs_LR/rh.atlasroi.59k_fs_LR.shape.gii
 include neuropythy/lib/data/fs_LR/lh.atlasroi.164k_fs_LR.shape.gii
 include neuropythy/lib/data/fs_LR/rh.atlasroi.164k_fs_LR.shape.gii
+include neuropythy/lib/data/hcp_lines_osftree.json.gz
