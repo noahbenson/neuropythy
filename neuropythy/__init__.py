@@ -8,6 +8,8 @@ submodules = ('neuropythy.util.conf',
               'neuropythy.util.filemap',
               'neuropythy.util.labels',
               'neuropythy.util',
+              'neuropythy.math.core',
+              'neuropythy.math',
               'neuropythy.java',
               'neuropythy.io.core',
               'neuropythy.io',
@@ -38,6 +40,9 @@ submodules = ('neuropythy.util.conf',
               'neuropythy.datasets.visual_performance_fields',
               'neuropythy.datasets.hcp_lines',
               'neuropythy.datasets',
+              'neuropythy.plans.core',
+              'neuropythy.plans.prfclean',
+              'neuropythy.plans',
               'neuropythy.commands.surface_to_ribbon',
               'neuropythy.commands.benson14_retinotopy',
               'neuropythy.commands.register_retinotopy',
@@ -87,8 +92,10 @@ from   .freesurfer import (subject as freesurfer_subject, to_mgh)
 from   .hcp        import (subject as hcp_subject)
 from   .datasets   import data
 from . import util
+from . import math
 from . import freesurfer
 from . import hcp
+from . import plans
 
 # things we might want to load but that might fail
 try:

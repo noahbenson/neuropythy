@@ -18,8 +18,8 @@ setup(
     description='Toolbox for flexible cortical mesh analysis and registration',
     keywords='neuroscience mesh cortex registration',
     author='Noah C. Benson',
-    author_email='nben@nyu.edu',
-    maintainer_email='nben@nyu.edu',
+    author_email='nben@uw.edu',
+    maintainer_email='nben@uw.edu',
     long_description='''
                      See the README.md file at the github repository for this package:
                      https://github.com/noahbenson/neuropythy
@@ -48,6 +48,7 @@ setup(
         'Operating System :: MacOS'],
     packages=['neuropythy',
               'neuropythy.util',
+              'neuropythy.math',
               'neuropythy.java',
               'neuropythy.io',
               'neuropythy.geometry',
@@ -59,6 +60,7 @@ setup(
               'neuropythy.vision',
               'neuropythy.graphics',
               'neuropythy.datasets',
+              'neuropythy.plans',
               'neuropythy.commands',
               'neuropythy.test'],
     # not part of library; just included as an example of how this would work
@@ -128,4 +130,5 @@ setup(
     extras_require={
         'graphics2D': ['matplotlib>=1.5.3'],
         'graphics3D': ['matplotlib>=1.5.3', 'ipyvolume>=0.5.1'],
-        'all':        ['matplotlib>=1.5.3', 'ipyvolume>=0.5.1']})
+        'torch':      ['torch>=1.6.0'],
+        'all':        ['matplotlib>=1.5.3', 'ipyvolume>=0.5.1', 'torch>=1.6.0']})

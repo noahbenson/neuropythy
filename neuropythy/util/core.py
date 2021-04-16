@@ -461,14 +461,14 @@ def simplex_averaging_matrix(simplices, weight=None, inverse=False):
 
 def is_image(image):
     '''
-    is_image(img) yields True if img is an instance if nibabel.spatialimages.SpatialImagee and False
+    is_image(img) yields True if img is an instance if nibabel.dataobj_images.DataobjImage and False
       otherwise.
     '''
     return isinstance(image, nib.dataobj_images.DataobjImage)
 def is_image_header(x):
     '''
-    is_image_header(x) yields True if x is a nibabel.spatialimages.SpatialHeader object and False
-      otherwise.
+    is_image_header(x) yields True if x is a nibabel.spatialimages.FileBasedHeader object or a 
+      nibabel.wrapstruct.LabeledWrapStruct objectand False otherwise.
     '''
     return isinstance(x, (nib.spatialimages.FileBasedHeader, nib.wrapstruct.LabeledWrapStruct))
 
@@ -1683,6 +1683,33 @@ class DataStruct(object):
     def __init__(self, **kw):    self.__dict__.update(kw)
     def __setattr__(self, k, v): raise ValueError('DataStruct objects are immutable')
     def __delattr__(self, k):    raise ValueError('DataStruct objects are immutable')
+    def set(**kw):
+        '''
+        ds.set(a=b, c=d, ...) yields a copy of the data-struct ds in which the given keys have been
+          set to the given values. If no keys are changed, then ds itself is returned.
+        ds.set() yields ds.
+        '''
+        d = self.__dict__
+        try:
+            if all(v is d[k] for (k,v) in six.iteritems(kw)): return self
+        except KeyError: pass
+        d = dict(d, **kw)
+        return DataStruct(d)
+    def delete(*args):
+        '''
+        db.delete('a', 'b', ...) yields a copy of the data-struct ds in which the given keys have
+          been dropped from the data-structure. If none of the keys are in ds, then ds itself is
+          returned.
+        ds.delete() yields ds.
+        '''
+        d = self.__dict__
+        for k in args:
+            if k in d:
+                if d is self.__dict__: d = dict(d)
+                del d[k]
+        if d is self.__dict__: return self
+        return DataStruct(d)
+        
 def data_struct(*args, **kw):
     '''
     data_struct(args...) collapses all arguments (which must be maps) and keyword arguments

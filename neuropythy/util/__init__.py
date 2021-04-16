@@ -22,5 +22,3 @@ from .filemap  import (FileMap, file_map, is_file_map, pseudo_path, is_pseudo_pa
                        osf_crawl, url_download)
 from .labels   import (label_colors, is_label_index, label_index, label_indices, to_label_index)
 
-
-

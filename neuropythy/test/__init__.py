@@ -13,6 +13,8 @@ else:                        import collections            as colls
 
 logging.getLogger().setLevel(logging.INFO)
 
+from .math import TestNeuropythyMath
+
 class TestNeuropythy(unittest.TestCase):
     '''
     The TestNeuropythy class defines all the tests for the neuropythy library.
