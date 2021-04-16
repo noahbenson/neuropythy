@@ -32,8 +32,9 @@ setup(
         'Intended Audience :: Science/Research',
         'Intended Audience :: Developers',
         'License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)',
-        'Programming Language :: Python :: 2',
-        'Programming Language :: Python :: 2.7',
+        # Removing support for Python 2, since it's well past EOL.
+        #'Programming Language :: Python :: 2',
+        #'Programming Language :: Python :: 2.7', 
         'Programming Language :: Python :: 3',
         'Programming Language :: Python :: 3.6',
         'Topic :: Software Development',
