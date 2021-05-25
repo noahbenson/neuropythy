@@ -571,7 +571,8 @@ def totensor(u, **kw):
         dtype = to_torchdtype(dtype)
         npdtype = torchdtype_to_numpydtype(dtype)
     if torch.is_tensor(u):
-        if len(kw) == 0: return u.clone().detach()
+        if len(kw) == 0 and (dtype is None or dtype == u.dtype):
+            return u.clone().detach()
         if u.is_sparse:
             u = u.coalesce()
             # We just detach the indices and values
@@ -670,6 +671,72 @@ def asdense(u):
     except ImportError: pass
     if sps.issparse(u): return u.toarray()
     else: return np.asarray(u)
+def todtype(u, dtype):
+    '''
+    todtype(u, dtype) yields a a copy of PyTorch tensor or NumPy array u with
+      the new dtype. The argument u may also be a SciPy sparse array.
+
+    A detached copy of u is always returned. To yield the array itself in cases
+    where this is possible, use asdtype(u, dtype).
+    '''
+    try:
+        torch = pytorch()
+        if torch.is_tensor(u):
+            if u.is_sparse:
+                u = u.coalesce()
+                # We just detach the indices and values
+                vals = todtype(u.values(), dtype)
+                return torch.sparse_coo_tensor(u.indices().clone().detach(), vals,
+                                               u.shape, dtype=dtype, device=u.device)
+            else:
+                dtype = to_torchdtype(dtype)
+                npdtype = torchdtype_to_numpydtype(dtype)
+                return torch.tensor(todtype(u.detach().numpy(), npdtype),
+                                    dtype=dtype, device=u.device)
+    except ImportError: pass
+    if sps.issparse(u):
+        (ii,jj,xx) = sps.find(u)
+        xx = np.array(xx.detach().numpy(), dtype=dtype)
+        return sps.coo_matrix((xx, (ii,jj)), **kw)
+    else:
+        return np.array(u, dtype=dtype)
+def asdtype(u, dtype):
+    '''
+    asdtype(u, dtype) yields either a copy of the PyTorch tensor or NumPy array
+      u with the new dtype, if the dtype is not equivalent to u.dtype, or yields
+      u itself if the dtype already matches. The argument u may also be a SciPy
+      sparse array.
+
+    A copy of u is made only if necessary, and it is not detached unless
+    necessary. To always obtain a detached copy, you can use the todtype()
+    function.
+    '''
+    try:
+        torch = pytorch()
+        if torch.is_tensor(u):
+            dtype = to_torchdtype(dtype)
+            if u.dtype == dtype: return u
+            if u.is_sparse:
+                u = u.coalesce()
+                # We just detach the indices and values
+                vals = u.values().type(dtype)
+                return torch.sparse_coo_tensor(u.indices().clone().detach(), vals,
+                                               u.shape, dtype=dtype, device=u.device)
+            else:
+                npdtype = torchdtype_to_numpydtype(dtype)
+                return torch.tensor(asdtype(u.detach().numpy(), npdtype),
+                                    dtype=dtype, device=u.device)
+    except ImportError: pass
+    dtype = np.dtype(dtype)
+    if sps.issparse(u):
+        if u.dtype == dtype: return u
+        (ii,jj,xx) = sps.find(u)
+        xx = np.array(xx.detach().numpy(), dtype=dtype)
+        return sps.coo_matrix((xx, (ii,jj)), **kw)
+    elif np.dtype(u) == dtype:
+        return u
+    else:
+        return np.asarray(u).astype(dtype)
 def promote(*args, **kw):
     '''
     promote(a, b) yields a tuple (A, B) where A and B are both the same
@@ -682,7 +749,7 @@ def promote(*args, **kw):
     that copies should be made. In this case, copies are made of all arguments
     even if nothing is promoted.
     '''
-    copy = kw.pop(copy, False)
+    copy = kw.pop('copy', False)
     # First, figure out what the promotion type is:
     try:
         torch = pytorch()
