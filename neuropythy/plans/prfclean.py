@@ -804,7 +804,7 @@ def init_cmag_params(dtype, device, gradients, torch, label_sort, grad_cmag_rad,
     dtype = to_torchdtype(dtype)
     pri = prior_cmag_eccen_offsets
     log_de = totensor(np.zeros(len(label_sort)),
-                      dtype=dtype, device=device, requires_grad=grad_cmag_rad)
+                      dtype=dtype, device=device, requires_grad=False)
     if pimms.is_map(pri):
         for (ii,k) in enumerate(label_sort):
             log_de[ii] = pri[k]
