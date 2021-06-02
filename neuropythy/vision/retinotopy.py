@@ -1,3 +1,4 @@
+
 ####################################################################################################
 # neuropythy/vision/retinotopy.py
 # Tools for registering the cortical surface to a particular potential function
@@ -2590,3 +2591,247 @@ def visual_field_mesh(max_eccentricity=12, hemi='lr', resolution=0.18):
     xy = np.asarray([x,y])
     tt = Delaunay(xy.T)
     return mesh(tt.simplices.T, xy)
+
+def sectors_to_labels(sectors, vertex_count):
+    '''
+    sectors_to_labels(sectors, vertex_count) yields a 2-tuple containing, first, a dictionary that
+      maps sector labels onto sector boundaries (i.e., keys in the sectors argument), and, second,
+      a property vector that contains the relevant sector label for each vertex.
+    '''    
+    p = np.zeros(vertex_count, dtype=np.int)
+    key = {}
+    for (lblm1,(k,ii)) in enumerate(sectors.items()):
+        lbl = lblm1 + 1
+        key[lbl] = k
+        p[ii] = lbl
+    return (key, p)
+def labels_to_sectors(sector_key, labels):
+    '''
+    labels_to_sectors(sector_key, labels) yields a dictionary that whose keys are the values of
+      the given sector_key dictionary and whose values are the vertices that are in each
+      associated sector according the the labels argument.
+    '''
+    res = {}
+    for (lbl,k) in sector_key.items():
+        res[k] = np.where(labels == lbl)[0]
+    return res
+def sector_bounds(hemi, sectors):
+    '''
+    sector_bounds(hemi, sectors, output_bounds) yields a nested dictionary whose top-level keys
+      are the same as in the input dictioinary sectors but whose values are dictionaries detailing
+      the boundaries of the sector. These dictionaries have as keys either (angle,None) or 
+      (None,eccen), indicating a sector boundary, and whose values are indices of the vertices that
+      lie along that particular bounndary.
+
+    The argument sectors should be a dictionary whose keys have the form of a 4-tuple
+    (min_polar_angle, max_polar_angle, min_eccentricity, max_eccentricity) and whose values are the
+    vertex indices of the associated sector.
+    '''
+    # Make a sector index property.
+    (skey, lbls) = sectors_to_labels(sectors, hemi.vertex_count)
+    (u,v) = hemi.tess.indexed_edges
+    # Now, walk through each sector and build up the results.
+    res = {}
+    for (lbl,k) in skey.items():
+        # For this label we will put results in rr.
+        (mnang,mxang,mnecc,mxecc) = k
+        ii = sectors[k]
+        # Figure out what labels go with mnang, mxang, mnecc, mxecc...
+        mnang_lbl = next((lbl for (lbl,(mnang2,mxang2,mnecc2,mxecc2)) in six.iteritems(skey)
+                          if mnang == mxang2 and mnecc == mnecc2 and mxecc == mxecc2),
+                         0) # 0 on no match because 0 is for unlabelled vertices.
+        mxang_lbl = next((lbl for (lbl,(mnang2,mxang2,mnecc2,mxecc2)) in six.iteritems(skey)
+                          if mxang == mnang2 and mnecc == mnecc2 and mxecc == mxecc2),
+                         0)
+        mnecc_lbl = next((lbl for (lbl,(mnang2,mxang2,mnecc2,mxecc2)) in six.iteritems(skey)
+                          if mnecc == mxecc2 and mnang == mnang2 and mxang == mxang2),
+                         0) # 0 on no match because 0 is for unlabelled vertices.
+        mxecc_lbl = next((lbl for (lbl,(mnang2,mxang2,mnecc2,mxecc2)) in six.iteritems(skey)
+                          if mxecc == mnecc2 and mnang == mnang2 and mxang == mxang2),
+                         0)
+        # For each of these we build of the indices along the edge.
+        rr = {}
+        l1 = lbls == lbl
+        for (lbl2,kk) in zip([mnang_lbl, mxang_lbl, mnecc_lbl, mxecc_lbl],
+                             [(mnang,None), (mxang,None), (None,mnecc), (None,mxecc)]):
+            l2 = lbls == lbl2
+            ee_u = np.where(l1[u] & l2[v])[0]
+            ee_v = np.where(l1[v] & l2[u])[0]
+            rr[kk] = np.intersect1d(np.union1d(u[ee_u], v[ee_v]), ii)
+        res[k] = rr
+    return res
+def _sector_boundary_distances(sctmesh, bounds):
+    from neuropythy.geometry import Path
+    res = {}
+    for (ae,ii) in bounds.items():
+        # We estimate the distances using Path.estimate_distances; it requires addresses
+        # for the initial path points, but they needn't be in order, and they needn't be
+        # made of real faces.
+        ii = np.intersect1d(ii, sctmesh.labels)
+        if len(ii) == 0:
+            res[ae] = np.zeros(0)
+        else:
+            faces = np.array([ii,ii,ii], dtype=np.int)
+            coords = np.zeros((2,len(ii)))
+            coords[0,:] = 1.0
+            addrs = {'faces':faces, 'coordinates':coords}
+            dists = Path.estimate_distances(addrs, sctmesh)
+            res[ae] = dists
+    return res
+def _estimate_crossings(dist, val, refs):
+    '''
+    Estimates the distances at which val equals the various refs.
+    '''
+    from sklearn.isotonic import IsotonicRegression
+    # Sort the distances and vals by dist.
+    ii_sort = np.argsort(dist)
+    dist = dist[ii_sort]
+    val  = val[ii_sort]
+    ok = np.where(np.isfinite(dist) & np.isfinite(val))[0]
+    if len(ok) < 4: raise ValueError('fewer than 4 valid values given to _estimate_crossings')
+    # Also sort the refs.
+    refs = np.sort(refs)
+    # Now, make an isotonic regression of the data so that we can split things easily
+    ir = IsotonicRegression(out_of_bounds="clip")
+    y = ir.fit_transform(dist[ok], val[ok])
+    # The y value is the isotonic estimate of the values; we split based on this.
+    binnos = np.digitize(y, refs)
+    dist_stops = np.full(len(refs), -np.inf)
+    for ii in range(len(refs)):
+        jj = np.where(binnos == ii)[0]
+        if len(jj) == 0:
+            if ii != 0: dist_stops[ii] = dist_stops[ii-1]
+            continue
+        jj = ok[jj[-1]]
+        if jj == len(dist) - 1:
+            dist_stops[ii] = np.inf
+        else:
+            dist_stops[ii] = np.mean([dist[jj], dist[jj+1]])
+    return dist_stops
+def refit_sectors(mesh, sectors, outangs, outeccs,
+                  retinotopy=Ellipsis, mask=None, invert_angle=False):
+    '''
+    refit_sectors(hemi, sectors, output_angles, output_eccens) yields a dictionary of sectors in
+      which keys take the form of a 4-tuple (min_polar_angle, max_polar_angle, min_eccentricity,
+      max_eccentricity) and values are the vertex indices of the associated sector.
+      
+    The elements in the keys must be given in neuropythy's visual format, i.e., polar angle is
+    measured in clockwise degrees of rotation with 0 at the upper vertical meridian, and
+    eccentricity is measured in degrees of visual angle.
+
+    The argument sectors must be an input dictionary identical in format to the output dictionary
+    but with an alternative set of sectors. These sectors are refit and returned. The argument
+    outbounds must be a list of the keys that should be returned.
+    
+    The following options can be given:
+      * retinotopy (default: Ellipsis) specifies the parameter that will be passed to the
+        neuropythy.retinotopy_data() function to obtain the retinotopy fom the mesh. If retinotopy
+        is a 2-tuple (angle,eccen) then the values are not processed via as_retinotopy.
+      * mask (default: None) specifies the mask that should be used when estimating the distance
+        cutoffs for each ROI.
+      * invert_angle (default: False) specifies whether to invert the polar angle values
+        or not. For a left hemisphere, this is not needed; for a right hemisphere it generally
+        is if you have specified your sector angles using positive values instead of negative
+        polar angle values.
+
+    Notes:
+      * scikit-learn is required to use refit_sectors(), although it is not required by
+        neuropythy generally.
+      * Make sure that your polar angle values are centered around the sector values you provide;
+        if a sector contains values that wrap around from 180 to -180, the isotonic interpolater
+        that is used can get very confused.
+    '''
+    try: import sklearn
+    except ImportError:
+        raise ImportError(
+            'could not import sklearn; scikit-learn must be intalled to use refit_sectors')
+    import neuropythy as ny
+    # Get the retinotopy data.
+    if pimms.is_tuple(retinotopy):
+        (ang,ecc) = retinotopy
+    else:
+        rdat = ny.retinotopy_data(mesh, retinotopy)
+        (ang,ecc) = ny.as_retinotopy(rdat, 'visual')
+    if invert_angle: ang = -ang
+    # Prepare the mask if there is one.
+    if mask is not None:
+        tmp = mesh.mask(mask, indices=True)
+        mask = np.zeros(mesh.vertex_count, dtype=np.bool)
+        mask[tmp] = True
+    # Sort the output angles and eccens
+    (outangs, outeccs) = (np.sort(outangs), np.sort(outeccs))
+    # We need to know which vertices in each sector correspond to which boundary.
+    bounds = sector_bounds(mesh, sectors)
+    # We will collect results in this dictionary:
+    res = {(mnang,mxang,mnecc,mxecc): np.zeros(0, dtype=np.int)
+           for (mnang,mxang) in zip(outangs[1:], outangs[:-1])
+           for (mnecc,mxecc) in zip(outeccs[1:], outeccs[:-1])}
+    # Basically we just apply the same algorithm to each existing sector, joining up the
+    # pieces we find along the way.
+    res = {(out_mn_ang,out_mx_ang,out_mn_ecc,out_mx_ecc): np.zeros(0, dtype=np.int)
+           for (out_mn_ang,out_mx_ang) in zip(outangs[:-1], outangs[1:])
+           for (out_mn_ecc,out_mx_ecc) in zip(outeccs[:-1], outeccs[1:])}
+    for (k, ii) in sectors.items():
+        (mn_ang,mx_ang,mn_ecc,mx_ecc) = k
+        if mn_ang >= outangs[-1] or mx_ang <= outangs[0]: continue
+        if mn_ecc >= outeccs[-1] or mx_ecc <= outeccs[0]: continue
+        # First, we can go ahead and make a subtess.
+        submesh = mesh.submesh(ii)
+        submask = submesh.indices if mask is None else mask[submesh.labels]
+        # Now, we want to calculate distances.
+        dists = _sector_boundary_distances(submesh, bounds[k])
+        # We use a combination of the two that varies linearly between the two extrema; this
+        # version (mn^2 - mx^2) will increase from min to max angle/eccen value.
+        (d_ang_mn, d_ang_mx) = (dists[(mn_ang,None)], dists[(mx_ang,None)])
+        for d_ang_mnmx in [d_ang_mn, d_ang_mx]:
+            fin = np.isfinite(d_ang_mnmx)
+            d_ang_mnmx[~fin] = np.max(d_ang_mnmx[fin])
+            bad = ~np.isfinite(d_ang_mnmx)
+        d_ang = (-d_ang_mx if len(d_ang_mn) == 0 else
+                 d_ang_mn  if len(d_ang_mx) == 0 else
+                 (d_ang_mn - d_ang_mx) * ny.math.zinv(d_ang_mn + d_ang_mx))
+        (d_ecc_mn, d_ecc_mx) = (dists[(None,mn_ecc)], dists[(None,mx_ecc)])
+        for d_ecc_mnmx in [d_ecc_mn, d_ecc_mx]:
+            fin = np.isfinite(d_ecc_mnmx)
+            d_ecc_mnmx[~fin] = np.max(d_ecc_mnmx[fin])
+        d_ecc = (-d_ecc_mx if len(d_ecc_mn) == 0 else
+                 d_ecc_mn  if len(d_ecc_mx) == 0 else
+                 (d_ecc_mn - d_ecc_mx) * ny.math.zinv(d_ecc_mn + d_ecc_mx))
+        # Now we need to know what boundaries to find inside of this sector; we do them in
+        # sorted order from min to max angle/eccen.
+        crossing_angs = [ang for ang in outangs if ang >= mn_ang and ang <= mx_ang]
+        crossing_eccs = [ecc for ecc in outeccs if ecc >= mn_ecc and ecc <= mx_ecc]
+        # If there are output sector boundaries that correspond exactly with the input sector
+        # boundaries we don't want to pass them to the _estimate_crossings function.
+        incross_angs = [ang for ang in crossing_angs if ang > mn_ang and ang < mx_ang]
+        incross_eccs = [ecc for ecc in crossing_eccs if ecc > mn_ecc and ecc < mx_ecc]
+        # For each of these, we need to find the best estimate of the crossings distances.
+        mesh_submask = submesh.labels[submask]
+        dcross_ang = _estimate_crossings(d_ang[submask], ang[mesh_submask], incross_angs)
+        dcross_ecc = _estimate_crossings(d_ecc[submask], ecc[mesh_submask], incross_eccs)
+        # For each sub-sector, we need to add the indices into the appropriate macro-sector;
+        # keep in mind that the macro-sectors may end at the given sector boundaries, in which
+        # case we just trust those boundaries.
+        # To do this, we loop over the actual bins we just calculated.
+        angzip = list(zip([-np.inf] + list(dcross_ang), list(dcross_ang) + [np.inf],
+                          [mn_ang] + incross_angs, incross_angs + [mx_ang]))
+        ecczip = list(zip([-np.inf] + list(dcross_ecc), list(dcross_ecc) + [np.inf],
+                          [mn_ecc] + incross_eccs, incross_eccs + [mx_ecc]))
+        for (dc0_ang, dc1_ang, out_mn_ang, out_mx_ang) in angzip:
+            # Find the indices that are in this box based on the distances.
+            ii_ang = np.where((d_ang >= dc0_ang) & (d_ang < dc1_ang))[0]
+            d_ecc_ii = d_ecc[ii_ang]
+            for (dc0_ecc, dc1_ecc, out_mn_ecc, out_mx_ecc) in ecczip:
+                ii_bin = ii_ang[(d_ecc_ii >= dc0_ecc) & (d_ecc_ii < dc1_ecc)]
+                # The ii_ang and ii_bin are submesh indices.
+                ii_bin = submesh.labels[ii_bin]
+                if len(ii_bin) == 0: continue
+                # We have the indices in this sub-bin of the submesh/sector; we need to figure out
+                # what out-bin we need to put it in.
+                for (out_k,rr) in res.items():
+                    if out_k[0] > out_mn_ang or out_k[1] < out_mx_ang: continue
+                    if out_k[2] > out_mn_ecc or out_k[3] < out_mx_ecc: continue
+                    res[out_k] = np.union1d(rr, ii_bin)
+                    break
+    # That's everything.
+    return res
