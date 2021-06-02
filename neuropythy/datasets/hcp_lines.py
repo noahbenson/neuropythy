@@ -1689,9 +1689,8 @@ class HCPLinesDataset(HCPMetaDataset):
     def subjects(subject_labels, subject_boundary_distances, clean_retinotopic_maps,
                  subject_cortical_magnifications):
         '''
-        subjects is a map of the HCP subjects that are part of the HCP-lines dataset; each value of
-        the subjects map is itself a map whose keys are 'lh' and 'rh'. The hemispheres referenced
-        are for the associated subject and contain additional properties for the visual areas and
+        subjects is a map of the HCP subjects that are part of the HCP-lines dataset; The
+        hemispheres of the subjects contain additional properties for the visual areas and
         the sectors. These are named '<anatomist>_visual_area' and '<anatomist>_visual_sector'. The
         mean across anatomists is just 'visual_area' and 'visual_sector'.
         '''
@@ -1721,7 +1720,7 @@ class HCPLinesDataset(HCPMetaDataset):
                 hemi = hemi.with_prop(**props)
                 r[h] = hemi
             if len(r) == 0: return None
-            else: return pimms.persist(r)
+            else: return sub.with_hemi(**r)
         return pimms.lazy_map({sid: curry(makesub, sid) for sid in HCPLinesDataset.subject_list})
     @pimms.value
     def subject_tables(subjects, exclusions, _cached_data):
@@ -1738,7 +1737,7 @@ class HCPLinesDataset(HCPMetaDataset):
                 if ('mean',sid,h) in exclusions: continue
                 sub = subjects[sid]
                 if sub is None: return None
-                hemi = sub[h]
+                hemi = sub.hemis[h]
                 if hemi is None: continue
                 nans = np.full(hemi.vertex_count, np.nan)
                 lbls = hemi.prop('visual_area')
@@ -2261,6 +2260,81 @@ class HCPLinesDataset(HCPMetaDataset):
                 else: raise ValueError('cannot interpret style for %s: %s' % (k, sty))
         # that's it!
         return pp
+    # A handy function for resampling a subject's sectors to a different estimateed set of sectors
+    v123_sector_key = pyr.pmap({1:  (90,  180, 0,   0.5), # V1d0
+                                2:  (90,  180, 0.5, 1),   # V1d1
+                                3:  (90,  180, 1,   2),   # V1d2
+                                4:  (90,  180, 2,   4),   # V1d3
+                                5:  (90,  180, 4,   7),   # V1d4
+                                6:  (0,    90, 0,   0.5), # V1v0
+                                7:  (0,    90, 0.5, 1),   # V1v1
+                                8:  (0,    90, 1,   2),   # V1v2
+                                9:  (0,    90, 2,   4),   # V1v3
+                                10: (0,    90, 4,   7),   # V1v4
+                                11: (180, 270, 0.5, 1),   # V2d1
+                                12: (180, 270, 1,   2),   # V2d2
+                                13: (180, 270, 2,   4),   # V2d3
+                                14: (180, 270, 4,   7),   # V2d4
+                                15: (-90,   0, 0.5, 1),   # V2v1
+                                16: (-90,   0, 1,   2),   # V2v2
+                                17: (-90,   0, 2,   4),   # V2v3
+                                18: (-90,   0, 4,   7),   # V2v4
+                                19: (270, 360, 0.5, 1),   # V3d1
+                                20: (270, 360, 1,   2),   # V3d2
+                                21: (270, 360, 2,   4),   # V3d3
+                                22: (270, 360, 4,   7),   # V3d4
+                                23: (-180,-90, 0.5, 1),   # V3v1
+                                24: (-180,-90, 1,   2),   # V3v2
+                                25: (-180,-90, 2,   4),   # V3v3
+                                26: (-180,-90, 4,   7)})  # V3v4
+    def refit_sectors(self, sid, h, outangs, outeccs):
+        '''
+        ny.data['hcp_lines'].refit_sectors(sid, h, outangles, outeccens) yields a resampled set of
+          sectors using neuropythy's ny.vision.refit_sectors() function. The result is a tuple for
+          each visual area, (v1, v2, v3) of the sectors formed by outangles and outeccens.
+        '''
+        import neuropythy as ny
+        sub = self.subjects[sid]
+        hem = sub.hemis[h]
+        rdat = ny.retinotopy_data(hem, 'prf_')
+        (ang,ecc) = ny.as_retinotopy(rdat, 'visual')
+        lbl = hem.prop('visual_sector')
+        if h == 'rh': ang = -ang
+        ang = np.mod(ang + 90, 360) - 90
+        # Fix the angles to match the ranges in the sector key.
+        for (s,bounds) in self.v123_sector_key.items():
+            ii = lbl == s
+            b1 = bounds[1]
+            if b1 == 270:
+                ang[ii] = 360 - ang[ii]
+            elif b1 == 360:
+                ang[ii] = 180 + ang[ii]
+            elif b1 == 0:
+                ang[ii] = -ang[ii]
+            elif b1 == -90:
+                ang[ii] = -180 + ang[ii]
+        scts = ny.vision.labels_to_sectors(self.v123_sector_key, lbl)
+        surf = hem.surface('midgray').with_prop(prf_polar_angle=ang)
+        # Fix the out-angles to use the v2 and v3 values as well.
+        outangs = np.unique([x for a in outangs for x in (a, a+180, a-180)])
+        rfs = ny.vision.refit_sectors(surf, scts, outangs, outeccs,
+                                      retinotopy=(ang,ecc))
+        # Sort and translate the results into v1, v2, and v3 sections.
+        res = ({}, {}, {})
+        for (k,ii) in rfs.items():
+            b1 = k[1]
+            if b1 <= 270 and b1 > 180:
+                (va,a1,a2) = (1, 360 - k[1], 360 - k[0])
+            elif b1 > 270:
+                (va,a1,a2) = (2, k[0] - 180, k[1] - 180)
+            elif b1 > -90 and b1 <= 0:
+                (va,a1,a2) = (1, -k[1], -k[0])
+            elif b1 <= -90:
+                (va,a1,a2) = (2, 180 + k[0], 180 + k[1])
+            else:
+                (va,a1,a2) = (0, k[0], k[1])
+            res[va][(a1,a2,k[2],k[3])] = ii
+        return res
 
 # Add the neuropythy hook for the dataset:
 add_dataset('hcp_lines', lambda:HCPLinesDataset().persist())
