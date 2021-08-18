@@ -2039,7 +2039,7 @@ def visual_isolines(hemi, retinotopy='any', visual_area=Ellipsis, mask=None, sur
                                [polar_angle_lines, eccentricity_lines],
                                [polar_angle_range, eccentricity_range]):
         # first, figure out the lines themselves
-        if pimms.is_int(lns): lns = np.percentile(dat[mask], np.linspace(0, 100, 2*lns + 1)[1::2])
+        if pimms.is_int(lns): lns = np.nanpercentile(dat[mask], np.linspace(0, 100, 2*lns + 1)[1::2])
         # now grab them from the hemisphere...
         r[p] = pimms.lazy_map({ln:curry(calc_isolines, hemi, dat, ln, mask=mask) for ln in lns})
     return pyr.pmap(r)
