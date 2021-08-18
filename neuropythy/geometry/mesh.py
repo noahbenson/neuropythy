@@ -4648,7 +4648,7 @@ def isolines(obj, prop, val,
         (u0s,v0s,u1s,v1s) = (us[:-1],vs[:-1],us[1:],vs[1:])
         qs = [np.setdiff1d([u1,v1], [u0,v0])[0] for (u0,v0,u1,v1) in zip(u0s,v0s,u1s,v1s)]
         fs = np.asarray([u0s, qs, v0s], dtype=np.int)
-        fend = (u1s[-1], np.setdiff1d(fs[:,-1], (u1s[-1],v1s[-1])), v1s[-1])
+        fend = np.concatenate(([u1s[-1]], np.setdiff1d(fs[:,-1], (u1s[-1],v1s[-1])), [v1s[-1]]))
         fs = np.hstack([fs, np.reshape(fend, (3,1))])
         # convert faces back to labels
         fs = np.asarray([obj.labels[f] for f in fs])
