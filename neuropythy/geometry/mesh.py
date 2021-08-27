@@ -23,7 +23,7 @@ from .util  import (triangle_area, triangle_address, alignment_matrix_3D, rotati
 from ..util import (ObjectWithMetaData, to_affine, zinv, is_image, is_address, address_data, curry,
                     curve_spline, CurveSpline, chop, zdivide, flattest, inner, config, library_path,
                     dirpath_to_list, to_hemi_str, is_tuple, is_list, is_set, close_curves,
-                    normalize, denormalize, AutoDict, auto_dict, times, apply_affine)
+                    normalize, denormalize, AutoDict, auto_dict, times, apply_affine, nanlt)
 from ..io   import (load, importer, exporter)
 from functools import reduce
 
@@ -529,13 +529,14 @@ def to_property(obj, prop=None,
     else:
         if weight_transform is Ellipsis:
             weights = np.array(weights, dtype=np.float)
+            weights[~np.isfinite(weights)] = 0
             weights[weights < 0] = 0
         elif weight_transform is not None:
             weight = weight_transform(np.asarray(weights))
         if not pimms.is_vector(weights, 'real'):
             raise ValueError('weights must be a real-valued vector or property name for such')
         low_weight = (np.asarray([], dtype=np.int) if weight_min is None else
-                      np.where(weights < weight_min)[0])
+                      np.where(nanlt(weights, weight_min, nan_val=True))[0])
     # we can also process the outliers
     outliers = np.asarray([], dtype=np.int) if outliers is None else np.arange(len(prop))[outliers]
     outliers = np.union1d(outliers, low_weight) # low-weight vertices are treated as outliers
@@ -943,7 +944,111 @@ class Tesselation(VertexSet):
         indices where tess.neighborhoods gives the vertex labels.
         '''
         return tuple([tuple([vertex_index[u] for u in nei]) for nei in neighborhoods])
+    @pimms.value
+    def neighborhood_face_partition(indexed_neighborhoods, indexed_faces, labels, index):
+        '''
+        tess.neighborhood_face_partition is a tuple of subsets of the face matrix that each
+        provides a set of faces that can be operated on simultaneously in a multi-step vectorized
+        neighborhood calculatiion. Each matrix of the tuple has size 3 x n where n varies, and each
+        columnn of the matrix has been rolled such that the first row contains a unique set of
+        vertices over which neighborhood calculations can be implemented. See also the
+        neighborhood_vectorize method.
+        '''
+        nnei = np.array([len(uu) for uu in indexed_neighborhoods])
+        emax = np.max(nnei)
+        whs  = tuple([np.where(nnei > k)[0] for k in range(emax)])
+        neis = np.array([u + (-1,)*(emax - len(u)) for u in indexed_neighborhoods], dtype=np.int)
+        # Prep the triangle orderings.
+        neifaces = []
+        for (k,a) in enumerate(whs):
+            b = neis[a, k]
+            c = neis[a, np.mod(k+1, nnei[a])]
+            fs = index[[labels[a],labels[b],labels[c]]]
+            ii = ~(fs == None)
+            if not np.all(ii): (a,b,c,fs) = [u[ii].astype(np.int) for u in (a,b,c,fs)]
+            abc = indexed_faces[:, fs]
+            aii = np.argmax(abc == (a,a,a), axis=0)
+            allfs = np.arange(len(a))*3
+            abc = abc.T.flatten()
+            abc = np.array([abc[(aii+k)%3 + allfs] for k in range(3)])
+            neifaces.append(abc)
+        for nf in neifaces: nf.setflags(write=False)
+        return tuple(neifaces)
+    def neighborhood_vmap(self, fn, *args, **kw):
+        '''
+        mesh.neighborhood_vmap(fn) runs the given function in a vectorized over the
+          neighborhoods of the given mesh in such a way that the computations can generally
+          be made much faster than by iterating over the neighborhoods. Yields None.
 
+        The function fn is always passed one arguments, indexed_faces, followed by any trailing
+        arguments or keywords given to the neighborhood_vectorize method. The indexed_faces value is
+        a 3 x m matrix (where the m varies between calls to fn) detailing the faces on which to
+        operate during this step of the calculation; the vertices of these faces are
+        always in mesh-order (i.e., clockwise or counterclockwise), and are rolled such that the
+        first row of the matrix, indexed_faces[0], contains all-unique vertex indices. Over the
+        course of several function calls to fn, each face will be be passed with each of its corners
+        rolled to the first row of the indexed_faces matrix exactly once, so any values accumulated
+        into neighborhood-/vertex-based bins using indexed_faces[0] will be safe and complete.
+        '''
+        neifaces = self.neighborhood_face_partition
+        for nf in neifaces:
+            fn(nf, *args, **kw)
+        return None
+    def neighborhood_sum(self, fn, *args, **kw):
+        '''
+        mesh.neighborhood_sum(fn) is similar to the neighborhood_vmap() method, but rather than
+          return nothing, this method sums the return value of fn, which must be a vector the same
+          length as the column count of the argument face matrix, across neighborhoods and returns
+          this total sum.
+        mesh.neighborhood_sum((fn, outvec)) uses the given output vector for the sum; this does not
+          edit the values of outvec prior to summing, so this can be used as a += operator.
+        mesh.neighborhhood_sum((fn, dtype)) uses a zero-vector of the given dtype for the sum.
+
+        See neighborhood_vmap() for information about how fn is called.
+        '''
+        neifaces = self.neighborhood_face_partition
+        if pimms.is_tuple(fn):
+            (fn,q) = fn
+            if not pimms.is_nparray(q):
+                q = np.zeros(self.vertex_count, dtype=q)
+            outvec = q
+        else:
+            outvec = np.zeros(self.vertex_count)
+        for nf in neifaces:
+            x = fn(nf, *args, **kw)
+            ii = nf[0]
+            outvec[ii,...] += x
+        return outvec
+    @pimms.value
+    def adjacency_matrix(indexed_edges, vertex_count):
+        '''
+        tess.adjacency_matrix is a sparse boolean csr_matrix whose rows and
+        columns both represent the vertices of tess in order, with each cell
+        having a value of True if the corresponding row and column are adjacent
+        vertices in the tess and False otherwise.
+        '''
+        from scipy.sparse import csr_matrix
+        (u,v) = indexed_edges
+        return csr_matrix(
+            (np.ones(2*len(u), dtype='bool'),
+             np.hstack([(u,v), (v,u)])),
+            shape=(vertex_count, vertex_count),
+            dtype='bool')
+    @pimms.value
+    def face_adjacency_matrix(edge_faces, face_count):
+        '''
+        tess.face_adjacency_matrix is a sparse boolean csr_matrix whose rows and
+        columns both represent the faces of mesh in order, with each cell having
+        the value of True if the faces correspondign to its row and column are
+        adjacent in the tess and False if they are not.
+        '''
+        from scipy.sparse import csr_matrix
+        (u,v) = np.transpose([e for e in edge_faces if len(e) == 2])
+        return csr_matrix(
+            (np.ones(2*len(u), dtype='bool'),
+             np.hstack([(u,v), (v,u)])),
+            shape=(face_count, face_count),
+            dtype='bool')
     # Requirements/checks
     #@pimms.require
     #def validate_properties(vertex_count, _properties):
@@ -1161,9 +1266,8 @@ class Mesh(VertexSet):
     @pimms.value
     def face_angles(face_angle_cosines):
         '''
-        mesh.face_angles is the (3 x d x n) matrix of the angles of each of the faces of the mesh;
-        d is the number of dimensions of the mesh embedding and n is the number of faces in the
-        mesh.
+        mesh.face_angles is the (3 x n) matrix of the angles of each of the faces of the mesh;
+        n is the number of faces in the mesh.
         '''
         tmp = np.arccos(face_angle_cosines)
         tmp.setflags(write=False)
@@ -1182,6 +1286,41 @@ class Mesh(VertexSet):
         tmp = np.sqrt(np.sum((edge_coordinates[1] - edge_coordinates[0])**2, axis=0))
         tmp.setflags(write=False)
         return tmp
+    @pimms.value
+    def adjacency_matrix(edge_lengths, tess):
+        '''
+        mesh.adjacency_matrix is a scipy csr sparse matrix whose rows and columns both
+          represent the vertices of the given mesh in sorted order and whose cells
+          represent the edge distance between the vertices corresponding to each
+          cell's row and column. Values of zero indicate that the two vertices are not
+          adjacent to each other.
+        '''
+        from scipy.sparse import csr_matrix
+        n = tess.vertex_count
+        (u, v) = tess.indexed_edges
+        return csr_matrix(
+            (np.concatenate([edge_lengths, edge_lengths]),
+             np.hstack([(u,v), (v,u)])),
+            shape=(n, n))
+    @pimms.value
+    def adjacency_matrix_eps(adjacency_matrix, edge_lengths, tess):
+        '''
+        mesh.adjacency_matrix_eps is identical to mesh.adjacency_matrix except that
+        any edge whose length is 0 is given an adjacency distance of the machine
+        epsilon.
+        '''
+        from scipy.sparse import csr_matrix, find
+        zz = (edge_lengths == 0)
+        if not np.any(zz):
+            return adjacency_matrix
+        eps = np.finfo(adjacency_matrix.dtype).eps
+        n = tess.vertex_count
+        (u, v) = tess.indexed_edges
+        elens = np.concatenate([edge_lengths, edge_lengths])
+        elens[np.concatenate([zz, zz])] = eps
+        return csr_matrix(
+            (elens, np.hstack([(u,v), (v,u)])),
+            shape=(n, n))
     @pimms.value
     def face_hash(face_centers):
         '''
@@ -1971,6 +2110,31 @@ class Mesh(VertexSet):
             #mtx = np.linalg.inv(affine)
             xyz = apply_affine(affine, xyz)
         return image_interpolate(image, xyz, method=method, fill=fill, dtype=dtype, weights=weights)
+    def dijkstra(self, dtype='float', return_predecessors=False,
+                 limit=np.inf, min_only=False, indices=None, use_eps=False):
+        '''
+        mesh.dijkstra() yields a matrix whose rows and columns both
+          represent the vertices of the given mesh in sorted order and whose cells
+          represent the length of the shortest path, per Dijkstra's algorithm,
+          between the vertices corresponding to each cell's row and column.
+      
+        The optional argument dtype may specify the numpy type used for the
+        calculation, and the options return_predecessors, limit, indices, and
+        min_only are passed to the scipy.sparse.csgraph.dijkstra function.
+
+        The optional argument use_eps (default: False) specifies that when two
+        vertices have an edge-length of 0 they should instead be given an
+        edge-length of the machine epsilon before the algorithm is run.
+        '''
+        from scipy.sparse import csr_matrix, find, csgraph
+        dist_mtx = self.adjacency_matrix_eps if use_eps else self.adjacency_matrix
+        return csgraph.dijkstra(dist_mtx,
+                                directed=False,
+                                unweighted=False,
+                                return_predecessors=return_predecessors,
+                                limit=limit,
+                                indices=indices,
+                                min_only=min_only)
     # smooth a field on the cortical surface
     def smooth(self, prop, smoothness=0.5, weights=None, weight_min=None, weight_transform=None,
                outliers=None, data_range=None, mask=None, valid_range=None, null=np.nan,
