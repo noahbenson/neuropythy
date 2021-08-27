@@ -13,9 +13,10 @@ import pyrsistent       as pyr
 from .. import geometry as geo
 from .. import mri      as mri
 
-from   neuropythy.util     import (zinv, simplex_summation_matrix, curry, to_hemi_str, flattest,
-                                   zdivide)
-from   .retinotopy         import (extract_retinotopy_argument, retinotopy_data, as_retinotopy)
+from ..util          import (zinv, simplex_summation_matrix, curry, to_hemi_str, flattest, zdivide)
+from .retinotopy     import (extract_retinotopy_argument, retinotopy_data, as_retinotopy,
+                             retinotopic_field_sign)
+from ..geometry.util import (line_segment_intersection_2D, cartesian_to_barycentric_2D)
 
 def mag_data(hemi, retinotopy='any', surface='midgray', mask=None,
              weights=Ellipsis, weight_min=0, weight_transform=Ellipsis,
@@ -131,7 +132,7 @@ def mag_data(hemi, retinotopy='any', surface='midgray', mask=None,
         if len(mask) == 0: return None
         # now that we have the mask, we can subsample
         if np.array_equal(mask, mesh.indices): submesh = mesh
-        else:                                  submesh = mesh.submesh(mask)
+        else:                                  submesh = mesh.submesh(mesh.labels[mask])
         mask = mesh.tess.index(submesh.labels)
         mdata = pyr.pmap({k:(v[mask]   if pimms.is_vector(v) else
                              v[:,mask] if pimms.is_matrix(v) else
@@ -296,7 +297,7 @@ def rtmag_potential(submesh, X0, mask=Ellipsis, fieldsign=None):
     object.__setattr__(f_vmag, 'meta_data', pyr.m(f_rtsmooth=f_rtsmooth, f_rt=f_rt))
     return f_vmag
 
-def disk_vmag(hemi, retinotopy='any', yields='axes', min_cod=0, **kw):
+def disk_vmag(hemi, retinotopy='any', yields='axes', min_cod=0, npoints=50, **kw):
     '''
     disk_vmag(mesh) yields the visual magnification based on the projection of disks on the cortical
       surface into the visual field.
@@ -326,37 +327,61 @@ def disk_vmag(hemi, retinotopy='any', yields='axes', min_cod=0, **kw):
     N    = hemi.vertex_count
     vxy  = mdat['visual_coordinates'].T
     sxy  = msh.coordinates.T
-    neis = msh.tess.indexed_neighborhoods
-    nnei = np.asarray(list(map(len, neis)))
-    emax = np.max(nnei)
-    whs  = [np.where(nnei > k)[0] for k in range(emax)]
-    neis = np.asarray([u + (-1,)*(emax - len(u)) for u in neis])
-    dist = np.full((n, emax), np.nan)
-    for (k,wh) in enumerate(whs):
-        nei = neis[wh,k]
-        dxy = sxy[nei] - sxy[wh]
-        dst = np.sqrt(np.sum(dxy**2, axis=1))
-        dist[wh,k] = dst
-    # find min dist from each vertex
-    ww  = np.where(np.max(np.isfinite(dist), axis=1) == 1)[0]
-    whs = [np.intersect1d(wh, ww) for wh in whs]
-    radii  = np.full(n, np.nan)
-    radii[ww] = np.nanmin(dist[ww], 1)
-    dfracs = (radii * zinv(dist.T)).T
-    ifracs = 1 - dfracs
-    # make points that distance from each edge
-    ellipses = np.full((n, emax, 2), np.nan)
-    for (k,wh) in enumerate(whs):
-        xy0 = vxy[wh]
-        xyn = vxy[neis[wh,k]]
-        ifr = ifracs[wh,k]
-        dfr = dfracs[wh,k]
-        uxy1 = xy0 * np.transpose([ifr, ifr])
-        uxy2 = xyn * np.transpose([dfr, dfr])
-        uxy = (uxy1 + uxy2)
-        ellipses[wh,k,:] = uxy - xy0
-    # At this point, ellipses dimensions repesent (vetices, neighbors, x/y coords)
-    # we want to rotate the points to be along their center's implied rad/tan axis
+    parts = msh.tess.neighborhood_face_partition
+    emax = len(parts)
+    mindist = np.full(n, np.inf)
+    angtot = np.zeros(n)
+    angs = []
+    for (a,b,c) in parts:
+        abvec = (sxy[b] - sxy[a])
+        acvec = (sxy[c] - sxy[a])
+        ablen = np.sqrt(np.sum(abvec**2, axis=1))
+        aclen = np.sqrt(np.sum(acvec**2, axis=1))
+        mindist[a] = np.min([mindist[a], ablen, aclen], axis=0)
+        abvec /= ablen[:,None]
+        acvec /= aclen[:,None]
+        angs.append(np.arccos(np.sum(abvec*acvec, axis=1)))
+        angtot[a] += angs[-1]
+    ellipses = np.full((n,npoints,2), np.nan)
+    angprog = np.zeros(n)
+    ang_per_pt = angtot / npoints
+    for (ang,part) in zip(angs, parts):
+        (a,b,c) = part
+        sabvec = (sxy[b] - sxy[a])
+        sacvec = (sxy[c] - sxy[a])
+        sablen = np.sqrt(np.sum(sabvec**2, axis=1))
+        saclen = np.sqrt(np.sum(sacvec**2, axis=1))
+        vabvec = (vxy[b] - vxy[a])
+        vacvec = (vxy[c] - vxy[a])
+        vablen = np.sqrt(np.sum(vabvec**2, axis=1))
+        vaclen = np.sqrt(np.sum(vacvec**2, axis=1))
+        uabvec = vabvec * (mindist[a] / sablen)[:,None]
+        uacvec = vacvec * (mindist[a] / saclen)[:,None]
+        uablen = np.sqrt(np.sum(uabvec**2, axis=1))
+        uaclen = np.sqrt(np.sum(uacvec**2, axis=1))
+        uabtht = np.arctan2(uabvec[:,1], uabvec[:,0])
+        uactht = np.arctan2(uacvec[:,1], uacvec[:,0])
+        angprog_start = np.array(angprog[a])
+        p0 = np.round((angprog[a] / angtot[a]) * npoints).astype('int')
+        ii = np.arange(len(a))
+        aa = a
+        while True:
+            angprog_aa = angprog[aa]
+            ii = ii[(angprog_aa - angprog_start[ii] < ang[ii]) &
+                    (angprog_aa + ang_per_pt[aa] <= angtot[aa])]
+            (aa,bb,cc) = (a[ii], b[ii], c[ii])
+            if len(ii) == 0: break
+            (rb,rc,thb,thc) = (uablen[ii], uaclen[ii], uabtht[ii], uactht[ii])
+            angw = (angprog[aa] - angprog_start[ii]) / ang[ii]
+            iangw = 1 - angw
+            tht = iangw*thb + angw*thc
+            r = iangw*rb + angw*rc
+            atpt = np.round(angprog[aa] / angtot[aa] * npoints).astype('int')
+            ellipses[aa, atpt, :] = np.transpose([np.cos(tht)*r, np.sin(tht)*r])
+            angprog[aa] += ang_per_pt[aa]
+    # At this point, ellipses is the set of ellipse points to fit for each neighborhood.
+    # Its dimensions repesent (vertices, neighbors, x/y coords); we want to rotate the
+    # points to be along their center's implied rad/tan axis.
     vrs  = np.sqrt(np.sum(vxy**2, axis=1))
     irs  = zinv(vrs)
     coss = vxy[:,0] * irs
@@ -365,8 +390,6 @@ def disk_vmag(hemi, retinotopy='any', yields='axes', min_cod=0, **kw):
     cels = (coss * ellipses.T)
     sels = (sins * ellipses.T)
     rots = np.transpose([cels[0] + sels[1], cels[1] - sels[0]], [1,2,0])
-    # At this point, rots dimensions repesent (neighbors, vetices, x/y coords)
-    # now we fit the best rad/tan-oriented ellipse we can with the given center
     rsrt = np.sqrt(np.sum(rots**2, axis=2)).T
     (csrt,snrt) = zinv(rsrt) * rots.T
     # At this point, csrt and snrt have dimensions that represent (vertices, neighbors)
@@ -374,23 +397,22 @@ def disk_vmag(hemi, retinotopy='any', yields='axes', min_cod=0, **kw):
     axes = []
     cods = []
     idxs = []
-    for (r,c,s,k,irad,i) in zip(rsrt,csrt,snrt,nnei,zinv(radii),range(len(nnei))):
-        if k < 3: continue
-        (c,s,r) = [u[:k] for u in (c,s,r)]
+    for (r,c,s,irad,i) in zip(rsrt,csrt,snrt,zinv(mindist),range(n)):
         # if the center point is way outside the min/max, skip it
         (x,y) = (r*c, r*s)
         if len(np.unique(np.sign(x))) < 2 or len(np.unique(np.sign(y))) < 2: continue
         mudst = np.sqrt(np.sum(np.mean([x, y], axis=1)**2))
-        if mudst > np.min(r): continue
+        #if mudst > np.min(r): continue
         # okay, fit an ellipse...
         fs = np.transpose([c,s])**2
         try:
             (ab,rss,rnk,svs) = np.linalg.lstsq(fs, r**2, rcond=None)
-            ab = np.sqrt(np.abs(ab))
+            # ab = np.sqrt(np.abs(ab)) # Why the sqrt?
+            ab = np.abs(ab)
             if len(rss) == 0 or rnk < 2: continue # or np.min(svs/np.sum(svs)) < 0.01: continue
             cod = 1 - rss[0]*zinv(np.sum(r**2))
             if cod < min_cod: continue
-            axes.append(np.abs(ab) * irad)
+            axes.append(ab * irad)
             cods.append(cod)
             idxs.append(i)
         except Exception as e: continue
@@ -398,29 +420,31 @@ def disk_vmag(hemi, retinotopy='any', yields='axes', min_cod=0, **kw):
     # make the return value; this is a 2x2 matrix for each vertex
     if yields != 'cod':
         raxes = np.full((N, 2), np.nan)
-        raxes[idxs] = axes
-    if yields == 'axes': return raxes
+        raxes[idxs,:] = axes
+        if yields == 'axes': return raxes
     rcods = np.full(N, np.nan)
     rcods[idxs] = cods
     if yields == 'cod': return rcods
-    return (raxes, rcods)
+    else: return (raxes, rcods)
 
-def face_vmag(hemi, retinotopy='any', to=None, **kw):
+def face_vmag(hemi, retinotopy='any', to=None, null=np.nan, **kw):
     '''
     face_vmag(mesh) yields the visual magnification based on the projection of individual faces on
       the cortical surface into the visual field.
     face_vmag(mdat) uses the given magnification data mdat (as returned from mag_data()); if valid
       magnification data is passed then all options related to the mag_data() function are ignored.
 
-    All options accepted by mag_data() are accepted by disk_vmag().
+    All options accepted by mag_data() are accepted by face_vmag().
 
     The additional optional arguments are also accepted:
       * to (default: None) specifies that the resulting data should be transformed in some way;
         these transformations are:
-          * None or 'data': returns the full magnification data without transformation;
           * 'faces': returns a property of the visual magnification value of each face;
           * 'vertices': returns a property of the visual magnification value of each vertex, as
             determined by averaging the magnification 
+          * None (the detault) is equivalent to 'faces'
+      * null (default: nan) specifies the value to use in the return-value for faces or
+        vertices outside the mesh.
     '''
     to = parse_toopt_facevertex(to)
     if pimms.is_vector(hemi):
@@ -430,17 +454,20 @@ def face_vmag(hemi, retinotopy='any', to=None, **kw):
             m = {k: curry(lambda k: face_vmag(mdat[k], to=to), k) for k in ks}
             return pimms.lmap(m)
         else:
-            return face_vmag(mag_data(hemi, retinotopy=retinotopy, **kw), to=to)
+           hemi = mag_data(hemi, retinotopy=retinotopy, **kw)
     mdat = hemi
     # Okay, we have a single mag-data dict; get the face visual and cortical areas:
     mesh = mdat['mesh']
-    vismesh = mesh.copy(coordinates=mdat['visual_coordinates'])
-    face_vmags = zdivide(vismesh.face_areas, mesh.face_areas, null=0)
+    submesh = mdat['submesh']
+    vismesh = submesh.copy(coordinates=mdat['visual_coordinates'])
+    subface_vmags = zdivide(vismesh.face_areas, submesh.face_areas, null=0)
+    face_vmags = np.full(mesh.tess.face_count, null)
+    face_vmags[mesh.tess.index[submesh.tess.faces]] = subface_vmags
     # convert these if the to argument so-requires it:
     if to == 'face': return face_vmags
     # possible #TODO here: super-tesselate the mesh and calculate the actual visual vertex areas
     # then divide by the vertex cortical surface ares to do this properly.
-    vmag = np.zeros(mesh.vertex_count)
+    vmag = np.full(mesh.vertex_count, null)
     for (vtx,faces) in six.iteritems(mdat['submesh'].tess.vertex_face_index):
         tmp = face_vmags[list(faces)]
         ii = mesh.tess.index(vtx)
@@ -448,6 +475,137 @@ def face_vmag(hemi, retinotopy='any', to=None, **kw):
         jj = jj[tmp[jj] > 0]
         if len(jj) > 0: vmag[ii] = np.mean(tmp[jj])
     return vmag
+
+def face_rtcmag(hemi, retinotopy='any', to=None, **kw):
+    '''
+    face_rtcmag(mesh) yields the cortical magnification matrices of each face in
+      the given mesh based on the projection of individual faces on the
+      cortical surface into the visual field.
+    face_rtcmag(mdat) uses the given magnification data mdat (as returned from
+      mag_data()); if valid magnification data is passed then all options
+      related to the mag_data() function are ignored.
+
+    The return value of face_rtcmag() is an tuple of (rad_cmag, tan_cmag, theta)
+    where rad_cmag and tan_cmag are both linear cortical magnifications in the
+    associated directions, and theta is the angle between them on cortex.
+
+    All options accepted by mag_data() are accepted by face_rtcmag().
+
+    The additional optional arguments are also accepted:
+      * to (default: None) specifies that the resulting data should be
+        transformed in some way; these transformations are:
+          * None or 'data': returns the full magnification data without 
+            transformation;
+          * 'faces': returns a property of the visual magnification value of
+            each face;
+          * 'vertices': returns a property of the visual magnification value of
+            each vertex, as determined by averaging the magnification.
+    '''
+    if pimms.is_vector(hemi):
+        return tuple([face_rtcmag(m, to=to) for m in mdat])
+    if not is_mag_data(hemi):
+        if (pimms.is_map(hemi) and 
+            all(pimms.is_int(k) for k in six.iterkeys(hemi))):
+            m = {k: curry(lambda k: face_rtcmag(mdat[k], to=to), k) for k in ks}
+            return pimms.lmap(m)
+        else:
+            return face_rtcmag(mag_data(hemi, retinotopy=retinotopy, **kw), to=to)
+    to = parse_toopt_facevertex(to)
+    mdat = hemi
+    # Okay, we have a single mag-data dict; get the face visual and cortical areas:
+    mesh = mdat['mesh']
+    submesh = mdat['submesh']
+    vismesh = submesh.copy(coordinates=mdat['visual_coordinates'])
+    face_vmags = zdivide(vismesh.face_areas, submesh.face_areas, null=0)
+    # To determine radial and tangential, we start by drawing lines from each 
+    # face center to whichever other triangle side in the radial and tangential
+    # directions.
+    fx0 = vismesh.face_centers
+    (ax,bx,cx) = abcx = vismesh.face_coordinates
+    ecc = np.sqrt(np.sum(fx0**2, axis=0))
+    tht = np.arctan2(fx0[1], fx0[0])
+    u_rad = fx0 * zinv(ecc, null=np.nan)
+    u_tan = np.array([-u_rad[1], u_rad[0]])
+    # Get the intersection of these u_rad and u_tan with the triangle sides
+    radlines = [np.hstack([u,u,u]) for u in (fx0, fx0+u_rad)]
+    tanlines = [np.hstack([u,u,u]) for u in (fx0, fx0+u_tan)]
+    trisides = [np.hstack([ax,bx,cx]), np.hstack([bx,cx,ax])]
+    isect_rad = line_segment_intersection_2D(radlines, trisides)
+    isect_tan = line_segment_intersection_2D(tanlines, trisides)
+    vis_segs = []
+    for (isect_dat, u_dat) in zip([isect_rad, isect_tan], [u_rad, u_tan]):
+        isects_wnan = np.array([u.T for u in np.reshape(np.transpose(isect_dat), (3,-1,2))])
+        # There should be 2 intersections per column of these matrices.
+        isects = np.zeros((2,) + isects_wnan.shape[1:])
+        isects_fin = np.isfinite(isects_wnan[:,0,:])
+        nisects = np.sum(isects_fin, axis=0)
+        ii3 = (nisects == 3)
+        if np.any(ii3):
+            wh3 = np.where(ii3)[0]
+            (iab, ibc, ica) = isects_wnan
+            d2b = np.sum((iab[:,wh3] - ibc[:,wh3])**2, axis=0)
+            d2c = np.sum((ibc[:,wh3] - ica[:,wh3])**2, axis=0)
+            d2a = np.sum((ica[:,wh3] - iab[:,wh3])**2, axis=0)
+            dists = [d2b, d2c, d2a]
+            far_isects = [ica, iab, ibc]
+            small = np.argmin(dists, axis=0)
+            # The two with the smallest distance between them we average
+            for s in (0,1,2):
+                iis = np.where(small == s)[0]
+                (far,cl1,cl2) = [far_isects[(s+k)%3][:, wh3[iis]] for k in (0,1,2)]
+                cl = np.mean([cl1,cl2], axis=0)
+                isects[0,:,wh3[iis]] = cl.T
+                isects[1,:,wh3[iis]] = far.T
+        # For the rest, we can just take the good two intersections.
+        ii2 = ~ii3
+        k = np.argmin(isects_fin, axis=0)[ii2]
+        rng = np.arange(isects_wnan.shape[2])[ii2]
+        isects[0,:,ii2] = isects_wnan[(k+1)%3, :, rng]
+        isects[1,:,ii2] = isects_wnan[(k+2)%3, :, rng]
+        # For all the intersections, we want to make sure that they are oriented
+        # correctly w.r.t rad/tan (i.e., make we didn't flip the vectors).
+        ivec = isects[1] - isects[0]
+        sgn = np.sign(np.sum(ivec * u_dat, axis=0))
+        ii = np.where(sgn == -1)[0]
+        tmp = np.array(isects[1,:,ii])
+        isects[1,:,ii] = isects[0,:,ii]
+        isects[0,:,ii] = tmp
+        vis_segs.append(isects)
+    # That gives us all the intersections in visual space.
+    # We now want them in cortical space as well, and we want to convert both
+    # into distances.
+    vis_segs = np.array(vis_segs)
+    bc_coords = np.array(
+        [[(a, b, 1.0 - a - b)
+          for isect in isects
+          for (a,b) in [cartesian_to_barycentric_2D(abcx, isect)]]
+         for isects in vis_segs])
+    srf_abcx = submesh.face_coordinates
+    srf_segs = np.array(
+        [[np.sum(srf_abcx * isect[:,None,:], axis=0)
+          for isect in isects]
+         for isects in bc_coords])
+    # Okay, convert the segments into lengths.
+    srf_rtlen = np.array([np.sqrt(np.sum((a - b)**2, axis=0)) for (a,b) in srf_segs])
+    vis_rtlen = np.array([np.sqrt(np.sum((a - b)**2, axis=0)) for (a,b) in vis_segs])
+    (rmag, tmag) = srf_rtlen / vis_rtlen
+    # Those magnifications fail in consider the angle between the surface lines,
+    # though; to correct for this, we just find it first:
+    srf_vecs = np.array([b - a for (a,b) in srf_segs])
+    srf_vecs *= zinv(np.sqrt(np.sum(srf_vecs**2, axis=1)))[:,None,:]
+    theta = np.arccos(np.sum(srf_vecs[0] * srf_vecs[1], axis=0))
+    # We also want to preserve +/- angle values to indicate whether there was a
+    # flip (positive for positive fieldsign and negative for negative).
+    fsign = retinotopic_field_sign(mesh, 'faces', retinotopy=mdat['retinotopy_data'])
+    theta *= fsign[mesh.tess.index[submesh.tess.faces]]
+    # Now accumulate and return.
+    res = []
+    ii = mesh.tess.index[submesh.tess.faces]
+    for x in (rmag,tmag,theta):
+        y = np.full(mesh.tess.face_count, np.nan)
+        y[ii] = x
+        res.append(y)
+    return tuple(res)
 
 @pimms.immutable
 class FieldOfView(object):
