@@ -581,7 +581,7 @@ hcp_filemap_instructions = [
                                                                             'lh_LR164k'),
         '{id}.L.aparc.164k_fs_LR.label.gii',         _prop('Desikan06_parcellation', 'lh_LR164k'),
         '{id}.L.aparc.a2009s.164k_fs_LR.label.gii',  (_prop('parcellation', 'lh_LH164k') +
-                                                      _prop('Destrieaux09_parcellation',
+                                                      _prop('Destrieux09_parcellation',
                                                             'lh_LH164k')),
         '{id}.L.atlasroi.164k_fs_LR.shape.gii',      _prop('atlas', 'lh_LR164k', key='label'),
         '{id}.L.curvature.164k_fs_LR.shape.gii',     _prop_fssulc('curvature', 'lh_LR164k',
@@ -626,7 +626,7 @@ hcp_filemap_instructions = [
         '{id}.R.aparc.164k_fs_LR.label.gii',         _prop('Desikan06_parcellation',
                                                            'rh_LR164k'),
         '{id}.R.aparc.a2009s.164k_fs_LR.label.gii',  (_prop('parcellation', 'rh_LH164k') +
-                                                      _prop('Destrieaux09_parcellation',
+                                                      _prop('Destrieux09_parcellation',
                                                             'rh_LH164k')),
         '{id}.R.atlasroi.164k_fs_LR.shape.gii',      _prop('atlas', 'rh_LR164k', key='label'),
         '{id}.R.curvature.164k_fs_LR.shape.gii',     _prop_fssulc('curvature', 'rh_LR164k',
@@ -676,7 +676,7 @@ hcp_filemap_instructions = [
             '{id}.L.RefMyelinMap.native.func.gii', _prop_fssulc('myelin_ref', 'lh_native'),
             '{id}.L.BA.native.label.gii', _prop('brodmann_area', 'lh_native'),
             '{id}.L.aparc.native.label.gii',  _prop('Deskian06_parcellation', 'lh_native'),
-            '{id}.L.aparc.a2009s.native.label.gii', (_prop('Destrieaux09_parcellation', 'lh_native')
+            '{id}.L.aparc.a2009s.native.label.gii', (_prop('Destrieux09_parcellation', 'lh_native')
                                                      + _prop('parcellation', 'lh_native')),
             '{id}.L.atlasroi.native.shape.gii', _prop('atlas', 'lh_native', key='label'),
             '{id}.L.curvature.native.shape.gii', _prop('curvature', 'lh_native', filt=lambda c:-c),
@@ -703,7 +703,7 @@ hcp_filemap_instructions = [
             '{id}.R.RefMyelinMap.native.func.gii', _prop_fssulc('myelin_ref', 'rh_native'),
             '{id}.R.BA.native.label.gii', _prop('brodmann_area', 'rh_native'),
             '{id}.R.aparc.native.label.gii',  _prop('Deskian06_parcellation', 'rh_native'),
-            '{id}.R.aparc.a2009s.native.label.gii', (_prop('Destrieaux09_parcellation', 'rh_native')
+            '{id}.R.aparc.a2009s.native.label.gii', (_prop('Destrieux09_parcellation', 'rh_native')
                                                     + _prop('parcellation', 'rh_native')),
             '{id}.R.atlasroi.native.shape.gii', _prop('atlas', 'rh_native', key='label'),
             '{id}.R.curvature.native.shape.gii', _prop('curvature', 'rh_native', filt=lambda c:-c),
@@ -719,7 +719,7 @@ hcp_filemap_instructions = [
         'fsaverage_LR59k', [
             '{id}.L.BA.59k_fs_LR.label.gii', _prop('brodmann_area', 'lh_LR59k'),
             '{id}.L.aparc.59k_fs_LR.label.gii', _prop('Desikan06_parcellation', 'lh_LR59k'),
-            '{id}.L.aparc.a2009s.59k_fs_LR.label.gii', (_prop('Destrieaux09_parcellation',
+            '{id}.L.aparc.a2009s.59k_fs_LR.label.gii', (_prop('Destrieux09_parcellation',
                                                               'lh_LR59k') + 
                                                         _prop('parcellation', 'lh_LR59k')),
             '{id}.L.ArealDistortion_FS.59k_fs_LR.shape.gii', _prop_fs('areal_distortion',
@@ -764,7 +764,7 @@ hcp_filemap_instructions = [
                                                {'flatmap':'lh_LR59k_MSMAll',  'format':'gifti'}),
             '{id}.R.BA.59k_fs_LR.label.gii', _prop('brodmann_area', 'rh_LR59k'),
             '{id}.R.aparc.59k_fs_LR.label.gii', _prop('Desikan06_parcellation', 'rh_LR59k'),
-            '{id}.R.aparc.a2009s.59k_fs_LR.label.gii', (_prop('Destrieaux09_parcellation',
+            '{id}.R.aparc.a2009s.59k_fs_LR.label.gii', (_prop('Destrieux09_parcellation',
                                                               'rh_LR59k') + 
                                                         _prop('parcellation', 'rh_LR59k')),
             '{id}.R.ArealDistortion_FS.59k_fs_LR.shape.gii', _prop_fs('areal_distortion',
@@ -824,7 +824,7 @@ hcp_filemap_instructions = [
         'fsaverage_LR32k', [
             '{id}.L.BA.32k_fs_LR.label.gii', _prop('brodmann_area', 'lh_LR32k'),
             '{id}.L.aparc.32k_fs_LR.label.gii', _prop('Desikan06_parcellation', 'lh_LR32k'),
-            '{id}.L.aparc.a2009s.32k_fs_LR.label.gii', (_prop('Destrieaux09_parcellation',
+            '{id}.L.aparc.a2009s.32k_fs_LR.label.gii', (_prop('Destrieux09_parcellation',
                                                               'lh_LR32k') + 
                                                         _prop('parcellation', 'lh_LR32k')),
             '{id}.L.ArealDistortion_FS.32k_fs_LR.shape.gii', _prop_fs('areal_distortion',
@@ -869,7 +869,7 @@ hcp_filemap_instructions = [
                                                {'flatmap':'lh_LR32k_MSMAll',  'format':'gifti'}),
             '{id}.R.BA.32k_fs_LR.label.gii', _prop('brodmann_area', 'rh_LR32k'),
             '{id}.R.aparc.32k_fs_LR.label.gii', _prop('Desikan06_parcellation', 'rh_LR32k'),
-            '{id}.R.aparc.a2009s.32k_fs_LR.label.gii', (_prop('Destrieaux09_parcellation',
+            '{id}.R.aparc.a2009s.32k_fs_LR.label.gii', (_prop('Destrieux09_parcellation',
                                                               'rh_LR32k') + 
                                                         _prop('parcellation', 'rh_LR32k')),
             '{id}.R.ArealDistortion_FS.32k_fs_LR.shape.gii', _prop_fs('areal_distortion',
