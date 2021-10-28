@@ -207,7 +207,9 @@ class BasicPath(object):
             if tbloc is not None:
                 if tbinternal == '':
                     # we're fine; we just need to cache the current file...
-                    return (self._cache_tarball(''), rpath)
+                    #return (self._cache_tarball(''), rpath)
+                    self._cache_tarball('')
+                    return (self, rpath)
                 else:
                     # We copy ourselves to handle this base-path
                     tmp = copy.copy(self)
