@@ -185,8 +185,9 @@ class BasicPath(object):
         else: raise ValueError('ensure_path called for non-existant file: %s' % flnm)
     def _make_cache_path(self): return tmpdir(delete=True)
     def _cache_tarball(self, rpath, base_path=''):
+        lpath = rpath[len(self.base_path):] if rpath.startswith(self.base_path) else rpath
         if self.cache_path is None: object.__setattr__(self, 'cache_path', self._make_cache_path())
-        cpath = self.osjoin(self.cache_path, self.to_ospath(rpath))
+        cpath = self.osjoin(self.cache_path, self.to_ospath(lpath))
         if os.path.isdir(cpath):
             (tbloc, tbinternal) = split_tarball_path(self.base_path)
             if tbloc is None: (tbloc, cpath) = (cpath, cpath)
@@ -198,7 +199,10 @@ class BasicPath(object):
                 base_path = self.osjoin(base_path, tbinternal)
                 if not os.path.exists(cpath): tbloc = self.ensure_path(rpath, cpath)
         else: tbloc = cpath
-        return TARPath(tbloc, base_path, cache_path=cpath)
+        tp = TARPath(tbloc, base_path, cache_path=cpath)
+        if not os.path.exists(tp.tarball_path):
+            self.ensure_path(lpath, tp.tarball_path)
+        return tp
     def _check_tarball(self, *path_parts):
         rpath = self.join(*path_parts)
         # start by checking our base path:
@@ -218,14 +222,19 @@ class BasicPath(object):
         # okay, next check the relative path
         fpath = self.join('' if self.base_path is None else self.base_path, rpath)
         (tbloc, tbinternal) = split_tarball_path(fpath)
-        if tbloc is not None and tbinternal != '':
+        if tbloc is not None:
             tbp = self._cache_tarball(tbloc)
-            return (tbp, tbinternal)
+            if tbinternal == '':
+                return (None, tbp.tarball_path)
+            else:
+                return (tbp, tbinternal)
         # otherwise, we have no tarball on the path and just need to return ourselves as we are:
         return (self, rpath)
     def find(self, *path_parts):
         yes = self.join(*path_parts)
         (pp, rpath) = self._check_tarball(*path_parts)
+        # if pp is none, we are requesting a cached tarball path rpath
+        if pp is None: return yes
         # if that gave us back a different path object, we defer to it:
         if pp is not self: return yes if pp.find(rpath) is not None else None
         # check the cache path first
@@ -238,6 +247,8 @@ class BasicPath(object):
         return self.find(*path_parts) is not None
     def getpath(self, *path_parts):
         (pp, rpath) = self._check_tarball(*path_parts)
+        # if pp is none, we are requesting a cached tarball path rpath
+        if pp is None: return rpath
         # if that gave us back a different path object, we defer to it:
         if pp is not self: return pp.getpath(rpath)
         # check the cache path first
