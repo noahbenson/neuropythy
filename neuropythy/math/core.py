@@ -1,29 +1,79 @@
+# -*- coding: utf-8 -*-
 ####################################################################################################
 # neuropythy/math/core.py
 # This file contains useful math tools for neuropythy largely built around interfacing seamlessly
 # with the PyTorch library.
 # by Noah C. Benson
 
+# Dependencies #####################################################################################
 import numpy        as np
 import scipy        as sp
 import scipy.sparse as sps
+import pimms
 
 # Constants ########################################################################################
 pi = np.pi
+"""float: the constant pi = 3.14159265....
+
+`neuropythy.math.pi` is equal to `numpy.pi`.
+"""
 half_pi = pi / 2
+"""float: the constant pi / 2 = 1.5707963...
+
+`neuropythy.math.half_pi` is equal to `numpy.pi / 2`.
+"""
 quarter_pi = pi / 4
+"""float: the constant pi / 4 = 0.78539816...
+
+`neuropythy.math.quarter_pi` is equal to `numpy.pi / 4`.
+"""
 tau = 2 * pi
+"""float: the constant tau = 2 pi = 6.2831853...
+
+`neuropythy.math.tau` is equal to `numpy.pi * 2`.
+"""
 inf = np.inf
+"""float: infinity
+
+`neuropythy.math.inf` is equal to `numpy.inf`.
+"""
 nan = np.nan
+"""float: not-a-number
+
+`neuropythy.math.nan` is equal to `numpy.nan`.
+"""
 radperdeg = pi / 180
+"""float: radians per degree of angle
+
+`neuropythy.math.radperdeg` is equal to `numpy.pi / 180`.
+"""
 degperrad = 180 / pi
+"""float: degrees of angle per radian
+
+`neuropythy.math.degperrad` is equal to `180 / numpy.pi`.
+"""
 
 # Importing PyTorch ################################################################################
 # We want to work with pytorch but not to require it. Thus we use this function to get it.
 def pytorch():
+    '''Yields the pytorch module or raises an ImportError.
+
+    The `pytorch()` fucntion is equivalent to `import torch` followed by `return torch` function;
+    though it is somewhat faster once the `torch` module has already been loaded once. This function
+    is provided through `neuropythy` because `neuropythy` does not explicitly require PyTorch, but
+    many of `neuropythy`'s sub-packages use `torch`.
+
+    Returns
+    -------
+    module
+        The PyTorch module, `torch`.
+
+    Raises
+    ------
+    ImportError
+        If the `torch` module cannot be imported.
     '''
-    Yields the pytorch module or raises an ImportError.
-    '''
+    import sys
     global pytorch
     try:
         import torch
@@ -31,7 +81,7 @@ def pytorch():
             '''
             Yields the pytorch module or raises an ImportError.
             '''
-            return torch
+            return sys.modules['torch']
         return torch
     except Exception: pass
     raise ImportError("failed to import torch: PyTorch may not be installed")
@@ -39,72 +89,239 @@ def pytorch():
 # General Utility Functions ########################################################################
 # These are functions that are typically available in both numpy and pytorch; the function here
 # provides an interface that works for both numpy and pytorch types.
-def to_torchdtype(dtype):
-    '''
-    to_torchdtype(d) yields d if d is a PyTorch dtype, otherwise yields a dtype
-      object that is equivalent to d. If d cannot be converted to a dtype object
-      then an exception is raised.
+def to_torchdtype(dtype, returnnone=False):
+    """Convertsa string or `numpy` `dtype` object into a PyTorch `dtype`.
 
-    The argument d may be a numpy dtype object, a numeric type, or a string that
-    names a PyTorch dtype.
-    '''
-    import pimms
+    Parameters
+    ----------
+    d : torch.dtype or numpy.dtype or str
+        A `numpy.dtype` object to be converted into a `torch.dtype` object, a
+        `str` object that is the alias of an `numpy.dtype`, or a `torch.dtype`
+        object.
+    retunnone : boolean, optional
+        If `True`, then the function rerturns `None` on failue instead of
+        raising an exception. The default is `False`.
+
+    Returns
+    -------
+    torch.dtype
+        The object `d` itself if `d` is a `torch.dtype` object already;
+        otherwise a `torch.dtype` object equivalent to `d` if `d` is a
+        `numpy.dtype` object or an object (such as the string 'int') that acts
+        as an alias for a `numpy.dtype` object.
+    
+    Raises
+    ------
+    ImportError
+        If the `torch` module cannot be imported.
+    ValueError
+        If the argument `d` is not a `dtype` object and cannot be interpreted as
+        one.
+    """
     torch = pytorch()
     if isinstance(dtype, torch.dtype):
         return dtype
+    if isinstance(dtype, np.dtype):
+        dtype = dtype.name
     elif pimms.is_str(dtype):
-        return getattr(torch, dtype)
-    elif np.issubdtype(dtype, np.generic):
-        return getattr(torch, dtype.__name__)
+        try:
+            dt = getattr(torch, dtype)
+            if isinstance(dt, torch.dtype): return dt
+        except AttributeError: pass
+        if retunnone: return None
+        raise ValueError(f"no torch dtype with name {dtype}")
+    elif retunnone:
+        return None
     else:
-        raise ValueError("Cannot convert to pytorch dtype: %s" % (dtype,))
-def torchdtype_to_numpydtype(dtype):
-    '''
-    torchdtype_to_numpydtype(dtype) yields a numpy dtype equivalent to the given
-      torch dtype. If dtype is None or if no matching dtype is known, None is
-      returned.
-    '''
-    torch = pytorch()
-    dtype = to_torchdtype(dtype)
-    return (np.float32    if dtype == torch.float32    else 
-            np.float64    if dtype == torch.float64    else
-            np.int32      if dtype == torch.int32      else
-            np.int64      if dtype == torch.int64      else
-            np.float16    if dtype == torch.float16    else
-            np.int16      if dtype == torch.int16      else
-            np.int8       if dtype == torch.int8       else
-            np.bool       if dtype == torch.bool       else
-            np.uint8      if dtype == torch.uint8      else
-            np.complex64  if dtype == torch.complex64  else
-            np.complex128 if dtype == torch.complex128 else
-           #np.uint64     if dtype == torch.uint64     else
-           #np.uint32     if dtype == torch.uint32     else
-           #np.uint16     if dtype == torch.uint16     else
-            None)
-def isarray(u):
-    '''
-    isarray(u) yields True if u is either a NumPy array or is a SciPy sparse
-      matrix and yields False otherwise.
+        raise ValueError(f"cannot convert object to torch dtype: {dtype}")
+def torchdtype_to_numpydtype(dtype, returnnone=False):
+    """Converts a `torch.dtype` object into an equivalent `numpy.dtype` object.
 
-    See also: istensor(), issparse(), isdense()
-    '''
+    Parameters
+    ----------
+    dtype : torch.dtype or numpy.dtype or str
+        A `torch.dtype` object to be converted into a `numpy.dtype` object or
+        any object that can be converted into a `torch.dtype` object using the
+        `to_torchdtype(dtype)` function.
+    retunnone : boolean, optional
+        If `True`, then the function rerturns `None` on failue instead of
+        raising an exception. The default is `False`.
+
+    Returns
+    -------
+    numpy.dtype or None
+        A `numpy.dtype` object equivalent to the given `dtype`. If `dtype` is
+        `None` or if no matching `dtype` is known, `None` is returned.
+
+    Raises
+    ------
+    ImportError
+        If the `torch` module cannot be imported.
+    ValueError
+        If `dtype` is not `None` and cannot be converted into a `torch.dtype`
+        object.
+    """
+    torch = pytorch()
+    if dtype is None: return None
+    dtype = to_torchdtype(dtype)
+    dt = (np.float32    if dtype == torch.float32    else 
+          np.float64    if dtype == torch.float64    else
+          np.int32      if dtype == torch.int32      else
+          np.int64      if dtype == torch.int64      else
+          np.float16    if dtype == torch.float16    else
+          np.int16      if dtype == torch.int16      else
+          np.int8       if dtype == torch.int8       else
+          np.bool       if dtype == torch.bool       else
+          np.uint8      if dtype == torch.uint8      else
+          np.complex64  if dtype == torch.complex64  else
+          np.complex128 if dtype == torch.complex128 else
+         #np.uint64     if dtype == torch.uint64     else
+         #np.uint32     if dtype == torch.uint32     else
+         #np.uint16     if dtype == torch.uint16     else
+          None)
+    if dt is None:
+        if returnnone: return None
+        else: raise ValueError(f"object {dtype} could not be converted to a numpy dtype")
+    return np.dtype(dt)
+def to_numpydtype(dtype, returnnone=False):
+    """Convertsa string or `torch` `dtype` object into a NumPy `dtype`.
+
+    Parameters
+    ----------
+    d : torch.dtype or numpy.dtype or str
+        A `torch.dtype` object to be converted into a `numpy.dtype` object, a
+        `str` object that is the alias of an `numpy.dtype`, or a `numpy.dtype`
+        object.
+    retunnone : boolean, optional
+        If `True`, then the function rerturns `None` on failue instead of
+        raising an exception. The default is `False`.
+
+    Returns
+    -------
+    numpy.dtype
+        The object `d` itself if `d` is a `numpy.dtype` object already;
+        otherwise a `numpy.dtype` object equivalent to `d` if `d` is a
+        `torch.dtype` object or an object (such as the string 'int') that acts
+        as an alias for a `numpy.dtype` object.
+    
+    Raises
+    ------
+    ValueError
+        If the argument `d` is not a `dtype` object and cannot be interpreted as
+        one.
+    """
+    if isinstance(dtype, numpy.dtype):
+        return dtype
+    try:
+        torch = pytorch()
+        if isinstance(dtype, torch.dtype):
+            d = torchdtype_to_nunmpydtype(dtype)
+            if d is not None: return d
+    except ImportError: pass
+    try:
+        return np.dtype(dtype)
+    except Exception: pass
+    if returnnone: return None
+    raise ValueError(f"cannot convert to numpy dtype: {dtype}")
+def to_dtype(obj, returnnone=False):
+    """Converts the given object into either a `numpy` or `torch` `dtype`.
+
+    If the argument `obj` is a `torch.dtype` object or a `numpy.dtype` object,
+    then it is returned. Otherwise, `numpy.dtype(obj)` is returned.
+
+    Parameters
+    ----------
+    obj : torch.dtype or numpy.dtype or dtype-like
+        If obj is a torch dtype or a numpy dtype already, then it is returned
+        untouched. Otherwise, it is converted into a numpy dtype and returned.
+    retunnone : boolean, optional
+        If `True`, then the function rerturns `None` on failue instead of
+        raising an exception. The default is `False`.
+
+    Returns
+    -------
+    numpy.dtype or torch.dtype
+        Either the `obj` itself is returned if it is already a dtype or
+        `numpy.dtype(obj)` is returned.
+
+    Raises
+    ------
+    ValueError
+        If the argument `d` is not a `dtype` object and cannot be interpreted as
+        one.
+    """
+    try:
+        torch = pytorch()
+        if isinstance(obj, torch.dtype): return obj
+    except ImportError: pass
+    if isinstance(obj, np.dtype): return obj
+    try: return np.dtype(obj)
+    except Exception: pass
+    if returnnone: return None
+    raise ValueError(f"canot convert to a dtype: {obj}")
+def isarray(u):
+    """Returns `True` if `u` is `scipy` or a `numpy` array, otherwise `False`.
+
+    If the argument `u` is either a `scipy.sprase` sparse matrix or if `u` is a
+    `numpy.ndarray`, then `isarray(u)` yields `True`; otherwise, yields `False`.
+    Note that this yields `False` for all PyTorch tensor objects.
+
+    Parameters
+    ----------
+    u : object
+        Any object.
+
+    Returns
+    -------
+    boolean
+        `True` if `u` is either a `scipy.sparse` sparse matrix or a
+        `numpy.ndarray` array object, otherwise `False`.
+
+    See also: `istensor()`, `issparse()`, `isdense()`
+    """
     if   sps.issparse(u):           return True
     elif isinstance(u, np.ndarray): return True
     else: return False
 def istensor(u):
-    '''
-    istensor(u) yields True if u is a PyTorch tensor and False otherwise.
-    '''
+    """Returns `True` if `u` is a PyTorch tensor and `False` otherwise.
+
+    Returns a `boolean` value that indicates whether `u` is a PyTorch tensor
+    object or not. If the `torch` module cannot be imported, this function
+    returns `False` instead of raising an error.
+
+    Parameters
+    ----------
+    u : object
+        Any object.
+
+    Returns
+    -------
+    boolean
+        `True` if `u` is a PyTorch `tensor` object, otherwise `False`.
+    """
     try:
         torch = pytorch()
         return torch.is_tensor(u)
     except ImportError: pass
     return False
 def issparse(u):
-    '''
-    issparse(u) yields True if u is either a SciPy sparse matrix or if u is a
-      PyTorch sparse tensor; otherwise yields False.
-    '''
+    """Returns `True` if `u` is a `scipy` or `torch` sparse object.
+
+    If `u` is either a `scipy.sparse` matrix or a `torch` sparse tensor, then
+    this function returns `True`; otherwise, it returns `False`. If the `torch`
+    module cannot be imported, this function returns `False` instead of raising
+    an error.
+
+    Parameters
+    ----------
+    u : object
+        Any object.
+
+    Returns
+    -------
+    boolean
+        `True` if `u` is a sparse matrix or tensor and `False` otherwise.
+    """
     try:
         torch = pytorch()
         if torch.is_tensor(u):
@@ -112,10 +329,29 @@ def issparse(u):
     except ImportError: pass
     return sps.issparse(u)
 def isdense(u):
-    '''
-    isdense(u) yields True if u is either a dense NumPy array or a dense PyTorch
-      tensor and False otherwise.
-    '''
+    """Returns `True` if `u` is not a sparse array object and `False` otherwise.
+
+    This function returns `True` if `u` represents a dense array of data. Note
+    that an object can be dense but not be an array or tensor; for example the
+    object `[1,2,3]` is dense but not a `numpy` array. The rules for the
+    `isdense` function are as follows:
+      - If `u` is a `scipy` sparse matrix or a `torch` sprase tensor, then
+        `isdense(u)` returns `False`.
+      - If `u` is a (dense) `torch` tensor or a `numpy` array, returns `True`.
+      - If `u` can be converted to a `numpy` array, returns `True` (note that
+        most objects can be converted to a `numpy` array).
+      - Otherwise, returns `False`.
+
+    Parameters
+    ----------
+    u : object
+        Any object.
+
+    Returns
+    -------
+    boolean
+        `True` if `u` represents a dense array and `False` otherwise.
+    """
     try:
         torch = pytorch()
         if torch.is_tensor(u):
@@ -125,41 +361,845 @@ def isdense(u):
     try: u = np.asarray(u)
     except Exception: return False
     return True
-def indices_to_integers(shape, ii):
-    '''
-    indices_to_integers(shape, ii) yields an integer array whose values
-      represent the columns of the index matrix ii (e.g., as returned by
-      numpy.where or torch.where).
+def arraylike(obj, dtype=None, ndims=None, shape=None,
+              torch=None, numpy=None, python=None):
+    """Tests whether an object matches a particular array form.
 
-    The return value is always a numpy array.
+    The parameter `obj` is matched against restrictions given by the remaining
+    parameters (below). These optional parameters can be used to place
+    restrictions on the object's `dtype`, number of dimensions (`ndms`),
+    `shape`, and underlyng implementation (`torch`, `numpy`, `python`). If the
+    object matches all requirements, then `True` is returned; otherwise, `False`
+    is returned.
 
-    See also integers_to_indices().
-    '''
-    tr = np.roll(np.cumprod(shape), 1)
-    tr[0] = 1
-    return np.dot(tr, asarray(ii))
-def integers_to_indices(shape, ii):
-    '''
-    integers_to_indices(shape, ii) yields an indices matrix whose columns
-      represent the values of the integer vector ii (e.g., as returned by
-      indices_to_integers).
+    Parameters
+    ----------
+    obj : object
+        The object the is to be matched against the array-structure requirements
+        that are required by the remaining parameters.
+    dtype : None or dtype-like or tuple or dtype-likes, optional
+        `arraylike(obj, dtype=dtype)` returns `True` if the given `obj` is or
+        would be interpreted by numpy as an array whose dtype is `dtype`. The
+        `dtype` may be a `numpy.dtype`, a `torch.dtype`, or the name of a
+        dtype. Whichever type, `torch` tensors and `numpy` objects are
+        considered to match when they match equivalent dtypes in their
+        library. to restrict the library, see the `torch`, `python`, and `numpy`
+        parameters below.
 
-    The return value is always a numpy array.
+        Additionally, the `dtype` parameter may be set to a tuple of dtype
+        objects or objects that can be converted to dtype objects. In this case,
+        any of the dtypes are considered valid dtypes for `obj`.
+    ndims : int or tuple of ints
+        `arraylike(obj, ndims=d)` returns `True` if the given `obj` has a number
+        of dimensions that matches the parameter value `d`. The value `d` may be
+        an integer, in which case the number of dimensions must match that value
+        exactly, or it may be a tuple or list of numbers, each of which are
+        valid numbers of dimensions. The default value of `None` puts no
+        restriction on the number of dimensions `obj` must have.
+    shape : int or tuple of ints, optional
+        `arraylike(obj, shape=sh)` returns `True` if the given `obj` has a shape
+        that matches the parameter value `sh`. The value `sh` must be a tuple
+        that is equal to the `obj`'s shape tuple with the following additional
+        rules: a `-1` value in the `sh` tuple will match any value in the
+        `obj`'s shape tuple, and a single `Ellipsis` may appear in `sh`, which
+        matches any number of values in the `obj`'s shape tuple. The default
+        value of `None` indicates that no restriction should be applied to the
+        `obj`'s shape.
+    torch : None or True or False, optional
+        If the `torch` value is set to `None`, then `torch.tensor` objects are
+        considered array-like, but so are `numpy.ndarray` and python native
+        objects. If `torch` is set to `True` then only `torch.tensor` objects
+        are considered array-like. If `torch` is set to `False` then
+        `torch.tensor` objects are not considered array-like, but no
+        restrictions are placed on other types. The default is `None`.
+    numpy : None or True or False, optional
+        If the `numpy` value is set to `None`, then `numpy.ndarray` objects are
+        considered array-like, but so are `torch.tensor` and python native
+        objects. If `numpy` is set to `True` then only `numpy.ndarray` objects
+        are considered array-like. If `numpy` is set to `False` then
+        `numpy.ndarray` objects are not considered array-like, but no
+        restrictions are placed on other types. The default is `None`.
+    python : None or True or False, optional
+        If the `python` value is set to `None`, then python native objects are
+        considered array-like, but so are `torch.tensor` and `numpy.ndarray`
+        objects. If `python` is set to `True` then only python native objects
+        are considered array-like. If `python` is set to `False` then python
+        native objects are not considered array-like, but no restrictions are
+        placed on other types. The default is `None`.
 
-    See also integers_to_indices().
-    '''
-    tr = np.roll(np.cumprod(shape), 1)
-    tr[0] = 1
-    rr = np.zeros((len(shape), len(ii)), dtype=np.int)
-    for (rrrow,shval) in zip(reversed(rr), reversed(tr)):
-        rrrow[:] = np.floor_divide(ii, shval)
-        ii = np.mod(ii, shval)
-    return rr
+    Returns
+    -------
+    boolean
+        `True` if all restrictions given in the parameters are met for `obj` and
+        `False otherwise.
+    """
+    # Some sanity checks first:
+    assert int(python is True) + int(numpy is True) + int(torch is True) < 2, \
+        "arraylike: only one of the parameters python, numpy, and torch may be True"
+    if numpy is False and python is False and torch is False: return False
+    # Parse the shape int front and back requirements and whether middle values are allowed.
+    shape_sh = nym.shape(shape)
+    if shape is None:
+        (sh_pre, sh_mid, sh_suf) = ((), True, ())
+    elif shape == ():
+        (sh_pre, sh_mid, sh_suf) = ((), False, ())
+    elif shape_sh == ():
+        (sh_pre, sh_mid, sh_suf) = ((shape,), False, ())
+    else:
+        # We add things to the prefix until we get to an ellipsis...
+        sh_pre = []
+        for d in shape:
+            if d is Ellipsis: break
+            sh_pre.append(d)
+        sh_pre = tuple(sh_pre)
+        # We might have finished with just that; otherwise, note the ellipsis and move on.
+        if len(sh_pre) == len(shape):
+            (sh_mid, sh_suf) = (False, ())
+        else:
+            sh_suf = []
+            for d in reversed(shape):
+                if d is Ellipsis: break
+                sh_suf.append(d)
+            sh_suf = tuple(sh_suf) # We leave this reversed!
+            sh_mid = len(sh_suf) + len(sh_pre) < len(shape)
+        assert len(sh_suf) + len(sh_pre) + int(sh_mid) == len(shape), \
+            "arraylike: only one Ellipsis may be used in the shape filter"
+    # Parse ndims.
+    if not (pimms.is_tuple(ndims) or pimms.is_set(ndims) or pimms.is_list(ndims) or ndims is None):
+        ndims = (ndims,)
+    # See if obj is represented by the correct library. We check if it's a tensor by looking at
+    # the promoted object, because a list of tensors should be considered a tensor, not a native
+    # python list, but first we can check if the numpy conditoins are met.
+    isarr = isarray(obj)
+    if   numpy  is True  and not isarr:            return False
+    elif numpy  is False and     isarr:            return False
+    # Okay, now we need to promote the object to continue checking.
+    pro = promote(obj)
+    # Finish check if the library arguments match.
+    istns = istensor(pro)
+    if   python is True  and     (isarr or istns): return False
+    elif python is False and not (isarr or istns): return False
+    elif torch  is True  and not istns:            return False
+    elif torch  is False and     istns:            return False
+    # See if we match in terms of ndims and shape
+    sh = pro.shape
+    if ndims is not None and len(sh) not in ndims:
+        return False
+    ndims = len(sh)
+    if ndims < len(sh_pre) + len(sh_suf):
+        return False
+    (npre, nsuf) = (0,0)
+    for (s,p) in zip(sh, sh_pre):
+        if p != -1 and p != s: return False
+        npre += 1
+    for (s,p) in zip(reversed(sh), sh_suf):
+        if p != -1 and p != s: return False
+        nsuf += 1
+    # If there are extras in the middle and we don't allow them, we fail the match.
+    if not sh_mid and nsuf + npre != ndims: return False
+    # See if we match the dtype.
+    if dtype is not None:
+        if istns:
+            if is_tuple(dtype): dtype = [to_torchdtype(dt, returnnone=True) for dt in dtype]
+            else: dtype = [to_torchdtype(dtype, returnnone=True)]
+            if pro.dtype not in dtype: return False
+        else:
+            if is_tuple(dtype): dtype = [to_numpydtype(dt, returnnone=True) for dt in dtype]
+            else: dtype = [to_numpydtype(dtype, returnnone=True)]
+            if pro.dtype not in dtype: return False
+    # We match everything!
+    return True
+def is_numeric(x, numtype='<=complex', ndims=None, shape=None, numpy=None, torch=None, python=None):
+    """Tests whether `x` contains numeric data, as well as other optional tests.
+
+    `is_numeric(x, ndims=n, shape=s, numpy=y, torch=t, python=p)` is equivalent
+    to `arraylike(x, ndims=n, shape=s, numpy=y, torch=t, python=p)` with the
+    additional requirement that the `dtype` of `x` exist at a particular point
+    on the numerical hierarchy, which is specified by the second positional
+    argument, which is optional and has the name `numtype`. The numerical
+    hierarchy that is used by `is_numeric()` is not the type-system hierarchy
+    used by `numpy` and `torch`, but rather the theoretical mathematical
+    hierarchy in which, for example, a real number is a type (subset) of the
+    complex numbers.
+
+    The `is_numeric()` function only understands certain types or dtypes that
+    are part of both `numpy` and `torch`; any other type (including, for
+    example, unsigned integers) are considered 'non-numeric' by
+    `is_numeric()`. The types understood by `is_numeric()`, in hierarchical
+    order (such that lower types are subsets of higher types), are:
+     * `'complex'`: `complex`, or any of the `numpy` `complexXX` or `torch`
+       `complexXX` types.
+     * `'real'`: `float`, or any of the `numpy` `floatXX` or `torch`
+       `floatXX` types.
+     * `'int'` or `'integer'`: `int`, or any of the `numpy` `intXX` or `torch`
+       `intXX` types.
+     * `'bool'` or `'boolean'`:  `bool`, `numpy.dtype('bool')`, and `torch.bool`
+    
+    In addition to accepting the above strings as the `numtype` to test, the
+    `numtype` also accepts those strings with the strings `'<'`, `'<='`, `'='`,
+    `'>='`, and `'>'` prepended. These indicate that the function should test
+    whether the numeric type of `x` is strictly lower, at the same position or
+    lower, exactly at the same position (`'=<numtype>'` is equivalent to
+    `'<numtype>'`), at the same position or higher, or strictly higher,
+    respectively, in the above numeric hierarchy than the string that follows
+    it. For example, `'<complex'` indicates that any numeric type that is a
+    subset of the complex numbers, but not the complex numbers themselves, is
+    acceptable.
+
+    Parameters
+    ----------
+    x : object
+        The object to be checked for appropriate numerical data.
+        ndims : int or tuple of ints
+        `arraylike(obj, ndims=d)` returns `True` if the given `obj` has a number
+        of dimensions that matches the parameter value `d`. The value `d` may be
+        an integer, in which case the number of dimensions must match that value
+        exactly, or it may be a tuple or list of numbers, each of which are
+        valid numbers of dimensions. The default value of `None` puts no
+        restriction on the number of dimensions `obj` must have.
+    numtype : str or None, optional
+        The numeric type of the agument `x` that is required in order for the
+        function to return `True`. If this value is `None`, then the function
+        instead tests whether the type of `x` is **not** numeric. Otherwise,
+        `numtype` must be one of the strings descibed above. The default value
+        is '<=complex', which results in `True` for all numeric data documented
+        above and `False` for all other data types.
+    ndims : int or tuple of ints
+        `arraylike(obj, ndims=d)` returns `True` if the given `obj` has a number
+        of dimensions that matches the parameter value `d`. The value `d` may be
+        an integer, in which case the number of dimensions must match that value
+        exactly, or it may be a tuple or list of numbers, each of which are
+        valid numbers of dimensions. The default value of `None` puts no
+        restriction on the number of dimensions `obj` must have.
+    shape : int or tuple of ints, optional
+        `arraylike(obj, shape=sh)` returns `True` if the given `obj` has a shape
+        that matches the parameter value `sh`. The value `sh` must be a tuple
+        that is equal to the `obj`'s shape tuple with the following additional
+        rules: a `-1` value in the `sh` tuple will match any value in the
+        `obj`'s shape tuple, and a single `Ellipsis` may appear in `sh`, which
+        matches any number of values in the `obj`'s shape tuple. The default
+        value of `None` indicates that no restriction should be applied to the
+        `obj`'s shape.
+    torch : None or True or False, optional
+        If the `torch` value is set to `None`, then `torch.tensor` objects are
+        considered array-like, but so are `numpy.ndarray` and python native
+        objects. If `torch` is set to `True` then only `torch.tensor` objects
+        are considered array-like. If `torch` is set to `False` then
+        `torch.tensor` objects are not considered array-like, but no
+        restrictions are placed on other types. The default is `None`.
+    numpy : None or True or False, optional
+        If the `numpy` value is set to `None`, then `numpy.ndarray` objects are
+        considered array-like, but so are `torch.tensor` and python native
+        objects. If `numpy` is set to `True` then only `numpy.ndarray` objects
+        are considered array-like. If `numpy` is set to `False` then
+        `numpy.ndarray` objects are not considered array-like, but no
+        restrictions are placed on other types. The default is `None`.
+    python : None or True or False, optional
+        If the `python` value is set to `None`, then python native objects are
+        considered array-like, but so are `torch.tensor` and `numpy.ndarray`
+        objects. If `python` is set to `True` then only python native objects
+        are considered array-like. If `python` is set to `False` then python
+        native objects are not considered array-like, but no restrictions are
+        placed on other types. The default is `None`.
+
+    Returns
+    -------
+    boolean
+        `True` if `x` is of the appropriate numeric type and matches all the
+        optional filters.
+    """
+    # Figure out what dtypes we are checking; start by getting the prefix.
+    if numtypes is None:
+        # We are testing if it does not match any valid numeric dtypes.
+        al = arraylike(x, ndims=ndims, shape=shape, python=python, numpy=numpy, torch=torch)
+        if not al: return False
+        types = is_numeric.numeric_types['<=complex']
+        return not arraylike(x, dtype=types[3])
+    # Otherwise, we just lookup the dtype from the numeric types and check against those.
+    dt = is_numeric.numeric_types.get(numtype, None)
+    if dt is None:
+        raise ValueError(f"could not understand numerical type name: {numtype}")
+    return arraylike(x, dtype=dt, ndims=ndims, shape=shape, python=python, numpy=numpy, torch=torch)
+def _reset_numeric_types():
+    global is_numeric
+    nt = dict(
+        bool    = ((bool,), (np.dtype('bool'),), (torch.bool,)),
+        int     = ((int, np.int, np.int8, np.int16, np.int32, np.int64),
+                   (np.dtype('int8'), np.dtype('int16'), np.dtype('int32'), np.dtype('int64')),
+                   (torch.int8, torch.int16, torch.int32, torch.int64)),
+        real    = ((float, np.float, np.float16, np.float32, np.float64, np.longfloat),
+                   (np.dtype('float16'), np.dtype('float32'), np.dtype('float64'),
+                    np.dtype('longfloat')),
+                   (torch.float16, torch.float32, torch.float64)),
+        complex = ((complex, np.complex64, np.complex128, np.longcomplex),
+                   (np.dtype('complex64'), np.dtype('complex128'), np.dtype('longcomplex')),
+                   (torch.complex64, torch.complex128)))
+    ntord = ['bool', 'int', 'real', 'complex']
+    # Calculate up the <, <=, >=, > types
+    for (ii,k) in enumerate(ntord):
+        # Upward first (> and >=)
+        tup = [(), (), ()]
+        for kk in ntord[ii+1:]:
+            (t0,t1,t1) = nt[kk]
+            tup[0] = tup[0] + t0
+            tup[1] = tup[1] + t1
+            tup[2] = tup[2] + t2
+        nt['>' + k] = tuple(tup)
+        # Add in ourself for >=
+        (t0,t1,t1) = nt[k]
+        tup[0] = tup[0] + t0
+        tup[1] = tup[1] + t1
+        tup[2] = tup[2] + t2
+        nt['>=' + k] = tuple(tup)
+        # Now go in the reverse.
+        tup = [(), (), ()]
+        for kk in ntord[ii-1::-1]:
+            (t0,t1,t1) = nt[kk]
+            tup[0] = tup[0] + t0
+            tup[1] = tup[1] + t1
+            tup[2] = tup[2] + t2
+        nt['<' + k] = tuple(tup)
+        (t0,t1,t1) = nt[k]
+        tup[0] = tup[0] + t0
+        tup[1] = tup[1] + t1
+        tup[2] = tup[2] + t2
+        nt['<=' + k] = tuple(tup)
+    # All types should get a fourth entry for numpy and torch dtypes combined:
+    for (k,v) in list(nt.items()):
+        nt[k] = v + ((v[1] + v[2]),)
+    # Add aliases:
+    for (k,v) in list(nt.keys()):
+        if 'bool' in k:
+            nt[k + 'ean'] = nt[k]
+        elif 'int' in k:
+            nt[k + 'eger'] = nt[k]
+    for (k,v) in list(nt.keys()):
+        if nt.startswith('>') or nt.startswith('<'): continue
+        nt['=' + k] = nt[k]
+    nt['boolean'] = nt['bool']
+    # Set and return.
+    is_numeric.numeric_types = pyr.pmap(nt)
+    return None
+# Make sure these start out initialized:
+_reset_numeric_types()
+    
+# let's fix up the numeric types!
+
+def reshape_indices(shape, ii, newshape):
+    """Converts a matrix of indices to be valid for a reshaped array.
+
+    N-dimensional array indices in Python are often represented as matrices
+    whose rows correspond to the axes of the array and whose columns correspond
+    to the indexed items of the array. In this way, each column of the matrix is
+    a cartesian index into the array. These index matrices are returned by
+    functions such as `numpy.where()` and `torch.where()`. If the original array
+    to which these indices refer is reshaped, however---for example, if it is
+    flattened---then these indices will no longer be valid.  This function
+    converts the indices such that they will be valid for a newly reshaped array
+    and returns the new matrix of indices.
+
+    Parameters
+    ----------
+    shape : iterable of int
+        The shape tuple of the original array, into which the columns of `ii` are
+        indices.
+    ii : matrix of int or vector of int
+        The matrix of indices, which must refer to elements in an array whose
+        shape is that of the parameter `shape`. This parameter may be a `numpy`
+        or `torch` matrix or vector or anything that can be converted into a 
+        `numpy` matrix or vector. If `ii` is a vector, then it is **not**
+        treated as being equivalent to `(ii,)`; rather, it is considered a
+        linear index instead of a cartesian index.
+    newshape : 
+        The shape tuple of the newly reshaped array, into which the columns of
+        the return value, a matrix, will be indices.
+    
+    Returns
+    -------
+    numpy.ndarray matrix of int
+        A matrix `r` of indices, like those matrices returned by `torch.where()`
+        and `numpy.where()`, such that for each column `a[:,j]` of the original
+        array `a`, which has a shape of `shape`, the column `r[:,j]` is an
+        equivalent index into the array `reshape(a, newshape)`.
+
+    Raises
+    ------
+    ValueError
+        If either the indices argument `ii` is neither a matrix nor a vector,
+        if the `shape` argument does not have a size that matches that of the
+        `newshape` argument, if the number of rows in `ii` does not match
+        the length of the `shape` argument, or if there is more than one value
+        in the `shape` and `newshape` arrays that is equal to `-1`.
+    """
+    if istensor(shape): shape = shape.detach().numpy()
+    if istensor(newshale): newshape = newshape.detach().numpy()
+    # Either shape or newshape may have 1 value that is equal to -1.
+    if -1 in shape:
+        nonneg = shape != -1
+        if -1 in newshape or np.sum(nonneg) + 1 < len(shape):
+            raise ValueError("shape or newshape may have at most one value equal to -1")
+        newshape_tot = np.prod(newshape)
+        missdim = newshape_tot // np.prod(shape[nonneg])
+        shape = np.array([(missdim if k == -1 else k) for k in shape])
+        shape_tot = np.prod(shape)
+    elif -1 in newshape:
+        nonneg = newshape != -1
+        if np.sum(nonneg) + 1 < len(newshape):
+            raise ValueError("shape or newshape may have at most one value equal to -1")
+        shape_tot = np.prod(shape)
+        missdim = shape_tot // np.prod(newshape[nonneg])
+        newshape = np.array([(missdim if k == -1 else k) for k in newshape])
+        newshape_tot = np.prod(newshape)
+    else:
+        shape_tot = np.prod(shape)
+        newshape_tot = np.prod(newshape)
+    # The shapes have to match.
+    if shape_tot != newshape_tot or shape_tot < 0:
+        raise ValueError("shape and newshape do not match")
+    ii = asarray(ii)
+    # Convert to linear indices first
+    if len(ii.shape) == 1:
+        lii = ii
+    elif len(ii.shape) != 2:
+        raise ValueError("indices argument must be a integer vector or matrix")
+    elif len(shape) != ii.shape[0]:
+        raise ValueError("first dimension of indices matrix must match shape")
+    else:
+        tr = np.flip(np.cumprod(np.flip(shape))) // shape
+        lii = np.dot(tr, ii) if len(shape) == 1 else ii[0]
+    # Then convert from linear to cartesian
+    if len(newshape) == 1:
+        cii = lii
+    else:
+        cii = np.empty((len(newshape), len(lii)), dtype=np.int)
+        tr = np.flip(np.cumprod(np.flip(newshape))) // newshape
+        for (r,shprod) in enumerate(tr[:-1]):
+            cii[r,:] = lii // shprod
+        cii[-1,:] = lii % tr[-1]
+    return cii
+def flatten_indices(shape, ii):
+    """Converts a matrix of cartesian indices into a vector of linear indices.
+
+    N-dimensional array indices in Python are often represented as matrices
+    whose rows correspond to the axes of the array and whose columns correspond
+    to the indexed items of the array. In this way, each column of the matrix is
+    a cartesian index into the array. These index matrices are returned by
+    functions such as `numpy.where()` and `torch.where()`. If the original array
+    to which these indices refer is flattened, however then these indices will
+    no longer be valid.  This function converts the indices such that they will
+    be valid for flattened array and returns the new vector of these linear
+    indices.
+
+    Parameters
+    ----------
+    shape : iterable of int
+        The shape tuple of the original array, into which the columns of `ii` are
+        indices.
+    ii : matrix of int or vector of int
+        The matrix of indices, which must refer to elements in an array whose
+        shape is that of the parameter `shape`. This parameter may be a `numpy`
+        or `torch` matrix or vector or anything that can be converted into a 
+        `numpy` matrix or vector. If `ii` is a vector, then it is **not**
+        treated as being equivalent to `(ii,)`; rather, it is considered a
+        linear index instead of a cartesian index and thus is returned verbatim.
+
+    Returns
+    -------
+    numpy.ndarray vector of int
+        A vector `r` of indices, like those matrices returned by `torch.where()`
+        and `numpy.where()`, such that for each column `a[:,j]` of the original
+        array `a`, which has a shape of `shape`, the index `r[j]` is an
+        equivalent linear index into the array `reshape(a, (-1,))`.
+
+    Raises
+    ------
+    ValueError
+        If either the indices argument `ii` is neither a matrix nor a vector, ,
+        if the number of rows in `ii` does not match the length of the `shape`
+        argument, or if there is a negative value in the `shape` argument.
+    """
+    jj = reshape_indices(shape, ii, (np.prod(shape),))
+    return jj[0]
+def unflatten_indices(ii, newshape):
+    """Converts a vector of linear indices into a matrix of cartesian indices.
+
+    N-dimensional array indices in Python are often represented as matrices
+    whose rows correspond to the axes of the array and whose columns correspond
+    to the indexed items of the array. In this way, each column of the matrix is
+    a cartesian index into the array. These index matrices are returned by
+    functions such as `numpy.where()` and `torch.where()`. If the original array
+    to which these indices refer is flattened, however then these indices will
+    no longer be valid. This function converts the that correspond to a such a
+    flattened vector of linear indices back into their cartesian equivalents,
+    such that they will again be valid for matrices of indices.
+
+    Parameters
+    ----------
+    ii : vector of int
+         The vector of linear indices, which must refer to elements in a
+        vector. This parameter may be a `numpy` or `torch` vector or anything
+        that can be converted into a `numpy` vector.
+    newshape : iterable of int
+        The `newshape` tuple of the shape of the array for which cartesian
+        indices should be returned.
+
+    Returns
+    -------
+    numpy.ndarray matrix of int
+        A matrix `r` of indices, like those matrices returned by `torch.where()`
+        and `numpy.where()`, such that for each column `a[:,j]` of the newly
+        reshaped array `a = reshape(a0, newshape)`, the index `a[r[j]]` is an
+        equivalent cartesian index as `a0[ii[j]]`.
+
+    Raises
+    ------
+    ValueError
+        If either the indices argument `ii` is neither a matrix nor a vector, ,
+        if the number of rows in `ii` does not match the length of the `shape`
+        argument, or if there is a negative value in the `shape` argument.
+    """
+    return reshape_indices((-1), ii, newshape)
+def zeros(size, dtype=None, requires_grad=False, device=None):
+    """Returns an array or tensor of zeros.
+
+    This function is an interface for the `numpy.zeros()` and the
+    `torch.zeros()` functions. If the `dtype` parameter is a `torch.dtype`
+    object then a `torch.tensor` object is returned. Otherwise, returns a
+    `numpy` array.
+
+    Parameters
+    ----------
+    size : iterable of ints
+        A sequence of integers defining the shape of the result.
+    dtype : numpy.dtype or torch.dtype or numpy.dtype alias or None, optional
+        The dtype of the resulting array or tensor. If the dtype is a
+        `torch.dtype` object, then a `torch` tensor is returned; otherwise a
+        `numpy.ndarray` is returned. If `dtype` is `None`, then the `dtype` is
+        `numpy.float_`.
+    requires_grad : boolean, optional
+        If the `dtype` is `torch.dtype` object, then this parameter controls
+        whether the resulting tensor tracks its gradient. The default is
+        `False`. If a `torch.tensor` is not returned, this is ignored.
+    device : str, optional
+        If the `dtype` is a `torch.dtype` object, then this parameter controls
+        the `device` of the resulting `torch.tensor` object. If a `torch.tensor`
+        is not returned, this is ignored.
+
+    Returns
+    -------
+    numpy.ndarray or torch.Tensor
+        An array or tensor, depending on the `dtype` parameter, of zeros.
+
+    """
+    if dtype is None: dtype = np.float_
+    try:
+        torch = pytorch()
+        if isinstance(dtype, torch.dtype):
+            return torch.zeros(size, dtype=dtype, requires_grad=requires_grad, device=device)
+    except ImportError: pass
+    return np.zeros(size, dtype=dtype)
+def ones(size, dtype=None, requires_grad=False, device=None):
+    """Returns an array or tensor of ones.
+
+    This function is an interface for the `numpy.ones()` and the `torch.ones()`
+    functions. If the `dtype` parameter is a `torch.dtype` object then a
+    `torch.tensor` object is returned. Otherwise, returns a `numpy` array.
+
+    Parameters
+    ----------
+    size : iterable of ints
+        A sequence of integers defining the shape of the result.
+    dtype : numpy.dtype or torch.dtype or numpy.dtype alias or None, optional
+        The dtype of the resulting array or tensor. If the dtype is a
+        `torch.dtype` object, then a `torch` tensor is returned; otherwise a
+        `numpy.ndarray` is returned. If `dtype` is `None`, then the `dtype` is
+        `numpy.float_`.
+    requires_grad : boolean, optional
+        If the `dtype` is `torch.dtype` object, then this parameter controls
+        whether the resulting tensor tracks its gradient. The default is
+        `False`. If a `torch.tensor` is not returned, this is ignored.
+    device : str, optional
+        If the `dtype` is a `torch.dtype` object, then this parameter controls
+        the `device` of the resulting `torch.tensor` object. If a `torch.tensor`
+        is not returned, this is ignored.
+
+    Returns
+    -------
+    numpy.ndarray or torch.Tensor
+        An array or tensor, depending on the `dtype` parameter, of ones.
+
+    """
+    if dtype is None: dtype = np.float_
+    try:
+        torch = pytorch()
+        if isinstance(dtype, torch.dtype):
+            return torch.ones(size, dtype=dtype, requires_grad=requires_grad, device=device)
+    except ImportError: pass
+    return np.ones(size, dtype=dtype)
+def empty(size, dtype=None, requires_grad=False, device=None):
+    """Returns an array or tensor of uninitialized values.
+
+    This function is an interface for the `numpy.empty()` and the
+    `torch.empty()` functions. If the `dtype` parameter is a `torch.dtype`
+    object then a `torch.tensor` object is returned. Otherwise, returns a
+    `numpy` array.
+
+    Parameters
+    ----------
+    size : iterable of ints
+        A sequence of integers defining the shape of the result.
+    dtype : numpy.dtype or torch.dtype or numpy.dtype alias or None, optional
+        The dtype of the resulting array or tensor. If the dtype is a
+        `torch.dtype` object, then a `torch` tensor is returned; otherwise a
+        `numpy.ndarray` is returned. If `dtype` is `None`, then the `dtype` is
+        `numpy.float_`.
+    requires_grad : boolean, optional
+        If the `dtype` is `torch.dtype` object, then this parameter controls
+        whether the resulting tensor tracks its gradient. The default is
+        `False`. If a `torch.tensor` is not returned, this is ignored.
+    device : str, optional
+        If the `dtype` is a `torch.dtype` object, then this parameter controls
+        the `device` of the resulting `torch.tensor` object. If a `torch.tensor`
+        is not returned, this is ignored.
+
+    Returns
+    -------
+    numpy.ndarray or torch.Tensor
+        An array or tensor, depending on the `dtype` parameter, of uninitialized
+        values.
+    """
+    if dtype is None: dtype = np.float_
+    try:
+        torch = pytorch()
+        if isinstance(dtype, torch.dtype):
+            return torch.empty(size, dtype=dtype, requires_grad=requires_grad, device=device)
+    except ImportError: pass
+    return np.empty(size, dtype=dtype)
+def full(size, fill_value, dtype=None, requires_grad=False, device=None):
+    """Returns an array or tensor of the given `fill_value`.
+
+    This function is an interface for the `numpy.full()` and the `torch.full()`
+    functions. If the `dtype` parameter is a `torch.dtype` object then a
+    `torch.tensor` object is returned. Otherwise, returns a `numpy` array.
+
+    Parameters
+    ----------
+    size : iterable of ints
+        A sequence of integers defining the shape of the result.
+    fill_value : object
+        The value to put in the cells of the resulting array or tensor.
+    dtype : numpy.dtype or torch.dtype or numpy.dtype alias or None, optional
+        The dtype of the resulting array or tensor. If the dtype is a
+        `torch.dtype` object, then a `torch` tensor is returned; otherwise a
+        `numpy.ndarray` is returned. If `dtype` is `None`, then the `dtype` is
+        inferred from the type of the `fill_value`.
+    requires_grad : boolean, optional
+        If the `dtype` is `torch.dtype` object, then this parameter controls
+        whether the resulting tensor tracks its gradient. The default is
+        `False`. If a `torch.tensor` is not returned, this is ignored.
+    device : str, optional
+        If the `dtype` is a `torch.dtype` object, then this parameter controls
+        the `device` of the resulting `torch.tensor` object. If a `torch.tensor`
+        is not returned, this is ignored.
+
+    Returns
+    -------
+    numpy.ndarray or torch.Tensor
+        An array or tensor, depending on the `dtype` parameter, of ones.
+    """
+    if dtype is None:
+        return np.full(size, fill_value)
+    try:
+        torch = pytorch()
+        if isinstance(dtype, torch.dtype):
+            return torch.full(size, fill_value,
+                              dtype=dtype, requires_grad=requires_grad, device=device)
+    except ImportError: pass
+    return np.full(size, fill_value, dtype=dtype)
+def rand(size, dtype=None, requires_grad=False, device=None):
+    """Returns an array or tensor of random numbers between 0 and 1.
+
+    This function is an interface for the `numpy.random.rand()` and the
+    `torch.rand()` functions. If the `dtype` parameter is a `torch.dtype` object
+    then a `torch.tensor` object is returned. Otherwise, returns a `numpy`
+    array.
+
+    Parameters
+    ----------
+    size : iterable of ints
+        A sequence of integers defining the shape of the result.
+    dtype : numpy.dtype or torch.dtype or numpy.dtype alias or None, optional
+        The dtype of the resulting array or tensor. If the dtype is a
+        `torch.dtype` object, then a `torch` tensor is returned; otherwise a
+        `numpy.ndarray` is returned. If `dtype` is `None`, then the `dtype` is
+        inferred from the type of the `fill_value`.
+    requires_grad : boolean, optional
+        If the `dtype` is `torch.dtype` object, then this parameter controls
+        whether the resulting tensor tracks its gradient. The default is
+        `False`. If a `torch.tensor` is not returned, this is ignored.
+    device : str, optional
+        If the `dtype` is a `torch.dtype` object, then this parameter controls
+        the `device` of the resulting `torch.tensor` object. If a `torch.tensor`
+        is not returned, this is ignored.
+
+    Returns
+    -------
+    numpy.ndarray or torch.Tensor
+        An array or tensor, depending on the `dtype` parameter, of random
+        numbers with a uniform distribution on the range `[0,1)`.
+    """
+    if dtype is None:
+        return np.random.rand(size)
+    try:
+        torch = pytorch()
+        if isinstance(dtype, torch.dtype):
+            return torch.rand(size, dtype=dtype, requires_grad=requires_grad, device=device)
+    except ImportError: pass
+    return np.random.rand(size, dtype=dtype)
+def randn(size, dtype=None, requires_grad=False, device=None):
+    """Returns an array or tensor of random normally distributed numbers.
+
+    This function is an interface for the `numpy.random.randn()` and the
+    `torch.randn()` functions. If the `dtype` parameter is a `torch.dtype` object
+    then a `torch.tensor` object is returned. Otherwise, returns a `numpy`
+    array.
+
+    Parameters
+    ----------
+    size : iterable of ints
+        A sequence of integers defining the shape of the result.
+    dtype : numpy.dtype or torch.dtype or numpy.dtype alias or None, optional
+        The dtype of the resulting array or tensor. If the dtype is a
+        `torch.dtype` object, then a `torch` tensor is returned; otherwise a
+        `numpy.ndarray` is returned. If `dtype` is `None`, then the `dtype` is
+        inferred from the type of the `fill_value`.
+    requires_grad : boolean, optional
+        If the `dtype` is `torch.dtype` object, then this parameter controls
+        whether the resulting tensor tracks its gradient. The default is
+        `False`. If a `torch.tensor` is not returned, this is ignored.
+    device : str, optional
+        If the `dtype` is a `torch.dtype` object, then this parameter controls
+        the `device` of the resulting `torch.tensor` object. If a `torch.tensor`
+        is not returned, this is ignored.
+
+    Returns
+    -------
+    numpy.ndarray or torch.Tensor
+        An array or tensor, depending on the `dtype` parameter, of random
+        numbers drawn from a standard normal distribution.
+    """
+    if dtype is None:
+        return np.randn(size)
+    try:
+        torch = pytorch()
+        if isinstance(dtype, torch.dtype):
+            return torch.randn(size, dtype=dtype, requires_grad=requires_grad, device=device)
+    except ImportError: pass
+    return np.random.randn(size, dtype=dtype)
+def randint(low, high=None, size=None, dtype=None, requires_grad=False, device=None):
+    """Returns an array or tensor of random integers.
+
+    This function is an interface for the `numpy.random.randint()` and the
+    `torch.randint()` functions. If the `dtype` parameter is a `torch.dtype`
+    object then a `torch.tensor` object is returned. Otherwise, returns a
+    `numpy` array.
+
+    Parameters
+    ----------
+    low : int
+        The minimum integer to return; if only `low` and not `high` is provided
+        then `low` is instead interpreted to be `0` and the value given for
+        `low` is instead interpreted as the supremum of the integes returned
+        (i.e., all integers will be less than the `low` value provided in this
+        case).
+    high : int, optional
+         The supremum of the integers that can be returned--i.e., the max value
+         of a returned integer plus 1. If tihs value is not provided, then the
+         `low` is instead assumed to be the `high` value while the true `low`
+         value that is used is `0`.
+    size : iterable of ints
+        A sequence of integers defining the shape of the result.
+    dtype : numpy.dtype or torch.dtype or numpy.dtype alias or None, optional
+        The dtype of the resulting array or tensor. If the dtype is a
+        `torch.dtype` object, then a `torch` tensor is returned; otherwise a
+        `numpy.ndarray` is returned. If `dtype` is `None`, then the `dtype` is
+        inferred from the type of the `fill_value`.
+    requires_grad : boolean, optional
+        If the `dtype` is `torch.dtype` object, then this parameter controls
+        whether the resulting tensor tracks its gradient. The default is
+        `False`. If a `torch.tensor` is not returned, this is ignored.
+    device : str, optional
+        If the `dtype` is a `torch.dtype` object, then this parameter controls
+        the `device` of the resulting `torch.tensor` object. If a `torch.tensor`
+        is not returned, this is ignored.
+
+    Returns
+    -------
+    numpy.ndarray or torch.Tensor
+        An array or tensor, depending on the `dtype` parameter, of random
+        integers with a uniform distribution on the range `[low,high)`.
+    """
+    if high is None:
+        (low, high) = (0, low)
+    if dtype is None:
+        return np.random.randint(low, high, size=size)
+    try:
+        torch = pytorch()
+        if isinstance(dtype, torch.dtype):
+            return torch.randint(low, high, size=size,
+                                 dtype=dtype, requires_grad=requires_grad, device=device)
+    except ImportError: pass
+    return np.randon.randint(low, highh, size=size, dtype=dtype)
+def permutation(x, dtype=None, requires_grad=False, device=None):
+    """Returns a random permutation.
+
+    This function is an interface for the `numpy.random.permutation()` and the
+    `torch.randperm()` functions. If the `dtype` parameter is a `torch.dtype`
+    object then a `torch.tensor` object is returned. Otherwise, returns a
+    `numpy` array.
+
+    Parameters
+    ----------
+    x : int or iterable
+        If `x` is an integer, then returns a random permutation of `arange(x)`;
+        otherwise, returns a random permutation of `x` itself.
+    dtype : numpy.dtype or torch.dtype or numpy.dtype alias or None, optional
+        The dtype of the resulting array or tensor. If the dtype is a
+        `torch.dtype` object, then a `torch` tensor is returned; otherwise a
+        `numpy.ndarray` is returned. If `dtype` is `None`, then the `dtype` is
+        inferred from the type of the `fill_value`.
+    requires_grad : boolean, optional
+        If the `dtype` is `torch.dtype` object, then this parameter controls
+        whether the resulting tensor tracks its gradient. The default is
+        `False`. If a `torch.tensor` is not returned, this is ignored.
+    device : str, optional
+        If the `dtype` is a `torch.dtype` object, then this parameter controls
+        the `device` of the resulting `torch.tensor` object. If a `torch.tensor`
+        is not returned, this is ignored.
+
+    Returns
+    -------
+    numpy.ndarray or torch.Tensor
+        An array or tensor, depending on the `dtype` parameter, of either a
+        random permutation of `x` (if `x` is ann iterable) or a random
+        permutation of `arange(x)` otherwise.
+    """
+    x = promote(x, dtype=dtype)
+    try:
+        torch = pytorch()
+        if isinstance(dtype, torch.dtype):
+            return torch.randperm(x, dtype=dtype, requires_grad=requires_grad, device=device)
+        elif dtype is None and istensor(x):
+            if device is None: device = x.device
+            return torch.randperm(x, dtype=dtype, requires_grad=requires_grad, device=device)
+    except ImportError: pass
+    return np.randon.permutation(x).astype(dtype)
+# #TODO #cleanup :: Above here is cleaned; below here needs work
 def find_indices(ii, k):
-    '''
+    """
     find_index(ii, k) yields a NumPy array of the indices at which the
       (integer) values of k occur in the (integer) array ii.
-    '''
+    """
     n = len(ii)
     zs = np.zeros(n, dtype=np.int)
     ri = sps.csr_matrix((np.arange(n), [k, zs]))
@@ -700,32 +1740,66 @@ def todtype(u, dtype):
         return sps.coo_matrix((xx, (ii,jj)), **kw)
     else:
         return np.array(u, dtype=dtype)
-def asdtype(u, dtype):
-    '''
-    asdtype(u, dtype) yields either a copy of the PyTorch tensor or NumPy array
-      u with the new dtype, if the dtype is not equivalent to u.dtype, or yields
-      u itself if the dtype already matches. The argument u may also be a SciPy
-      sparse array.
+def asdtype(u, dtype, device=None):
+    """Returns a duplicate of the array `u` with a new `dtype`.
+
+    `asdtype(u, dtype)` returns either a copy of the PyTorch tensor or NumPy
+    array `u` with the new `dtype`, if the `dtype` is not equivalent to
+    `u.dtype`, or yields `u` itself if `u` already has the requested
+    `dtype`. The argument `u` may also be a SciPy sparse array.
 
     A copy of u is made only if necessary, and it is not detached unless
     necessary. To always obtain a detached copy, you can use the todtype()
     function.
-    '''
+
+    If the `dtype` argument is a `torch.dtype` object, then a `torch` tensor is
+    returned; if a `numpy.dtype` object is given, then a `numpy` array is
+    returned. If `dtype` is a string alias for a `dtype`, then the object
+    returned is a `torch` tensor if `u` is a `torch` tensor and is a `numpy`
+    array otherwise.
+
+    Parameters
+    ----------
+    u : array-like or torch.Tensor
+        The array or tensor whose `dtype` is to be converted.
+    dtype : torch.dtype or numpy.dtype or str
+        The type of the returned array. If `dtype` is a `torch.dtype` object,
+        then a `torch.Tensor` object is returned; if `dtype` is a `numpy.dtype`
+        object, then a `numpy.ndarray` object is returned. Otherwise, the return
+        value will be a `torch.Tensor` if `u` is a `torch.Tensor` and will be a
+        `numpy.ndarray` otherwise.
+    device : str or None
+        The device to allocate to any new `torch.Tensor` objects. If `None`,
+        then uses the `dtype` of `u` if `u` is a `torch.Tensor` and otherwise
+        provides no guidance.
+
+    Returns
+    -------
+    numpy.ndarray or torch.Tensor
+        The tensor `u` converted to the given `dtype`.
+    """
     try:
         torch = pytorch()
         if torch.is_tensor(u):
-            dtype = to_torchdtype(dtype)
-            if u.dtype == dtype: return u
-            if u.is_sparse:
-                u = u.coalesce()
-                # We just detach the indices and values
-                vals = u.values().type(dtype)
-                return torch.sparse_coo_tensor(u.indices().clone().detach(), vals,
-                                               u.shape, dtype=dtype, device=u.device)
+            if device is None: device = u.device
+            if pimms.is_str(dtype):
+                dtype = to_torchdtype(dtype)
+            if isinstance(dtype, torch.dtype):
+                if u.dtype == dtype: return u
+                if u.is_sparse:
+                    u = u.coalesce()
+                    # We just detach the indices and values
+                    vals = u.values().type(dtype)
+                    return torch.sparse_coo_tensor(u.indices().clone().detach(), vals,
+                                                   u.shape, dtype=dtype, device=device)
+                else:
+                    return u.type(dtype)
             else:
-                npdtype = torchdtype_to_numpydtype(dtype)
-                return torch.tensor(asdtype(u.detach().numpy(), npdtype),
-                                    dtype=dtype, device=u.device)
+                return np.asarray(u).astype(dtype)
+        if isinstance(dtype, torch.dtype):
+            # We're producing a pytorch tensor.
+            if sps.issparse(u): return totensor(u, dtype=dtype)
+            else: return torch.tensor(u, dtype=dtype, device=device)
     except ImportError: pass
     dtype = np.dtype(dtype)
     if sps.issparse(u):
@@ -749,6 +1823,16 @@ def promote(*args, **kw):
     that copies should be made. In this case, copies are made of all arguments
     even if nothing is promoted.
     '''
+    # #TODO
+    #  - Make sure this function is smart about nested lists that might contain a tensor
+    #    somewhere near the bottom. What does promote([[1,2,3],[4,5,6]], [[1,2,3], tensor([4,5,6])])
+    #    return? promote(x) should always return either a numpy array or torch tensor version of x
+    #    and if there are any tensors in x it should be a tensor.
+    #  - Add a keyword argument dtype that allows one to also promote the dtype argument of the
+    #    return values. A value of False means that no dtype promotion should be attempted;
+    #    a value of True or None would mean that the dtype should be promoted among the arguments
+    #    only; a numpy or torch dtype would indicate that ina ddition to the dtypes of the
+    #    arguments, the given dtype should be a minimum member for promotion.
     copy = kw.pop('copy', False)
     # First, figure out what the promotion type is:
     try:
@@ -775,6 +1859,38 @@ def reshape(u, shape):
         return u.reshape(shape)
     else:
         return np.reshape(u, shape)
+def squeeze(u, axis=None):
+    """Returns a tensor or array with the dimensions of size `1` removed.
+    
+    This function is a wrapper around the `numpy.squeeze` and `torch.squeeze`
+    functions. It calls the one appropriate for the input argument `u`.
+    
+    Parameters
+    ----------
+    u : numpy.ndarray or torch.Tensor or array_like
+        The array to be squeezed.
+    axis : int or tuple of ints or None, optional
+        The axis or axes along which to squeeze.
+    
+    Returns
+    -------
+    numpy.ndarray or torch.Tensor
+        A squeezed copy of the given array `u`.
+    """
+    try:
+        torch = pytorch()
+        if torch.is_tensor(u): return torch.squeeze(u, dim=axis)
+    except ImportError: pass
+    return np.squeeze(u, axis=axis)
+# #TODO:
+#  - tr() (transpose) function
+#  - cat() for joining up arrays
+#  - inverse() for matrix inversion (np.linalg.inv() vs. tensor.inverse())
+#  - equal() for np.array_equal() and torch.equal()
+#  - isclose(), isfinite()
+#  - logical_not(), logical_or(), logical_and()
+#  - where()
+#  - sort(), argsort()
 
 # Access Functions #################################################################################
 def extract(u, ii):
@@ -788,8 +1904,8 @@ def extract(u, ii):
         if torch.is_tensor(u):
             if u.is_sparse:
                 u = u.coalesce()
-                ki = indices_to_integers(u.shape, ii)
-                ku = indices_to_integers(u.shape, u.indices())
+                ki = flatten_indices(u.shape, ii)
+                ku = flatten_indices(u.shape, u.indices())
                 kk = np.intersect1d(ki, ku)
                 r = torch.zeros(len(ki), dtype=u.dtype, device=u.device)
                 r[find_index(ki, kk)] = u.values()[find_index(ku, kk)]
@@ -1576,6 +2692,60 @@ def all(x, *args, **kw):
     '''
     return pytorch().all(x, *args, **kw)
 
+# Simplices ########################################################################################
+def simplex_summation_matrix(simplices, weight=None, inverse=False):
+    '''
+    simplex_summation_matrix(mtx) yields a scipy sparse array matrix that, when dotted with a
+      column vector of length m (where m is the number of simplices described in the simplex matrix,
+      mtx), yields a vector of length n (where n is the number of vertices in the simplex mesh); the
+      returned vetor is the sum over each vertex, of the faces to which it belongs.
+
+    The matrix mtx must be oriented such that the first dimension (rows) corresponds to the vertices
+    of the simplices and the second dimension (columns) corresponds to simplices themselves.
+
+    The optional argument weight may specify a weight for each face, in which case the summation is
+    a weighted sum instead of a flat sum.
+
+    The optional argument inverse=True may be given to indicate that the inverse summation matrix
+    (summation of the vertices onto the simplices) should be returned.
+    '''
+    simplices = np.asarray(simplices)
+    n = np.max(simplices) + 1
+    (d,m) = simplices.shape
+    rng = range(m)
+    if inverse:
+        if weight is None: f = sps.csr_matrix
+        else:
+            nrng = range(n)
+            ww = sps.csr_matrix((weight, (nrng, nrng)), shape=(n,n), dtype=np.float)
+            f = lambda *args,**kwargs: ww.dot(sps.csc_matrix(*args,**kwargs))
+        s = f((np.ones(d*m, dtype=np.int),
+               (np.concatenate([rng for _ in range(d)]), np.concatenate(simplices))),
+              shape=(m,n),
+              dtype=np.int)
+    else:
+        s = sps.csr_matrix(
+            (np.ones(d*m, dtype=np.int),
+             (np.concatenate(simplices), np.concatenate([rng for _ in range(d)]))),
+            shape=(n,m),
+            dtype=np.int)
+        if weight is not None:
+            s = s.dot(sps.csc_matrix((weight, (rng, rng)), shape=(m,m), dtype=np.float))
+    return s
+def simplex_averaging_matrix(simplices, weight=None, inverse=False):
+    '''
+    Simplex_averaging_matrix(mtx) is equivalent to simplex_simmation_matrix, except that each row of
+      the matrix is subsequently normalized such that all rows sum to 1.
+    
+    The optional argument inverse=True may be passed to indicate that the inverse averaging matrix
+    (of vertices onto simplices) should be returned.
+    '''
+    m = simplex_summation_matrix(simplices, weight=weight, inverse=inverse)
+    rs = np.asarray(m.sum(axis=1), dtype=np.float)[:,0]
+    invrs = zinv(rs)
+    rng = range(m.shape[0])
+    diag = sps.csr_matrix((invrs, (rng, rng)), dtype=np.float)
+    return diag.dot(sps.csc_matrix(m, dtype=np.float))
 
 # Distributions ####################################################################################
 def beta_log_prob(x, mu, scale):

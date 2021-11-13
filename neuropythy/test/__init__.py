@@ -13,6 +13,7 @@ else:                        import collections            as colls
 
 logging.getLogger().setLevel(logging.INFO)
 
+from .util import TestNeuropythyUtil
 from .math import TestNeuropythyMath
 
 class TestNeuropythy(unittest.TestCase):

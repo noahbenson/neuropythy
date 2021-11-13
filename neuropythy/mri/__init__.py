@@ -16,5 +16,5 @@ from .core   import (Subject, Cortex, is_subject, is_cortex, to_cortex)
 from .images import (to_image_spec, to_image, to_image_header, image_interpolate, image_apply,
                      image_reslice, is_image_spec, image_array_to_spec, image_header_to_spec,
                      image_to_spec, image_copy, image_clear, is_pimage, is_npimage,
-                     to_image_type)
-from ..util  import (is_image, is_image_header)
+                     to_image_type, is_image, is_image_header)
+

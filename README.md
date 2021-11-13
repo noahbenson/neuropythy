@@ -82,8 +82,8 @@ repository root.
 
 ### Python Version #################################################################################
 
-Neuropythy is compatible with both Python 2 and 3. It was deleveloped under 2.7 and is now used
-primarily with 3.6.
+Neuropythy is compatible with both Python 3. It was deleveloped under 2.7 but is no longer
+officially supported for Python 2. It is now used primarily with Python 3.6.
 
 ## Configuration ###################################################################################
 

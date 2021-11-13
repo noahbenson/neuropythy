@@ -16,11 +16,11 @@ from .. import geometry as geo
 
 from itertools import chain
 
-from ..util import (ObjectWithMetaData, to_affine, apply_affine, is_image, is_address, is_tuple,
+from ..util import (ObjectWithMetaData, to_affine, apply_affine, is_address, is_tuple,
                     is_list, address_data, address_interpolate, curry, to_hemi_str, is_pseudo_path,
                     pseudo_path, to_pseudo_path)
 from .images import (to_image, to_image_spec, is_image_spec, is_image_header, is_pimage, is_npimage,
-                     image_copy)
+                     is_image, image_copy)
 
 @pimms.immutable
 class Subject(ObjectWithMetaData):

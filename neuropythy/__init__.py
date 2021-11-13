@@ -3,13 +3,13 @@
 
 '''Tools for analyzing and registering cortical meshes.'''
 
-submodules = ('neuropythy.util.conf',
+submodules = ('neuropythy.math.core',
+              'neuropythy.math',
+              'neuropythy.util.conf',
               'neuropythy.util.core',
               'neuropythy.util.filemap',
               'neuropythy.util.labels',
               'neuropythy.util',
-              'neuropythy.math.core',
-              'neuropythy.math',
               'neuropythy.java',
               'neuropythy.io.core',
               'neuropythy.io',
@@ -70,15 +70,16 @@ def reload_neuropythy():
             sys.modules[mdl] = reload(sys.modules[mdl])
     return reload(sys.modules['neuropythy'])
 
-from   .util       import (config, is_image, library_path, to_affine, is_address, address_data,
+from   .util       import (config, library_path, to_affine, is_address, address_data,
                            is_curve_spline, to_curve_spline, curve_spline, flattest,
-                           is_list, is_tuple, to_hemi_str, is_dataframe, to_dataframe, auto_dict,
+                           is_list, is_tuple, is_str,
+                           to_hemi_str, is_dataframe, to_dataframe, auto_dict,
                            label_index, is_label_index, to_label_index)
 from   .util       import label_indices as labels
 from   .io         import (load, save, to_nifti)
 from   .mri        import (is_subject, is_cortex, to_cortex, to_image, to_image_spec,
                            is_image_spec, image_interpolate, image_apply, image_copy, image_clear,
-                           is_pimage, to_image_type)
+                           is_pimage, to_image_type, is_image)
 from   .vision     import (retinotopy_data, empirical_retinotopy_data, predicted_retinotopy_data,
                            register_retinotopy, retinotopy_anchors, retinotopy_model,
                            neighborhood_cortical_magnification, as_retinotopy,

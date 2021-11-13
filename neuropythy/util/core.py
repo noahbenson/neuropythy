@@ -1,16 +1,19 @@
+# -*- coding: utf-8 -*-
 ####################################################################################################
 # neuropythy/util/core.py
 # This file implements the command-line tools that are available as part of neuropythy as well as
 # a number of other random utilities.
 
-import types, inspect, atexit, shutil, tempfile, importlib, pimms, os, six
+import types, inspect, atexit, shutil, tempfile, importlib, pimms, os, six, warnings
 import collections                       as colls
 import numpy                             as np
 import scipy.sparse                      as sps
 import pyrsistent                        as pyr
 import nibabel                           as nib
 import nibabel.freesurfer.mghformat      as fsmgh
-from   functools                    import reduce
+from   functools                     import reduce
+
+from .. import math as nym
 
 if six.PY2: (_tuple_type, _list_type) = (types.TupleType, types.ListType)
 else:       (_tuple_type, _list_type) = (tuple, list)
@@ -22,36 +25,399 @@ try:              default_atol = inspect.getargspec(np.isclose)[3][1]
 except Exception: default_atol = 1e-8
 
 # A few functions were moved into pimms; they still appear here for compatibility
-from pimms import (is_tuple, is_list, is_set, curry)
+from pimms import (is_tuple, is_list, is_set, is_map, is_str, curry)
 
+# Info Utilities ###################################################################################
+def is_hemi_str(s):
+    """Returns `True` if `s in ('lh', 'rh', 'lr')`, otherwise `False`.
+
+    Parameters
+    ----------
+    s : object
+        An object whose quality as a hemi string is to be assessed.
+
+    Returns
+    -------
+    boolean
+        `True` if `s` is a string and is one of `'lh'`, `'rh'`, or `'lr'`,
+        otherwise `False`.
+    """
+    return is_str(s) and (s == 'lh' or s == 'rh' or s == 'lr')
+def like_hemi_str(s):
+    """`True` if `s` can be turned into a hemi string, otherwise `False`.
+
+    Parameters
+    ----------
+    s : object
+        An object whose quality as a potential hemi string is to be assessed.
+
+    Returns
+    -------
+    boolean
+        `True` if `s` is a hemi string or is an object that can be converted
+        into a hemi string using the function `to_hemi_str()` and `False
+        otherwise.
+    """
+    if is_hemi_str(s): return Truee
+    try:
+        s = to_hemi_str(s)
+        return True
+    except Exception:
+        return False
 def to_hemi_str(s):
-    '''
-    to_hemi_str(s) yields either 'lh', 'rh', or 'lr' depending on the input s.
+    """Converts the input into one of `'lh'`, `'rh'`, or `'lr'`.
 
-    The match rules for s are as follows:
-      * if s is None or Ellipsis, returns 'lr'
-      * if s is not a string, error; otherwise s becomes s.lower()
-      * if s is in ('lh','rh','lr'), returns s
-      * if s is in ('left', 'l', 'sh'), returns 'lh'
-      * if s is in ('right', 'r', 'dh'), returns 'rh'
-      * if s in in ('both', 'all', 'xh'), returns 'lr'
+    The match rules for `s` are as follows:
+      * if `s` is `None` or `Ellipsis`, returns `'lr'`
+      * if `s` is not a string, raises an error; otherwise `s = s.lower()`
+      * if `s` is in `('lh','rh','lr')`, returns `s`
+      * if `s` is in `('left', 'l', 'sh')`, returns `'lh'`
+      * if `s` is in `('right', 'r', 'dh')`, returns `'rh'`
+      * if `s` in in `('both', 'all', 'xh')`, returns `'lr'`
       * otherwise, raises an error
-    '''
+    """
     if s is None or s is Ellipsis: return 'lr'
-    if not pimms.is_str(s): raise ValueError('to_hemi_str(%s): not a string or ... or None' % s)
+    if not is_str(s): raise ValueError('to_hemi_str(%s): not a string or ... or None' % s)
     s = s.lower()
     if   s in ('lh',    'rh',  'lr'): return s
     elif s in ('left',  'l',   'sh'): return 'lh'
     elif s in ('right', 'r',   'dh'): return 'rh'
     elif s in ('both',  'all', 'xh'): return 'lr'
     else: raise ValueError('Could not understand to_hemi_str argument: %s' % s)
+def is_cortical_depth(s):
+    """Returns `True` if `s` is a float and `0 <= s <= 1`, otherwise `False`.
 
+    Cortical depths are fractional float-typed values between 0 and 1. This
+    function yields `True` if `s` conforms to this exact type (i.e., an int 0
+    will fail where a float 0.0 will pass). To convert a value to a cortical
+    depth, use `to_cortical_depth()`. To check if something can be converted,
+    use `like_cortical_depth()`.
+
+    Parameters
+    ----------
+    s : object
+        An object whose quality as a cortical depth is to be assessed.
+
+    Returns
+    -------
+    boolean
+        `True` if `s` is a cortical depth and `False` if it is not.
+    """
+    return isinstance(s, float) and k >= 0 and k <= 1
+def like_cortical_depth(s, aliases=None):
+    """Returns `True` if `s` can be convertd into a cortical depth.
+
+    Cortical depths are fractional float-typed values between 0 and 1. This
+    function yields `True` if `s` can be coerced into a cortical depth by the
+    `to_cortical_depth()` function.
+
+    Parameters
+    ----------
+    s : object
+        An object whose quality as a cortical depth is to be assessed.
+    aliases : mapping or None, optional
+        A set of aliases for cortical depths that should be considered. See
+        `to_cortical_depth()`.
+
+    Returns
+    -------
+    boolean
+        `True` if `s` is a cortical depth or can b converted into a cortical
+        depth and `False` otherwise.
+    """
+    if aliases is not None:
+        alt = aliases.get(s, Ellipsis)
+        if alt is not Ellipsis:
+            # Without aliases now:
+            return like_cortical_depth(alt)
+    # First, is this a cortical depth already?
+    if is_cortical_depth(s): return True
+    # Is it the name of a cortical depth?
+    if is_str(s): s = s.lower()
+    if s == 'pial' or s == 'midgray' or s == 'white': return True
+    # Is it in the builtin alises?
+    alt = to_cortical_depth.aliases.get(s, Ellipsis)
+    if alt is not Ellipsis:
+        if is_cortical_depth(alt): return alt
+        else: s = alt
+    # Okay, is s a number that is between 0 and 1?
+    try:
+        s = float(s)
+        return (s <= 1 and s >= 0)
+    except TypeError:
+        return False
+def to_cortical_depth(s, aliases=None):
+    """Converts an object, which may be a surface name, into a depth fraction.
+    
+    `to_cortical_depth(s)` converts the argument `s` into a cortical depth
+    fraction: a real number `r` such that `0 <= r and r <= 1`. If `s` cannot be
+    converted into such a fraction, raises an error. `s` can bbe converted into
+    a fraction if it is already such a fraction or if it is the name of a
+    cortical surface: `'pial'` (`1`), `'midgray'` (`0.5`), and `'white'` (`0`).
+
+    If `s` is `None`, then `0.5` is returned.
+
+    To add a new named depth, you can modify the `to_cortical_depth.aliases`
+    dictionary; though note that this is always consulted after tye builtin
+    aliass listed above (pial, white, and midgray), so you cannot override this
+    behavior using the `aliases` dictionary. The optional parameter `aliases`,
+    on the other hand, will override the standard behavior, as it is checked
+    first.
+
+    Parameters
+    ----------
+    s : object
+        An object to be converted into a cortical depth. An object can be
+        successfully converted if it is already a cortical depth fraction (a
+        real number on the closed interval between 0 and 1), or if it is the
+        name of a known cortical depth fraction such as `'pial'` or `'midgray'`.
+
+        Optionally, `s` may be a mapping whose keys are a cortical-depth-like
+        objects, in which case `s` is converted into an identical dictionary
+        whose keys have all been transformed by the `to_cortical_depth()`
+        function. Named keys always overwrite duplicate numerical keys in this
+        case.
+    aliases : mapping or None, optional
+        A mapping whose keys are aliases of particular cortical depths and whose
+        values are those cortical depths. This mapping is checked for a key
+        matching `s` before any other tests of `s` are done, so this parameter
+        may override the default behavior of the function. The default value of
+        `None` is equivalent to `{}`.
+    
+    Returns
+    -------
+    float or mapping
+        A floating point value between 0 and 1, inclusive, where 0 represents
+        the white-matter boundary of cortex and 1 represents the pial or
+        gray-matter boundary of cortex. The return value is a mapping if the
+        input `s` is also a mapping: the return value in this case represents
+        the input after `to_cortical_depth()` has been called its keys.
+
+    Raises
+    ------
+    ValueError
+        If `s` (or any of its keys or elements if `s` is a mapping or array-like
+        object) cannot be converted into a cortical depth fraction.
+    """
+    # First: are we dealing with a mapping or a normal object?
+    if is_map(s):
+        # We want to respect persistent and lazy maps.
+        if pimms.is_pmap(s):
+            d = s
+            for (k,v) in six.iteritems(s):
+                if not isinstance(k, float) or k < 0 or k < 1:
+                    newk = to_cortical_depth(k, aliases=aliases)
+                    d = d.remove(k).set(newk, v)
+            return d
+        elif pimms.is_lmap(s):
+            d = s
+            for k in six.iterkeys(s):
+                if not isinstance(k, float) or k < 0 or k < 1:
+                    newk = to_cortical_depth(k, aliases=aliases)
+                    if s.is_lazy(k):
+                        d = d.remove(k).set(newk, s.lazyfn(k))
+                    else:
+                        d = d.remove(k).set(newk, s[k])
+            return d
+        else:
+            d = s.copy()
+            for (k,v) in six.iteritems(s):
+                if not is_cortical_depth(s):
+                    newk = to_cortical_depth(k, aliases=aliases)
+                    del d[k]
+                    d[newk] = v
+            return d
+    # Otherwise, we are convertinng s itself into a cortical depth. First thing is that we
+    # check aliases, which overrides all other behavior.
+    if aliases is not None:
+        ss = aliases.get(s, Ellipsis)
+        if ss is not Ellipsis: return to_cortical_depth(ss) # Omit aliases this time.
+    # If it is a cortical depth, return it.
+    if is_cortical_depth(s): return s
+    # Check the global aliases.
+    if is_str(s): s = s.lower()
+    if   s == 'pial':    return 1.0
+    elif s == 'midgray': return 0.5
+    elif s == 'white':   return 0.0
+    # Is it in the builtin alises?
+    alt = to_cortical_depth.aliases.get(s, Ellipsis)
+    if alt is not Ellipsis:
+        if is_cortical_depth(alt): return alt
+        else: s = alt
+    # Okay, is s a number that is between 0 and 1?
+    try:
+        s = float(s)
+        if (s <= 1 and s >= 0): return s
+    except TypeError: pass
+    raise ValueError(f"cannot interpret argument as a cortical depth: {s}")
+to_cortical_depth.aliases = {}
+def is_interpolation_method(s):
+    """Returns `True` if `s` is an interpolation method name, otherwise `False`.
+
+    Valid interpolation methods are as follows:
+     * `'linear'` indicates linear interpolation.
+     * `'heaviest'` indicates heaviest-neighbor interpolation: it is similar to
+       `'nearest'` except that where `'nearest'` will always pick the closest
+       neighbor in terms of raw distance, `'heaviest'` finds the weights of the
+       vertices of the cell (triangle face for mesh interpolation or voxel
+       neighbors for mage interpolation) and chooses the closest of them. This
+       is only important for mesh-based interpolation where the nearest neighbor
+       to a particular point on the mesh may not be part of the triangle
+       containing the point onto which interpolation is being performed.
+     * `'nearest'` indicates nearest-neighbor interpolation.
+     * `'cubic'` indicates bi-cubic interpolation.
+
+    Parameters
+    ----------
+    s : objecct
+        The object whose quality as an interpolation method is being assessed.
+
+    Returns
+    -------
+    boolean
+        `True` if `s` is a recognized interpolation method and `False` otherwise.
+    """
+    return is_str(s) and (s == 'linear' or s == 'nearest' or s == 'heaviest' or s == 'cubic')
+def like_interpolation_method(s, aliases=None):
+    """Determines whether `s` is can be converted to an interpolation method.
+
+    This function is essentially equivalent to `is_interpolation_method(s)`
+    except that it first checks the `aliases` parameter and the
+    `to_interpolation_method.aliases` dict. If these contain matches to `s`
+    whose values are valid interpolation methods, then the `True` is returned,
+    otherwise `False`.
+
+    Parameters
+    ----------
+    s : objecct
+        The object whose quality as an interpolation method is being assessed.
+    aliases : mapping or None, optional
+        A mapping whose keys are aliases of the valid interpolaton methods and
+        whose values are themselves valid interpolation methods. This mapping is
+        checked for a key matching `s` before any other tests of `s` are done,
+        so this parameter may override the default behavior of the function. The
+        default value of `None` is equivalent to `{}`.
+
+
+    Returns
+    -------
+    boolean
+       `True` if `s` can be converted intoo a recognized interpolation method
+        and `False` otherwise.
+    """
+    if is_str(s): s = s.lower()
+    # Fist of all, check the aliases.
+    if aliases is not None and s in aliases:
+        return like_interpolation_method(aliases[s]) # Don't pass aliases on.
+    # Next, check if it's already valid.
+    if is_interpolation_method(s): return True
+    # Otherwise, see if it's in the global aliases.
+    aliases = to_interpolation_method.aliases
+    if aliases is not None and s in aliases:
+        # Global aliases must match interpolation methods exactly.
+        return is_interpolation_method(aliases[s])
+    # Otherwise, it's not recognized.
+    return False
+def to_interpolation_method(s, aliases=None):
+    """Convets `s` into an interpolation method name and returns it.
+
+    This function converts `s` into the name of an interpolation method and
+    either returns that name or raises an error if `s` cannot be converted.
+    
+    Valid interpolation methods are as follows (see also
+    `is_interpolation_methhod()`):
+     * `'linear'` indicates linear interpolation.
+     * `'heaviest'` indicates heaviest-neighbor interpolation: it is similar to
+       `'nearest'` except that where `'nearest'` will always pick the closest
+       neighbor in terms of raw distance, `'heaviest'` finds the weights of the
+       vertices of the cell (triangle face for mesh interpolation or voxel
+       neighbors for mage interpolation) and chooses the closest of them. This
+       is only important for mesh-based interpolation where the nearest neighbor
+       to a particular point on the mesh may not be part of the triangle
+       containing the point onto which interpolation is being performed.
+     * `'nearest'` indicates nearest-neighbor interpolation.
+     * `'cubic'` indicates bi-cubic interpolation.
+
+    In addition, the above methods may have aliases that arise from two sources:
+    (1) the optional parameter `aliases`, which is checked prior to any other
+    activity by this function and thus can be used to override the normal
+    behavior; and (2) the alias dictionary `to_interpolation_method.aliases`,
+    which cannot be used to override behavior for the above valid method names.
+
+    Parameters
+    ----------
+    s : objecct
+        The object that is to be converted
+    aliases : mapping or None, optional
+        A mapping whose keys are aliases of the valid interpolaton methods and
+        whose values are themselves valid interpolation methods. This mapping is
+        checked for a key matching `s` before any other tests of `s` are done,
+        so this parameter may override the default behavior of the function. The
+        default value of `None` is equivalent to `{}`.
+
+    Returns
+    -------
+    s : str
+       One of the valid interpolation methods: `'linear'`, `'heaviest'`,
+       `'nearest'`, or `'cubic'`.
+
+    Raises
+    ------
+    ValueError
+        If the argument `s` cannot be convertd into an interpolation method
+        name.
+    """
+    if is_str(s): s = s.lower()
+    # Fist of all, check the aliases.
+    if aliases is not None and s in aliases:
+        return to_interpolation_method(aliases[s]) # Don't pass aliases on.
+    # Next, check if it's already valid.
+    if is_interpolation_method(s): return s
+    # Otherwise, see if it's in the global aliases.
+    aliases = to_interpolation_method.aliases
+    if aliases is not None and s in aliases:
+        s = aliases[s]
+        # Global aliases must match interpolation methods exactly.
+        if is_interpolation_method(s): return s
+    # Otherwise, it's not recognized.
+    raise ValueError(f"cannot convert object to interpolation method: {s}")
+to_interpolation_method.aliases = {'trilinear':         'linear',
+                                   'lin':               'linear',
+                                   'trilin':            'linear',
+                                   'near':              'nearest',
+                                   'nn':                'nearest',
+                                   'nearest-neighbor':  'nearest',
+                                   'nearest_neighbor':  'nearest',
+                                   'nearest neighbor':  'nearest',
+                                   'heavy':             'heaviest',
+                                   'hn':                'heaviest',
+                                   'heaviest-neighbor': 'heaviest',
+                                   'heaviest_neighbor': 'heaviest',
+                                   'heaviest neighbor': 'heaviest',
+                                   'bicubic':           'cubic',
+                                   'cub':               'cubic',
+                                   'bicub':             'cubic'}
+
+# Normalization Code ###############################################################################
 @pimms.immutable
 class ObjectWithMetaData(object):
-    '''
-    ObjectWithMetaData is a class that stores a few useful utilities and the param meta_data, all of
-    which assist in tracking a persistent map of meta-data with an object.
-    '''
+    """Base class for `pimms.immutable` classes that track meta-data.
+
+    `ObjectWithMetaData` is a class that stores a few useful utilities and the
+    parameter `meta_data`, all of which assist in tracking a persistent mapping
+    of meta-data associated with an object.
+
+    Parameters
+    ----------
+    meta_data : dict or None
+        A mapping of meta-data keys to values
+
+    Attributes
+    ----------
+    meta_data : pyrsistent.PMap
+        A persistent mapping of meta-data; if the provided `meta_data` parameter
+        was `None`, then this is an empty mapping.
+    """
     def __init__(self, meta_data=None):
         if meta_data is None:
             self.meta_data = pyr.m()
@@ -59,30 +425,84 @@ class ObjectWithMetaData(object):
             self.meta_data = meta_data
     @pimms.option(pyr.m())
     def meta_data(md):
-        '''
-        obj.meta_data is a persistent map of meta-data provided to the given object, obj.
-        '''
+        """A persistent mapping of meta-data."""
         if md is None: return pyr.m()
         return md if pimms.is_pmap(md) else pyr.pmap(md)
-    def meta(self, name, missing=None):
-        '''
-        obj.meta(x) is equivalent to obj.meta_data.get(name, None).
-        obj.meta(x, nf) is equivalent to obj.meta_data.get(name, nf)
-        '''
+    def meta(self, key, missing=None):
+        """Looks up a key in the meta-data mapping and returns the value.
+
+        `obj.meta(k)` is a shortcut for `obj.meta_data.get(name, None)`.
+        `obj.meta(k, nf)` is a shortcut for `obj.meta_data.get(name, nf)`.
+
+        Parameters
+        ----------
+        key : object
+            The key to lookup in the meta-data mapping.
+        missing : object, optional
+            The value to return if the `key` is not found in the meta-data
+            (default: `None`).
+
+        Returns
+        -------
+        object
+            The value associated with the given `key` in the meta-data mapping
+            or the `missing` value if the `key` was not found in the meta-data.
+        """
         return self.meta_data.get(name, missing)
     def with_meta(self, *args, **kwargs):
-        '''
-        obj.with_meta(...) collapses the given arguments with pimms.merge into the object's current
-        meta_data map and yields a new object with the new meta-data.
-        '''
+        """Returns a copy of the object with additional meta-data.
+
+        `obj.with_meta(...)` collapses the given arguments using the
+        `pimms.merge` into the object's current `meta_data` mapping and yields a
+        new object with the new meta-data. The returned object is created using
+        the `obj.copy()` method.
+
+        Parameters
+        ----------
+        *args
+            Any number of dict or mapping objects that are merged left-to-right
+            with keys appearing in rightward mappings overwriting identical keys
+            in leftward mappings.
+        **kwargs
+            Any number of additional key-value pairs to add to the meta-data.
+            Values in `kwargs` overwrite all values in `args`.
+
+        Returns
+        -------
+        ObjectWithMetaData
+            A duplicate object of the same type with the updated meta-data.
+        """
         md = pimms.merge(self.meta_data, *(args + (kwargs,)))
         if md is self.meta_data: return self
         else: return self.copy(meta_data=md)
-    def wout_meta(self, *args, **kwargs):
-        '''
-        obj.wout_meta(...) removes the given arguments (keys) from the object's current meta_data
-        map and yields a new object with the new meta-data.
-        '''
+    def wout_meta(self, *args):
+        """Returns a copy of the object without the given meta-data keys.
+
+        `obj.wout_meta(...)` constructs a duplicate of `obj` such that all
+        meta-data keys of `obj` that are included in the `wout_meta` method
+        parameter list have been removed from the duplicate object. The returned
+        object is created using the `obj.copy()` method.
+
+        The arguments to `wout_meta()` may additionally be vectors of meta-data
+        keys. If your meta-data keys include tuples or other vector-like
+        objects, you should wrap these keys in single-tuples to force them to be
+        interpreted as vector keys. For example, `obj.wout_meta(('a', 'b'))`
+        returns an object whose meta-data s keys `'a'`, and `'b'` have been
+        removed and is equivalent to `obj.wout_meta('a', 'b')`, but
+        `obj.wout_meta((('a', 'b'),))` instead returns an object with the
+        meta-data key `('a','b')` removed.
+
+        Parameters
+        ----------
+        *args
+            Any number of meta-data keys.
+
+        Returns
+        -------
+        ObjectWithMetaData
+            A duplicate object of the same type without the provided meta-data
+            keys.
+        """
         md = self.meta_data
         for a in args:
             if pimms.is_vector(a):
@@ -92,58 +512,118 @@ class ObjectWithMetaData(object):
                 md = md.discard(a)
         return self if md is self.meta_data else self.copy(meta_data=md)
     def normalize(self):
-        '''
-        obj.normalize() yields a JSON-friendly Python native data-structure (i.e., dicts, lists,
-          strings, numbers) that represents the given object obj. If obj contains data that cannot
-          be represented in a normalized format, raises an error.
+        """Convert an object into a JSON-friendly native Python data-structure.
 
-        Note that if the object's meta_data cannot be encoded, then any part of the meta_data that
-        fails is simply excluded from the normalized representation.
+        `obj.normalize()` yields a JSON-friendly Python native data-structure
+        (i.e., a data structure composed exclusively of dicts with str keys,
+        lists, strings, and numbers) that represents the given object `obj`. If
+        `obj` contains data that cannot be represented in a normalized format,
+        this function raises an error.
 
-        This function generally shouldn't be called directly unless you plan to call
-        <class>.denormalize(data) directly as well--rather, use normalize(obj) and
-        denormalize(data). These latter calls ensure that the type information necessary to deduce
-        the proper class's denormalize function is embedded in the data.
-        '''
+        Note that if the object's `meta_data` cannot be encoded, then any part
+        of the `meta_data` that fails excluded from the normalized
+        representation and simply results in a warning.
+
+        This function generally shouldn't be called directly unless you plan to
+        call `<class>.denormalize(data)` directly as well---rather, this
+        function should be overloaded in derived `pimms.immutable` classes that
+        support normalization. Use `normalize(obj)` and `denormalize(data)` to
+        perform normalization and denormalization itself. These latter calls
+        ensure that the type information necessary to deduce the proper class's
+        `denormalize()` function is embedded in the `data`.
+
+        Returns
+        -------
+        object
+            A Python native data structure that can be exported as a JSON
+            string.
+
+        Raises
+        ------
+        ValueError
+            If the object cannot be converted into a JSON-friendly data
+            structure.
+        """
         params = pimms.imm_params(self)
         if 'meta_data' in params:
             md = dict(params['meta_data'])
             del params['meta_data']
             params = normalize(params)
             for k in list(md.keys()):
-                if not pimms.is_str(k):
+                if not is_str(k):
                     del md[k]
                     continue
                 try: md[k] = normalize(md[k])
-                except Exception: del md[k]
+                except Exception:
+                    msg = "ignoring meta-data key %s with JSON-incompatible value"
+                    warnings.warn(msg % (k,))
+                    del md[k]
             params['meta_data'] = md
         else: params = normalize(params)
         return params
     @classmethod
     def denormalize(self, params):
-        '''
-        ObjectWithMetaData.denormalize(params) is used to denormalize an object given a mapping of
-          normalized JSON parameters, as produced via obj.normalize() or normalize(obj).
+        """Denormalizes an object of a given type from a native Python form.
 
-        This function should generally be called by the denormalize() function rather than being
-        called directly unless the data you have was produced by a call to obj.normalize() rather
-        than normalize(obj).
-        '''
+        `ObjectWithMetaData.denormalize(params)` is used to denormalize an
+        object given a mapping of normalized JSON parameters, as produced via
+        `obj.normalize()` or `normalize(obj)`. Note that `ObjectWithMetaData`
+        here can be substituted out with one of its derived classes.
+
+        This function should generally be called by the `denormalize()` function
+        rather than being called directly unless the data you have was produced
+        by a call to `obj.normalize()` rather than `normalize(obj)`.
+
+        Parameters
+        ----------
+        params : mapping
+            A mapping of the immutable parameter values that can be used to
+            rehydrate an object.
+
+        Returns
+        -------
+        object
+            An object of the type used in the call signature, constructed from
+            the given parameter mapping.
+
+        Raises
+        ------
+        Exception
+            If the parameters could not hydrate an object of the given type.
+        """
         return self(**params)
 def normalize(data):
-    '''
-    normalize(obj) yields a JSON-friendly normalized description of the given object. If the data
-      cannot be normalized an error is raised.
+    """Converts an object into a JSON-friendly normalized dscription object.
+    
+    `normalize(obj)` returns a JSON-friendly normalized description of the given
+    object. If the data cannot be normalized an error is raised.
 
-    Any object that implements a normalize() function can be normalized, so long as the mapping 
-    object returned by normalize() itself can be normalized. Note that the normalize() function
-    must return a mapping object.
+    Any object that implements a `normalize()` function can be normalized, so
+    long as the mapping object returned by `normalize()` itself can be
+    normalized. Note that the `normalize()` function must return a mapping
+    object such as a dict.
 
-    Objects that can be represented as themselves are returned as themselves. Any other object will
-    be represented as a map that includes the reserved key '__type__' which will map to a
-    2-element list [module_name, class_name]; upon denomrlization, the module and class k are looked
-    up and k.denomalize(data) is called.
-    '''
+    Objects that can be represented as themselves such as numbers, strings, or
+    `None` are returned as themselves. Any other object will be represented as a
+    map that includes the reserved key `'__type__'` which will map to a
+    2-element list `[module_name, class_name]`; upon denormalization, the module
+    and class `k` are looked up and `k.denomalize(data)` is called.
+
+    Parameters
+    ----------
+    data : object
+        The data to be normalized.
+
+    Returns
+    -------
+    object
+        A JSON-friendly object that can be serialized as a JSON-string.
+
+    Raises
+    ------
+    Exception
+        If the argument `data` cannot be normalized.
+    """
     if data is None: return None
     elif pimms.is_array(data, 'complex') and not pimms.is_array(data, 'real'):
         # any complex number must be handled specially:
@@ -164,10 +644,10 @@ def normalize(data):
         return {normalize.type_key: [None, 'sparse_matrix'],
                 'rows':i.tolist(), 'cols':j.tolist(), 'vals': v.tolist(),
                 'shape':data.shape}
-    elif pimms.is_map(data):
+    elif is_map(data):
         newdict = {}
         for (k,v) in six.iteritems(data):
-            if not pimms.is_str(k):
+            if not is_str(k):
                 raise ValueError('Only maps with strings for keys can be normalized')
             newdict[k] = normalize(v)
         return newdict
@@ -180,8 +660,10 @@ def normalize(data):
         # we have an object of some type we don't really recognize
         try:              m = data.normalize()
         except Exception: m = None
-        if m is None: raise ValueError('could not run obj.normalize() on obj: %s' % (data,))
-        if not pimms.is_map(m): raise ValueError('obj.normalize() returned non-map; obj: %s' % data)
+        if m is None:
+            raise ValueError('could not run obj.normalize() on obj: %s' % (data,))
+        if not is_map(m):
+            raise ValueError('obj.normalize() returned non-map; obj: %s' % (data,))
         m = dict(m)
         tt = type(data)
         m[normalize.type_key] = [tt.__module__, tt.__name__]
@@ -191,17 +673,36 @@ def normalize(data):
         return [normalize(x) for x in data]
 normalize.type_key = '__type__'
 def denormalize(data):
-    '''
-    denormalize(data) yield a denormalized version of the given JSON-friendly normalized data. This
-      is the inverse of the normalize(obj) function.
+    """Converts a normalized object into its standard Python representation.
+    
+    `denormalize(data)` yield a denormalized version of the given JSON-friendly
+    normalized `data` argument. This is the inverse of the `normalize(obj)`
+    function.
 
-    The normalize and denormalize functions use the reserved keyword '__type__' along with the
-    <obj>.normalize() and <class>.denormalize(data) functions to manage types of objects that are
-    not JSON-compatible. Please see help(normalize) for more details.
-    '''
+    The normalize and denormalize functions use the reserved keyword
+    `'__type__'` along with the `<obj>.normalize()` and
+    `<class>.denormalize(data)` functions to manage types of objects that are
+    not JSON-compatible. Please see `help(normalize)` for more details.
+
+    Parameters
+    ----------
+    data : object
+        The data to be denormalized.
+
+    Returns
+    -------
+    object
+        A Python object equivalent to that from which the given `data` was
+        denormalized.
+
+    Raises
+    ------
+    Exception
+        If the argument `data` cannot be denormalized.
+    """
     if   data is None: return None
     elif pimms.is_scalar(data, ('number', 'bool', 'string', 'unicode')): return data
-    elif pimms.is_map(data):
+    elif is_map(data):
         # see if it's a non-native map
         if normalize.type_key in data:
             (mdl,cls) = data[normalize.type_key]
@@ -226,92 +727,208 @@ def denormalize(data):
         # lists of primitives need not be changed
         if pimms.is_array(data, ('number', 'bool', 'string', 'unicode')): return data
         return [denormalize(x) for x in data]
-def to_affine(aff, dims=None):
-    '''
-    to_affine(None) yields None.
-    to_affine(data) yields an affine transformation matrix equivalent to that given in data. Such a
-      matrix may be specified either as (matrix, offset_vector), as an (n+1)x(n+1) matrix, or, as an
-      n x (n+1) matrix.
-    to_affine(data, dims) additionally requires that the dimensionality of the data be dims; meaning
-      that the returned matrix will be of size (dims+1) x (dims+1).
-    '''
-    if aff is None: return None
-    if isinstance(aff, _tuple_type):
-        # allowed to be (mtx, offset)
-        if (len(aff) != 2                       or
-            not pimms.is_matrix(aff[0], 'real') or
-            not pimms.is_vector(aff[1], 'real')):
-            raise ValueError('affine transforms must be matrices or (mtx,offset) tuples')
-        mtx = np.asarray(aff[0])
-        off = np.asarray(aff[1])
-        if dims is not None:
-            if mtx.shape[0] != dims or mtx.shape[1] != dims:
-                raise ValueError('%dD affine matrix must be %d x %d' % (dims,dims,dims))
-            if off.shape[0] != dims:
-                raise ValueError('%dD affine offset must have length %d' % (dims,dims))
-        else:
-            dims = off.shape[0]
-            if mtx.shape[0] != dims or mtx.shape[1] != dims:
-                raise ValueError('with offset size=%d, matrix must be %d x %d' % (dims,dims,dims))
-        aff = np.zeros((dims+1,dims+1), dtype=np.float)
-        aff[dims,dims] = 1
-        aff[0:dims,0:dims] = mtx
-        aff[0:dims,dims] = off
-        return pimms.imm_array(aff)
-    if not pimms.is_matrix(aff, 'real'):
-        raise ValueError('affine transforms must be matrices or (mtx, offset) tuples')
-    aff = np.asarray(aff)
-    if dims is None:
-        dims = aff.shape[1] - 1
-    if aff.shape[0] == dims:
-        lastrow = np.zeros((1,dims+1))
-        lastrow[0,-1] = 1
-        aff = np.concatenate((aff, lastrow))
-    if aff.shape[1] != dims+1 or aff.shape[0] != dims+1:
-        arg = (dims, dims,dims+1, dims+1,dims+1)
-        raise ValueError('%dD affine matrix must be %dx%d or %dx%d' % arg)
-    return aff
-def apply_affine(aff, coords):
-    '''
-    apply_affine(affine, coords) yields the result of applying the given affine transformation to
-      the given coordinate or coordinates.
 
-    This function expects coords to be a (dims X n) matrix but if the first dimension is neither 2
-    nor 3, coords.T is used; i.e.:
-      apply_affine(affine3x3, coords2xN) ==> newcoords2xN
-      apply_affine(affine4x4, coords3xN) ==> newcoords3xN
-      apply_affine(affine3x3, coordsNx2) ==> newcoordsNx2 (for N != 2)
-      apply_affine(affine4x4, coordsNx3) ==> newcoordsNx3 (for N != 3)
-    '''
-    if aff is None: return coords
-    (coords,tr) = (np.asanyarray(coords), False)
-    if len(coords.shape) == 1: return np.squeeze(apply_affine(np.reshape(coords, (-1,1)), aff))
-    elif len(coords.shape) > 2: raise ValueError('cannot apply affine to ND-array for N > 2')
-    if   len(coords) == 2: aff = to_affine(aff, 2)
-    elif len(coords) == 3: aff = to_affine(aff, 3)
-    else: (coords,aff,tr) = (coords.T, to_affine(aff, coords.shape[1]), True)
-    r = np.dot(aff, np.vstack([coords, np.ones([1,coords.shape[1]])]))[:-1]
-    return r.T if tr else r
+# Affine Code ######################################################################################
+def to_affine(aff, dims=None, dtype=None, requires_grad=False):
+    """Converts the argument to an affine transform matrix.
+
+    `to_affine(data)` returns an affine transformation matrix equivalent to that
+    given in `data`. The value in `data` may be specified either as `(matrix,
+    offset_vector)`, as an `n+1`x`n+1` matrix, or, as an `n`x`n+1` matrix.
+
+    `to_affine(data, dims)` additionally requires that the dimensionality of the
+    `data` be `dims`, meaning that the returned matrix will be of size
+    `dims+1`x`dims+1`.
+
+    Parameters
+    ----------
+    data : tuple or matrix
+        One of the following representations of an affine transformation: (1) a
+        4x4 or 4x3 matrix (3D affine), (2) a 3x3 or 3x2 matrix (2D affine), (3)
+        a tuple `(matrix, offset)` that contains either a 3D matrix and 3D
+        vector or a 2D matrix and 2D vector. Higher order affines may also be
+        parsed.
+    dims : int > 0, optional
+        The dimensionality of the affine matrix that should be returned. The
+        returned matrix will always have shape `(dims+1, dims+1)`. If the `dims`
+        argument is not explicitly given or is `None`, then the dimensionality
+        is detected automatically. Providing the `dims` argument explicitly
+        forces an error to be raised should the `data` argument not match the
+        requested dimensionality.
+    dtype : numpy dtype or torch dtype or numpy dtype alias, optional
+        The dtype to use in constructing the affine matrix. If the `dtype` is a
+        `torch.dtype` object, then the result will be a `torch` tensor;
+        otherwise the result will be a `numpy` array. The default value of dtype
+        is `None`, which indicates that the dtype will be inferred from the
+        `data`.
+    requires_grad : boolean, optional
+        If the `dtype` parameter is a `torch.dtype` object, then this specifies
+        whether the created affine matrix will require gradient tracking. The
+        default value is `False`.
+
+    Returns
+    -------
+    numpy.ndarray or torch.tensor
+        A square matrix representing the affine transformation in `data`. The
+        return value is a `torch` tensor if the `dtype` parameter is a
+        `torch.dtype` object; otherwise the return value is a `numpy.ndarray`
+        object.
+
+    Raises
+    ------
+    ValueError
+        If `data` cannot be interpreted as an affine transformation or if the
+        affine transformation provided in `data` does not have the
+        dimensionality required by an explicit `dims` argument.
+    """
+    # Have we been given a tuple or a matrix?
+    if pimms.is_tuple(aff) and len(aff) == 2:
+        (mtx,off) = aff
+        (mtx,off) = nym.promote(mtx, off, dtype=dtype)
+        mtx_sh = mtx.shape
+        off_sh = off.shape
+        if mtx_sh == (3,) and off_sh == (3,):
+            # This is actually a 2x3 matrix, and as such it is a valid 2D affine matrix.
+            aff = nym.cat([mtx[None,:], off[None,:], [(0, 0, 1)]], axis=1)
+        else:
+            assert len(mtx_sh) == 2 and mtx_sh[0] == mtx_sh[1], \
+                'affine tuples must contain a square matrix and a vector'
+            assert len(off_sh) == 1 and off_sh[0] == mtx_sh[0], \
+                'affine tuples must contain matrix and offset with matching shapes'
+            aff = nym.cat([mtx, off[:,None]], axis=1)
+            aff = nym.cat([aff, [0]*len(off) + [1]])
+        aff_sh = np.shape(aff)
+    else:
+        aff = nym.promote(aff, dtype=dtype)
+        aff_sh = aff.shape
+        assert len(aff_sh) == 2, \
+            'affine transform arrays must be matrices'
+        if aff_sh[1] == aff_sh[0] + 1:
+            aff = nym.cat([aff, [0]*aff_sh[0] + [1]], axis=0)
+            aff_sh = aff.shape
+        assert aff_sh[0] == aff_sh[1], \
+            'affiine transform matrices must be n x n or n x (n+1)'
+    if dims is not None:
+        assert dims == aff_sh[0] - 1, \
+            f'given affine matrix does not match required dimensioinality: {dims}'
+    return aff
+def apply_affine(affine, coords, T=False, dtype=None):
+    """Applies an affine transform to a set of matrix of coordinates.
+
+    `apply_affine(affine, coords)` applies the given affine transformation to
+    the given coordinate or coordinates and returns the new coordinate or set of
+    coordinates that results.
+
+    This function requires that `coords` to be a `dims`x`n` matrix where `dims`
+    is the also the dimensionality of the affine trannsform giiven in the
+    argument `affine`.
+
+    Parameters
+    ----------
+    affine : affine matrix or affine-like or None
+        The affine transformation to apply to the `coords`. This may be a matrix
+        with shape `(dims+1, dims+1)` where `dims` is the number of rows in the
+        `coords` matrix, or it may be anything that can be converted to such a
+        matrix using the `to_affine()` function. If `affine` is `None`, then no
+        affine transformation is applied, and the `coords` are returned
+        untouched.
+    coords : matrix of numbers
+        The coordinate matrix that is to be transformed by the `affine`. This
+        must be a `dims`x`n` matrix or a `dims`-length vector. The return value
+        is always the same shape as `coords`.
+    T : boolean, optional
+        If `True`, then `coords` must instead be a `n`x`dims`-shaped matrix.
+
+    Returns
+    -------
+    matrix of numbers
+        A matrix of numbers the same shape as `coords`. The return value is
+        always the same shape as `coords` regardless of whether the `T`
+        parameter has been set to `True`.
+
+    Raises
+    ------
+    ValueError
+        If `affine` cannot be interpreted as an affine transformation, if
+        `coords` is not a matrix, or if the dimensionality of the `coords`
+        matrix does not match that of the `affine` transformation.
+    """
+    # Get the coordinates:
+    coords = nym.promote(coords, dtype=dtype)
+    sh = coords.shape
+    assert len(sh) == 2, "coords argument to apply_affine must be a matrix"
+    if affine is None: return coords
+    if T:
+        coords = nym.tr(coords)
+        sh = coords.shape
+    # Get the affine transform:
+    aff = to_affine(affine, dtype=coords.dtype, dims=sh[0])
+    # Apply it.
+    res = nym.add(nym.dot(aff[:-1,:-1], coords), aff[:-1, [-1]])
+    if T:
+        res = nym.tr(res)
+    return res
+
+# Dataframe Code ###################################################################################
 def is_dataframe(d):
-    '''
-    is_dataframe(d) yields True if d is a pandas DataFrame object and False otherwise; if
-      pandas cannot be loaded, this yields None.
-    '''
+    """Returns `True` if given a `pandas.DataFrame`, otherwise `False`.
+    
+    `is_dataframe(d)` returns `True` if `d` is a `pandas.DataFrame` object and
+    `False` otherwise; if `pandas` cannot be loaded, this yields `None`.
+
+    Parameters
+    ----------
+    d : object
+        The object that is to be tested: is this object a `pandas` `DataFrame`
+        object?
+    
+    Returns
+    -------
+    boolean
+        `True` if `d` is a `pandas.DataFrame` object and `False` otherwise. If
+        `pandas` cannot be imported, instead returns `None`.
+    """
     try: import pandas
     except Exception: return None
     return isinstance(d, pandas.DataFrame)
 def to_dataframe(d, **kw):
-    '''
-    to_dataframe(d) attempts to coerce the object d to a pandas DataFrame object. If d is a
-      tuple of 2 items whose second argument is a dictionary, then the dictionary will be taken
-      as arguments for the dataframe constructor. These arguments may alternately be given as
-      standard keyword arguments.
-    '''
+    """Converts `d` into a `pandas.DataFrame` and returns it.
+
+    `to_dataframe(d)` attempts to coerce the object `d` to a `pandas.DataFrame`
+    object. If `d` is a tuple of 2 items whose second argument is a dictionary,
+    then the dictionary will be taken as arguments for the dataframe
+    constructo. (These arguments may alternately be given as standard keyword
+    arguments.) Otherwise, `d` must be in one of two formats: (1) `d` can be a
+    mapping (such as a dictionary) whose keys are the column names and whose
+    values are the dataframe's columns, or (2) `d` can be an iterable whose rows
+    are dicts representing the dataframe's individual rows. In the latter of
+    these cases, the dictionaries that represent the rows must all have the same
+    keys while in the former of these cases, the iterables that represent the
+    columns must all have the same number of elements.
+
+    Parameters
+    ----------
+    d : object
+        The object that is to be converted into a dataframe.
+    **kw
+        Any additional keyword arguments that should be passed to the
+        `pandas.DataFrame` constructor.
+
+    Returns
+    -------
+    pandas.DataFrame
+        A dataframe representation of `d`.
+
+    Raises
+    ------
+    ValueError
+        If `d` cannot be interpreted as a dataframe.
+    """
     import pandas
     if pimms.is_itable(d): d = d.dataframe
     if is_dataframe(d): return d if len(kw) == 0 else pandas.DataFrame(d, **kw)
-    if is_tuple(d) and len(d) == 2 and pimms.is_map(d[1]):
-        try: return to_dataframe(d[0], **pimms.merge(d[1], kw))
+    if is_tuple(d) and len(d) == 2 and is_map(d[1]):
+        try: return to_dataframe(d[0], **dict(d[1], **kw))
         except Exception: pass
     # try various options:
     try: return pandas.DataFrame(d, **kw)
@@ -321,22 +938,55 @@ def to_dataframe(d, **kw):
     try: return pandas.DataFrame.from_dict(d, **kw)
     except Exception: pass
     raise ValueError('Coersion to dataframe failed for object %s' % d)
-def dataframe_select(df, *cols, **filters):
-    '''
-    dataframe_select(df, k1=v1, k2=v2...) yields df after selecting all the columns in which the
-      given keys (k1, k2, etc.) have been selected such that the associated columns in the dataframe
-      contain only the rows whose cells match the given values.
-    dataframe_select(df, col1, col2...) selects the given columns.
-    dataframe_select(df, col1, col2..., k1=v1, k2=v2...) selects both.
+def dataframe_select(df, *args, **kwargs):
+    """Performs a simple selection on a dataframe object.
+
+    `dataframe_select(df, k1=v1, k2=v2...)` yields a subset of the rows of `df`
+    after selecting only those rows in which the given keys (`k1`, `k2`, etc.)
+    map to values that match the filter instructiions (`v1`, `v2`, etc.; see
+    below regarding filters).
+
+    `dataframe_select(df, col1, col2...)` selects a subset of the columns of
+    `df`: those that are listed only.
+
+    `dataframe_select(df, col1, col2..., k1=v1, k2=v2...)` selects only the
+    listed columns and only those rows that match the given key-value filters.
     
-    If a value is a tuple/list of 2 elements, then it is considered a range where cells must fall
-    between the values. If value is a tuple/list of more than 2 elements or is a set of any length
-    then it is a list of values, any one of which can match the cell.
-    '''
+    **Filters**. Keys are mapped to values that act as filter instructons (i.e.,
+    the `v1`, `v2`, etc. in `dataframe_select(df, k1=v1, k2=v2...)` are filter
+    instructions). Depending on the instructioin, different rules will be used
+    to select the rows that are included. These rules are as follows: (1) if a
+    filter is a tuple or list of 2 elements, then it is considered a range where
+    cells must fall between the values; (2) if a filter is a tuple or list of
+    whose length is not 2, or if it is a set of any length, then any values in
+    the filter are considered acceptable values regarding the selection; (3)
+    otherwise, the filter itself is considered to be the only acceptable value
+    regarding the selection.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame or dataframe-like
+        The `pandas` dataframe to select on; if this is not a `pandas.DataFrame`
+        object, the function will attempt to interpret it as a dataframe first
+        using the `to_dataframe()` function.
+    *args
+        The names of the columns that should be subselected; if no column names
+        are provided, then all columns are included.
+    **kwargs
+        The names of columns (as keys) mapped to filter instructions (as
+        values); each of the filter instructoins is applied to the relevant
+        column value of all rows, and only those rows that pass all filters are
+        included in the selection.
+
+    Returns
+    -------
+    pandas.DataFrame
+        The resulting subselection of the dataframe `df`.
+    """
     ii = np.ones(len(df), dtype='bool')
     for (k,v) in six.iteritems(filters):
         vals = df[k].values
-        if   pimms.is_set(v):                    jj = np.isin(vals, list(v))
+        if   is_set(v):                    jj = np.isin(vals, list(v))
         elif pimms.is_vector(v) and len(v) == 2: jj = (v[0] <= vals) & (vals < v[1])
         elif pimms.is_vector(v):                 jj = np.isin(vals, list(v))
         else:                                    jj = (vals == v)
@@ -344,41 +994,36 @@ def dataframe_select(df, *cols, **filters):
     if len(ii) != np.sum(ii): df = df.loc[ii]
     if len(cols) > 0: df = df[list(cols)]
     return df
-def dataframe_except(df, *cols, **filters):
-    '''
-    dataframe_except(df, k1=v1, k2=v2...) yields df after selecting all the columns in which the
-      given keys (k1, k2, etc.) have been selected such that the associated columns in the dataframe
-      contain only the rows whose cells match the given values.
-    dataframe_except(df, col1, col2...) selects all columns except for the given columns.
-    dataframe_except(df, col1, col2..., k1=v1, k2=v2...) selects on both conditions.
-    
-    The dataframe_except() function is identical to the dataframe_select() function with the single
-    difference being that the column names provided to dataframe_except() are dropped from the
-    result while column names passed to dataframe_select() are kept.
 
-    If a value is a tuple/list of 2 elements, then it is considered a range where cells must fall
-    between the values. If value is a tuple/list of more than 2 elements or is a set of any length
-    then it is a list of values, any one of which can match the cell.
-    '''
-    ii = np.ones(len(df), dtype='bool')
-    for (k,v) in six.iteritems(filters):
-        vals = df[k].values
-        if   pimms.is_set(v):                    jj = np.isin(vals, list(v))
-        elif pimms.is_vector(v) and len(v) == 2: jj = (v[0] <= vals) & (vals < v[1])
-        elif pimms.is_vector(v):                 jj = np.isin(vals, list(v))
-        else:                                    jj = (vals == v)
-        ii = np.logical_and(ii, jj)
-    if len(ii) != np.sum(ii): df = df.loc[ii]
-    if len(cols) > 0: df = df.drop(list(cols), axis=1, inplace=False)
-    return df
-
+# AutoDict code ####################################################################################
 class AutoDict(dict):
-    '''
-    AutoDict is a handy kind of dictionary that automatically fills vivifies itself when a miss
-    occurs. By default, the new value returned on miss is an AutoDict, but this may be changed by
-    setting the object's on_miss() function to be something like lambda:[] (to return an empty
-    list).
-    '''
+    """A dictionary that automatically vivifies new keys.
+
+    `AutoDict` is a handy kind of dictionary that automatically vivifies itself
+    when a miss occurs. By default, the new value returned on miss is itself an
+    `AutoDict`, thus allowing for arbitrary depths of nested dictionaries with
+    ease, but this may be changed by setting the object's `on_miss` attribute to
+    a custom function such as `lambda:[]` (to return an empty list).
+
+    The `auto_dict()` function can also be used to create `AutoDict` objects.
+
+    Parameters
+    ----------
+    *args
+        Any number of dict objects, which are merged from left to right, to form
+        the initial key-value pairs in the new `AutoDict`.
+    **kwargs
+        Any number of key-value pairs may be passed to `AutoDict()` and are
+        treated as a final right-most dictionary when merging together the
+        `*args` to form the initial contents of the new `AuroDict`.
+
+    Attributes
+    ----------
+    on_miss : function
+        The function that is called (as `on_miss()`) when a key miss occurs. The
+        return value of this function is the new value that is inserted with the
+        key that caused the miss.
+    """
     def __init__(self, *args, **kwargs):
         dict.__init__(self, *args, **kwargs)
         self.on_miss = lambda:type(self)()
@@ -387,210 +1032,336 @@ class AutoDict(dict):
         self[key] = value
         return value
 def auto_dict(ival=None, miss=None):
-    '''
-    auto_dict() yields an auto-dict that vivifies value of {} on miss.
-    auto_dict(ival) uses the given dict ival as an initializer.
-    auto_dict(ival, miss) uses the given miss function.
-    auto_dict(None, miss) is equivalent to auto_dict() with the given miss function.
+    """Creates and returns an `AutoDict` object.
 
-    If the miss argument (also a named parameter, miss) is an empty list, an empty dict, or an
-    empty set, then the miss is taken to be an anonymous lambda function that returns an empty
-    item of the same type.
-    '''
+    `auto_dict()` is equivalent to `AutoDict()`.
+
+    `auto_dict(ival=ival)` uses the given dict `ival` as an initializer for the
+    `AutoDict` contents. The `ival` may be a mapping object or it may be a tuple
+    or list of mapping objects, which are merged left-to-right.
+
+    `auto_dict(miss=miss)` uses the given value `miss` as the `AutoDict`'s
+    `on_miss` attribute. Usually this must be a function such as `lambda:[]`,
+    but if the `miss` argument is equal to either `[]` or `set([])`, then the
+    returned `AutoDict` will use `on_miss = lambda:[]` or `on_miss =
+    lambda:set([])`, respectively. Similarly, if the `miss` argument is equal to
+    `{}`, then the `on_miss = lambda:type(self)()`, which is equivalent to the
+    function used for the default `miss` value of `None`.
+
+    Parameters
+    ----------
+    ival : None or mapping or iterator of mappings, optional
+        The initial value of the new dictionary.
+    miss : None or [] or set([]) or {} or function, optional
+        The on_miss function that the new dictionary should use.
+
+    Returns
+    -------
+    AutoDict
+        The new dictionary object.
+    """
     if ival is None: d = AutoDict()
-    else: d = AutoDict(ival)
+    elif is_map(d): d = AutoDict(ival)
+    else: d = AutoDict(dict(*ival))
     if miss == {} or miss is None: return d
     elif miss == []: d.on_miss = lambda:[]
     elif miss == set([]): d.on_miss = lambda:set([])
     else: d.on_miss = miss
     return d
 
-def simplex_summation_matrix(simplices, weight=None, inverse=False):
-    '''
-    simplex_summation_matrix(mtx) yields a scipy sparse array matrix that, when dotted with a
-      column vector of length m (where m is the number of simplices described in the simplex matrix,
-      mtx), yields a vector of length n (where n is the number of vertices in the simplex mesh); the
-      returned vetor is the sum over each vertex, of the faces to which it belongs.
+# Address Functions ################################################################################
+def is_address(data, check_values=False):
+    """Determines if the argument contains valid neuropythy address data.
 
-    The matrix mtx must be oriented such that the first dimension (rows) corresponds to the vertices
-    of the simplices and the second dimension (columns) corresponds to simplices themselves.
+    `is_address(data)` returns `True` if `data` is a valid address dict for
+    addressing positions on a mesh or in a (3D) cortical sheet and returnsp
+    `False` otherwise. In order to be a valid address dict, `data` must be a
+    mapping object and must contain the keys `'faces'` and `'coordinates'`. The
+    key `'faces'` must be mapped to a 3D vector or 3D matrix of integers (mesh
+    vertex labels), and the key `'coordinates'` must be mapped to a 2D or 3D
+    matrix of real numbers (barycentric coordinates with an optional depth
+    coordinate for 3D cortical sheets).
 
-    The optional argument weight may specify a weight for each face, in which case the summation is
-    a weighted sum instead of a flat sum.
+    In order to be considered 2D or 3D, a matrix must have 2 or 3 rows,
+    respectively (not 2 or 3 columns).
 
-    The optional argument inverse=True may be given to indicate that the inverse summation matrix
-    (summation of the vertices onto the simplices) should be returned.
-    '''
-    simplices = np.asarray(simplices)
-    n = np.max(simplices) + 1
-    (d,m) = simplices.shape
-    rng = range(m)
-    if inverse:
-        if weight is None: f = sps.csr_matrix
-        else:
-            nrng = range(n)
-            ww = sps.csr_matrix((weight, (nrng, nrng)), shape=(n,n), dtype=np.float)
-            f = lambda *args,**kwargs: ww.dot(sps.csc_matrix(*args,**kwargs))
-        s = f((np.ones(d*m, dtype=np.int),
-               (np.concatenate([rng for _ in range(d)]), np.concatenate(simplices))),
-              shape=(m,n),
-              dtype=np.int)
-    else:
-        s = sps.csr_matrix(
-            (np.ones(d*m, dtype=np.int),
-             (np.concatenate(simplices), np.concatenate([rng for _ in range(d)]))),
-            shape=(n,m),
-            dtype=np.int)
-        if weight is not None:
-            s = s.dot(sps.csc_matrix((weight, (rng, rng)), shape=(m,m), dtype=np.float))
-    return s
-def simplex_averaging_matrix(simplices, weight=None, inverse=False):
-    '''
-    Simplex_averaging_matrix(mtx) is equivalent to simplex_simmation_matrix, except that each row of
-      the matrix is subsequently normalized such that all rows sum to 1.
-    
-    The optional argument inverse=True may be passed to indicate that the inverse averaging matrix
-    (of vertices onto simplices) should be returned.
-    '''
-    m = simplex_summation_matrix(simplices, weight=weight, inverse=inverse)
-    rs = np.asarray(m.sum(axis=1), dtype=np.float)[:,0]
-    invrs = zinv(rs)
-    rng = range(m.shape[0])
-    diag = sps.csr_matrix((invrs, (rng, rng)), dtype=np.float)
-    return diag.dot(sps.csc_matrix(m, dtype=np.float))
+    Parameters
+    ----------
+    data : object
+        An object whose quality as a set of address data is to be assessed.
+    check_values : boolean, optional
+        Whether or not to check that the values of the `data` mapping adhere to
+        the address data format as well as the keys. The default behavior
+        (`check_values=False`) does not require that the values be matrices of
+        the appropriate shape and type. If this parameter is set to `True`,
+        these checks will be carried out.
 
-def is_image(image):
-    '''
-    is_image(img) yields True if img is an instance if nibabel.dataobj_images.DataobjImage and False
-      otherwise.
-    '''
-    return isinstance(image, nib.dataobj_images.DataobjImage)
-def is_image_header(x):
-    '''
-    is_image_header(x) yields True if x is a nibabel.spatialimages.FileBasedHeader object or a 
-      nibabel.wrapstruct.LabeledWrapStruct objectand False otherwise.
-    '''
-    return isinstance(x, (nib.spatialimages.FileBasedHeader, nib.wrapstruct.LabeledWrapStruct))
-
-def is_address(data):
-    '''
-    is_address(addr) yields True if addr is a valid address dict for addressing positions on a mesh
-      or in a cortical sheet and False otherwise.
-    '''
-    return (pimms.is_map(data) and 'faces' in data and 'coordinates' in data)
+    Returns
+    -------
+    boolean
+        `True` if `data` contains valid neuropythy address data and `False`
+        otherwise.
+    """
+    if not (is_map(data) and 'faces' in data and 'coordinates' in data):
+        return False
+    if check_values:
+        # We need to check the value shapes.
+        faces = data['faces']
+        coords = data['coords']
+        fsh = nym.shape(faces)
+        csh = nym.shape(coords)
+        if not arraylike(faces, dtype='int', ndims=2): return False
+        if not arraylike(coords, dtype='float', ndims=2): return False
+        if fsh[0] != 3: return False
+        if csh[0] != 2 and csh[0] != 3: return False
+        if csh[1] != fsh[1]: return False
+    return True
 def address_data(data, dims=None, surface=0.5, strict=True):
-    '''
-    address_data(addr) yields the tuple (faces, coords) of the address data where both faces and
-      coords are guaranteed to be numpy arrays with sizes (3 x n) and (d x n); this will coerce
-      the data found in addr if necessary to do this. If the data is not valid, then an error is
-      raised. If the address is empty, this yields (None, None).
+    """Extracts the `(faces, coordinates)` from an address data dict.
 
-    The following options may be given:
-       * dims (default None) specifies the dimensions requested for the coordinates. If 2, then
-         the final dimension is dropped from 3D coordinates; if 3 then will add the optional
-         surface argument as the final dimension of 2D coordinates.
-       * surface (default: 0.5) specifies the surface to use for 2D addresses when a 3D address;
-         is requested. If None, then an error will be raised when this condition is encountered.
-         This should be either 'white', 'pial', 'midgray', or a real number in the range [0,1]
-         where 0 is the white surface and 1 is the pial surface.
-       * strict (default: True) specifies whether an error should be raised when there are
-         non-finite values found in the faces or the coordinates matrices. These values are usually
-         indicative of an attempt to address a point that was not inside the mesh/cortex.
-    '''
+    `address_data(data)` returns the tuple `(faces, coords)` of the address data
+    where both faces and coords are guaranteed to be numpy arrays with sizes
+    (`3`x`n`) and (`d`x`n`). If the data are not valid as an address, then an
+    error is raised. If the address is empty, this returns `(None, None)`.
+
+    Parameters
+    ----------
+    data : an address data mapping (see `is_address()`)
+        An address data mapping whose face and coordinate matrices are being
+        extracted.
+    dims : 2 or 3 or None, optional
+        The dimensionality requested of the output coordinate matrix. If the
+        address data is not the requested dimensionality, then the depth
+        dimension is truncated (in the case `dims=2`), or the value of `surface`
+        (see below) is appended to all columns (in the case that `dims=3`). If
+        `dims` is `None` (the default), then no change is made to the
+        coordinates.
+    surface : real number in [0,1], optional
+        The depth value to append to the columns of the coordinates matrix in
+        the case that 3D coordinates are requested but only 2D coordinates are
+        available. In such a case, positions in the 2D triangle surface mesh are
+        encoded in the address data, but the depth is not, so an arbitrary depth
+        must be chosen. The depth must be a real number between 0 and 1 with 0
+        representing the white-matter surface of cortex and 1 representing the
+        pial surface. The aliases `'pial'`, `'white'`, and `'midgray'` can be
+        used as aliases for `1`, `0`, and `0.5`, respectively. The default value
+        is `0.5`.
+    strict : boolean, optional
+        Whether to rraise an error when there are non-finite values found in the
+        faces or the coordinates matrices. These values are usually indicative
+        of an attempt to address a point that was not inside the mesh/cortex.
+        The default is `True`, which does not suppress errors. To suppress these
+        errors use `strict=False`.
+
+    Returns
+    -------
+    2-tuple of numpy.ndarray matrices
+        The `(faces, coordinates)` matrices are returned as aa 2-tuple. The
+        `faces` matrix is a `3`x`n` integer matrix whose columns are the mesh
+        vertex labels of the corners of each triangle represented in the address
+        data, and the `coordinates` matrix is a `2`x`n` or `3`x`n` real-valued
+        matrix whose columns are the barycentric coordinates of the represented
+        point in the associated triangle from `faces` and (optionally) the
+        cortical depth fraction if the `coordinates` matrix has 3 rows.
+
+    Raises
+    ------
+    ValueError
+        If `data` is not a valid address data mapping.
+    """
     if data is None: return (None, None)
-    if not is_address(data): raise ValueError('argument is not an address')
-    faces = np.asarray(data['faces'])
-    coords = np.asarray(data['coordinates'])
+    if not is_address(data, check_values=False): # We're gonna recheck the values.
+        raise ValueError('argument is not a valid address data mapping')
+    faces = promote(data['faces'])
+    coords = promote(data['coordinates'])
     if len(faces.shape) > 2 or len(coords.shape) > 2:
         raise ValueError('address data contained high-dimensional arrays')
-    elif len(faces.shape) != len(coords.shape):
+    if len(faces.shape) != len(coords.shape):
         raise ValueError('address data faces and coordinates are different shapes')
-    elif len(faces) == 0: return (None, None)
-    if len(faces.shape) == 2 and faces.shape[0] != 3: faces = faces.T
-    if len(faces.shape) == 2 and faces.shape[1] == 0: return (None, None)
-    if faces.shape[0] != 3: raise ValueError('address contained bad face matrix')
-    if len(coords.shape) == 2 and coords.shape[0] not in (2,3): coords = coords.T
-    if coords.shape[0] not in (2,3): raise ValueError('address coords are neither 2D nor 3D')
-    if len(coords.shape) == 2 and coords.shape[1] == 0: return (None, None)
+    if faces.shape[1:] != coordinates.shape[1:]:
+        raise ValueError('address data faces and coordinates have different column counts')
+    if faces.shape[0] != 3:
+        raise ValueError('address contains a face matrix whose first dimension is not 3')
+    if coords.shape[0] not in (2,3):
+        raise ValueError('address coords are neither 2D nor 3D')
+    if len(faces.shape) == 2 and faces.shape[1] == 0:
+        return (None, None)
     if dims is None: dims = coords.shape[0]
     elif coords.shape[0] != dims:
         if dims == 2: coords = coords[:2]
         else:
-            if surface is None: raise ValueError('address data must be 3D')
-            elif pimms.is_str(surface):
+            if surface is None:
+                raise ValueError('address data must be 3D but 2D data was found')
+            elif is_str(surface):
                 surface = surface.lower()
                 if surface == 'pial': surface = 1
                 elif surface == 'white': surface = 0
                 elif surface in ('midgray', 'mid', 'middle'): surface = 0.5
-                else: raise ValueError('unrecognized surface name: %s' % surface)
+                else: raise ValueError('unrecognized surface name: ' + surface)
             if not pimms.is_real(surface) or surface < 0 or surface > 1:
                 raise ValueError('surface must be a real number in [0,1]')
-            coords = np.vstack((coords, np.full((1, coords.shape[1]), surface)))
+            coords = nym.cat([coords, nym.full((1, coords.shape[1]), surface)])
     if strict:
-        if np.sum(np.logical_not(np.isfinite(coords))) > 0:
-            w = np.where(np.logical_not(np.isfinite(coords)))
+        cnans = nym.logical_not(nym.isfinite(coords))
+        if nym.sum(cnans) > 0:
+            w = nym.where(cnans)
             if len(w[0]) > 10:
                 raise ValueError('address contains %d non-finite coords' % len(w[0]))
             else:
                 raise ValueError('address contains %d non-finite coords (%s)' % (len(w),w))
-        if np.sum(np.logical_not(np.isfinite(faces))) > 0:
-            w = np.where(np.logical_not(np.isfinite(faces)))
+        fnans = nym.logical_not(nym.isfinite(faces))
+        if nym.sum(fnans) > 0:
+            w = np.where(fnans)
             if len(w[0]) > 10:
                 raise ValueError('address contains %d non-finite faces' % len(w[0]))
             else:
                 raise ValueError('address contains %d non-finite faces (%s)' % (len(w[0]),w))
     return (faces, coords)
-def address_interpolate(addr, prop, method=None, surface='midgray', strict=False, null=np.nan,
-                        tess=None):
-    '''
-    address_interpolate(addr, prop) yields the result of interpolating the given property prop at
-      the given addresses. If addr contains 3D addresses and prop is a map of layer values from 0 to
-      1 (e.g., {0:white_prop, 0.5:midgray_prop, 1:pial_prop}), then the addresses are interpolated
-      from the appropriate layers.
+def address_interpolate(addr, prop, method=None, surface='midgray',
+                        strict=False, null=np.nan, index=None):
+    """Interpolates a property at a set of points specified using address data.
 
-    The following optional arguments may be given:
-      * method (default: None) may be either 'linear' or 'nearest' to force linear/nearest
-        interpolation. If None is given (the default), then linear is used for all real and complex
-        (inexact) numbers and nearest is used for all others.
-      * surface (default: 'midgray') may specify the surface the if addr provides 2D addresses but
-        3D property data are given (otherwise this argument is ignored); in this case, surface
-        specifies the height-fraction or named surface at which the interpolation should take place;
-        0 is white and 1 is pial.
-      * strict (default: False) may be set to True to indicate that an error should be raised if any
-        address coordinates have non-finite values (i.e., were "out-in-region" values); otherwise
-        the associated interpolated values are silently set to null.
-      * null (default: nan) may specify the value given to any "out-of-region" value found in the
-        addresses.
-      * tess (default: None) may specify a tesselation object that should be used to lookup the
-        faces and convert them into face indices.
-    '''
-    (faces, (a,b,h)) = address_data(addr, 3, surface=surface)
-    if tess is not None: faces = tess.index(faces)
-    bad = np.where(~np.isfinite(a))[0]
-    if strict is True and len(bad) > 0: raise ValueError('non-finite coordinates found in address')
-    c = 1.0 - a - b
-    # parse the properties:
-    if pimms.is_vector(prop): prop = {0:prop, 1:prop}
-    elif pimms.is_matrix(prop): prop = {k:v for (k,v) in zip(np.linspace(0,1,len(prop)), prop)}
-    elif not pimms.is_map(prop): raise ValueError('bad property arg of type %s' % type(prop))
-    # start by making the upper and lower property values for each indexed voxel:
-    ks = np.argsort(list(prop.keys()))
-    vs = np.asarray([prop[ks[0]]] + [prop[k] for k in ks] + [prop[ks[-1]]])
-    ks = np.concatenate([[-np.inf], ks, [np.inf]])
-    # good time to figure out what method we are using:
-    if method is None:
-        if np.issubdtype(vs.dtype, np.inexact): method = 'linear'
-        else: method = 'nearest'
+    `address_interpolate(addr, prop)` returns the result of interpolating the
+    given property prop at points that are specified by the given addresses. If
+    addr contains 3D addresses and prop is a map of layer values from 0 to 1
+    (e.g., `{0:white_prop, 0.5:midgray_prop, 1:pial_prop}`), then the addresses
+    are respect and are interpolated from the appropriate layers.
+
+    The address data `addr` is related too the property `prop` in that the
+    vertex labels in the cells of the `'faces'` matrix of the address data
+    correspond to a cell in the `prop` vector (or in each of `prop`'s columns,
+    if prop is a dictionary of vectors). In other words, the address data must
+    have been calculated from the set of points at which we are
+    interpolating---in most interpolation function this set of points (or this
+    topology/mesh object) is required, but `addr` suffices here.
+
+    If the `prop` and `addr` data comes from a flatmap or a submesh of a full
+    mesh or topology object, then the vertex labels in the `addr` data will not
+    be correct indices into the `prop` data. In this case, an index is needed,
+    and either the flatmap's/submesh's `tess` attribute or its `tess.index` may
+    be given as an opotional parameter in this case.
+
+    Parameters
+    ----------
+    addr : address data dict
+        The dictionary of address data (see `is_address` and `address_data`)
+        that represents the points at which the property is to be interpolated.
+    prop : array-like or mapping
+        The property to be interpolated onto the points encoded by `addr`. This
+        must be an array-like object (a `numpy` array, `torch` tensor, or
+        something that can be converted into these types) whose last dimension
+        is equivalent to the number of vertices in the mesh from which
+        interpolation occurs (i.e., the mesh on which the `addr` address data
+        were calculated) or a mapping whose values are all such array-like
+        objects and whose keys are cortical depths or are like cortical depths
+        (see `is_cortical_depth()` and `like_cortical_depth()`). When `prop` is
+        a mapping, the interpolation occurs either at the depths specified in
+        the `addr` data or at the depth specified by the `surface` argument,
+        which must be like a cortical depth also, if no depth is encoded in
+        `addr`.
+    method : interpolation method-like, optional
+        The interpolation method to use, which may be any value that, when
+        filtered by the `to_interpolation_method()` function results in either
+        `'heaviest'` or `'linear'` interpolations. The `'heaviest'`
+        interpolation method is similar to nearest-neighbor interpolation except
+        that it always chooses the nearest mesh vertex of a point from among the
+        corners of the triangle containing the point whereas true
+        nearest-neighbor interpolation might pick a closer vertex of a
+        neighboring triangle. Linear interpolation interpolated linearly within
+        the triangle containing the point. True nearest-neighbor interpolation
+        is not possible using this function (the data necessary to perform such
+        interpolation is not provided to this function). For true
+        nearest-neighbor interpolation you must use a mesh's `interpolate()`
+        method. If `None` is given (the default), then `'linear'` is used for
+        all real and complex (inexact) numbers and `'heaviest'` is used for all
+        others.
+    surface : cortical-depth-like, optional
+        If the `addr` data do not contain informatioon about cortical depth and
+        the `prop` data contain property data for multiple cortical layers,
+        including, at minimum, 0.0 and 1.0, then the depth at which
+        interpolation occurs is providd by `to_cortical_depth(surface)`. The
+        default value is `midgray`.
+    strict : boolean, optional
+        If `True`, an error is raised if any address coordinates have non-finite
+        values (i.e., were "out-in-region" values); otherwise the associated
+        interpolated values are silently set to `null`. The default is `False`.
+    null : object, optional
+        The value given to any "out-of-region" value found in the addresses if
+        `strict` is `False`. The default is `nan`.
+    index : Index or Tesselation, optional
+        If the addresses werer calculated in reference to a mesh that is a
+        flatmap or submesh of another mesh, then the vertex labels in the `addr`
+        data's `'faces'` matrix will not match up to the `prop` dimensions. In
+        this case, `index` may be the `Tesselation` object or the tesselation's
+        `Index` object, allowing `address_interpolate()` to translate from
+        vertex labels to vertex indices. The default, `None`, results in no
+        translaction, meaning that `prop` must be from a mesh that has not been
+        subsampled.
+
+    Returns
+    -------
+    array-like
+        An array or tensor of values interpolated from the given properrties
+        (`prop`) onto the points encoded in the given address data (`addr`).
+
+    Raises
+    ------
+    ValueError
+        If any of the arguments cannot be interpreted as matching their required
+        types or forms.
+    """
+    # Argument Parsing #############################################################################
+    # Parse the index, if any.
+    if index is not None:
+        from neuropythy.geometry import (is_tess, is_mesh, is_topo)
+        if   is_mesh(index): index = index.tess
+        elif is_topo(index): index = index.tess
+        if is_tess(index): index = index.index
+        faces = index(faces)
+    # Parse the properties into an array of depths and a list of the properties at those depths.
+    if nym.arraylike(prop, shape=(-1,Ellipsis)):
+        prop = promote(prop)
+        n = prop.shape[-1]
+        prop = {0.0:prop, 1.0:prop}
+    elif not is_map(prop):
+        raise ValueError('bad property arg of type %s' % type(prop))
     else:
-        method = method.lower()
-        if method in ['lin','trilinear','barycentric','bc']: method = 'linear'
-        elif method in ['near', 'nn', 'nearest-neighbor', 'nearest_neighbor']: method = 'nearest'
-        if method != 'nearest' and method != 'linear':
-            raise ValueError('cannot understand method: %s' % method)
-    # where in each column is the 
-    q = (h > np.reshape(ks, (-1,1)))
+        prop = to_cortical_depth(prop) # convert keys to floats
+        if 0.0 not in prop or 1.0 not in prop:
+            raise ValueError("property mappings must at minimum contain white and pial layers")
+        prop = {k:promote(v) for (k,v) in six.iteritems(prop)}
+        n = prop[0.0].shape[-1]
+        for v in six.itervalues(prop):
+            if v.shape[-1] != n:
+                raise ValueError("property mappings must contain arrays whose last dims match")
+    # We now have a valid property map; convert to sorted keys and values.
+    ks = nym.argsort(list(prop.keys()))
+    vs = [prop[k] for k in ks] # Keep as a list because they may not actually have the same shapes.
+    # Get faces and barycentric coordinates and cortical depth.
+    (faces, (a,b,h)) = address_data(addr, 3, surface=surface, strict=strict)
+    # Let's promote everything together now!
+    promotions = promote(faces, a, b, h, *vs)
+    vs = promotions[4:]
+    (faces, a, b, h) = promotions[:4]
+    # Calculate the barycentric c weight.
+    c = 1.0 - a - b
+    # Now we can parse the interpolation method.
+    if method is None:
+        if is_numeric(vs[0], '>int'): method = 'linear'
+        else: method = 'heaviest'
+    else:
+        method = to_interpolation_method(method)
+        if method not in ('linear', 'heaviest'):
+            raise ValueError(f"method {method} is not supported for address interpolation")
+    # Where are the nans? (No need to raise an error: strict will have done that above.)
+    bad = nym.where(~nym.isfinite(a))[0]
+    # Add infinite boundaries to our layers for depths outside of [0,1].
+    ks = nym.cat([[-nym.inf], ks, [nym.inf]])
+    vs = [vs[0]] + vs + [v[-1]]
+    # where in each column is the height.
+    q = nym.gt(h, nym.reshape(ks, (-1,1)))
     # qs[0] is always True, qs[-1] is always False; the first False indicates h's layer
-    wh1 = np.argmin(q, axis=0) # get first occurance of False; False means h >= the layer
+    wh1 = nym.argmin(q, axis=0) # get first occurance of False; False means h >= the layer
     wh0 = wh1 - 1
     h = (h - ks[wh0]) / (ks[wh1] - ks[wh0])
     h[wh0 == 0] = 0.5
@@ -598,37 +1369,39 @@ def address_interpolate(addr, prop, method=None, surface='midgray', strict=False
     hup = (h > 0.5) # the heights above 0.5 (closer to the upper than the lower)
     # okay, figure out the actual values we use:
     vals = vs[:,faces]
-    each = np.arange(len(wh1))
-    vals = np.transpose(vals, (0,2,1))
-    lower = vals[(wh0, each)].T
-    upper = vals[(wh1, each)].T
-    if method == 'linear': vals = lower*(1 - h) + upper*h
+    each = nym.arange(len(wh1))
+    vals = nym.transpose(vals, (0,2,1))
+    lower = nym.tr(vals[(wh0, each)])
+    upper = nym.tr(vals[(wh1, each)])
+    if method == 'linear':
+        vals = lower*(1 - h) + upper*h
     else:
-        vals = np.array(lower)
         ii = h > 0.5
         vals[:,ii] = upper[:,ii]
     # make sure that we only get inf/nan values using nearest (otherwise they spread!)
-    ii = np.where(~np.isfinite(lower) & hup)
+    ii = nym.where(~nym.isfinite(lower) & hup)
     vals[ii] = upper[ii]
-    ii = np.where(~np.isfinite(upper) & ~hup)
+    ii = nym.where(~nym.isfinite(upper) & ~hup)
     vals[ii] = lower[ii]
     # now, let's interpolate across a/b/c;
     if method == 'linear':
-        w = np.asarray([a,b,c])
-        ni = np.where(~np.isfinite(vals))
+        w = nym.promote([a,b,c])
+        ni = nym.where(~nym.isfinite(vals))
         if len(ni[0]) > 0:
             w[ni] = 0
             vals[ni] = 0
-            ww = zinv(np.sum(w, axis=0))
+            ww = nym.zinv(nym.sum(w, axis=0))
             w *= ww
         else: ww = None
-        res = np.sum(vals * w, axis=0)
-        if ww is not None: res[np.isclose(ww, 0)] = null
+        res = nym.sum(vals * w, axis=0)
+        if ww is not None: res[nym.isclose(ww, 0)] = null
     else:
-        wh = np.argmax([a,b,c], axis=0)
-        res = vals[(wh, np.arange(len(wh)))]
+        wh = nym.argmax([a,b,c], axis=0)
+        res = vals[(wh, nym.arange(len(wh)))]
     if len(bad) > 0: res[bad] = null
     return res
+
+# #TODO -- code cleaning: above is mostly clean, below needs work.
 def numel(x):
     '''
     numel(x) yields the number of elements in x: the product of the shape of x.
@@ -1741,7 +2514,7 @@ def dirpath_to_list(p):
     return value filters out parts of the path that are not directories.
     '''
     if   p is None: p = []
-    elif pimms.is_str(p): p = p.split(':')
+    elif is_str(p): p = p.split(':')
     if len(p) > 0 and not pimms.is_vector(p, str):
         raise ValueError('Path is not equivalent to a list of dirs')
     return [pp for pp in p if os.path.isdir(pp)]

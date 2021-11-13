@@ -11,7 +11,20 @@ import nibabel                          as nib
 import nibabel.freesurfer.mghformat     as fsmgh
 from   functools                    import reduce
 
-from ..util import (to_affine, is_image, is_image_header, is_tuple, curry, to_hemi_str, zinv)
+from ..util import (to_affine, is_tuple, curry, to_hemi_str, zinv)
+
+def is_image(image):
+    '''
+    is_image(img) yields True if img is an instance if nibabel.dataobj_images.DataobjImage and False
+      otherwise.
+    '''
+    return isinstance(image, nib.dataobj_images.DataobjImage)
+def is_image_header(x):
+    '''
+    is_image_header(x) yields True if x is a nibabel.spatialimages.FileBasedHeader object or a 
+      nibabel.wrapstruct.LabeledWrapStruct objectand False otherwise.
+    '''
+    return isinstance(x, (nib.spatialimages.FileBasedHeader, nib.wrapstruct.LabeledWrapStruct))
 
 # handy function for getting an image header
 def to_image_header(img):
@@ -65,8 +78,8 @@ class ImageType(object):
         '''
         Parses the affine out of the given header data and yields it.
         '''
-        if 'affine' in hdat: return to_affine(hdat['affine'])
-        else:                return to_affine(self.default_affine())
+        aff = hdat.get('affine', None)
+        return to_affine(aff if aff is not None else self.default_affine())
     @classmethod
     def parse_dataobj(self, dataobj, hdat={}):
         # first, see if we have a specified shape/size
@@ -305,13 +318,19 @@ class Nifti1ImageType(ImageType):
         # qform and sform
         try:
             try: q = to_affine(d['qform'])
-            except Exception: q = to_affine(d['affine'])
+            except Exception: q = None
+            if q is None:
+                try: q = to_affine(d['affine'])
+                except Exception: q = None
             qc = d.get('qform_code', None)
             hdr.set_qform(q, qc)
         except Exception: pass
         try:
             try: s = to_affine(d['sform'])
-            except Exception: s = to_affine(d['affine'])
+            except Exception: s = None
+            if s is None:
+                try: s = to_affine(d['affine'])
+                except Exception: s = None
             sc = d.get('sform_code', None)
             hdr.set_sform(s, sc)
         except Exception: pass

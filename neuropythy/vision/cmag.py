@@ -13,7 +13,8 @@ import pyrsistent       as pyr
 from .. import geometry as geo
 from .. import mri      as mri
 
-from ..util          import (zinv, simplex_summation_matrix, curry, to_hemi_str, flattest, zdivide)
+from ..util          import (zinv, curry, to_hemi_str, flattest, zdivide)
+from ..math          import (simplex_summation_matrix)
 from .retinotopy     import (extract_retinotopy_argument, retinotopy_data, as_retinotopy,
                              retinotopic_field_sign)
 from ..geometry.util import (line_segment_intersection_2D, cartesian_to_barycentric_2D)
