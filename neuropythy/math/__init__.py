@@ -17,14 +17,20 @@ types.
 """
 
 from .core import (
+    torch, pytorch_found,
+    
     # Constants
     pi, half_pi, quarter_pi, tau, inf, nan, radperdeg, degperrad,
 
     # Utility / Setup Functions
-    pytorch, to_torchdtype, torchdtype_to_numpydtype, to_nunmpydtype, to_dtype,
-    isarray, istensor, issparse, isdense, arraylike, is_numeric,
-    clone, totensor, astensor, toarray, asarray, asdense,
+    to_torchdtype, torchdtype_to_numpydtype, to_nunmpydtype, to_dtype,
+    is_array, is_tensor, is_ndcoll, is_sparse, is_dense,
+    like_ndcoll, like_tensor, like_ndcoll, like_spares, like_dense,
+    to_array, to_tensor, to_ndcoll, to_sparse, to_dense,
+    as_array, as_tensor, as_ndcoll, as_sparse, as_dense,
+    to_readonly, as_readonly, is_readonly,
     reshape_indices, flatten_indices, unflatten_indices,
+    is_numeric, clone, shape,
 
     # Creation functions.
     zeros, ones, full, empty, rand, randn, randint, permutation,
@@ -49,21 +55,4 @@ from .core import (
     cauchy_log_prob, cauchy_prob, halfcauchy_log_prob, halfcauchy_prob, 
     laplace_log_prob, laplace_prob, exp_log_prob, exp_prob,
     gennorm_log_prob, gennorm_prob, gumbel_log_prob, gumbel_prob)
-
-# Some functions work on all objects, and we just borrow them.
-from numpy import shape
-
-pytorch_found = False
-"""boolean: Whether the `torch` module was successfully imported.
-
-If `neuropythy` was able to successfully import `torch`, then the `pytorch_found` variable will be
-set to `True`. Otherwise, it will be `False`.
-
-See also: `neuropythy.math.pytorch()`
-"""
-
-try:
-    if pytorch() is not None:
-        pytorch_found = True
-except ImportError: pass
 

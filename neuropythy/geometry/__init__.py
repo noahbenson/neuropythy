@@ -40,6 +40,11 @@ from .util import (
     point_in_prism,
     tetrahedral_barycentric_coordinates,
     prism_barycentric_coordinates)
+
+from .vset import (VertexSet, is_vset, is_mask, like_mask, to_mask, to_property, LinearSpline)
+from .lspline import (LinearSpline, is_lspline, to_lspline)
+
+
 from .mesh import (VertexSet, Tesselation, Mesh, Topology, MapProjection, Path, PathTrace,
                    mesh, is_mesh, is_flatmap,
                    tess, is_tess,

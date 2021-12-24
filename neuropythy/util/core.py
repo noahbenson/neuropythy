@@ -4,30 +4,49 @@
 # This file implements the command-line tools that are available as part of neuropythy as well as
 # a number of other random utilities.
 
-import types, inspect, atexit, shutil, tempfile, importlib, pimms, os, six, warnings
-import collections                       as colls
-import numpy                             as np
-import scipy.sparse                      as sps
-import pyrsistent                        as pyr
-import nibabel                           as nib
-import nibabel.freesurfer.mghformat      as fsmgh
-from   functools                     import reduce
+import atexit, shutil, tempfile, importlib, pimms, os, six, warnings
+import numpy        as np
+import scipy.sparse as sps
+import pyrsistent   as pyr
 
 from .. import math as nym
-
-if six.PY2: (_tuple_type, _list_type) = (types.TupleType, types.ListType)
-else:       (_tuple_type, _list_type) = (tuple, list)
-
-# Used by functions that pass arguments on to the isclose and related functions
-try:              default_rtol = inspect.getargspec(np.isclose)[3][0]
-except Exception: default_rtol = 1e-5
-try:              default_atol = inspect.getargspec(np.isclose)[3][1]
-except Exception: default_atol = 1e-8
-
-# A few functions were moved into pimms; they still appear here for compatibility
+# A few old functions were moved to pimms; they still appear here for compatibility reasons.
 from pimms import (is_tuple, is_list, is_set, is_map, is_str, curry)
 
 # Info Utilities ###################################################################################
+def is_iterable(obj, map=True, set=True, str=True):
+    """Determines if the given object is iterable.
+
+    This function can be used to determine if an object is iterable. A few
+    common types of objects, such as strings and dictionaries, may be flagged as
+    special cases using the optional parameters.
+
+    Parameters
+    ----------
+    obj : object
+        The object whose iterability is to be assessed.
+    map : boolean
+        Whether an object that is a subclass of `Mapping` is considered an
+        iterable object. The default is `True` (maps and dicts are considered
+        iterablee).
+    set : boolean
+        Whether an object that is a subclass of `set` or `frozenset` is
+        considered an iterable object. The default is `True` (sets are
+        considered iterablee).
+    str : boolean
+        Whether an object that is a subclass of `str` is considered an iterable
+        object. The default is `True` (strings are considered iterablee).
+
+    Returns
+    -------
+    boolean
+        `True` if `obj` is an iterable objects, subject to the above
+        restrictions, and `False` otherwise.
+    """
+    if not map and is_map(obj): return False
+    if not set and is_set(obj): return False
+    if not str and is_str(obj): return False
+    return hasattr(obj, '__iter__')
 def is_hemi_str(s):
     """Returns `True` if `s in ('lh', 'rh', 'lr')`, otherwise `False`.
 
@@ -84,13 +103,13 @@ def to_hemi_str(s):
     elif s in ('right', 'r',   'dh'): return 'rh'
     elif s in ('both',  'all', 'xh'): return 'lr'
     else: raise ValueError('Could not understand to_hemi_str argument: %s' % s)
-def is_cortical_depth(s):
+def is_grayheight(s):
     """Returns `True` if `s` is a float and `0 <= s <= 1`, otherwise `False`.
 
     Cortical depths are fractional float-typed values between 0 and 1. This
     function yields `True` if `s` conforms to this exact type (i.e., an int 0
     will fail where a float 0.0 will pass). To convert a value to a cortical
-    depth, use `to_cortical_depth()`. To check if something can be converted,
+    depth, use `to_grayheight()`. To check if something can be converted,
     use `like_cortical_depth()`.
 
     Parameters
@@ -104,12 +123,12 @@ def is_cortical_depth(s):
         `True` if `s` is a cortical depth and `False` if it is not.
     """
     return isinstance(s, float) and k >= 0 and k <= 1
-def like_cortical_depth(s, aliases=None):
+def like_grayheight(s, aliases=None):
     """Returns `True` if `s` can be convertd into a cortical depth.
 
     Cortical depths are fractional float-typed values between 0 and 1. This
     function yields `True` if `s` can be coerced into a cortical depth by the
-    `to_cortical_depth()` function.
+    `to_grayheight()` function.
 
     Parameters
     ----------
@@ -117,7 +136,7 @@ def like_cortical_depth(s, aliases=None):
         An object whose quality as a cortical depth is to be assessed.
     aliases : mapping or None, optional
         A set of aliases for cortical depths that should be considered. See
-        `to_cortical_depth()`.
+        `to_grayheight()`.
 
     Returns
     -------
@@ -129,16 +148,16 @@ def like_cortical_depth(s, aliases=None):
         alt = aliases.get(s, Ellipsis)
         if alt is not Ellipsis:
             # Without aliases now:
-            return like_cortical_depth(alt)
+            return like_grayheight(alt)
     # First, is this a cortical depth already?
-    if is_cortical_depth(s): return True
+    if is_grayheight(s): return True
     # Is it the name of a cortical depth?
     if is_str(s): s = s.lower()
     if s == 'pial' or s == 'midgray' or s == 'white': return True
     # Is it in the builtin alises?
-    alt = to_cortical_depth.aliases.get(s, Ellipsis)
+    alt = to_grayheight.aliases.get(s, Ellipsis)
     if alt is not Ellipsis:
-        if is_cortical_depth(alt): return alt
+        if is_grayheight(alt): return alt
         else: s = alt
     # Okay, is s a number that is between 0 and 1?
     try:
@@ -146,10 +165,10 @@ def like_cortical_depth(s, aliases=None):
         return (s <= 1 and s >= 0)
     except TypeError:
         return False
-def to_cortical_depth(s, aliases=None):
+def to_grayheight(s, aliases=None):
     """Converts an object, which may be a surface name, into a depth fraction.
     
-    `to_cortical_depth(s)` converts the argument `s` into a cortical depth
+    `to_grayheight(s)` converts the argument `s` into a cortical depth
     fraction: a real number `r` such that `0 <= r and r <= 1`. If `s` cannot be
     converted into such a fraction, raises an error. `s` can bbe converted into
     a fraction if it is already such a fraction or if it is the name of a
@@ -157,7 +176,7 @@ def to_cortical_depth(s, aliases=None):
 
     If `s` is `None`, then `0.5` is returned.
 
-    To add a new named depth, you can modify the `to_cortical_depth.aliases`
+    To add a new named depth, you can modify the `to_grayheight.aliases`
     dictionary; though note that this is always consulted after tye builtin
     aliass listed above (pial, white, and midgray), so you cannot override this
     behavior using the `aliases` dictionary. The optional parameter `aliases`,
@@ -174,7 +193,7 @@ def to_cortical_depth(s, aliases=None):
 
         Optionally, `s` may be a mapping whose keys are a cortical-depth-like
         objects, in which case `s` is converted into an identical dictionary
-        whose keys have all been transformed by the `to_cortical_depth()`
+        whose keys have all been transformed by the `to_grayheight()`
         function. Named keys always overwrite duplicate numerical keys in this
         case.
     aliases : mapping or None, optional
@@ -191,7 +210,7 @@ def to_cortical_depth(s, aliases=None):
         the white-matter boundary of cortex and 1 represents the pial or
         gray-matter boundary of cortex. The return value is a mapping if the
         input `s` is also a mapping: the return value in this case represents
-        the input after `to_cortical_depth()` has been called its keys.
+        the input after `to_grayheight()` has been called its keys.
 
     Raises
     ------
@@ -206,14 +225,14 @@ def to_cortical_depth(s, aliases=None):
             d = s
             for (k,v) in six.iteritems(s):
                 if not isinstance(k, float) or k < 0 or k < 1:
-                    newk = to_cortical_depth(k, aliases=aliases)
+                    newk = to_grayheight(k, aliases=aliases)
                     d = d.remove(k).set(newk, v)
             return d
         elif pimms.is_lmap(s):
             d = s
             for k in six.iterkeys(s):
                 if not isinstance(k, float) or k < 0 or k < 1:
-                    newk = to_cortical_depth(k, aliases=aliases)
+                    newk = to_grayheight(k, aliases=aliases)
                     if s.is_lazy(k):
                         d = d.remove(k).set(newk, s.lazyfn(k))
                     else:
@@ -222,8 +241,8 @@ def to_cortical_depth(s, aliases=None):
         else:
             d = s.copy()
             for (k,v) in six.iteritems(s):
-                if not is_cortical_depth(s):
-                    newk = to_cortical_depth(k, aliases=aliases)
+                if not is_grayheight(s):
+                    newk = to_grayheight(k, aliases=aliases)
                     del d[k]
                     d[newk] = v
             return d
@@ -231,18 +250,18 @@ def to_cortical_depth(s, aliases=None):
     # check aliases, which overrides all other behavior.
     if aliases is not None:
         ss = aliases.get(s, Ellipsis)
-        if ss is not Ellipsis: return to_cortical_depth(ss) # Omit aliases this time.
+        if ss is not Ellipsis: return to_grayheight(ss) # Omit aliases this time.
     # If it is a cortical depth, return it.
-    if is_cortical_depth(s): return s
+    if is_grayheight(s): return s
     # Check the global aliases.
     if is_str(s): s = s.lower()
     if   s == 'pial':    return 1.0
     elif s == 'midgray': return 0.5
     elif s == 'white':   return 0.0
     # Is it in the builtin alises?
-    alt = to_cortical_depth.aliases.get(s, Ellipsis)
+    alt = to_grayheight.aliases.get(s, Ellipsis)
     if alt is not Ellipsis:
-        if is_cortical_depth(alt): return alt
+        if is_grayheight(alt): return alt
         else: s = alt
     # Okay, is s a number that is between 0 and 1?
     try:
@@ -250,7 +269,7 @@ def to_cortical_depth(s, aliases=None):
         if (s <= 1 and s >= 0): return s
     except TypeError: pass
     raise ValueError(f"cannot interpret argument as a cortical depth: {s}")
-to_cortical_depth.aliases = {}
+to_grayheight.aliases = {}
 def is_interpolation_method(s):
     """Returns `True` if `s` is an interpolation method name, otherwise `False`.
 
@@ -410,7 +429,7 @@ class ObjectWithMetaData(object):
     Parameters
     ----------
     meta_data : dict or None
-        A mapping of meta-data keys to values
+        A mapping of meta-data keys to values.
 
     Attributes
     ----------
@@ -592,6 +611,24 @@ class ObjectWithMetaData(object):
             If the parameters could not hydrate an object of the given type.
         """
         return self(**params)
+def is_metaobj(obj):
+    """Determines if an object is an `ObjectWithMtaData` or not.
+    
+    `is_metaobj(obj)` returns `True` if `obj` is an immutable object that can
+    have meta-data and `False` otherwise. This function is essentially an alias
+    for `isinstance(obj, ObjectWithMetaData)`.
+
+    Parameters
+    ----------
+    obj : object
+        The object whose quality as an `ObjectWithMetaData` is to be assessed.
+
+    Returns
+    -------
+    boolean
+        `True` if `obj` is an `ObjectWithMetaData` and `False` otherwise.
+    """
+    return isinstance(obj, ObjectWithMetaData)
 def normalize(data):
     """Converts an object into a JSON-friendly normalized dscription object.
     
@@ -1068,1413 +1105,73 @@ def auto_dict(ival=None, miss=None):
     elif miss == set([]): d.on_miss = lambda:set([])
     else: d.on_miss = miss
     return d
-
-# Address Functions ################################################################################
-def is_address(data, check_values=False):
-    """Determines if the argument contains valid neuropythy address data.
-
-    `is_address(data)` returns `True` if `data` is a valid address dict for
-    addressing positions on a mesh or in a (3D) cortical sheet and returnsp
-    `False` otherwise. In order to be a valid address dict, `data` must be a
-    mapping object and must contain the keys `'faces'` and `'coordinates'`. The
-    key `'faces'` must be mapped to a 3D vector or 3D matrix of integers (mesh
-    vertex labels), and the key `'coordinates'` must be mapped to a 2D or 3D
-    matrix of real numbers (barycentric coordinates with an optional depth
-    coordinate for 3D cortical sheets).
-
-    In order to be considered 2D or 3D, a matrix must have 2 or 3 rows,
-    respectively (not 2 or 3 columns).
-
-    Parameters
-    ----------
-    data : object
-        An object whose quality as a set of address data is to be assessed.
-    check_values : boolean, optional
-        Whether or not to check that the values of the `data` mapping adhere to
-        the address data format as well as the keys. The default behavior
-        (`check_values=False`) does not require that the values be matrices of
-        the appropriate shape and type. If this parameter is set to `True`,
-        these checks will be carried out.
-
-    Returns
-    -------
-    boolean
-        `True` if `data` contains valid neuropythy address data and `False`
-        otherwise.
-    """
-    if not (is_map(data) and 'faces' in data and 'coordinates' in data):
-        return False
-    if check_values:
-        # We need to check the value shapes.
-        faces = data['faces']
-        coords = data['coords']
-        fsh = nym.shape(faces)
-        csh = nym.shape(coords)
-        if not arraylike(faces, dtype='int', ndims=2): return False
-        if not arraylike(coords, dtype='float', ndims=2): return False
-        if fsh[0] != 3: return False
-        if csh[0] != 2 and csh[0] != 3: return False
-        if csh[1] != fsh[1]: return False
-    return True
-def address_data(data, dims=None, surface=0.5, strict=True):
-    """Extracts the `(faces, coordinates)` from an address data dict.
-
-    `address_data(data)` returns the tuple `(faces, coords)` of the address data
-    where both faces and coords are guaranteed to be numpy arrays with sizes
-    (`3`x`n`) and (`d`x`n`). If the data are not valid as an address, then an
-    error is raised. If the address is empty, this returns `(None, None)`.
-
-    Parameters
-    ----------
-    data : an address data mapping (see `is_address()`)
-        An address data mapping whose face and coordinate matrices are being
-        extracted.
-    dims : 2 or 3 or None, optional
-        The dimensionality requested of the output coordinate matrix. If the
-        address data is not the requested dimensionality, then the depth
-        dimension is truncated (in the case `dims=2`), or the value of `surface`
-        (see below) is appended to all columns (in the case that `dims=3`). If
-        `dims` is `None` (the default), then no change is made to the
-        coordinates.
-    surface : real number in [0,1], optional
-        The depth value to append to the columns of the coordinates matrix in
-        the case that 3D coordinates are requested but only 2D coordinates are
-        available. In such a case, positions in the 2D triangle surface mesh are
-        encoded in the address data, but the depth is not, so an arbitrary depth
-        must be chosen. The depth must be a real number between 0 and 1 with 0
-        representing the white-matter surface of cortex and 1 representing the
-        pial surface. The aliases `'pial'`, `'white'`, and `'midgray'` can be
-        used as aliases for `1`, `0`, and `0.5`, respectively. The default value
-        is `0.5`.
-    strict : boolean, optional
-        Whether to rraise an error when there are non-finite values found in the
-        faces or the coordinates matrices. These values are usually indicative
-        of an attempt to address a point that was not inside the mesh/cortex.
-        The default is `True`, which does not suppress errors. To suppress these
-        errors use `strict=False`.
-
-    Returns
-    -------
-    2-tuple of numpy.ndarray matrices
-        The `(faces, coordinates)` matrices are returned as aa 2-tuple. The
-        `faces` matrix is a `3`x`n` integer matrix whose columns are the mesh
-        vertex labels of the corners of each triangle represented in the address
-        data, and the `coordinates` matrix is a `2`x`n` or `3`x`n` real-valued
-        matrix whose columns are the barycentric coordinates of the represented
-        point in the associated triangle from `faces` and (optionally) the
-        cortical depth fraction if the `coordinates` matrix has 3 rows.
-
-    Raises
-    ------
-    ValueError
-        If `data` is not a valid address data mapping.
-    """
-    if data is None: return (None, None)
-    if not is_address(data, check_values=False): # We're gonna recheck the values.
-        raise ValueError('argument is not a valid address data mapping')
-    faces = promote(data['faces'])
-    coords = promote(data['coordinates'])
-    if len(faces.shape) > 2 or len(coords.shape) > 2:
-        raise ValueError('address data contained high-dimensional arrays')
-    if len(faces.shape) != len(coords.shape):
-        raise ValueError('address data faces and coordinates are different shapes')
-    if faces.shape[1:] != coordinates.shape[1:]:
-        raise ValueError('address data faces and coordinates have different column counts')
-    if faces.shape[0] != 3:
-        raise ValueError('address contains a face matrix whose first dimension is not 3')
-    if coords.shape[0] not in (2,3):
-        raise ValueError('address coords are neither 2D nor 3D')
-    if len(faces.shape) == 2 and faces.shape[1] == 0:
-        return (None, None)
-    if dims is None: dims = coords.shape[0]
-    elif coords.shape[0] != dims:
-        if dims == 2: coords = coords[:2]
-        else:
-            if surface is None:
-                raise ValueError('address data must be 3D but 2D data was found')
-            elif is_str(surface):
-                surface = surface.lower()
-                if surface == 'pial': surface = 1
-                elif surface == 'white': surface = 0
-                elif surface in ('midgray', 'mid', 'middle'): surface = 0.5
-                else: raise ValueError('unrecognized surface name: ' + surface)
-            if not pimms.is_real(surface) or surface < 0 or surface > 1:
-                raise ValueError('surface must be a real number in [0,1]')
-            coords = nym.cat([coords, nym.full((1, coords.shape[1]), surface)])
-    if strict:
-        cnans = nym.logical_not(nym.isfinite(coords))
-        if nym.sum(cnans) > 0:
-            w = nym.where(cnans)
-            if len(w[0]) > 10:
-                raise ValueError('address contains %d non-finite coords' % len(w[0]))
-            else:
-                raise ValueError('address contains %d non-finite coords (%s)' % (len(w),w))
-        fnans = nym.logical_not(nym.isfinite(faces))
-        if nym.sum(fnans) > 0:
-            w = np.where(fnans)
-            if len(w[0]) > 10:
-                raise ValueError('address contains %d non-finite faces' % len(w[0]))
-            else:
-                raise ValueError('address contains %d non-finite faces (%s)' % (len(w[0]),w))
-    return (faces, coords)
-def address_interpolate(addr, prop, method=None, surface='midgray',
-                        strict=False, null=np.nan, index=None):
-    """Interpolates a property at a set of points specified using address data.
-
-    `address_interpolate(addr, prop)` returns the result of interpolating the
-    given property prop at points that are specified by the given addresses. If
-    addr contains 3D addresses and prop is a map of layer values from 0 to 1
-    (e.g., `{0:white_prop, 0.5:midgray_prop, 1:pial_prop}`), then the addresses
-    are respect and are interpolated from the appropriate layers.
-
-    The address data `addr` is related too the property `prop` in that the
-    vertex labels in the cells of the `'faces'` matrix of the address data
-    correspond to a cell in the `prop` vector (or in each of `prop`'s columns,
-    if prop is a dictionary of vectors). In other words, the address data must
-    have been calculated from the set of points at which we are
-    interpolating---in most interpolation function this set of points (or this
-    topology/mesh object) is required, but `addr` suffices here.
-
-    If the `prop` and `addr` data comes from a flatmap or a submesh of a full
-    mesh or topology object, then the vertex labels in the `addr` data will not
-    be correct indices into the `prop` data. In this case, an index is needed,
-    and either the flatmap's/submesh's `tess` attribute or its `tess.index` may
-    be given as an opotional parameter in this case.
-
-    Parameters
-    ----------
-    addr : address data dict
-        The dictionary of address data (see `is_address` and `address_data`)
-        that represents the points at which the property is to be interpolated.
-    prop : array-like or mapping
-        The property to be interpolated onto the points encoded by `addr`. This
-        must be an array-like object (a `numpy` array, `torch` tensor, or
-        something that can be converted into these types) whose last dimension
-        is equivalent to the number of vertices in the mesh from which
-        interpolation occurs (i.e., the mesh on which the `addr` address data
-        were calculated) or a mapping whose values are all such array-like
-        objects and whose keys are cortical depths or are like cortical depths
-        (see `is_cortical_depth()` and `like_cortical_depth()`). When `prop` is
-        a mapping, the interpolation occurs either at the depths specified in
-        the `addr` data or at the depth specified by the `surface` argument,
-        which must be like a cortical depth also, if no depth is encoded in
-        `addr`.
-    method : interpolation method-like, optional
-        The interpolation method to use, which may be any value that, when
-        filtered by the `to_interpolation_method()` function results in either
-        `'heaviest'` or `'linear'` interpolations. The `'heaviest'`
-        interpolation method is similar to nearest-neighbor interpolation except
-        that it always chooses the nearest mesh vertex of a point from among the
-        corners of the triangle containing the point whereas true
-        nearest-neighbor interpolation might pick a closer vertex of a
-        neighboring triangle. Linear interpolation interpolated linearly within
-        the triangle containing the point. True nearest-neighbor interpolation
-        is not possible using this function (the data necessary to perform such
-        interpolation is not provided to this function). For true
-        nearest-neighbor interpolation you must use a mesh's `interpolate()`
-        method. If `None` is given (the default), then `'linear'` is used for
-        all real and complex (inexact) numbers and `'heaviest'` is used for all
-        others.
-    surface : cortical-depth-like, optional
-        If the `addr` data do not contain informatioon about cortical depth and
-        the `prop` data contain property data for multiple cortical layers,
-        including, at minimum, 0.0 and 1.0, then the depth at which
-        interpolation occurs is providd by `to_cortical_depth(surface)`. The
-        default value is `midgray`.
-    strict : boolean, optional
-        If `True`, an error is raised if any address coordinates have non-finite
-        values (i.e., were "out-in-region" values); otherwise the associated
-        interpolated values are silently set to `null`. The default is `False`.
-    null : object, optional
-        The value given to any "out-of-region" value found in the addresses if
-        `strict` is `False`. The default is `nan`.
-    index : Index or Tesselation, optional
-        If the addresses werer calculated in reference to a mesh that is a
-        flatmap or submesh of another mesh, then the vertex labels in the `addr`
-        data's `'faces'` matrix will not match up to the `prop` dimensions. In
-        this case, `index` may be the `Tesselation` object or the tesselation's
-        `Index` object, allowing `address_interpolate()` to translate from
-        vertex labels to vertex indices. The default, `None`, results in no
-        translaction, meaning that `prop` must be from a mesh that has not been
-        subsampled.
-
-    Returns
-    -------
-    array-like
-        An array or tensor of values interpolated from the given properrties
-        (`prop`) onto the points encoded in the given address data (`addr`).
-
-    Raises
-    ------
-    ValueError
-        If any of the arguments cannot be interpreted as matching their required
-        types or forms.
-    """
-    # Argument Parsing #############################################################################
-    # Parse the index, if any.
-    if index is not None:
-        from neuropythy.geometry import (is_tess, is_mesh, is_topo)
-        if   is_mesh(index): index = index.tess
-        elif is_topo(index): index = index.tess
-        if is_tess(index): index = index.index
-        faces = index(faces)
-    # Parse the properties into an array of depths and a list of the properties at those depths.
-    if nym.arraylike(prop, shape=(-1,Ellipsis)):
-        prop = promote(prop)
-        n = prop.shape[-1]
-        prop = {0.0:prop, 1.0:prop}
-    elif not is_map(prop):
-        raise ValueError('bad property arg of type %s' % type(prop))
-    else:
-        prop = to_cortical_depth(prop) # convert keys to floats
-        if 0.0 not in prop or 1.0 not in prop:
-            raise ValueError("property mappings must at minimum contain white and pial layers")
-        prop = {k:promote(v) for (k,v) in six.iteritems(prop)}
-        n = prop[0.0].shape[-1]
-        for v in six.itervalues(prop):
-            if v.shape[-1] != n:
-                raise ValueError("property mappings must contain arrays whose last dims match")
-    # We now have a valid property map; convert to sorted keys and values.
-    ks = nym.argsort(list(prop.keys()))
-    vs = [prop[k] for k in ks] # Keep as a list because they may not actually have the same shapes.
-    # Get faces and barycentric coordinates and cortical depth.
-    (faces, (a,b,h)) = address_data(addr, 3, surface=surface, strict=strict)
-    # Let's promote everything together now!
-    promotions = promote(faces, a, b, h, *vs)
-    vs = promotions[4:]
-    (faces, a, b, h) = promotions[:4]
-    # Calculate the barycentric c weight.
-    c = 1.0 - a - b
-    # Now we can parse the interpolation method.
-    if method is None:
-        if is_numeric(vs[0], '>int'): method = 'linear'
-        else: method = 'heaviest'
-    else:
-        method = to_interpolation_method(method)
-        if method not in ('linear', 'heaviest'):
-            raise ValueError(f"method {method} is not supported for address interpolation")
-    # Where are the nans? (No need to raise an error: strict will have done that above.)
-    bad = nym.where(~nym.isfinite(a))[0]
-    # Add infinite boundaries to our layers for depths outside of [0,1].
-    ks = nym.cat([[-nym.inf], ks, [nym.inf]])
-    vs = [vs[0]] + vs + [v[-1]]
-    # where in each column is the height.
-    q = nym.gt(h, nym.reshape(ks, (-1,1)))
-    # qs[0] is always True, qs[-1] is always False; the first False indicates h's layer
-    wh1 = nym.argmin(q, axis=0) # get first occurance of False; False means h >= the layer
-    wh0 = wh1 - 1
-    h = (h - ks[wh0]) / (ks[wh1] - ks[wh0])
-    h[wh0 == 0] = 0.5
-    h[wh1 == (len(ks) - 1)] = 0.5
-    hup = (h > 0.5) # the heights above 0.5 (closer to the upper than the lower)
-    # okay, figure out the actual values we use:
-    vals = vs[:,faces]
-    each = nym.arange(len(wh1))
-    vals = nym.transpose(vals, (0,2,1))
-    lower = nym.tr(vals[(wh0, each)])
-    upper = nym.tr(vals[(wh1, each)])
-    if method == 'linear':
-        vals = lower*(1 - h) + upper*h
-    else:
-        ii = h > 0.5
-        vals[:,ii] = upper[:,ii]
-    # make sure that we only get inf/nan values using nearest (otherwise they spread!)
-    ii = nym.where(~nym.isfinite(lower) & hup)
-    vals[ii] = upper[ii]
-    ii = nym.where(~nym.isfinite(upper) & ~hup)
-    vals[ii] = lower[ii]
-    # now, let's interpolate across a/b/c;
-    if method == 'linear':
-        w = nym.promote([a,b,c])
-        ni = nym.where(~nym.isfinite(vals))
-        if len(ni[0]) > 0:
-            w[ni] = 0
-            vals[ni] = 0
-            ww = nym.zinv(nym.sum(w, axis=0))
-            w *= ww
-        else: ww = None
-        res = nym.sum(vals * w, axis=0)
-        if ww is not None: res[nym.isclose(ww, 0)] = null
-    else:
-        wh = nym.argmax([a,b,c], axis=0)
-        res = vals[(wh, nym.arange(len(wh)))]
-    if len(bad) > 0: res[bad] = null
-    return res
-
-# #TODO -- code cleaning: above is mostly clean, below needs work.
-def numel(x):
-    '''
-    numel(x) yields the number of elements in x: the product of the shape of x.
-    '''
-    return int(np.prod(np.shape(x)))
-def rows(x):
-    '''
-    rows(x) yields the number of rows in x; if x is a scalar, this is still 1.
-    '''
-    s = np.shape(x)
-    return s[0] if len(s) > 0 else 1
-def check_sparsity(x, fraction=0.6):
-    '''
-    check_sparsity(x) yields either x or an array equivalent to x with a different sparsity based on
-      a heuristic: if x is a sparse array with more than 60% of its elements specified, it is made
-      dense; otherwise, it is left alone.
-
-    The optional argument fraction (default 0.6) specifies the fraction of elements that must be
-    specified in the array for it to be un-sparsified.
-    '''
-    if not sps.issparse(x): return x
-    n = numel(x)
-    if n == 0: return x
-    if len(x.data) / float(x) > 0.6: return x.toarray()
-    else: return x
-def unbroadcast(a, b):
-    '''
-    unbroadcast(a, b) yields a tuple (aa, bb) that is equivalent to (a, b) except that aa and bb
-      have been reshaped such that arithmetic numpy operations such as aa * bb will result in
-      row-wise operation instead of column-wise broadcasting.
-    '''
-    # they could be sparse:
-    spa = sps.issparse(a)
-    spb = sps.issparse(b)
-    if   spa and spb: return (a,b)
-    elif spa or  spb:
-        def fix(sp,nm):
-            nm = np.asarray(nm)
-            dnm = len(nm.shape)
-            nnm = np.prod(nm.shape)
-            # if we have (sparse matrix) * (high-dim array), unbroadcast the dense array
-            if   dnm == 0: return (sp, np.reshape(nm, (1,   1)))
-            elif dnm == 1: return (sp, np.reshape(nm, (nnm, 1)))
-            elif dnm == 2: return (sp, nm)
-            else:          return unbroadcast(sp.toarray(), nm)
-        return fix(a, b) if spa else tuple(reversed(fix(b, a)))
-    # okay, no sparse matrices found:
-    a = np.asarray(a)
-    b = np.asarray(b)
-    da = len(a.shape)
-    db = len(b.shape)
-    if   da > db: return (a, np.reshape(b, b.shape + tuple(np.ones(da-db, dtype=np.int))))
-    elif da < db: return (np.reshape(a, a.shape + tuple(np.ones(db-da, dtype=np.int))), b)
-    else:         return (a, b)
-def cplus(*args):
-    '''
-    cplus(a, b...) returns the sum of all the values as a numpy array object. Like numpy's add
-      function or a+b syntax, plus will thread over the latest dimension possible.
-
-    Additionally, cplus works correctly with sparse arrays.
-    '''
-    n = len(args)
-    if   n == 0: return np.asarray(0)
-    elif n == 1: return np.asarray(args[0])
-    elif n >  2: return reduce(plus, args)
-    (a,b) = args
-    if sps.issparse(a):
-        if not sps.issparse(b):
-            b = np.asarray(b)
-            if len(b.shape) == 0: b = np.reshape(b, (1,1))
-    elif sps.issparse(b):
-        a = np.asarray(a)
-        if len(a.shape) == 0: a = np.reshape(a, (1,1))
-    else:
-        a = np.asarray(a)
-        b = np.asarray(b)
-    return a + b
-def plus(*args):
-    '''
-    plus(a, b...) returns the sum of all the values as a numpy array object. Unlike numpy's add
-      function or a+b syntax, plus will thread over the earliest dimension possible; thus if a.shape
-      a.shape is (4,2) and b.shape is 4, plus(a,b) is a equivalent to
-      [ai+bi for (ai,bi) in zip(a,b)].
-    '''
-    n = len(args)
-    if   n == 0: return np.asarray(0)
-    elif n == 1: return np.asarray(args[0])
-    elif n >  2: return reduce(plus, args)
-    (a,b) = unbroadcast(*args)
-    return a + b
-def cminus(a, b):
-    '''
-    cminus(a, b) returns the difference a - b as a numpy array object. Like numpy's subtract
-      function or a - b syntax, minus will thread over the latest dimension possible.
-    '''
-    # adding/subtracting a constant to/from a sparse array is an error...
-    spa = sps.issparse(a)
-    spb = sps.issparse(b)
-    if not spa: a = np.asarray(a)
-    if not spb: b = np.asarray(b)
-    if   spa: b = np.reshape(b, (1,1)) if len(np.shape(b)) == 0 else b
-    elif spb: a = np.reshape(a, (1,1)) if len(np.shape(a)) == 0 else a
-    return a - b
-def minus(a, b):
-    '''
-    minus(a, b) returns the difference a - b as a numpy array object. Unlike numpy's subtract
-      function or a - b syntax, minus will thread over the earliest dimension possible; thus if
-      a.shape is (4,2) and b.shape is 4, a - b is a equivalent to [ai-bi for (ai,bi) in zip(a,b)].
-    '''
-    (a,b) = unbroadcast(a,b)
-    return a - b
-def ctimes(*args):
-    '''
-    ctimes(a, b...) returns the product of all the values as a numpy array object. Like numpy's
-      multiply function or a*b syntax, times will thread over the latest dimension possible; thus
-      if a.shape is (4,2) and b.shape is 2, times(a,b) is a equivalent to a * b.
-
-    Unlike numpy's multiply function, ctimes works with sparse matrices and will reify them.
-    '''
-    n = len(args)
-    if   n == 0: return np.asarray(0)
-    elif n == 1: return np.asarray(args[0])
-    elif n >  2: return reduce(plus, args)
-    (a,b) = args
-    if   sps.issparse(a): return a.multiply(b)
-    elif sps.issparse(b): return b.multiply(a)
-    else:                 return np.asarray(a) * b
-def times(*args):
-    '''
-    times(a, b...) returns the product of all the values as a numpy array object. Unlike numpy's
-      multiply function or a*b syntax, times will thread over the earliest dimension possible; thus
-      if a.shape is (4,2) and b.shape is 4, times(a,b) is a equivalent to
-      [ai*bi for (ai,bi) in zip(a,b)].
-    '''
-    n = len(args)
-    if   n == 0: return np.asarray(0)
-    elif n == 1: return np.asarray(args[0])
-    elif n >  2: return reduce(plus, args)
-    (a,b) = unbroadcast(*args)
-    if   sps.issparse(a): return a.multiply(b)
-    elif sps.issparse(b): return b.multiply(a)
-    else:                 return a * b
-def inv(x):
-    '''
-    inv(x) yields the inverse of x, 1/x.
-
-    Note that inv supports sparse matrices, but it is forced to reify them. Additionally, because
-    inv raises an error on divide-by-zero, they are unlikely to work. For better sparse-matrix
-    support, see zinv.
-    '''
-    if sps.issparse(x): return 1.0 / x.toarray()        
-    else:               return 1.0 / np.asarray(x)
-def zinv(x, null=0):
-    '''
-    zinv(x) yields 1/x if x is not close to 0 and 0 otherwise. Automatically threads over arrays and
-      supports sparse-arrays.
-
-    The optional argument null (default: 0) may be given to specify that zeros in the arary x should
-    instead be replaced with the given value. Note that if this value is not equal to 0, then any
-    sparse array passed to zinv must be reified.
-
-    The zinv function never raises an error due to divide-by-zero; if you desire this behavior, use
-    the inv function instead.
-    '''
-    if sps.issparse(x):
-        if null != 0: return zinv(x.toarray(), null=null)
-        x = x.copy()
-        x.data = zinv(x.data)
-        try: x.eliminate_zeros()
-        except Exception: pass
-        return x
-    else:
-        x = np.asarray(x)
-        z = np.isclose(x, 0)
-        r = np.logical_not(z) / (x + z)
-        if null == 0: return r
-        r[z] = null
-        return r
-def cdivide(a, b):
-    '''
-    cdivide(a, b) returns the quotient a / b as a numpy array object. Like numpy's divide function
-      or a/b syntax, divide will thread over the latest dimension possible. Unlike numpy's divide,
-      cdivide works with sparse matrices.
-
-    Note that warnings/errors are raised by this function when divide-by-zero occurs, so it is
-    usually not useful to use cdivide() with sparse matrices--see czdivide instead.
-    '''
-    if   sps.issparse(a): return a.multiply(inv(b))
-    elif sps.issparse(b): return np.asarray(a) / b.toarray()
-    else:                 return np.asarray(a) / np.asarray(b)
-def divide(a, b):
-    '''
-    divide(a, b) returns the quotient a / b as a numpy array object. Unlike numpy's divide function
-      or a/b syntax, divide will thread over the earliest dimension possible; thus if a.shape is
-      (4,2) and b.shape is 4, divide(a,b) is a equivalent to [ai/bi for (ai,bi) in zip(a,b)].
-
-    Note that divide(a,b) supports sparse array arguments, but if b is a sparse matrix, then it will
-    be reified. Additionally, errors are raised by this function when divide-by-zero occurs, so it
-    is usually not useful to use divide() with sparse matrices--see zdivide instead.
-    '''
-    (a,b) = unbroadcast(a,b)
-    return cdivide(a,b)
-def czdivide(a, b, null=0):
-    '''
-    czdivide(a, b) returns the quotient a / b as a numpy array object. Like numpy's divide function
-      or a/b syntax, czdivide will thread over the latest dimension possible. Unlike numpy's divide,
-      czdivide works with sparse matrices. Additionally, czdivide multiplies a by the zinv of b, so
-      divide-by-zero entries are replaced with 0 in the result.
-
-    The optional argument null (default: 0) may be given to specify that zeros in the arary b should
-    instead be replaced with the given value in the result. Note that if this value is not equal to
-    0, then any sparse array passed as argument b must be reified.
-
-    The czdivide function never raises an error due to divide-by-zero; if you desire this behavior,
-    use the cdivide function instead.
-    '''
-    if null == 0:         return a.multiply(zinv(b)) if sps.issparse(a) else a * zinv(b)
-    elif sps.issparse(b): b = b.toarray()
-    else:                 b = np.asarray(b)
-    z = np.isclose(b, 0)
-    q = np.logical_not(z)
-    zi = q / (b + z)
-    if sps.issparse(a):
-        r = a.multiply(zi).tocsr()
-    else:
-        r = np.asarray(a) * zi
-    r[np.ones(a.shape, dtype=np.bool)*z] = null
-    return r
-def zdivide(a, b, null=0):
-    '''
-    zdivide(a, b) returns the quotient a / b as a numpy array object. Unlike numpy's divide function
-      or a/b syntax, zdivide will thread over the earliest dimension possible; thus if a.shape is
-      (4,2) and b.shape is 4, zdivide(a,b) is a equivalent to [ai*zinv(bi) for (ai,bi) in zip(a,b)].
-
-    The optional argument null (default: 0) may be given to specify that zeros in the arary b should
-    instead be replaced with the given value in the result. Note that if this value is not equal to
-    0, then any sparse array passed as argument b must be reified.
-
-    The zdivide function never raises an error due to divide-by-zero; if you desire this behavior,
-    use the divide function instead.
-
-    Note that zdivide(a,b, null=z) is not quite equivalent to a*zinv(b, null=z) unless z is 0; if z
-    is not zero, then the same elements that are zet to z in zinv(b, null=z) are set to z in the
-    result of zdivide(a,b, null=z) rather than the equivalent element of a times z.
-    '''
-    (a,b) = unbroadcast(a,b)
-    return czdivide(a,b, null=null)
-def cpower(a,b):
-    '''
-    cpower(a,b) is equivalent to a**b except that it also operates over sparse arrays; though it
-    must reify them to do so.
-    '''
-    if sps.issparse(a): a = a.toarray()
-    if sps.issparse(b): b = b.toarray()
-    return a ** b
-hpi    = np.pi / 2
-tau    = 2 * np.pi
-negpi  = -np.pi
-neghpi = -hpi
-negtau = -tau
-def power(a,b):
-    '''
-    power(a,b) is equivalent to a**b except that, like the neuropythy.util.times function, it
-      threads over the earliest dimension possible rather than the latest, as numpy's power function
-      and ** syntax do. The power() function also works with sparse arrays; though it must reify
-      them during the process.
-    '''
-    (a,b) = unbroadcast(a,b)
-    return cpower(a,b)
-def inner(a,b):
-    '''
-    inner(a,b) yields the dot product of a and b, doing so in a fashion that respects sparse
-      matrices when encountered. This does not error check for bad dimensionality.
-
-    If a or b are constants, then the result is just the a*b; if a and b are both vectors or both
-    matrices, then the inner product is dot(a,b); if a is a vector and b is a matrix, this is
-    equivalent to as if a were a matrix with 1 row; and if a is a matrix and b a vector, this is
-    equivalent to as if b were a matrix with 1 column.
-    '''
-    if   sps.issparse(a): return a.dot(b)
-    else: a = np.asarray(a)
-    if len(a.shape) == 0: return a*b
-    if sps.issparse(b):
-        if len(a.shape) == 1: return b.T.dot(a)
-        else:                 return b.T.dot(a.T).T
-    else: b = np.asarray(b)
-    if len(b.shape) == 0: return a*b
-    if len(a.shape) == 1 and len(b.shape) == 2: return np.dot(b.T, a)
-    else: return np.dot(a,b)
-def sine(x):
-    '''
-    sine(x) is equivalent to sin(x) except that it also works on sparse arrays.
-    '''
-    if sps.issparse(x):
-        x = x.copy()
-        x.data = np.sine(x.data)
-        return x
-    else: return np.sin(x)
-def cosine(x):
-    '''
-    cosine(x) is equivalent to cos(x) except that it also works on sparse arrays.
-    '''
-    # cos(0) = 1 so no point in keeping these sparse
-    if sps.issparse(x): x = x.toarray(x)
-    return np.cos(x)
-def tangent(x, null=(-np.inf, np.inf), rtol=default_rtol, atol=default_atol):
-    '''
-    tangent(x) is equivalent to tan(x) except that it also works on sparse arrays.
-
-    The optional argument null (default, (-numpy.inf, numpy.inf)) may be specified to indicate what
-    value(s) should be assigned when x == -pi/2 or -pi/2. If only one number is given, then it is
-    used for both values; otherwise the first value corresponds to -pi/2 and the second to pi/2.
-    A value of x is considered to be equal to one of these valids based on numpy.isclose. The
-    optional arguments rtol and atol are passed along to isclose. If null is None, then no
-    replacement is performed.
-    '''
-    if sps.issparse(x):
-        x = x.copy()
-        x.data = tangent(x.data, null=null, rtol=rtol, atol=atol)
-        return x
-    else: x = np.asarray(x)
-    if rtol is None: rtol = default_rtol
-    if atol is None: atol = default_atol
-    try:    (nln,nlp) = null
-    except Exception: (nln,nlp) = (null,null)
-    x = np.mod(x + pi, tau) - pi
-    ii = None if nln is None else np.where(np.isclose(x, neghpi, rtol=rtol, atol=atol))
-    jj = None if nlp is None else np.where(np.isclose(x, hpi,    rtol=rtol, atol=atol))
-    x = np.tan(x)
-    if ii: x[ii] = nln
-    if jj: x[jj] = nlp
-    return x
-def cotangent(x, null=(-np.inf, np.inf), rtol=default_rtol, atol=default_atol):
-    '''
-    cotangent(x) is equivalent to cot(x) except that it also works on sparse arrays.
-
-    The optional argument null (default, (-numpy.inf, numpy.inf)) may be specified to indicate what
-    value(s) should be assigned when x == 0 or pi. If only one number is given, then it is used for
-    both values; otherwise the first value corresponds to 0 and the second to pi.  A value of x is
-    considered to be equal to one of these valids based on numpy.isclose. The optional arguments
-    rtol and atol are passed along to isclose. If null is None, then no replacement is performed.
-    '''
-    if sps.issparse(x): x = x.toarray()
-    else:               x = np.asarray(x)
-    if rtol is None: rtol = default_rtol
-    if atol is None: atol = default_atol
-    try:    (nln,nlp) = null
-    except Exception: (nln,nlp) = (null,null)
-    x = np.mod(x + hpi, tau) - hpi
-    ii = None if nln is None else np.where(np.isclose(x, 0,  rtol=rtol, atol=atol))
-    jj = None if nlp is None else np.where(np.isclose(x, pi, rtol=rtol, atol=atol))
-    x = np.tan(x)
-    if ii: x[ii] = 1
-    if jj: x[jj] = 1
-    x = 1.0 / x
-    if ii: x[ii] = nln
-    if jj: x[jj] = nlp
-    return x
-def secant(x, null=(-np.inf, np.inf), rtol=default_rtol, atol=default_atol):
-    '''
-    secant(x) is equivalent to 1/sin(x) except that it also works on sparse arrays.
-
-    The optional argument null (default, (-numpy.inf, numpy.inf)) may be specified to indicate what
-    value(s) should be assigned when x == -pi/2 or -pi/2. If only one number is given, then it is
-    used for both values; otherwise the first value corresponds to -pi/2 and the second to pi/2.
-    A value of x is considered to be equal to one of these valids based on numpy.isclose. The
-    optional arguments rtol and atol are passed along to isclose. If null is None, then an error is
-    raised when -pi/2 or pi/2 is encountered.
-    '''
-    if sps.issparse(x): x = x.toarray()
-    else:               x = np.asarray(x)
-    if rtol is None: rtol = default_rtol
-    if atol is None: atol = default_atol
-    try:    (nln,nlp) = null
-    except Exception: (nln,nlp) = (null,null)
-    x = np.mod(x + pi, tau) - pi
-    ii = None if nln is None else np.where(np.isclose(x, neghpi, rtol=rtol, atol=atol))
-    jj = None if nlp is None else np.where(np.isclose(x, hpi,    rtol=rtol, atol=atol))
-    x = np.cos(x)
-    if ii: x[ii] = 1.0
-    if jj: x[jj] = 1.0
-    x = 1.0/x
-    if ii: x[ii] = nln
-    if jj: x[jj] = nlp
-    return x
-def cosecant(x, null=(-np.inf, np.inf), rtol=default_rtol, atol=default_atol):
-    '''
-    cosecant(x) is equivalent to 1/sin(x) except that it also works on sparse arrays.
-
-    The optional argument null (default, (-numpy.inf, numpy.inf)) may be specified to indicate what
-    value(s) should be assigned when x == 0 or pi. If only one number is given, then it is used for
-    both values; otherwise the first value corresponds to 0 and the second to pi. A value x is
-    considered to be equal to one of these valids based on numpy.isclose. The optional arguments
-    rtol and atol are passed along to isclose. If null is None, then an error is raised when -pi/2
-    or pi/2 is encountered.
-    '''
-    if sps.issparse(x): x = x.toarray()
-    else:               x = np.asarray(x)
-    if rtol is None: rtol = default_rtol
-    if atol is None: atol = default_atol
-    try:    (nln,nlp) = null
-    except Exception: (nln,nlp) = (null,null)
-    x = np.mod(x + hpi, tau) - hpi # center on pi/2 so that 0 and pi are easy to detect
-    ii = None if nln is None else np.where(np.isclose(x, 0,  rtol=rtol, atol=atol))
-    jj = None if nlp is None else np.where(np.isclose(x, pi, rtol=rtol, atol=atol))
-    x = np.sin(x)
-    if ii: x[ii] = 1.0
-    if jj: x[jj] = 1.0
-    x = 1.0/x
-    if ii: x[ii] = nln
-    if jj: x[jj] = nlp
-    return x
-def arcsine(x, null=(-np.inf, np.inf)):
-    '''
-    arcsine(x) is equivalent to asin(x) except that it also works on sparse arrays.
-
-    The optional argument null (default, (-numpy.inf, numpy.inf)) may be specified to indicate what
-    value(s) should be assigned when x < -1 or x > 1. If only one number is given, then it is used
-    for both values; otherwise the first value corresponds to <-1 and the second to >1.  If null is
-    None, then an error is raised when invalid values are encountered.
-    '''
-    if sps.issparse(x):
-        x = x.copy()
-        x.data = arcsine(x.data, null=null, rtol=rtol, atol=atol)
-        return x
-    else: x = np.asarray(x)
-    try:    (nln,nlp) = null
-    except Exception: (nln,nlp) = (null,null)
-    ii = None if nln is None else np.where(x < -1)
-    jj = None if nlp is None else np.where(x > 1)
-    if ii: x[ii] = 0
-    if jj: x[jj] = 0
-    x = np.arcsin(x)
-    if ii: x[ii] = nln
-    if jj: x[jj] = nlp
-    return x
-def arccosine(x, null=(-np.inf, np.inf)):
-    '''
-    arccosine(x) is equivalent to acos(x) except that it also works on sparse arrays.
-
-    The optional argument null (default, (-numpy.inf, numpy.inf)) may be specified to indicate what
-    value(s) should be assigned when x < -1 or x > 1. If only one number is given, then it is used
-    for both values; otherwise the first value corresponds to <-1 and the second to >1.  If null is
-    None, then an error is raised when invalid values are encountered.
-    '''
-    if sps.issparse(x): x = x.toarray()
-    else:               x = np.asarray(x)
-    try:    (nln,nlp) = null
-    except Exception: (nln,nlp) = (null,null)
-    ii = None if nln is None else np.where(x < -1)
-    jj = None if nlp is None else np.where(x > 1)
-    if ii: x[ii] = 0
-    if jj: x[jj] = 0
-    x = np.arccos(x)
-    if ii: x[ii] = nln
-    if jj: x[jj] = nlp
-    return x
-def arctangent(y, x=None, null=0, broadcast=False, rtol=default_rtol, atol=default_atol):
-    '''
-    arctangent(x) is equivalent to atan(x) except that it also works on sparse arrays.
-    arctangent(y,x) is equivalent to atan2(y,x) except that it also works on sparse arrays.
-
-    The optional argument null (default: 0) specifies the result found when y and x both equal 0. If
-    null is None, then an error is raised on this condition. Note that if null is not 0, then it is
-    more likely that sparse arrays will have to be reified. If null is set to None, then no attempt
-    is made to detect null values.
-
-    The optional argument broadcast (default: False) specifies whether numpy-like (True) or
-    Mathematica-like (False) broadcasting should be used. Broadcasting resolves ambiguous calls to
-    arctangent, such as artangent([a,b,c], [[d,e,f],[g,h,i],[j,k,l]]). If broadcasting is True, 
-    arctangent(y,x) behaves like numpy.arctan2(y,x), so [a,b,c] is interpreted like [[a,b,c],
-    [a,b,c], [a,b,c]]. If broadcasting is False, [a,b,c] is interpreted like [[a,a,a], [b,b,b],
-    [c,c,c]].
-    '''
-    if sps.issparse(y):
-        if x is None:
-            y = y.copy()
-            y.data = np.arctan(y.data)
-            return y
-        elif null is not None and null != 0:
-            # we need to reify anyway...
-            y = y.toarray()
-            if sps.issparse(x): x = x.toarray()
-        else:
-            # anywhere that y is zero must have an arctan of 0 or null (which is 0), so we only have
-            # to look at those values that are non-zero in y
-            (yr,yc,yv) = sps.find(y)
-            xv = np.asarray(x[rr,rc].flat)
-            res = y.copy()
-            res.data = arctangent(yv, xv, null=null)
-            res.eliminate_zeros()
-            return res
-    elif sps.issparse(x): x = x.toarray()
-    # we should start by broadcasting if need be...
-    if x is None: res = np.arctan(y)
-    else:
-        if not broadcast: (y,x) = unbroadcast(y,x)
-        res = np.arctan2(y, x)
-        # find the zeros, if need-be
-        if null is not None:
-            if rtol is None: rtol = default_rtol
-            if atol is None: atol = default_atol
-            # even if null is none, we do this because the rtol and atol may be more lenient than
-            # the tolerance used by arctan2.
-            z = np.isclose(y, 0, rtol=rtol, atol=atol) & np.isclose(x, 0, rtol=rtol, atol=atol)
-            res[z] = null
-    return res
-def flattest(x):
-    '''
-    flattest(x) yields a 1D numpy vector equivalent to a flattened version of x. Unline
-      np.asarray(x).flatten, flattest(x) works with sparse matrices. It does not, however, work with
-      ragged arrays.
-    '''
-    x = x.toarray().flat if sps.issparse(x) else np.asarray(x).flat
-    return np.array(x)
-def flatter(x, k=1):
-    '''
-    flatter(x) yields a numpy array equivalent to x but whose first dimension has been flattened.
-    flatter(x, k) yields a numpy array whose first k dimensions have been flattened; if k is
-      negative, the last k dimensions are flattened. If np.inf or -np.inf is passed, then this is
-      equivalent to flattest(x). Note that flatter(x) is equivalent to flatter(x,1).
-    flatter(x, 0) yields x.
-    '''
-    if k == 0: return x
-    x = x.toarray() if sps.issparse(x) else np.asarray(x)
-    if len(x.shape) - abs(k) < 2: return x.flatten()
-    k += np.sign(k)
-    if k > 0: return np.reshape(x, (-1,) + x.shape[k:])
-    else:     return np.reshape(x, x.shape[:k] + (-1,))
-def part(x, *args):
-    '''
-    part(x, ii, jj...) is equivalent to x[ii, jj...] if x is a sparse matrix or numpy array and is
-      equivalent to np.asarray(x)[ii][:, jj][...] if x is not. If only one argument is passed and
-      it is a tuple, then it is passed like x[ii] alone.
-
-    The part function is comparible with slices (though the must be entered using the slice(...)
-    rather than the : syntax) and Ellipsis.
-    '''
-    n = len(args)
-    sl = slice(None)
-    if sps.issparse(x):
-        if n == 1: return x[args[0]]
-        elif n > 2: raise ValueError('Too many indices for sparse matrix')
-        (ii,jj) = args
-        if   ii is Ellipsis: ii = sl
-        elif jj is Ellipsis: jj = sl
-        ni = pimms.is_number(ii)
-        nj = pimms.is_number(jj)
-        if   ni and nj: return x[ii,jj]
-        elif ni:        return x[ii,jj].toarray()[0]
-        elif nj:        return x[ii,jj].toarray()[:,0]
-        else:           return x[ii][:,jj]
-    else:
-        x = np.asarray(x)
-        if n == 1: return x[args[0]]
-        i0 = []
-        for (k,arg) in enumerate(args):
-            if arg is Ellipsis:
-                # special case...
-                #if Ellipsis in args[ii+1:]: raise ValueError('only one ellipsis allowed per part')
-                left = n - k - 1
-                i0 = [sl for _ in range(len(x.shape) - left)]
-            else:
-                x = x[tuple(i0 + [arg])]
-                if not pimms.is_number(arg): i0.append(sl)
-        return x
-def hstack(tup):
-    '''
-    hstack(x) is equivalent to numpy.hstack(x) or scipy.sparse.hstack(x) except that it works
-      correctly with both sparse and dense arrays (if any inputs are dense, it converts all inputs
-      to dense arrays).
-    '''
-    if all([sps.issparse(u) for u in tup]): return sps.hstack(tup, format=tup[0].format)
-    else: return np.hstack([u.toarray() if sps.issparse(u) else u for u in tup])
-def vstack(tup):
-    '''
-    vstack(x) is equivalent to numpy.vstack(x) or scipy.sparse.vstack(x) except that it works
-      correctly with both sparse and dense arrays (if any inputs are dense, it converts all inputs
-      to dense arrays).
-    '''
-    if all([sps.issparse(u) for u in tup]): return sps.vstack(tup, format=tup[0].format)
-    else: return np.vstack([u.toarray() if sps.issparse(u) else u for u in tup])
-def repmat(x, r, c):
-    '''
-    repmat(x, r, c) is equivalent to numpy.matlib.repmat(x, r, c) except that it works correctly for
-      sparse matrices.
-    '''
-    if sps.issparse(x):
-        row = sps.hstack([x for _ in range(c)])
-        return sps.vstack([row for _ in range(r)], format=x.format)
-    else: return np.matlib.repmat(x, r, c)
-    
-def replace_close(x, xhat, rtol=default_rtol, atol=default_atol, copy=True):
-    '''
-    replace_close(x, xhat) yields x if x is not close to xhat and xhat otherwise. Closeness is
-      determined by numpy's isclose(), and the atol and rtol options are passed along.
-
-    The x and xhat arguments may be lists/arrays.
-
-    The optional argument copy may also be set to False to chop x in-place.
-    '''
-    if rtol is None: rtol = default_rtol
-    if atol is None: atol = default_atol
-    x = np.array(x) if copy else np.asarray(x)
-    w = np.isclose(x, xhat, rtol=rtol, atol=atol)
-    x[w] = np.asarray(xhat)[w]
-    return x
-def chop(x, rtol=default_rtol, atol=default_atol, copy=True):
-    '''
-    chop(x) yields x if x is not close to round(x) and round(x) otherwise. Closeness is determined
-      by numpy's isclose(), and the atol and rtol options are passed along.
-
-    The x and xhat arguments may be lists/arrays.
-
-    The optional argument copy may also be set to False to chop x in-place.
-    '''
-    return replace_close(x, np.round(x), rtol=rtol, atol=atol, copy=copy)
-
-def nan_compare(f, x, y, nan_nan=False, nan_val=False, val_nan=False):
-    '''
-    nan_compare(f, x, y) is equivalent to f(x, y), which is assumed to be a boolean function that
-      broadcasts over x and y (such as numpy.less), except that NaN values in either x or y result
-      in a value of False instead of being run through f.
-
-    The argument f must be a numpy comparison function such as numpy.less that accepts the optional
-    arguments where and out.
-
-    The following optional arguments may be provided:
-      * nan_nan (default: False) specifies the return value (True or False) for comparisons
-        equivalent to f(nan, nan).
-      * nan_val (default: False) specifies the return value (True or False) for comparisons
-        equivalent to f(nan, non_nan).
-      * val_nan (default: False) specifies the return value (True or False) for comparisons
-        equivalent to f(non_nan, nan).
-    '''
-    #TODO: This should work with sparse matrices as well
-    x = np.asanyarray(x)
-    y = np.asanyarray(y)
-    xii = np.isnan(x)
-    yii = np.isnan(y)
-    if not xii.any() and not yii.any(): return f(x, y)
-    ii  = (~xii) & (~yii)
-    out = np.zeros(ii.shape, dtype=np.bool)
-    if nan_nan == nan_val and nan_val == val_nan:
-        # All the nan-result values are the same; we can simplify a little...
-        if nan_nan: out[~ii] = nan_nan
-    else:
-        if nan_nan: out[   xii &    yii] = nan_nan
-        if nan_val: out[   xii & (~yii)] = nan_val
-        if val_nan: out[(~xii) &    yii] = val_nan
-    return f(x, y, out=out, where=ii)
-def naneq(x, y, nan_nan=False, nan_val=False, val_nan=False):
-    '''
-    naneq(x, y) is equivalent to (x == y) except that NaN values in either x or y result in False.
-
-    The following optional arguments may be provided:
-      * nan_nan (default: False) specifies the return value (True or False) for comparisons
-        equivalent to naneq(nan, nan).
-      * nan_val (default: False) specifies the return value (True or False) for comparisons
-        equivalent to naneq(nan, 0).
-      * val_nan (default: False) specifies the return value (True or False) for comparisons
-        equivalent to naneq(nan, 0).
-    '''
-    return nan_compare(np.equal, x, y, nan_nan=nan_nan, nan_val=nan_val, val_nan=val_nan)
-def nanne(x, y, nan_nan=False, nan_val=False, val_nan=False):
-    '''
-    nanne(x, y) is equivalent to (x != y) except that NaN values in either x or y result in False.
-
-    The following optional arguments may be provided:
-      * nan_nan (default: False) specifies the return value (True or False) for comparisons
-        equivalent to nanne(nan, nan).
-      * nan_val (default: False) specifies the return value (True or False) for comparisons
-        equivalent to nanne(nan, 0).
-      * val_nan (default: False) specifies the return value (True or False) for comparisons
-        equivalent to nanne(nan, 0).
-    '''
-    return nan_compare(np.not_equal, x, y, nan_nan=nan_nan, nan_val=nan_val, val_nan=val_nan)
-def nanlt(x, y, nan_nan=False, nan_val=False, val_nan=False):
-    '''
-    nanlt(x, y) is equivalent to (x < y) except that NaN values in either x or y result in False.
-
-    The following optional arguments may be provided:
-      * nan_nan (default: False) specifies the return value (True or False) for comparisons
-        equivalent to nanlt(nan, nan).
-      * nan_val (default: False) specifies the return value (True or False) for comparisons
-        equivalent to nanlt(nan, 0).
-      * val_nan (default: False) specifies the return value (True or False) for comparisons
-        equivalent to nan;t(nan, 0).
-    '''
-    return nan_compare(np.less, x, y, nan_nan=nan_nan, nan_val=nan_val, val_nan=val_nan)
-def nanle(x, y, nan_nan=False, nan_val=False, val_nan=False):
-    '''
-    nanle(x, y) is equivalent to (x <= y) except that NaN values in either x or y result in False.
-
-    The following optional arguments may be provided:
-      * nan_nan (default: False) specifies the return value (True or False) for comparisons
-        equivalent to nanle(nan, nan).
-      * nan_val (default: False) specifies the return value (True or False) for comparisons
-        equivalent to nanle(nan, 0).
-      * val_nan (default: False) specifies the return value (True or False) for comparisons
-        equivalent to nanle(nan, 0).
-    '''
-    return nan_compare(np.less_equal, x, y, nan_nan=nan_nan, nan_val=nan_val, val_nan=val_nan)
-def nangt(x, y, nan_nan=False, nan_val=False, val_nan=False):
-    '''
-    nangt(x, y) is equivalent to (x > y) except that NaN values in either x or y result in False.
-
-    The following optional arguments may be provided:
-      * nan_nan (default: False) specifies the return value (True or False) for comparisons
-        equivalent to nangt(nan, nan).
-      * nan_val (default: False) specifies the return value (True or False) for comparisons
-        equivalent to nangt(nan, 0).
-      * val_nan (default: False) specifies the return value (True or False) for comparisons
-        equivalent to nangt(nan, 0).
-    '''
-    return nan_compare(np.greater, x, y, nan_nan=nan_nan, nan_val=nan_val, val_nan=val_nan)
-def nange(x, y, nan_nan=False, nan_val=False, val_nan=False):
-    '''
-    nange(x, y) is equivalent to (x >= y) except that NaN values in either x or y result in False.
-
-    The following optional arguments may be provided:
-      * nan_nan (default: False) specifies the return value (True or False) for comparisons
-        equivalent to nange(nan, nan).
-      * nan_val (default: False) specifies the return value (True or False) for comparisons
-        equivalent to nange(nan, 0).
-      * val_nan (default: False) specifies the return value (True or False) for comparisons
-        equivalent to nange(nan, 0).
-    '''
-    return nan_compare(np.greater_equal, x, y, nan_nan=nan_nan, nan_val=nan_val, val_nan=val_nan)
-def nanlog(x, null=np.nan):
-    '''
-    nanlog(x) is equivalent to numpy.log(x) except that it avoids calling log on 0 and non-finie
-      values; in place of these values, it returns the value null (which is nan by default).
-    '''
-    x = np.asarray(x)
-    ii0 = np.where(np.isfinite(x))
-    ii  = np.where(x[ii0] > 0)[0]
-    if len(ii) == numel(x): return np.log(x)
-    res = np.full(x.shape, null)
-    ii = tuple([u[ii] for u in ii0])
-    res[ii] = np.log(x[ii])
-    return res    
-
 def library_path():
-    '''
-    library_path() yields the path of the neuropythy library.
-    '''
+    """Returns the local path of the neuropythy `'lib'` directory.
+
+    Returns
+    -------
+    str
+        The absolute local path of the neuropythy `'lib'` directory.
+    """
     return os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'lib'))
 
-@pimms.immutable
-class CurveSpline(ObjectWithMetaData):
-    '''
-    CurveSpline is an immutable class for tracking curve objects produced using scipy.interpolate's
-    spl* functions. Removes a lot of the confusion around these functions and manages data/function
-    calls for the curves. CurveSpline is a pimms immutable class, but should generally be created
-    via the curve_spline() function.
-    '''
-    def __init__(self, x, y=None,
-                 order=1, weights=None, smoothing=None, periodic=False,
-                 distances=None,
-                 meta_data=None):
-        ObjectWithMetaData.__init__(self, meta_data=meta_data)
-        x = np.asarray(x)
-        if y is not None: x = np.asarray([x,y])
-        self.coordinates = x
-        self.order = order
-        self.weights = weights
-        self.smoothing = smoothing
-        self.periodic = periodic
-        self.distances = distances
-    @pimms.param
-    def coordinates(x):
-        'curve.coordinates is the seed coordinate matrix for the given curve.'
-        x = np.asarray(x)
-        assert(len(x.shape) == 2)
-        if x.shape[0] != 2: x = x.T
-        assert(x.shape[0] == 2)
-        return pimms.imm_array(x)
-    @pimms.param
-    def order(o):
-        'curve.degree is the degree of the interpolating splines for the given curv.'
-        assert(pimms.is_int(o) and o >= 0)
-        return o
-    @pimms.param
-    def smoothing(s):
-        'curve.smoothing is the amount of smoothing passed to splrep for the given curve.'
-        if s is None: return None
-        assert(pimms.is_number(s) and s >= 0)
-        return s
-    @pimms.param
-    def weights(w):
-        'curve.weights are the weights passed to splrep for a given curve.'
-        if w is None: return None
-        w = pimms.imm_array(w)
-        assert(pimms.is_vector(w, 'number'))
-        return w
-    @pimms.param
-    def periodic(p):
-        'curve.periodic is True if the given curve is a periodic curve and False otherwise.'
-        assert(p is True or p is False)
-        return p
-    @pimms.param
-    def distances(ds):
-        'curve.distances is the specified curve-distances between points in the given curve.'
-        if ds is None: return None
-        ds = pimms.imm_array(ds)
-        assert(pimms.is_vector(ds, 'number'))
-        assert((ds >= 0).all())
-        return ds
-    @pimms.require
-    def check_distances(distances, coordinates, periodic):
-        if distances is None: return True
-        if len(distances) != coordinates.shape[1] - 1:
-            raise ValueError('Distances must be diffs of coordinates')
-        return True
-    @pimms.value
-    def t(distances,coordinates):
-        n = coordinates.shape[1]
-        if distances is None: distances = np.ones(n - 1)
-        t = np.cumsum(np.pad(distances, (1,0), 'constant'))
-        t.setflags(write=False)
-        return t
-    @pimms.value
-    def splrep(coordinates, t, order, weights, smoothing, periodic):
-        from scipy import interpolate
-        (x,y) = coordinates
-        # we need to skip anything where t[i] and t[i+1] are too close
-        wh = np.where(np.isclose(np.diff(t), 0))[0]
-        if len(wh) > 0:
-            (t,x,y) = [np.array(u) for u in (t,x,y)]
-            ii = np.arange(len(t))
-            for i in reversed(wh):
-                ii[i+1:-1] = ii[i+2:]
-                for u in (t,x,y):
-                    u[i] = np.mean(u[i:i+2])
-            ii = ii[:-len(wh)]
-            (t,x,y) = [u[ii] for u in (t,x,y)]
-        xtck = interpolate.splrep(t, x, k=order, s=smoothing, w=weights, per=periodic)
-        ytck = interpolate.splrep(t, y, k=order, s=smoothing, w=weights, per=periodic)
-        return tuple([tuple([pimms.imm_array(u) for u in tck])
-                      for tck in (xtck,ytck)])
-    def __repr__(self):
-        return 'CurveSpline(<%d points>, order=%d, %f <= t <= %f)' % (
-            self.coordinates.shape[1],
-            self.order, self.t[0], self.t[-1])
-    def __call__(self, t, derivative=0):
-        from scipy import interpolate
-        xint = interpolate.splev(t, self.splrep[0], der=derivative, ext=0)
-        yint = interpolate.splev(t, self.splrep[1], der=derivative, ext=0)
-        return np.asarray([xint,yint])
-    def curve_length(self, start=None, end=None, precision=0.01):
-        '''
-        Calculates the length of the curve by dividing the curve up
-        into pieces of parameterized-length <precision>.
-        '''
-        if start is None: start = self.t[0]
-        if end is None: end = self.t[-1]
-        from scipy import interpolate
-        if self.order == 1:
-            # we just want to add up along the steps...
-            ii = [ii for (ii,t) in enumerate(self.t) if start < t and t < end]
-            ts = np.concatenate([[start], self.t[ii], [end]])
-            xy = np.vstack([[self(start)], self.coordinates[:,ii].T, [self(end)]])
-            return np.sum(np.sqrt(np.sum((xy[1:] - xy[:-1])**2, axis=1)))
-        else:
-            t = np.linspace(start, end, int(np.ceil((end-start)/precision)))
-            dt = t[1] - t[0]
-            dx = interpolate.splev(t, self.splrep[0], der=1)
-            dy = interpolate.splev(t, self.splrep[1], der=1)
-            return np.sum(np.sqrt(dx**2 + dy**2)) * dt
-    def linspace(self, n=100, derivative=0):
-        '''
-        curv.linspace(n) yields n evenly-spaced points along the curve.
-        '''
-        ts = np.linspace(self.t[0], self.t[-1], n)
-        return self(ts, derivative=derivative)
-    def even_out(self, precision=0.001):
-        '''
-        Yields an equivalent curve but where the parametric value t
-        is equivalent to x/y distance (up to the given precision).
-        '''
-        dists = [self.curve_length(s, e, precision=precision)
-                 for (s,e) in zip(self.t[:-1], self.t[1:])]
-        return CurveSpline(self.coordinates,
-                           order=self.order,
-                           weights=self.weights,
-                           smoothing=self.smoothing,
-                           periodic=self.periodic,
-                           distances=dists,
-                           meta_data=self.meta_data)
-    def reverse(self):
-        '''
-        curve.reverse() yields the inverted spline-curve equivalent to curve.
-        '''
-        return CurveSpline(
-            np.flip(self.coordinates, axis=1),
-            distances=(None if self.distances is None else np.flip(self.distances, axis=0)),
-            order=self.order, weights=self.weights, smoothing=self.smoothing,
-            periodic=self.periodic, meta_data=self.meta_data)
-    def subcurve(self, t0, t1):
-        '''
-        curve.subcurve(t0, t1) yields a curve-spline object that is equivalent to the given
-          curve but that extends from curve(t0) to curve(t1) only.
-        '''
-        # if t1 is less than t0, then we want to actually do this in reverse...
-        if t1 == t0: raise ValueError('Cannot take subcurve of a point')
-        if t1 < t0:
-            tt = self.curve_length()
-            return self.reverse().subcurve(tt - t0, tt - t1)
-        idx = [ii for (ii,t) in enumerate(self.t) if t0 < t and t < t1]
-        pt0 = self(t0)
-        pt1 = self(t1)
-        coords = np.vstack([[pt0], self.coordinates.T[idx], [pt1]])
-        ts = np.concatenate([[t0], self.t[idx], [t1]])
-        dists  = None if self.distances is None else np.diff(ts)
-        return CurveSpline(
-            coords.T,
-            order=self.order,
-            smoothing=self.smoothing,
-            periodic=False,
-            distances=dists,
-            meta_data=self.meta_data)
-
-def curve_spline(x, y=None, weights=None, order=1, even_out=True,
-                 smoothing=None, periodic=False, meta_data=None):
-    '''
-    curve_spline(coords) yields a bicubic spline function through
-      the points in the given coordinate matrix.
-    curve_spline(x, y) uses the coordinate matrix [x,y].
-
-    The function returned by curve_spline() is f(t), defined on the
-    interval from 0 to n-1 where n is the number of points in the
-    coordinate matrix provided.
-    
-    The following options are accepted:
-      * weights (None) the weights to use in smoothing.
-      * smoothing (None) the amount to smooth the points.
-      * order (3) the order of the polynomial used in the splines.
-      * periodic (False) whether the points are periodic or not.
-      * even_out (True) whether to even out the distances along
-        the curve.
-      * meta_data (None) an optional map of meta-data to give the
-        spline representation.
-    '''
-    curv = CurveSpline(x,y, 
-                       weights=weights, order=order,
-                       smoothing=smoothing, periodic=periodic,
-                       meta_data=meta_data)
-    if even_out: curv = curv.even_out()
-    return curv
-def is_curve_spline(obj):
-    '''
-    is_curve_spline(obj) yields True if obj is a curve spline object and False otherwise.
-    '''
-    return isinstance(obj, CurveSpline)
-def to_curve_spline(obj):
-    '''
-    to_curve_spline(obj) obj if obj is a curve spline and otherwise attempts to coerce obj into a
-      curve spline, raising an error if it cannot.
-    '''
-    if   is_curve_spline(obj):            return obj
-    elif is_tuple(obj) and len(obj) == 2: (crds,opts) = obj
-    else:                                 (crds,opts) = (obj,{})
-    if pimms.is_matrix(crds) or is_curve_spline(crds): crds = [crds]
-    spls = [c for c in crds if is_curve_spline(c)]
-    opts = dict(opts)
-    if 'weights' not in opts and len(spls) == len(crds):
-        if all(c.weights is not None for c in crds):
-            opts['weights'] = np.concatenate([c.weights for c in crds])
-    if 'order' not in opts and len(spls) > 0:
-        opts['order'] = np.min([c.order for c in spls])
-    if 'smoothing' not in opts and len(spls) > 0:
-        sm = set([c.smoothing for c in spls])
-        if len(sm) == 1: opts['smoothing'] = list(sm)[0]
-        else: opts['smoothing'] = None
-    crds = [x.crds if is_curve_spline(crds) else np.asarray(x) for x in crds]
-    crds = [x if x.shape[0] == 2 else x.T for x in crds]
-    crds = np.hstack(crds)
-    return curve_spline(crds, **opts)
-def curve_intersection(c1, c2, grid=16):
-    '''
-    curve_intersect(c1, c2) yields the parametric distances (t1, t2) such that c1(t1) == c2(t2).
-      
-    The optional parameter grid may specify the number of grid-points
-    to use in the initial search for a start-point (default: 16).
-    '''
-    from scipy.optimize import minimize
-    from neuropythy.geometry import segment_intersection_2D
-    if c1.coordinates.shape[1] > c2.coordinates.shape[1]:
-        (t1,t2) = curve_intersection(c2, c1, grid=grid)
-        return (t2,t1)
-    # before doing a search, see if there are literal exact intersections of the segments
-    x1s  = c1.coordinates.T
-    x2s  = c2.coordinates
-    for (ts,te,xs,xe) in zip(c1.t[:-1], c1.t[1:], x1s[:-1], x1s[1:]):
-        pts = segment_intersection_2D((xs,xe), (x2s[:,:-1], x2s[:,1:]))
-        ii = np.where(np.isfinite(pts[0]))[0]
-        if len(ii) > 0:
-            ii = ii[0]
-            def f(t): return np.sum((c1(t[0]) - c2(t[1]))**2)
-            t01 = 0.5*(ts + te)
-            t02 = 0.5*(c2.t[ii] + c2.t[ii+1])
-            (t1,t2) = minimize(f, (t01, t02)).x
-            return (t1,t2)
-    if pimms.is_vector(grid): (ts1,ts2) = [c.t[0] + (c.t[-1] - c.t[0])*grid for c in (c1,c2)]
-    else:                     (ts1,ts2) = [np.linspace(c.t[0], c.t[-1], grid) for c in (c1,c2)]
-    (pts1,pts2) = [c(ts) for (c,ts) in zip([c1,c2],[ts1,ts2])]
-    ds = np.sqrt([np.sum((pts2.T - pp)**2, axis=1) for pp in pts1.T])
-    (ii,jj) = np.unravel_index(np.argmin(ds), ds.shape)
-    (t01,t02) = (ts1[ii], ts2[jj])
-    ttt = []
-    def f(t): return np.sum((c1(t[0]) - c2(t[1]))**2)
-    (t1,t2) = minimize(f, (t01, t02)).x
-    return (t1,t2)
-def close_curves(*crvs, **kw):
-    '''
-    close_curves(crv1, crv2...) yields a single curve that merges all of the given list of curves
-      together. The curves must be given in order, such that the i'th curve should be connected to
-      to the (i+1)'th curve circularly to form a perimeter.
-
-    The following optional parameters may be given:
-      * grid may specify the number of grid-points to use in the initial search for a start-point
-        (default: 16).
-      * order may specify the order of the resulting curve; by default (None) uses the lowest order
-        of all curves.
-      * smoothing (None) the amount to smooth the points.
-      * even_out (True) whether to even out the distances along the curve.
-      * meta_data (None) an optional map of meta-data to give the spline representation.
-    '''
-    for k in six.iterkeys(kw):
-        if k not in close_curves.default_options: raise ValueError('Unrecognized option: %s' % k)
-    kw = {k:(kw[k] if k in kw else v) for (k,v) in six.iteritems(close_curves.default_options)}
-    (grid, order) = (kw['grid'], kw['order'])
-    crvs = [(crv if is_curve_spline(crv) else to_curve_spline(crv)).even_out() for crv in crvs]
-    # find all intersections:
-    isects = [curve_intersection(u,v, grid=grid)
-              for (u,v) in zip(crvs, np.roll(crvs,-1))]
-    # subsample curves
-    crds = np.hstack([crv.subcurve(s1[1], s0[0]).coordinates[:,:-1]
-                      for (crv,s0,s1) in zip(crvs, isects, np.roll(isects,1,0))])
-    kw['order'] = np.min([crv.order for crv in crvs]) if order is None else order
-    kw = {k:v for (k,v) in six.iteritems(kw)
-          if v is not None and k in ('order','smoothing','even_out','meta_data')}
-    return curve_spline(crds, periodic=True, **kw)
-close_curves.default_options = dict(grid=16, order=None, even_out=True,
-                                    smoothing=None, meta_data=None)
+# DataStruct #######################################################################################
 class DataStruct(object):
-    '''
-    A DataStruct object is an immutable map-like object that accepts any number of kw-args on input
-    and assigns all of them as members which are then immutable.
-    '''
+    """A simple immutable structure with configurable attributes.
+
+    A `DataStruct` object is an immutable map-like object that accepts any
+    number of keyword arguments on construction and assigns all of them as
+    members which are then immutable in the resulting (immutable) object.
+
+    Parameters
+    ----------
+    **kwargs
+        The names and values to be included in the resulting object.
+    """
     def __init__(self, **kw):    self.__dict__.update(kw)
     def __setattr__(self, k, v): raise ValueError('DataStruct objects are immutable')
     def __delattr__(self, k):    raise ValueError('DataStruct objects are immutable')
-    def set(**kw):
-        '''
-        ds.set(a=b, c=d, ...) yields a copy of the data-struct ds in which the given keys have been
-          set to the given values. If no keys are changed, then ds itself is returned.
-        ds.set() yields ds.
-        '''
+    def set(**kwargs):
+        """Returns a copy of the data structure with an update to its members.
+
+        `ds.set(a=b, c=d, ...)` returns a copy of the data-struct `ds` in which
+        the given keys have been set to the given values. If no keys are
+        changed, then `ds` itself is returned.  ds.set() yields ds.
+
+        Parameters
+        ----------
+        **kwargs
+            The attribute names to give the new data structure and their values.
+
+        Returns
+        -------
+        DataStruct
+            A data structure object that is a copy of the existing data
+            structure but with updated attributes.
+        """
         d = self.__dict__
-        try:
-            if all(v is d[k] for (k,v) in six.iteritems(kw)): return self
-        except KeyError: pass
-        d = dict(d, **kw)
+        if all(k in d and v is d[k] for (k,v) in six.iteritems(kwargs)):
+            return self
+        d = dict(d, **kwargs)
         return DataStruct(d)
     def delete(*args):
-        '''
-        db.delete('a', 'b', ...) yields a copy of the data-struct ds in which the given keys have
-          been dropped from the data-structure. If none of the keys are in ds, then ds itself is
-          returned.
-        ds.delete() yields ds.
-        '''
+        """Returns a copy of thhe data structure without the given attributes.
+
+        `db.delete('a', 'b', ...)` yields a copy of the data-struct `ds` in
+        which the given attributes have been dropped from the data-structure. If
+        none of the keys are in `ds`, then `ds` itself is returned.  `ds.delete()`
+        returns `ds`.
+
+        Parameters
+        ----------
+        *args
+            The names of the attributes that should be deleted.
+
+        Returns
+        -------
+        DataStruct
+            A new data structure object without the given attributes.
+        """
         d = self.__dict__
         for k in args:
             if k in d:
@@ -2482,63 +1179,184 @@ class DataStruct(object):
                 del d[k]
         if d is self.__dict__: return self
         return DataStruct(d)
-        
-def data_struct(*args, **kw):
-    '''
-    data_struct(args...) collapses all arguments (which must be maps) and keyword arguments
-      right-to-left into a single mapping and uses this mapping to create a DataStruct object.
-    '''
-    m = pimms.merge(*(args + (kw,)))
-    return DataStruct(**m)
+def is_data_struct(obj):
+    """Returns `True` if given a `DataStruct` object and `False` otherwise.
 
-def tmpdir(prefix='npythy_tempdir_', delete=True):
-    '''
-    tmpdir() creates a temporary directory and yields its path. At python exit, the directory and
-      all of its contents are recursively deleted (so long as the the normal python exit process is
-      allowed to call the atexit handlers).
-    tmpdir(prefix) uses the given prefix in the tempfile.mkdtemp() call.
+    Parameters
+    ----------
+    obj : object
+        The object whose quality as a `DataStruct` is to be assessed.
     
-    The option delete may be set to False to specify that the tempdir should not be deleted on exit.
-    '''
+    Returns
+    -------
+    boolean
+        `True` if `obj` is a `DataStruct` and `False` otherwise.
+    """
+    return isinstance(obj, DataStruct)
+def to_data_struct(*args, **kwargs):
+    """Creates a `DataStruct` object with the given attribute dictionary.
+
+    `to_data_struct(args...)` collapses all arguments (which must be mappings)
+    and keyword arguments right-to-left into a single dictionary and uses this
+    dict to create a `DataStruct` object. Any keys in the resulting dictionary
+    are included as attributs in the resulting `DataStruct` object.
+
+    This function is essentially an alias for the `DataStruct()` constructor
+    itself.
+
+    Parameters
+    ----------
+    *args
+        Any number of dict or mapping objects that are to be mergeed
+        left-to-right.
+    **kwargs
+        Any number of key-value pairs to be added to the attributes.
+
+    Returns
+    -------
+    DataStruct
+        A new `DataStruct` object with the attributes given in the arguments.
+    """
+    if len(args) == 1 and len(kwargs) == 0 and is_data_struct(args[0]):
+        return args[0]
+    args = [a.__dict__ if is_data_struct(a) else a for a in args]
+    if len(kwargs) > 0: args.append(kwargs)
+    d = {}
+    for a in args: d.update(a)
+    return DataStruct(**d)
+
+# File System Tools ################################################################################
+def tmpdir(prefix='npythy_tempdir_', delete=True):
+    """Returns a temporary directory path.
+
+    `tmpdir()` creates a temporary directory and returns its path. At python
+    exit, the directory and all of its contents are recursively deleted (so long
+    as the the normal python exit process is allowed to call the `atexit`
+    handlers).
+
+    `tmpdir(prefix)` uses the given prefix in the `tempfile.mkdtemp()` call that
+    is used to create the directory.
+    
+    Parameters
+    ----------
+    prefix : str, optional
+        The prefix to give the name of the temporary directory.
+    delete : boolean, optional
+         Whether to automatically delete the temporary directory when Python
+         exits. The default is `True`.
+
+    Returns
+    -------
+    str
+        The path of the temporary directory that is created.
+
+    Raises
+    ------
+    ValueError
+        When a temporary directory cannot be created.
+    """
     path = tempfile.mkdtemp(prefix=prefix)
     if not os.path.isdir(path): raise ValueError('Could not find or create temp directory')
     if delete: atexit.register(shutil.rmtree, path)
     return path
+def to_pathlist(path, error_on_missing=False):
+    """Converts a colon-separated string of paths into a Python list of paths.
 
-def dirpath_to_list(p):
-    '''
-    dirpath_to_list(path) yields a list of directories contained in the given path specification.
+    `to_pathlist(path)` returns a list of directories contained in the given
+    path specification. The specification should be similar to how `PATH`
+    variables are encoded in POSIX shells in which multiple paths are separated
+    by the colon (:) character.
 
-    A path may be either a single directory name (==> [path]), a :-separated list of directories
-    (==> path.split(':')), a list of directory names (==> path), or None (==> []). Note that the
-    return value filters out parts of the path that are not directories.
-    '''
-    if   p is None: p = []
-    elif is_str(p): p = p.split(':')
-    if len(p) > 0 and not pimms.is_vector(p, str):
-        raise ValueError('Path is not equivalent to a list of dirs')
-    return [pp for pp in p if os.path.isdir(pp)]
+    A path may be either a single directory name (resulting in `[path]`), a
+    colon-separated list of directories (resulting in `path.split(':')`), a list
+    of directory names (resulting in `path`), or `None` (resulting in
+    `[]`). Note that the return value filters out parts of the path that are not
+    directories but does not raise an error.
 
-def try_until(*args, **kw):
-    '''
-    try_until(f1, f2, f3...) attempts to return f1(); if this raises an Exception during its
-      evaluation, however, it attempts to return f2(); etc. If none of the functions succeed, then
-      an exception is raised.
+    Parameters
+    ----------
+    path : str or list of str or None
+        The object to be converted into a list of paths.
+    error_on_missing : boolean, optional
+        Whether to raise an error when any of the paths are not found. The
+        default is `False`.
 
-    The following optional arguments may be given:
-      * check (default: None) may specify a function of one argument that must return True when the
+    Returns
+    -------
+    list of str
+        A list of paths represented in the object `path`.
+    """
+    if   path is None: return []
+    elif is_str(path): path = path.split(':')
+    # Otherwise, we assume a list of strings and expect an error if it's not.
+    if error_on_missing:
+        for pp in path:
+            if not os.path.isdir(pp):
+                raise ValueError(f"pathlist directory not found: {pp}")
+        return list(path)
+    else:
+        return [pp for pp in path if os.path.isdir(pp)]
+
+# Other Utilities ##################################################################################
+def is_callable(f):
+    """Returns `True` if `f` has an `__call__` attribute and `False` otherwise.
+
+    Parameters
+    ----------
+    f : object
+        The object whose quality as a callable is to be determined.
+
+    Returns
+    -------
+    boolean
+        `True` if `hasattr(f, '__call__')`, otherwise `False`.
+    """
+    return hasattr(f, '__call__')
+def try_through(*args, check=None, default=None, error_on_fail=True):
+    """Attempts to run multiple functions and returns the first to succeed.
+
+    `try_through(f1, f2, f3...)` attempts to return `f1()`; if this raises an
+    `Exception` during its evaluation, however, it attempts to return `f2()`;
+    etc. If none of the functions succeed, then an exception is raised.
+
+    Parameters
+    ----------
+    *args
+        The list of functions to try to run, in order.
+    check : function or None, optional
+        An optional function of one argument that must return `True` when the
         passed value is an acceptable return value; for example, an option of
-        `check=lambda x: x is not None`  would indicate that a function that returns None should not
-        be considered to have succeeded.
-    '''
-    if 'check' in kw: check = kw.pop('check')
-    else: check = None
-    if len(kw) > 0: raise ValueError('unrecognized options given to try_until')
+        `check=lambda x: x is not None` would indicate that a function that
+        returns `None` should not be considered to have succeeded.
+    error_on_fail : boolean, optional
+        Whether to raise an error on failure or to return the `default` optional
+        argument instead. If `True` (the default) then an error is raised on
+        failure. If `False`, then `default` is returned instead.
+    default : object, optional
+        The object to return if both `error_on_failure` is `False` and none of
+        the functions in `*args` succeeds.
+
+    Returns
+    -------
+    object
+        The return value of the first function in `args` to successfully return
+        a value that also passes the `check` function, if any.
+
+    Raises
+    ------
+    ValueError
+        If none of the given functions succeed or if one of the arguments is not
+        callable.
+    """
     for f in args:
-        if not hasattr(f, '__call__'):
-            raise ValueError('function given to try_until is not callable')
+        if not is_callable(f):
+            raise ValueError('function given to try_through is not callable')
         try:
             rval = f()
-            if check is None or check(rval): return rval
-        except Exception: raise
-    raise ValueError('try_until failed to find a successful function return')
+            if check is None or check(rval):
+                return rval
+        except Exception: pass
+    if error_on_fail:
+        raise ValueError('try_until failed to find a successful function return')
+    else:
+        return default

@@ -17,8 +17,8 @@ from .. import io       as nyio
 #import ..io as nyio
 
 from ..util import (config, library_path, curry, pseudo_path, is_pseudo_path, data_struct,
-                    label_indices, label_index, to_label_index, is_tuple, file_map, to_pseudo_path,
-                    try_until)
+                    label_indices, to_label_index, is_tuple, file_map, to_pseudo_path,
+                    try_through)
 
 def library_freesurfer_subjects():
     '''
@@ -62,9 +62,9 @@ def _load_fshome(path):
     luts = pimms.lazy_map(luts)
     # put these into the label indices
     global label_indices
-    label_indices['freesurfer']      = label_index(luts['all'])
-    label_indices['freesurfer_aseg'] = label_index(luts['aseg'])
-    label_indices['freesurfer_wm']   = label_index(luts['wm'])
+    label_indices['freesurfer']      = to_label_index(luts['all'])
+    label_indices['freesurfer_aseg'] = to_label_index(luts['aseg'])
+    label_indices['freesurfer_wm']   = to_label_index(luts['wm'])
     return data_struct(luts=luts, path=path)
 config.declare_dir('freesurfer_home', environ_name='FREESURFER_HOME', filter=_load_fshome)
 
@@ -621,7 +621,7 @@ def cortex_from_filemap(fmap, chirality, name, subid=None, affine=None):
                 load_mid_fn = curry(_load_surfx, os.path.join(extra_path, flnm), {})
                 for mid in mid:
                     f = load_mid_fn if mid not in regs else \
-                        curry(try_until,
+                        curry(try_through,
                               curry(lambda regs: regs[mid], regs), load_mid_fn,
                               check=pimms.is_matrix)
                     regs = regs.set(mid, f)
@@ -1132,8 +1132,8 @@ def load_freesurfer_annot(filename, to='property'):
     p[~oks] = 0
     lils = np.arange(len(nms))
     if to in ['property', 'prop', 'p', 'auto', 'automatic']: return p
-    elif to in ['index', 'label_index', 'lblidx', 'idx']: return label_index(lils, nms, clrs)
-    elif to in ['all', 'full']: return (p, label_index(lils, nms, clrs))
+    elif to in ['index', 'label_index', 'lblidx', 'idx']: return to_label_index(lils, nms, clrs)
+    elif to in ['all', 'full']: return (p, to_label_index(lils, nms, clrs))
     else: raise ValueError('bad to conversion: %s' % to)
 @nyio.exporter('freesurfer_annot', ('annot',))
 def save_freesurfer_annot(filename, obj, index=None):
@@ -1150,7 +1150,7 @@ def save_freesurfer_annot(filename, obj, index=None):
     # first parse the index
     if index is None:
         if len(obj) == 2 and pimms.is_vector(obj[0]): (obj, index) = obj
-        else: index = label_index(obj)
+        else: index = obj
     index = to_label_index(index)
     # okay, let's get the data in the right format
     (u,ris) = np.unique(obj, return_inverse=True)
@@ -1163,7 +1163,7 @@ def save_freesurfer_annot(filename, obj, index=None):
     return filename
 
 # A few annot labels we can just save:
-brodmann_label_index = label_index(
+brodmann_label_index = to_label_index(
     np.arange(15),
     ['none', 'BA1', 'BA2', 'BA3a', 'BA3b', 'BA4a', 'BA4p', 'BA6', 'BA44', 'BA45', 'V1', 'V2', 'MT',
      'perirhinal', 'enterorhinal'])

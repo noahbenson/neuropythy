@@ -151,4 +151,5 @@ class TestNeuropythyUtil(unittest.TestCase):
         self.assertTrue(nym.equal(s1.values, s2.values))
 
     # #TODO: add tests for addresses
+    # #TODO: add tests for vertex sets, to_property, to_mask, is_mask, like_mask
     

@@ -55,36 +55,40 @@ degperrad = 180 / pi
 
 # Importing PyTorch ################################################################################
 # We want to work with pytorch but not to require it. Thus we use this function to get it.
-def pytorch():
-    '''Yields the pytorch module or raises an ImportError.
+pytorch_found = False
+"""boolean: Whether the `torch` module was successfully imported.
 
-    The `pytorch()` fucntion is equivalent to `import torch` followed by `return torch` function;
-    though it is somewhat faster once the `torch` module has already been loaded once. This function
-    is provided through `neuropythy` because `neuropythy` does not explicitly require PyTorch, but
-    many of `neuropythy`'s sub-packages use `torch`.
+If `neuropythy` was able to successfully import `torch`, then the
+`pytorch_found` variable will be set to `True`. Otherwise, it will be `False`.
 
-    Returns
-    -------
-    module
-        The PyTorch module, `torch`.
+See also: `neuropythy.math.pytorch()`
 
-    Raises
-    ------
-    ImportError
-        If the `torch` module cannot be imported.
-    '''
-    import sys
-    global pytorch
-    try:
-        import torch
-        def pytorch():
-            '''
-            Yields the pytorch module or raises an ImportError.
-            '''
-            return sys.modules['torch']
-        return torch
-    except Exception: pass
-    raise ImportError("failed to import torch: PyTorch may not be installed")
+"""
+torch = None
+try:
+    import torch
+    pytorch_found = True
+except ImportError: pass
+class TorchNotFound(Exception):
+    """Exception raised when PyTorch is requested but not installed."""
+    def __str__(self):
+        return ("PyTorch not found.\n"
+                "Neuropythy does not require PyTorch, but it must be installed for certain\n"
+                "operations to work.\n\n"
+                "See https://pytorch.org/get-started/locally/ for help installing PyTorch.")
+def check_torch():
+    """Raises a `TorchNotFound` exception if PyTorch could not be found."""
+    if torch is None: raise TorchNotFound()
+    return None
+
+# Quantities/Magnitudes ############################################################################
+# We want to be able to seamlessly handle quantities as well. For this we mostly copy the code in
+# the pimms library, which was made to work specifically with numpy arrays but not necessarily with
+# pytorch tensors.
+
+
+# This function from numpy works just how we want it to already.
+from numpy import shape
 
 # General Utility Functions ########################################################################
 # These are functions that are typically available in both numpy and pytorch; the function here
@@ -118,7 +122,7 @@ def to_torchdtype(dtype, returnnone=False):
         If the argument `d` is not a `dtype` object and cannot be interpreted as
         one.
     """
-    torch = pytorch()
+    check_torch()
     if isinstance(dtype, torch.dtype):
         return dtype
     if isinstance(dtype, np.dtype):
@@ -128,7 +132,7 @@ def to_torchdtype(dtype, returnnone=False):
             dt = getattr(torch, dtype)
             if isinstance(dt, torch.dtype): return dt
         except AttributeError: pass
-        if retunnone: return None
+        if returnnone: return None
         raise ValueError(f"no torch dtype with name {dtype}")
     elif retunnone:
         return None
@@ -161,7 +165,7 @@ def torchdtype_to_numpydtype(dtype, returnnone=False):
         If `dtype` is not `None` and cannot be converted into a `torch.dtype`
         object.
     """
-    torch = pytorch()
+    check_torch()
     if dtype is None: return None
     dtype = to_torchdtype(dtype)
     dt = (np.float32    if dtype == torch.float32    else 
@@ -212,14 +216,11 @@ def to_numpydtype(dtype, returnnone=False):
     """
     if isinstance(dtype, numpy.dtype):
         return dtype
-    try:
-        torch = pytorch()
+    if torch:
         if isinstance(dtype, torch.dtype):
             d = torchdtype_to_nunmpydtype(dtype)
             if d is not None: return d
-    except ImportError: pass
-    try:
-        return np.dtype(dtype)
+    try: return np.dtype(dtype)
     except Exception: pass
     if returnnone: return None
     raise ValueError(f"cannot convert to numpy dtype: {dtype}")
@@ -250,16 +251,16 @@ def to_dtype(obj, returnnone=False):
         If the argument `d` is not a `dtype` object and cannot be interpreted as
         one.
     """
-    try:
-        torch = pytorch()
-        if isinstance(obj, torch.dtype): return obj
-    except ImportError: pass
-    if isinstance(obj, np.dtype): return obj
+    if torch:
+        if isinstance(obj, torch.dtype):
+            return obj
+    if isinstance(obj, np.dtype):
+        return obj
     try: return np.dtype(obj)
     except Exception: pass
     if returnnone: return None
     raise ValueError(f"canot convert to a dtype: {obj}")
-def isarray(u):
+def is_array(u):
     """Returns `True` if `u` is `scipy` or a `numpy` array, otherwise `False`.
 
     If the argument `u` is either a `scipy.sprase` sparse matrix or if `u` is a
@@ -277,12 +278,12 @@ def isarray(u):
         `True` if `u` is either a `scipy.sparse` sparse matrix or a
         `numpy.ndarray` array object, otherwise `False`.
 
-    See also: `istensor()`, `issparse()`, `isdense()`
+    See also: `is_tensor()`, `is_sparse()`, `is_dense()`
     """
     if   sps.issparse(u):           return True
     elif isinstance(u, np.ndarray): return True
     else: return False
-def istensor(u):
+def is_tensor(u):
     """Returns `True` if `u` is a PyTorch tensor and `False` otherwise.
 
     Returns a `boolean` value that indicates whether `u` is a PyTorch tensor
@@ -299,12 +300,29 @@ def istensor(u):
     boolean
         `True` if `u` is a PyTorch `tensor` object, otherwise `False`.
     """
-    try:
-        torch = pytorch()
+    if torch:
         return torch.is_tensor(u)
-    except ImportError: pass
     return False
-def issparse(u):
+def is_ndcoll(u):
+    """Determines if `u` is either a PyTorch tensor or NumPy array.
+
+    Returns a `boolean` value that indicates whether `u` is a PyTorch tensor
+    object or NumPy array object---i.e., an N-dimensional collection---or not.
+
+    Parameters
+    ----------
+    u : object
+        Any object.
+
+    Returns
+    -------
+    boolean
+        `True` if `u` is a PyTorch `tensor` object or a NumPy `ndarray` object,
+        otherwise `False`.
+    """
+    if torch and torch.is_tensor(u): return True
+    return isinstance(u, np.ndarray)
+def is_sparse(u):
     """Returns `True` if `u` is a `scipy` or `torch` sparse object.
 
     If `u` is either a `scipy.sparse` matrix or a `torch` sparse tensor, then
@@ -322,13 +340,11 @@ def issparse(u):
     boolean
         `True` if `u` is a sparse matrix or tensor and `False` otherwise.
     """
-    try:
-        torch = pytorch()
+    if torch:
         if torch.is_tensor(u):
             return u.is_sparse
-    except ImportError: pass
     return sps.issparse(u)
-def isdense(u):
+def is_dense(u):
     """Returns `True` if `u` is not a sparse array object and `False` otherwise.
 
     This function returns `True` if `u` represents a dense array of data. Note
@@ -352,17 +368,16 @@ def isdense(u):
     boolean
         `True` if `u` represents a dense array and `False` otherwise.
     """
-    try:
-        torch = pytorch()
+    if torch:
         if torch.is_tensor(u):
             return not u.is_sparse
-    except ImportError: pass
     if sps.issparse(u): return False
     try: u = np.asarray(u)
     except Exception: return False
     return True
-def arraylike(obj, dtype=None, ndims=None, shape=None,
-              torch=None, numpy=None, python=None):
+def like_ndcoll(obj,
+                dtype=None, ndim=None, shape=None,
+                torch=None, numpy=None, python=None):
     """Tests whether an object matches a particular array form.
 
     The parameter `obj` is matched against restrictions given by the remaining
@@ -378,7 +393,7 @@ def arraylike(obj, dtype=None, ndims=None, shape=None,
         The object the is to be matched against the array-structure requirements
         that are required by the remaining parameters.
     dtype : None or dtype-like or tuple or dtype-likes, optional
-        `arraylike(obj, dtype=dtype)` returns `True` if the given `obj` is or
+        `like_ndcoll(obj, dtype=dtype)` returns `True` if the given `obj` is or
         would be interpreted by numpy as an array whose dtype is `dtype`. The
         `dtype` may be a `numpy.dtype`, a `torch.dtype`, or the name of a
         dtype. Whichever type, `torch` tensors and `numpy` objects are
@@ -389,15 +404,15 @@ def arraylike(obj, dtype=None, ndims=None, shape=None,
         Additionally, the `dtype` parameter may be set to a tuple of dtype
         objects or objects that can be converted to dtype objects. In this case,
         any of the dtypes are considered valid dtypes for `obj`.
-    ndims : int or tuple of ints
-        `arraylike(obj, ndims=d)` returns `True` if the given `obj` has a number
+    ndim : int or tuple of ints
+        `like_ndcoll(obj, ndim=d)` returns `True` if the given `obj` has a number
         of dimensions that matches the parameter value `d`. The value `d` may be
         an integer, in which case the number of dimensions must match that value
         exactly, or it may be a tuple or list of numbers, each of which are
         valid numbers of dimensions. The default value of `None` puts no
         restriction on the number of dimensions `obj` must have.
     shape : int or tuple of ints, optional
-        `arraylike(obj, shape=sh)` returns `True` if the given `obj` has a shape
+        `like_ndcoll(obj, shape=sh)` returns `True` if the given `obj` has a shape
         that matches the parameter value `sh`. The value `sh` must be a tuple
         that is equal to the `obj`'s shape tuple with the following additional
         rules: a `-1` value in the `sh` tuple will match any value in the
@@ -435,10 +450,10 @@ def arraylike(obj, dtype=None, ndims=None, shape=None,
     """
     # Some sanity checks first:
     assert int(python is True) + int(numpy is True) + int(torch is True) < 2, \
-        "arraylike: only one of the parameters python, numpy, and torch may be True"
+        "like_ndcoll: only one of the parameters python, numpy, and torch may be True"
     if numpy is False and python is False and torch is False: return False
     # Parse the shape int front and back requirements and whether middle values are allowed.
-    shape_sh = nym.shape(shape)
+    shape_sh = np.shape(shape)
     if shape is None:
         (sh_pre, sh_mid, sh_suf) = ((), True, ())
     elif shape == ():
@@ -463,10 +478,10 @@ def arraylike(obj, dtype=None, ndims=None, shape=None,
             sh_suf = tuple(sh_suf) # We leave this reversed!
             sh_mid = len(sh_suf) + len(sh_pre) < len(shape)
         assert len(sh_suf) + len(sh_pre) + int(sh_mid) == len(shape), \
-            "arraylike: only one Ellipsis may be used in the shape filter"
-    # Parse ndims.
-    if not (pimms.is_tuple(ndims) or pimms.is_set(ndims) or pimms.is_list(ndims) or ndims is None):
-        ndims = (ndims,)
+            "like_ndcoll: only one Ellipsis may be used in the shape filter"
+    # Parse ndim.
+    if not (pimms.is_tuple(ndim) or pimms.is_set(ndim) or pimms.is_list(ndim) or ndim is None):
+        ndim = (ndim,)
     # See if obj is represented by the correct library. We check if it's a tensor by looking at
     # the promoted object, because a list of tensors should be considered a tensor, not a native
     # python list, but first we can check if the numpy conditoins are met.
@@ -481,12 +496,12 @@ def arraylike(obj, dtype=None, ndims=None, shape=None,
     elif python is False and not (isarr or istns): return False
     elif torch  is True  and not istns:            return False
     elif torch  is False and     istns:            return False
-    # See if we match in terms of ndims and shape
+    # See if we match in terms of ndim and shape
     sh = pro.shape
-    if ndims is not None and len(sh) not in ndims:
+    if ndim is not None and len(sh) not in ndim:
         return False
-    ndims = len(sh)
-    if ndims < len(sh_pre) + len(sh_suf):
+    ndim = len(sh)
+    if ndim < len(sh_pre) + len(sh_suf):
         return False
     (npre, nsuf) = (0,0)
     for (s,p) in zip(sh, sh_pre):
@@ -496,7 +511,7 @@ def arraylike(obj, dtype=None, ndims=None, shape=None,
         if p != -1 and p != s: return False
         nsuf += 1
     # If there are extras in the middle and we don't allow them, we fail the match.
-    if not sh_mid and nsuf + npre != ndims: return False
+    if not sh_mid and nsuf + npre != ndim: return False
     # See if we match the dtype.
     if dtype is not None:
         if istns:
@@ -509,11 +524,11 @@ def arraylike(obj, dtype=None, ndims=None, shape=None,
             if pro.dtype not in dtype: return False
     # We match everything!
     return True
-def is_numeric(x, numtype='<=complex', ndims=None, shape=None, numpy=None, torch=None, python=None):
+def is_numeric(x, numtype='<=complex', ndim=None, shape=None, numpy=None, torch=None, python=None):
     """Tests whether `x` contains numeric data, as well as other optional tests.
 
-    `is_numeric(x, ndims=n, shape=s, numpy=y, torch=t, python=p)` is equivalent
-    to `arraylike(x, ndims=n, shape=s, numpy=y, torch=t, python=p)` with the
+    `is_numeric(x, ndim=n, shape=s, numpy=y, torch=t, python=p)` is equivalent
+    to `like_ndcoll(x, ndim=n, shape=s, numpy=y, torch=t, python=p)` with the
     additional requirement that the `dtype` of `x` exist at a particular point
     on the numerical hierarchy, which is specified by the second positional
     argument, which is optional and has the name `numtype`. The numerical
@@ -550,8 +565,8 @@ def is_numeric(x, numtype='<=complex', ndims=None, shape=None, numpy=None, torch
     ----------
     x : object
         The object to be checked for appropriate numerical data.
-        ndims : int or tuple of ints
-        `arraylike(obj, ndims=d)` returns `True` if the given `obj` has a number
+    ndim : int or tuple of ints
+        `is_numeric(obj, ndim=d)` returns `True` if the given `obj` has a number
         of dimensions that matches the parameter value `d`. The value `d` may be
         an integer, in which case the number of dimensions must match that value
         exactly, or it may be a tuple or list of numbers, each of which are
@@ -564,15 +579,15 @@ def is_numeric(x, numtype='<=complex', ndims=None, shape=None, numpy=None, torch
         `numtype` must be one of the strings descibed above. The default value
         is '<=complex', which results in `True` for all numeric data documented
         above and `False` for all other data types.
-    ndims : int or tuple of ints
-        `arraylike(obj, ndims=d)` returns `True` if the given `obj` has a number
+    ndim : int or tuple of ints
+        `like_ndcoll(obj, ndim=d)` returns `True` if the given `obj` has a number
         of dimensions that matches the parameter value `d`. The value `d` may be
         an integer, in which case the number of dimensions must match that value
         exactly, or it may be a tuple or list of numbers, each of which are
         valid numbers of dimensions. The default value of `None` puts no
         restriction on the number of dimensions `obj` must have.
     shape : int or tuple of ints, optional
-        `arraylike(obj, shape=sh)` returns `True` if the given `obj` has a shape
+        `like_ndcoll(obj, shape=sh)` returns `True` if the given `obj` has a shape
         that matches the parameter value `sh`. The value `sh` must be a tuple
         that is equal to the `obj`'s shape tuple with the following additional
         rules: a `-1` value in the `sh` tuple will match any value in the
@@ -611,29 +626,45 @@ def is_numeric(x, numtype='<=complex', ndims=None, shape=None, numpy=None, torch
     # Figure out what dtypes we are checking; start by getting the prefix.
     if numtypes is None:
         # We are testing if it does not match any valid numeric dtypes.
-        al = arraylike(x, ndims=ndims, shape=shape, python=python, numpy=numpy, torch=torch)
+        al = like_ndcoll(x, ndim=ndim, shape=shape, python=python, numpy=numpy, torch=torch)
         if not al: return False
         types = is_numeric.numeric_types['<=complex']
-        return not arraylike(x, dtype=types[3])
+        return not like_ndcoll(x, dtype=types[3])
     # Otherwise, we just lookup the dtype from the numeric types and check against those.
     dt = is_numeric.numeric_types.get(numtype, None)
     if dt is None:
         raise ValueError(f"could not understand numerical type name: {numtype}")
-    return arraylike(x, dtype=dt, ndims=ndims, shape=shape, python=python, numpy=numpy, torch=torch)
+    return like_ndcoll(x,
+                       dtype=dt, ndim=ndim, shape=shape,
+                       python=python, numpy=numpy, torch=torch)
 def _reset_numeric_types():
     global is_numeric
-    nt = dict(
-        bool    = ((bool,), (np.dtype('bool'),), (torch.bool,)),
-        int     = ((int, np.int, np.int8, np.int16, np.int32, np.int64),
-                   (np.dtype('int8'), np.dtype('int16'), np.dtype('int32'), np.dtype('int64')),
-                   (torch.int8, torch.int16, torch.int32, torch.int64)),
-        real    = ((float, np.float, np.float16, np.float32, np.float64, np.longfloat),
-                   (np.dtype('float16'), np.dtype('float32'), np.dtype('float64'),
-                    np.dtype('longfloat')),
-                   (torch.float16, torch.float32, torch.float64)),
-        complex = ((complex, np.complex64, np.complex128, np.longcomplex),
-                   (np.dtype('complex64'), np.dtype('complex128'), np.dtype('longcomplex')),
-                   (torch.complex64, torch.complex128)))
+    if torch:
+        nt = dict(
+            bool    = ((bool,), (np.dtype('bool'),), (torch.bool,)),
+            int     = ((int, np.int, np.int8, np.int16, np.int32, np.int64),
+                       (np.dtype('int8'), np.dtype('int16'), np.dtype('int32'), np.dtype('int64')),
+                       (torch.int8, torch.int16, torch.int32, torch.int64)),
+            real    = ((float, np.float, np.float16, np.float32, np.float64, np.longfloat),
+                       (np.dtype('float16'), np.dtype('float32'), np.dtype('float64'),
+                        np.dtype('longfloat')),
+                       (torch.float16, torch.float32, torch.float64)),
+            complex = ((complex, np.complex64, np.complex128, np.longcomplex),
+                       (np.dtype('complex64'), np.dtype('complex128'), np.dtype('longcomplex')),
+                       (torch.complex64, torch.complex128)))
+    else:
+        nt = dict(
+            bool    = ((bool,), (np.dtype('bool'),), ()),
+            int     = ((int, np.int, np.int8, np.int16, np.int32, np.int64),
+                       (np.dtype('int8'), np.dtype('int16'), np.dtype('int32'), np.dtype('int64')),
+                       ()),
+            real    = ((float, np.float, np.float16, np.float32, np.float64, np.longfloat),
+                       (np.dtype('float16'), np.dtype('float32'), np.dtype('float64'),
+                        np.dtype('longfloat')),
+                       ()),
+            complex = ((complex, np.complex64, np.complex128, np.longcomplex),
+                       (np.dtype('complex64'), np.dtype('complex128'), np.dtype('longcomplex')),
+                       ()))
     ntord = ['bool', 'int', 'real', 'complex']
     # Calculate up the <, <=, >=, > types
     for (ii,k) in enumerate(ntord):
@@ -682,9 +713,6 @@ def _reset_numeric_types():
     return None
 # Make sure these start out initialized:
 _reset_numeric_types()
-    
-# let's fix up the numeric types!
-
 def reshape_indices(shape, ii, newshape):
     """Converts a matrix of indices to be valid for a reshaped array.
 
@@ -731,8 +759,9 @@ def reshape_indices(shape, ii, newshape):
         the length of the `shape` argument, or if there is more than one value
         in the `shape` and `newshape` arrays that is equal to `-1`.
     """
-    if istensor(shape): shape = shape.detach().numpy()
-    if istensor(newshale): newshape = newshape.detach().numpy()
+    if is_tensor(shape): shape = shape.detach().numpy()
+    if is_tensor(newshape): newshape = newshape.detach().numpy()
+    #TODO: #here!
     # Either shape or newshape may have 1 value that is equal to -1.
     if -1 in shape:
         nonneg = shape != -1
@@ -1654,7 +1683,68 @@ def toarray(u, **kw):
         xx = np.array(xx.detach().numpy(), dtype=dt)
         return sps.coo_matrix((xx, (ii,jj)), **kw)
     else:
-        return np.array(u, **kw)        
+        return np.array(u, **kw)
+def to_readonly(x):
+    """Returns a read-only `numpy` array copy of the argument.
+
+    If `x` is already a read-only `numpy` array, returns `x`. Otherwise, makes a
+    copy of `x` as a `nunmpy` array, marks it as read-only, and returns `x`.
+
+    Parameters
+    ----------
+    x : array-like
+        The object that is to be converted into a read-only numpy array.
+    
+    Returns
+    -------
+    numpy.ndarray
+        The read-only copy of `x`, or `x` itself if `x` was already a read-only
+        numpy array.
+    """
+    if not isarray(x) or x.flags['WRITEABLE']:
+        x = toarray(x)
+        x.setflag(write=False)
+    return x        
+def as_readonly(x):
+    """Returns a read-only `numpy` array version of the argument.
+
+    If `x` is already a read-only `numpy` array, returns `x`. Otherwise, if `x`
+    is a `numpy` array, sets `x` to be read-only and returns it. Otherwise,
+    makes a copy of `x` as a `nunmpy` array, marks it as read-only, and returns
+    it.
+
+    Parameters
+    ----------
+    x : array-like
+        The object that is to be converted into a read-only numpy array.
+    
+    Returns
+    -------
+    numpy.ndarray
+        The read-only copy of `x`, or `x` itself if `x` was already a numpy
+        array.
+    """
+    if not isarray(x):
+        x = toarray(x)
+        x.setflag(write=False)
+    elif not x.flags['WRITEABLE']:
+        x.setflag(write=False)
+    return x
+def is_readonly(x):
+    """`True` if `x` is a read-only `numpy` array, otherwise `False`.
+
+    Parameters
+    ----------
+    x : object
+        The object whose quality as a read-only `numpy` array is to be assessed.
+    
+    Returns
+    -------
+    boolean
+        `True` if `x` iis a read-only `numpy` array and `False` otherwise.
+    """
+    if not isarray(x): return False
+    return x.flags['WRITEABLE']
 def astensor(u, **kw):
     '''
     astensor(u) yields u if u is a PyTorch tensor and yields a PyTorch-tensor
@@ -1891,6 +1981,19 @@ def squeeze(u, axis=None):
 #  - logical_not(), logical_or(), logical_and()
 #  - where()
 #  - sort(), argsort()
+#  - isin()
+#  - intersect1d, union1d, setdiff1d (do not exist in torch)
+#  - norm(), like torch.norm() and np.linalg.norm() + 'angle' and 'cos' norms
+#  - searchsorted(), like np.searchsorted() and torch.searchsorted()
+#  - make sure clone() works for 0-dim arrays/tensors!
+#  - distance() function compatiible with LinearSpline's requirements
+#  - roll(), like np.roll() and torch.roll()
+#  - cumsum()
+#  - flip()
+#  - empty_like(), zeros_like(), ones_like(), full_like() that preserves torch/numpy-ness
+#  - floor(), ceiling(), round()
+#  - add out parameters to all of the functions?
+
 
 # Access Functions #################################################################################
 def extract(u, ii):

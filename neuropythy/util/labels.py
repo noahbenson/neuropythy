@@ -1,42 +1,82 @@
+# -*- coding: utf-8 -*-
 ####################################################################################################
 # neuropythy/util/labels.py
 # Simple tools for dealing with neuroscience-related labels for brains.
 # By Noah C. Benson
 
+import os, sys, types, six, pimms
 import numpy               as np
 import pyrsistent          as pyr
-import collections         as colls
-import os, sys, types, six, pimms
 
-from .core import (ObjectWithMetaData, is_tuple, curry, is_dataframe)
+from .core import (ObjectWithMetaData, is_tuple, curry, is_dataframe, is_iterable)
 
-def label_colors(lbls, cmap=None):
-    '''
-    label_colors(labels) yields a dict object whose keys are the unique values in labels and whose
-      values are the (r,g,b,a) colors that should be assigned to each label.
-    label_colors(n) is equivalent to label_colors(range(n)).
+def label_colors(labels, cmap=None):
+    """Assigns colors to each label value in a vector of labels.
 
-    Note that this function uses a heuristic and is not guaranteed to be optimal in any way for any
-    value of n--but it generally works well enough for most common purposes.
+    `label_colors(labels)` returns a dict object whose keys are the unique
+    values in labels and whose values are the `(r,g,b,a)` colors that should be
+    assigned to each label.
+
+    `label_colors(n)` is equivalent to `label_colors(range(n))`.
+
+    Note that this function uses a heuristic and is not guaranteed to be optimal
+    in any way for any value of `n`---but it generally works well enough for
+    most common purposes.
+
+    Parameters
+    ----------
+    labels : iterable of ints or int
+        Either an integer representing the number of unique labels or an
+        interable of the labels themselves. This may be either a collection of
+        just the unique labels or a vector of all the labels in a property.
+    cmap : colormap or None, optioinal
+        Specifies a colormap to use as a base for the label colors. If this is
+        `None` (the default), then a varianct of 'hsv' is used.
     
-    The following optional arguments may be given:
-      * cmap (default: None) specifies a colormap to use as a base. If this is None, then a varianct
-        of 'hsv' is used.
-    '''
+    Returns
+    -------
+    dict of labels mapped to RGBA tuples
+        A dictionary whose keys are the unique labels given by the argument and
+        whose values are `(r,g,b,a)` tuples for the label colors.
+    """
     from neuropythy.graphics import label_cmap
-    if pimms.is_int(lbls): lbls = np.arange(lbls)
-    lbls0 = np.unique(lbls)
-    lbls = np.arange(len(lbls0))
+    if nym.is_numeric(lbls, 'int', ndim=0): lbls = nym.arange(lbls)
+    lbls0 = nym.unique(lbls)
+    lbls = nym.arange(len(lbls0))
     cm = label_cmap(lbls, cmap=cmap)
     mx = float(len(lbls) - 1)
     m = {k:cm(l/mx) for (k,l) in zip(lbls0, lbls)}
     return m
 @pimms.immutable
 class LabelEntry(ObjectWithMetaData):
-    '''
-    LabelEntry is a class tracked by LabelIndex objects; it stores information about a single
-    label.
-    '''
+    """A single entry in a `LabelIndex` object that tracks a single label.
+
+    `LabelEntry` is a class tracked by `LabelIndex` objects; it stores
+    information about a single label. It is a `pimms.immutable` class.
+
+    Parameters
+    ----------
+    id : int
+        The integer value of the label.
+    name : str
+        The name of the label.
+    color : tuple of float
+        The `(r,g,b,a)` color tuple where each value is between 0 and 1.
+    meta_data : dict or None, optional
+        A mapping of meta-data keys to values.
+
+    Attributes
+    ----------
+    id : int
+        The integer value of the label.
+    name : str
+        The name of the label.
+    color : tuple of float
+        The `(r,g,b,a)` color tuple where each value is between 0 and 1.
+    meta_data : pyrsistent.PMap
+        A persistent mapping of meta-data; if the provided `meta_data` parameter
+        was `None`, then this is an empty mapping.
+    """
     def __init__(self, ident, name, color=None, meta_data=None):
         self.id = ident
         self.name = name
@@ -64,14 +104,58 @@ class LabelEntry(ObjectWithMetaData):
         return 'label(<%d: %s>)' % (self.id, self.name)
 @pimms.immutable
 class LabelIndex(ObjectWithMetaData):
-    '''
-    LabelIndex is an immutable class that tracks label data and can lookup labels by name or integer
-    value as well as assign colors to them.
-    '''
+    """An index for sets of labels.
+
+    `LabelIndex` is an immutable class that tracks label data and can lookup
+    labels by name or integer value as well as assign colors to them.
+
+    Parameters
+    ----------
+    ids : iterable of ints
+        The label values in the label set.
+    names : iterable of strings
+        The names of the labels.
+    colors : matrix of floats or None, optional
+        The colors for each of the labels, or `None` for automatic colors.
+    entry_meta_data : iterable, optional
+        A list of meta-data entries for each label. Each entry may be `None` or
+        a mapping.
+    meta_data : dict or None, optional
+        A mapping of meta-data keys to values.
+
+    Attributes
+    ----------
+    ids : iterable of ints
+        The label values in the label set.
+    names : iterable of strings
+        The names of the labels.
+    colors : matrix of floats
+        The colors for each of the labels.
+    entry_meta_data : iterable
+        A tuple of meta-data entries for each label. Each entry may be `None` or
+        a mapping.
+    meta_data : pyrsistent.PMap
+        A persistent mapping of meta-data; if the provided `meta_data` parameter
+        was `None`, then this is an empty mapping.
+    entries : tuple of LabelEntry
+        A tuple of the label entries, one for each label.
+    by_id : mapping
+        A mapping whose keys are label ids and whose values are the label
+        entries.
+    by_name : mapping
+        A mapping whose keys are label names and whose values are the label
+        entries.
+    vmin : float
+        A `vmin` value appropriate for properties of the labels tracked by the
+        `LabelIndex`.
+    vmax : float
+        A `vmax` value appropriate for properties of the labels tracked by the
+        `LabelIndex`.
+    colormap : matplotlib colormap
+        A colormap appropriate for properties of the labels tracked by the
+        `LabelIndex`.
+    """
     def __init__(self, ids, names, colors=None, entry_meta_data=None, meta_data=None):
-        '''
-        LabelIndex(ids, names) constructs a label index object with the given ids and names.
-        '''
         self.ids = ids
         self.names = names
         self.colors = colors
@@ -98,7 +182,7 @@ class LabelIndex(ObjectWithMetaData):
         from neuropythy.graphics import to_rgba
         if cs is None: return None
         # we want to convert to colors
-        return pimms.imm_array([to_rgba(c) for c in cs])
+        return nym.to_readonly([to_rgba(c) for c in cs])
     @pimms.param
     def entry_meta_data(mds):
         '''
@@ -108,11 +192,13 @@ class LabelIndex(ObjectWithMetaData):
         if mds is None: return None
         if is_dataframe(mds):
             mds = {k:mds[k].values for k in mds.colums}
-        elif pimms.is_map(mds):
+        elif is_map(mds):
             ks = list(mds.keys())
             mds = [{k:v for (k,v) in zip(ks,vs)} for vs in np.transpose(list(mds.values()))]
-        elif not pimms.is_array(mds) or not all(pimms.is_map(u) for u in mds):
-            raise ValueError('unbalanced or non-map entry meta-data')
+        elif not is_iterable(mds, str=False, set=False):
+            raise ValueError('cannot interpret entry meta-data')
+        elif not all(is_map(u) or u is None for u in mds):
+            raise ValueError('entry meta-data must be maps or None')
         return pimms.persist(mds)
     @pimms.require
     def check_counts(ids, names, colors, entry_meta_data):
@@ -182,50 +268,115 @@ class LabelIndex(ObjectWithMetaData):
         vals = (ids - vmin) / (vmax - vmin)
         return from_list('label%d' % len(vals), list(zip(vals, clrs)))
     def __getitem__(self, k):
-        if   pimms.is_int(k):              return self.by_id.get(k, None)
-        elif pimms.is_str(k):              return self.by_name.get(k, None)
-        elif pimms.is_vector(k, 'int'):    return np.asarray([self.by_id.get(k, None) for k in k])
-        else: return np.asarray([(self.by_name if pimms.is_str(k) else self.by_id).get(k, None)
-                                 for k in k])
+        if   pimms.is_int(k): return self.by_id.get(k, None)
+        elif pimms.is_str(k): return self.by_name.get(k, None)
+        elif not is_iterable(k, map=False, set=False):
+            raise ValueError(f"could not interpret argument to getitem: {k}")
+        else:
+            k = nym.promote(k)
+            u = np.empty_like(k, dtype=np.object)
+            if nym.is_numeric(k, 'int'):
+                dd = self.by_id
+                for kk in k:
+                    u[kk] = dd.get(kk)
+            else:
+                for kk in k:
+                    dd = self.by_id if is_str(kk) else self.by_id
+                    u[kk] = dd.get(kk)
+            return uu
     def name_lookup(self, ii):
-        '''
-        lblidx.name_lookup(ii) yields the names associated with the labels with the given ids. If
-          ii is a list of ids, then yields an array of names.
-        '''
-        if   pimms.is_int(ii): return self.by_id[ii].name if ii in self.by_id else None
-        elif pimms.is_str(ii): return self.by_name[ii].name if ii in self.by_name else None
-        else: return np.asarray([tbl[ii].name if ii in tbl else None
-                                 for ii in ii
-                                 for tbl in [self.by_name if pimms.is_str(ii) else self.by_id]])
+        """Looks up names for labels by label ID.
+
+        `lblidx.name_lookup(ii)` returns the names associated with the labels
+        with the given ids `ii`. If `ii` is a list of ids, then returnss an
+        array of names.
+
+        Parameters
+        ----------
+        ii : int or array-like of ints
+            The id or ids of the label(s) to lookup in the label index.
+
+        Returns
+        -------
+        str or array of strs
+            The names corresponding to the given label id or label ids.
+        """
+        if is_iteraable(ii, map=False, set=False, str=False):
+            ss = [self.by_id[ii].name if jj in self.by_id else None for jj in ii]
+            return np.asarray(ss)
+        else:
+            return self.by_id[ii].name if ii in self.by_id else None
     def id_lookup(self, names):
-        '''
-        lblidx.id_lookup(names) yields the ids associated with the labels with the given names. If
-          names is a list of names, then yields an array of ids.
-        '''
-        if   pimms.is_str(names): return self.by_name[names].id if names in self.by_name else None
-        elif pimms.is_int(names): return self.by_id[names].id if names in self.by_id else None
-        else: return np.asarray([tbl[ii].id if ii in tbl else None
-                                 for ii in names
-                                 for tbl in [self.by_name if pimms.is_str(ii) else self.by_id]])
+        """Looks up IDs for labels by label name.
+
+        `lblidx.id_lookup(names)` returns the ids associated with the labels
+        with the given `names`. If `names` is a list of names, then returnss an
+        array of ids.
+
+        Parameters
+        ----------
+        names : str or array-like of strs
+            The name or names of the label(s) to lookup in the label index.
+
+        Returns
+        -------
+        int or array of ints
+            The ids corresponding to the given label name or label names.
+        """
+        if is_iteraable(names, map=False, set=False, str=False):
+            ss = [self.by_name[jj].name if jj in self.by_name else None for jj in names]
+        else:
+            ss = self.by_name[ii].name if ii in self.by_name else None
+        return np.asarray(ss)
     def color_lookup(self, ii):
-        '''
-        lblidx.color_lookup(ids) yields the color(s) associated with the labels with the given ids.
-          If ids is a list of ids, then yields a matrix of colors.
-        lblidx.color_lookup(names) uses the names to lookup the label colors.
-        '''
-        if pimms.is_int(ii): return self.by_id[ii].color if ii in self.by_id else None
-        elif pimms.is_str(ii): return self.by_name[ii].color if ii in self.by_name else None
-        else: return np.asarray([tbl[ii].color if ii in tbl else None
-                                 for ii in ii
-                                 for tbl in [self.by_name if pimms.is_str(ii) else self.by_id]])
+        """Looks up colors for labels by label name or label ID.
+
+        `lblidx.color_lookup(names)` returns the colors (RGBA tuples) associated
+        with the labels with the name(s) or ID(s) given in the parameter
+        `ii`. If `ii` is a list of names, then returnss an matrix of colors.
+
+        Parameters
+        ----------
+        ii : str or int or vector-like
+            The name(s) or id(s) of the label color(s) to lookup in the label
+            index.
+
+        Returns
+        -------
+        vector or matrix of RGBA entries
+            Either an RGBA tuple or a matrix of RGBA rows.
+        """
+        if is_iteraable(ii, map=False, set=False, str=False):
+            ss = [((self.by_name[jj].color if jj in self.by_name else (0,0,0,0)) if is_str(jj) else
+                   (self.by_id[jj].color if jj in self.by_id else (0,0,0,0)))
+                  for jj in ii]
+            return np.asarray(ss)
+        else:
+            if is_str(iii):
+                return self.by_name[ii].color if ii in self.by_name else (0,0,0,0)
+            else:
+                return self.by_id[ii].color if ii in self.by_id else (0,0,0,0)
     def cmap(self, data=None):
-        '''
-        lblidx.cmap() yields a colormap for the given label index object that assumes that the data
-          being plotted will be rescaled such that label 0 is 0 and the highest label value in the
-          label index is equal to 1.
-        lblidx.cmap(data) yields a colormap that will correctly color the labels given in data if
-          data is scaled such that its minimum and maximum value are 0 and 1.
-        '''
+        """Returns a scaled colormap for the label index.
+
+        `lblidx.cmap()` returns a colormap for the given label index object that
+        assumes that the data being plotted will be rescaled such that label 0
+        is 0 and the highest label value in the label index is equal to 1.
+
+        `lblidx.cmap(data)` returns a colormap that will correctly color the
+        labels given in data if data is scaled such that its minimum and maximum
+        value are 0 and 1.
+
+        Parameters
+        ----------
+        data : vector of ints or None, optional
+            Optionally, the label data to tune the colormap for.
+
+        Returns
+        -------
+        matplotlib colormap
+            A colormap appropriate for the label index.
+        """
         import matplotlib.colors
         from_list = matplotlib.colors.LinearSegmentedColormap.from_list
         if data is None: return self.colormap
@@ -244,81 +395,98 @@ class LabelIndex(ObjectWithMetaData):
         return from_list('label%d' % len(vals), list(zip(vals, clrs)))
     def __repr__(self):
         return 'LabelIndex(<%d labels>)' % len(self.ids)
-def is_label_index(le):
-    '''
-    is_label_index(le) yields True if the given object le is a label index and False otherwise.
-    '''
-    return isinstance(le, LabelIndex)
-def label_index(dat, *args, **kw):
-    '''
-    label_index(idx_map) converts the given map- or dict-like object idx_map into a label index by
-      assuming that the keys are label ids and the values are label names or tuples of label names
-      and (r,g,b,a) colors.
-    label_index(ids, names) uses the given ids and names to make the label index.
-    label_index(ids, names, colors) additionally uses the given colors.
+def is_label_index(obj):
+    """Determines whether an object is a `LabelIndex`.
 
-    Note that if there is not a label with id 0 then such a label is automatically created with the
-    name 'none', the rgba color [0,0,0,0], and no entry meta-data. As a general rule, the label 0
-    should be used to indicate that a label is missing.
+    `is_label_index(obj)` returns `True` if the given object obj is a label
+    index and `False` otherwise.
 
-    The optional arguments meta_data and entry_meta_data may specify both the meta-data for the
-    label-index object itself as well as the meta-data for the individual entries.
-    '''
-    md = kw.pop('meta_data', {})
-    mds = kw.pop('entry_meta_data', None)
-    if len(kw) > 0: raise ValueError('unrecognized optional argument(s) given to label_index')
-    if len(args) == 0:
-        if pimms.is_map(dat):
-            (ids,nms,clrs) = ([],[],[])
-            for (k,v) in six.iteritems(dat):
-                if pimms.is_scalar(v): c = None
-                else: (v,c) = v
-                if pimms.is_str(k):
-                    ids.append(v)
-                    nms.append(k)
-                else:
-                    ids.append(k)
-                    nms.append(v)
-                if c is not None: clrs.append(c)
-        elif is_dataframe(dat):
-            if dat.index.name.lower() == 'id': ids = dat.index.values
-            else: ids = dat['id'].values
-            nms = dat['name'].values
-            if 'color' in dat: clrs = np.array(list(map(list, dat['color'].values)))
-            elif all(k in dat for k in ['r','g','b']):
-                ks = ['r','g','b']
-                if 'a' in dat: ks.append('a')
-                clrs = np.array([[r[k] for k in ks].values for (ii,r) in dat.iterrows()])
-            else: clrs = []
-        elif pimms.is_vector(dat, 'int'):
-            ids = np.unique(dat)
-            nms = ['label%d'%k for k in ids]
-            clrs = []
-        else: raise ValueError('label_index(idx_map) given non-map argument')
-    elif len(args) == 1: (ids,nms,clrs) = (dat, args[0], [])
-    elif len(args) == 2: (ids,nms,clrs) = (dat, args[0], args[1])
-    else: raise ValueError('Too many arguments given to label_index()')
-    if clrs is None or len(clrs) == 0: clrs = None
-    elif len(clrs) != len(ids): raise ValueError('color-count must match id-count')
+    Parameters
+    ----------
+    obj : object
+        The object whose quality as a `LabelIndex` is to be assessed.
+
+    Returns
+    -------
+    `True` if `obj` is a `LabelIndex` and `False` otherwise.
+    """
+    return isinstance(obj, LabelIndex)
+def to_label_index(idxmap, names=None, colors=None, entry_meta_data=None, meta_data=None):
+    """Creates and returns a `LabelIndex` object from the arguments.
+
+    `label_index(idxmap)` converts the given map- or dict-like object `idxmap`
+    into a label index by assuming that the keys are label ids and the values
+    are label names or tuples of label names and `(r,g,b,a)` colors.
+
+    `label_index(ids, names)` uses the given `ids` and `names` to make the label
+    index.
+
+    `label_index(ids, names, colors)` additionally uses the given colors.
+
+    Note that if there is not a label with id 0 then such a label is
+    automatically created with the name 'none', the RGBA color `(0,0,0,0)`, and
+    no entry meta-data. As a general rule, the label 0 should be used to
+    indicate that a vertex is out of range for this particular set of labels.
+
+    Parameters
+    ----------
+    idxmap : mapping or iterable of ints
+        Either, if `names` is not provided, an index mapping, or, if `names` is
+        provided, an iterable of label ids. The mapping must contain keys that
+        are label ids and values that are label names or tuples of `(names,
+        (r,g,b,a))` pairs.
+    names : iterable of str or None, optional
+        The names of the IDs provided in `idxmap` if `idxmap` is not a mapping;
+        if `idxmap` is a mapping, then this argument must be `None` or an error
+        is raised.
+    colors : matrix of RGBA rows or None, optional
+        The colors to use for the label index. If `None` (the default), then
+        generates colors using `label_colors()`.
+    entry_meta_data : None or iterable of mappings
+        The meta-data associated with each label entry. If not `None`, then this
+        must be an iterable with one entry per labele that is itself either
+        `None` or a mapping of meta-data.
+    meta_data : dict or None, optional
+        A mapping of meta-data keys to values.
+
+    Returns
+    -------
+    LabelIndex
+        A `LabelIndex` object representing the given labels.
+    """
+    md = meta_data
+    mds = entry_meta_data
+    dat = idxmap
+    if is_map(dat):
+        if names is not None:
+            raise ValueError("either names must be None or argument must not be a mapping")
+        (ids,nms,clrs) = ([],[],[])
+        for (k,v) in dat.items():
+            if is_str(v): c = None
+            else: (v,c) = v
+            ids.append(k)
+            nms.append(v)
+            if c is not None: clrs.append(c)
+    elif is_dataframe(dat):
+        if dat.index.name.lower() == 'id': ids = dat.index.values
+        else: ids = dat['id'].values
+        nms = dat['name'].values
+        if 'color' in dat: clrs = np.array(list(map(list, dat['color'].values)))
+        elif all(k in dat for k in ['r','g','b']):
+            ks = ['r','g','b']
+            if 'a' in dat: ks.append('a')
+            clrs = np.array([[r[k] for k in ks].values for (ii,r) in dat.iterrows()])
+        else: clrs = colors
+    elif nym.is_numeric(dat, 'int', ndim=1):
+        ids = nym.unique(dat)
+        nms = names
+        clrs = colors
+    else:
+        raise ValueError(f'label_index() could nor parse first argument: {dat}')
+    if nms is Noone: nms = ['label%d'%k for k in ids]
+    if clrs is not None:
+        if   len(clrs) == 0:        clrs = None
+        elif len(clrs) != len(ids): raise ValueError('color-count must match id-count')
     # okay, make the label index
     return LabelIndex(ids, nms, colors=clrs, meta_data=md, entry_meta_data=mds)
-def to_label_index(obj):
-    '''
-    to_label_index(obj) attempts to coerce the given object into a label index object; if obj is
-      already a label index object, then obj itself is returned. If obj cannot be coerced into a
-      label index, then an error is raised.
-
-    The obj argument can be any of the following:
-      * a label index
-      * a label list (i.e., an integer vector)
-      * a tuple of arguments, potentially ending with a kw-options map, that can be passed to the
-        label_index function successfully.
-    '''
-    if   is_label_index(obj): return obj
-    elif pimms.is_vector(obj, 'int'): return label_index(obj)
-    elif is_dataframe(obj): return label_index(obj)
-    elif is_tuple(obj):
-        if len(obj) > 1 and pimms.is_map(obj[-1]): return label_index(*obj[:-1], **obj[-1])
-        else: return label_index(*obj)
-    else: raise ValueError('could not parse to_label_index parameter: %s' % obj)
 label_indices = {}

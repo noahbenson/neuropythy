@@ -16,8 +16,8 @@ from .. import geometry as geo
 
 from itertools import chain
 
-from ..util import (ObjectWithMetaData, to_affine, apply_affine, is_address, is_tuple,
-                    is_list, address_data, address_interpolate, curry, to_hemi_str, is_pseudo_path,
+from ..util import (ObjectWithMetaData, to_affine, apply_affine, is_tuple, is_list,
+                    address_data, address_interpolate, curry, to_hemi_str, is_pseudo_path,
                     pseudo_path, to_pseudo_path)
 from .images import (to_image, to_image_spec, is_image_spec, is_image_header, is_pimage, is_npimage,
                      is_image, image_copy)
@@ -882,6 +882,7 @@ class Cortex(geo.Topology):
             either 'white', 'pial', 'midgray', or a real number in the range [0,1] where 0 is the
             white surface and 1 is the pial surface.
         '''
+        #TODO: fix address_data here once it has been settled (in vset.py?)
         (faces, coords) = address_data(data, 3, surface=surface)
         (bc, ds) = (coords[:2], coords[2])
         faces = self.tess.index(faces)

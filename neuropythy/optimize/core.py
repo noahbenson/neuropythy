@@ -14,11 +14,738 @@ import pyrsistent            as pyr
 from   functools         import reduce
 from   ..                import geometry as geo
 from   ..                import mri      as mri
-from   ..util            import (numel, rows, part, hstack, vstack, repmat, flatter, flattest,
-                                 times, plus, minus, zdivide, zinv, power, ctimes, cpower, inner,
-                                 cplus, sine, cosine, tangent, cosecant, secant, cotangent,
-                                 divide, arctangent)
 from   ..geometry        import (triangle_area)
+
+# Functions that used to live in neuropythy.util.core ##############################################
+def numel(x):
+    '''
+    numel(x) yields the number of elements in x: the product of the shape of x.
+    '''
+    return int(np.prod(np.shape(x)))
+def rows(x):
+    '''
+    rows(x) yields the number of rows in x; if x is a scalar, this is still 1.
+    '''
+    s = np.shape(x)
+    return s[0] if len(s) > 0 else 1
+def unbroadcast(a, b):
+    '''
+    unbroadcast(a, b) yields a tuple (aa, bb) that is equivalent to (a, b) except that aa and bb
+      have been reshaped such that arithmetic numpy operations such as aa * bb will result in
+      row-wise operation instead of column-wise broadcasting.
+    '''
+    # they could be sparse:
+    spa = sps.issparse(a)
+    spb = sps.issparse(b)
+    if   spa and spb: return (a,b)
+    elif spa or  spb:
+        def fix(sp,nm):
+            nm = np.asarray(nm)
+            dnm = len(nm.shape)
+            nnm = np.prod(nm.shape)
+            # if we have (sparse matrix) * (high-dim array), unbroadcast the dense array
+            if   dnm == 0: return (sp, np.reshape(nm, (1,   1)))
+            elif dnm == 1: return (sp, np.reshape(nm, (nnm, 1)))
+            elif dnm == 2: return (sp, nm)
+            else:          return unbroadcast(sp.toarray(), nm)
+        return fix(a, b) if spa else tuple(reversed(fix(b, a)))
+    # okay, no sparse matrices found:
+    a = np.asarray(a)
+    b = np.asarray(b)
+    da = len(a.shape)
+    db = len(b.shape)
+    if   da > db: return (a, np.reshape(b, b.shape + tuple(np.ones(da-db, dtype=np.int))))
+    elif da < db: return (np.reshape(a, a.shape + tuple(np.ones(db-da, dtype=np.int))), b)
+    else:         return (a, b)
+def cplus(*args):
+    '''
+    cplus(a, b...) returns the sum of all the values as a numpy array object. Like numpy's add
+      function or a+b syntax, plus will thread over the latest dimension possible.
+
+    Additionally, cplus works correctly with sparse arrays.
+    '''
+    n = len(args)
+    if   n == 0: return np.asarray(0)
+    elif n == 1: return np.asarray(args[0])
+    elif n >  2: return reduce(plus, args)
+    (a,b) = args
+    if sps.issparse(a):
+        if not sps.issparse(b):
+            b = np.asarray(b)
+            if len(b.shape) == 0: b = np.reshape(b, (1,1))
+    elif sps.issparse(b):
+        a = np.asarray(a)
+        if len(a.shape) == 0: a = np.reshape(a, (1,1))
+    else:
+        a = np.asarray(a)
+        b = np.asarray(b)
+    return a + b
+def plus(*args):
+    '''
+    plus(a, b...) returns the sum of all the values as a numpy array object. Unlike numpy's add
+      function or a+b syntax, plus will thread over the earliest dimension possible; thus if a.shape
+      a.shape is (4,2) and b.shape is 4, plus(a,b) is a equivalent to
+      [ai+bi for (ai,bi) in zip(a,b)].
+    '''
+    n = len(args)
+    if   n == 0: return np.asarray(0)
+    elif n == 1: return np.asarray(args[0])
+    elif n >  2: return reduce(plus, args)
+    (a,b) = unbroadcast(*args)
+    return a + b
+def cminus(a, b):
+    '''
+    cminus(a, b) returns the difference a - b as a numpy array object. Like numpy's subtract
+      function or a - b syntax, minus will thread over the latest dimension possible.
+    '''
+    # adding/subtracting a constant to/from a sparse array is an error...
+    spa = sps.issparse(a)
+    spb = sps.issparse(b)
+    if not spa: a = np.asarray(a)
+    if not spb: b = np.asarray(b)
+    if   spa: b = np.reshape(b, (1,1)) if len(np.shape(b)) == 0 else b
+    elif spb: a = np.reshape(a, (1,1)) if len(np.shape(a)) == 0 else a
+    return a - b
+def minus(a, b):
+    '''
+    minus(a, b) returns the difference a - b as a numpy array object. Unlike numpy's subtract
+      function or a - b syntax, minus will thread over the earliest dimension possible; thus if
+      a.shape is (4,2) and b.shape is 4, a - b is a equivalent to [ai-bi for (ai,bi) in zip(a,b)].
+    '''
+    (a,b) = unbroadcast(a,b)
+    return a - b
+def ctimes(*args):
+    '''
+    ctimes(a, b...) returns the product of all the values as a numpy array object. Like numpy's
+      multiply function or a*b syntax, times will thread over the latest dimension possible; thus
+      if a.shape is (4,2) and b.shape is 2, times(a,b) is a equivalent to a * b.
+
+    Unlike numpy's multiply function, ctimes works with sparse matrices and will reify them.
+    '''
+    n = len(args)
+    if   n == 0: return np.asarray(0)
+    elif n == 1: return np.asarray(args[0])
+    elif n >  2: return reduce(plus, args)
+    (a,b) = args
+    if   sps.issparse(a): return a.multiply(b)
+    elif sps.issparse(b): return b.multiply(a)
+    else:                 return np.asarray(a) * b
+def times(*args):
+    '''
+    times(a, b...) returns the product of all the values as a numpy array object. Unlike numpy's
+      multiply function or a*b syntax, times will thread over the earliest dimension possible; thus
+      if a.shape is (4,2) and b.shape is 4, times(a,b) is a equivalent to
+      [ai*bi for (ai,bi) in zip(a,b)].
+    '''
+    n = len(args)
+    if   n == 0: return np.asarray(0)
+    elif n == 1: return np.asarray(args[0])
+    elif n >  2: return reduce(plus, args)
+    (a,b) = unbroadcast(*args)
+    if   sps.issparse(a): return a.multiply(b)
+    elif sps.issparse(b): return b.multiply(a)
+    else:                 return a * b
+def inv(x):
+    '''
+    inv(x) yields the inverse of x, 1/x.
+
+    Note that inv supports sparse matrices, but it is forced to reify them. Additionally, because
+    inv raises an error on divide-by-zero, they are unlikely to work. For better sparse-matrix
+    support, see zinv.
+    '''
+    if sps.issparse(x): return 1.0 / x.toarray()        
+    else:               return 1.0 / np.asarray(x)
+def zinv(x, null=0):
+    '''
+    zinv(x) yields 1/x if x is not close to 0 and 0 otherwise. Automatically threads over arrays and
+      supports sparse-arrays.
+
+    The optional argument null (default: 0) may be given to specify that zeros in the arary x should
+    instead be replaced with the given value. Note that if this value is not equal to 0, then any
+    sparse array passed to zinv must be reified.
+
+    The zinv function never raises an error due to divide-by-zero; if you desire this behavior, use
+    the inv function instead.
+    '''
+    if sps.issparse(x):
+        if null != 0: return zinv(x.toarray(), null=null)
+        x = x.copy()
+        x.data = zinv(x.data)
+        try: x.eliminate_zeros()
+        except Exception: pass
+        return x
+    else:
+        x = np.asarray(x)
+        z = np.isclose(x, 0)
+        r = np.logical_not(z) / (x + z)
+        if null == 0: return r
+        r[z] = null
+        return r
+def cdivide(a, b):
+    '''
+    cdivide(a, b) returns the quotient a / b as a numpy array object. Like numpy's divide function
+      or a/b syntax, divide will thread over the latest dimension possible. Unlike numpy's divide,
+      cdivide works with sparse matrices.
+
+    Note that warnings/errors are raised by this function when divide-by-zero occurs, so it is
+    usually not useful to use cdivide() with sparse matrices--see czdivide instead.
+    '''
+    if   sps.issparse(a): return a.multiply(inv(b))
+    elif sps.issparse(b): return np.asarray(a) / b.toarray()
+    else:                 return np.asarray(a) / np.asarray(b)
+def divide(a, b):
+    '''
+    divide(a, b) returns the quotient a / b as a numpy array object. Unlike numpy's divide function
+      or a/b syntax, divide will thread over the earliest dimension possible; thus if a.shape is
+      (4,2) and b.shape is 4, divide(a,b) is a equivalent to [ai/bi for (ai,bi) in zip(a,b)].
+
+    Note that divide(a,b) supports sparse array arguments, but if b is a sparse matrix, then it will
+    be reified. Additionally, errors are raised by this function when divide-by-zero occurs, so it
+    is usually not useful to use divide() with sparse matrices--see zdivide instead.
+    '''
+    (a,b) = unbroadcast(a,b)
+    return cdivide(a,b)
+def czdivide(a, b, null=0):
+    '''
+    czdivide(a, b) returns the quotient a / b as a numpy array object. Like numpy's divide function
+      or a/b syntax, czdivide will thread over the latest dimension possible. Unlike numpy's divide,
+      czdivide works with sparse matrices. Additionally, czdivide multiplies a by the zinv of b, so
+      divide-by-zero entries are replaced with 0 in the result.
+
+    The optional argument null (default: 0) may be given to specify that zeros in the arary b should
+    instead be replaced with the given value in the result. Note that if this value is not equal to
+    0, then any sparse array passed as argument b must be reified.
+
+    The czdivide function never raises an error due to divide-by-zero; if you desire this behavior,
+    use the cdivide function instead.
+    '''
+    if null == 0:         return a.multiply(zinv(b)) if sps.issparse(a) else a * zinv(b)
+    elif sps.issparse(b): b = b.toarray()
+    else:                 b = np.asarray(b)
+    z = np.isclose(b, 0)
+    q = np.logical_not(z)
+    zi = q / (b + z)
+    if sps.issparse(a):
+        r = a.multiply(zi).tocsr()
+    else:
+        r = np.asarray(a) * zi
+    r[np.ones(a.shape, dtype=np.bool)*z] = null
+    return r
+def zdivide(a, b, null=0):
+    '''
+    zdivide(a, b) returns the quotient a / b as a numpy array object. Unlike numpy's divide function
+      or a/b syntax, zdivide will thread over the earliest dimension possible; thus if a.shape is
+      (4,2) and b.shape is 4, zdivide(a,b) is a equivalent to [ai*zinv(bi) for (ai,bi) in zip(a,b)].
+
+    The optional argument null (default: 0) may be given to specify that zeros in the arary b should
+    instead be replaced with the given value in the result. Note that if this value is not equal to
+    0, then any sparse array passed as argument b must be reified.
+
+    The zdivide function never raises an error due to divide-by-zero; if you desire this behavior,
+    use the divide function instead.
+
+    Note that zdivide(a,b, null=z) is not quite equivalent to a*zinv(b, null=z) unless z is 0; if z
+    is not zero, then the same elements that are zet to z in zinv(b, null=z) are set to z in the
+    result of zdivide(a,b, null=z) rather than the equivalent element of a times z.
+    '''
+    (a,b) = unbroadcast(a,b)
+    return czdivide(a,b, null=null)
+def cpower(a,b):
+    '''
+    cpower(a,b) is equivalent to a**b except that it also operates over sparse arrays; though it
+    must reify them to do so.
+    '''
+    if sps.issparse(a): a = a.toarray()
+    if sps.issparse(b): b = b.toarray()
+    return a ** b
+hpi    = np.pi / 2
+tau    = 2 * np.pi
+negpi  = -np.pi
+neghpi = -hpi
+negtau = -tau
+def power(a,b):
+    '''
+    power(a,b) is equivalent to a**b except that, like the neuropythy.util.times function, it
+      threads over the earliest dimension possible rather than the latest, as numpy's power function
+      and ** syntax do. The power() function also works with sparse arrays; though it must reify
+      them during the process.
+    '''
+    (a,b) = unbroadcast(a,b)
+    return cpower(a,b)
+def inner(a,b):
+    '''
+    inner(a,b) yields the dot product of a and b, doing so in a fashion that respects sparse
+      matrices when encountered. This does not error check for bad dimensionality.
+
+    If a or b are constants, then the result is just the a*b; if a and b are both vectors or both
+    matrices, then the inner product is dot(a,b); if a is a vector and b is a matrix, this is
+    equivalent to as if a were a matrix with 1 row; and if a is a matrix and b a vector, this is
+    equivalent to as if b were a matrix with 1 column.
+    '''
+    if   sps.issparse(a): return a.dot(b)
+    else: a = np.asarray(a)
+    if len(a.shape) == 0: return a*b
+    if sps.issparse(b):
+        if len(a.shape) == 1: return b.T.dot(a)
+        else:                 return b.T.dot(a.T).T
+    else: b = np.asarray(b)
+    if len(b.shape) == 0: return a*b
+    if len(a.shape) == 1 and len(b.shape) == 2: return np.dot(b.T, a)
+    else: return np.dot(a,b)
+def sine(x):
+    '''
+    sine(x) is equivalent to sin(x) except that it also works on sparse arrays.
+    '''
+    if sps.issparse(x):
+        x = x.copy()
+        x.data = np.sine(x.data)
+        return x
+    else: return np.sin(x)
+def cosine(x):
+    '''
+    cosine(x) is equivalent to cos(x) except that it also works on sparse arrays.
+    '''
+    # cos(0) = 1 so no point in keeping these sparse
+    if sps.issparse(x): x = x.toarray(x)
+    return np.cos(x)
+def tangent(x, null=(-np.inf, np.inf), rtol=default_rtol, atol=default_atol):
+    '''
+    tangent(x) is equivalent to tan(x) except that it also works on sparse arrays.
+
+    The optional argument null (default, (-numpy.inf, numpy.inf)) may be specified to indicate what
+    value(s) should be assigned when x == -pi/2 or -pi/2. If only one number is given, then it is
+    used for both values; otherwise the first value corresponds to -pi/2 and the second to pi/2.
+    A value of x is considered to be equal to one of these valids based on numpy.isclose. The
+    optional arguments rtol and atol are passed along to isclose. If null is None, then no
+    replacement is performed.
+    '''
+    if sps.issparse(x):
+        x = x.copy()
+        x.data = tangent(x.data, null=null, rtol=rtol, atol=atol)
+        return x
+    else: x = np.asarray(x)
+    if rtol is None: rtol = default_rtol
+    if atol is None: atol = default_atol
+    try:    (nln,nlp) = null
+    except Exception: (nln,nlp) = (null,null)
+    x = np.mod(x + pi, tau) - pi
+    ii = None if nln is None else np.where(np.isclose(x, neghpi, rtol=rtol, atol=atol))
+    jj = None if nlp is None else np.where(np.isclose(x, hpi,    rtol=rtol, atol=atol))
+    x = np.tan(x)
+    if ii: x[ii] = nln
+    if jj: x[jj] = nlp
+    return x
+def cotangent(x, null=(-np.inf, np.inf), rtol=default_rtol, atol=default_atol):
+    '''
+    cotangent(x) is equivalent to cot(x) except that it also works on sparse arrays.
+
+    The optional argument null (default, (-numpy.inf, numpy.inf)) may be specified to indicate what
+    value(s) should be assigned when x == 0 or pi. If only one number is given, then it is used for
+    both values; otherwise the first value corresponds to 0 and the second to pi.  A value of x is
+    considered to be equal to one of these valids based on numpy.isclose. The optional arguments
+    rtol and atol are passed along to isclose. If null is None, then no replacement is performed.
+    '''
+    if sps.issparse(x): x = x.toarray()
+    else:               x = np.asarray(x)
+    if rtol is None: rtol = default_rtol
+    if atol is None: atol = default_atol
+    try:    (nln,nlp) = null
+    except Exception: (nln,nlp) = (null,null)
+    x = np.mod(x + hpi, tau) - hpi
+    ii = None if nln is None else np.where(np.isclose(x, 0,  rtol=rtol, atol=atol))
+    jj = None if nlp is None else np.where(np.isclose(x, pi, rtol=rtol, atol=atol))
+    x = np.tan(x)
+    if ii: x[ii] = 1
+    if jj: x[jj] = 1
+    x = 1.0 / x
+    if ii: x[ii] = nln
+    if jj: x[jj] = nlp
+    return x
+def secant(x, null=(-np.inf, np.inf), rtol=default_rtol, atol=default_atol):
+    '''
+    secant(x) is equivalent to 1/sin(x) except that it also works on sparse arrays.
+
+    The optional argument null (default, (-numpy.inf, numpy.inf)) may be specified to indicate what
+    value(s) should be assigned when x == -pi/2 or -pi/2. If only one number is given, then it is
+    used for both values; otherwise the first value corresponds to -pi/2 and the second to pi/2.
+    A value of x is considered to be equal to one of these valids based on numpy.isclose. The
+    optional arguments rtol and atol are passed along to isclose. If null is None, then an error is
+    raised when -pi/2 or pi/2 is encountered.
+    '''
+    if sps.issparse(x): x = x.toarray()
+    else:               x = np.asarray(x)
+    if rtol is None: rtol = default_rtol
+    if atol is None: atol = default_atol
+    try:    (nln,nlp) = null
+    except Exception: (nln,nlp) = (null,null)
+    x = np.mod(x + pi, tau) - pi
+    ii = None if nln is None else np.where(np.isclose(x, neghpi, rtol=rtol, atol=atol))
+    jj = None if nlp is None else np.where(np.isclose(x, hpi,    rtol=rtol, atol=atol))
+    x = np.cos(x)
+    if ii: x[ii] = 1.0
+    if jj: x[jj] = 1.0
+    x = 1.0/x
+    if ii: x[ii] = nln
+    if jj: x[jj] = nlp
+    return x
+def cosecant(x, null=(-np.inf, np.inf), rtol=default_rtol, atol=default_atol):
+    '''
+    cosecant(x) is equivalent to 1/sin(x) except that it also works on sparse arrays.
+
+    The optional argument null (default, (-numpy.inf, numpy.inf)) may be specified to indicate what
+    value(s) should be assigned when x == 0 or pi. If only one number is given, then it is used for
+    both values; otherwise the first value corresponds to 0 and the second to pi. A value x is
+    considered to be equal to one of these valids based on numpy.isclose. The optional arguments
+    rtol and atol are passed along to isclose. If null is None, then an error is raised when -pi/2
+    or pi/2 is encountered.
+    '''
+    if sps.issparse(x): x = x.toarray()
+    else:               x = np.asarray(x)
+    if rtol is None: rtol = default_rtol
+    if atol is None: atol = default_atol
+    try:    (nln,nlp) = null
+    except Exception: (nln,nlp) = (null,null)
+    x = np.mod(x + hpi, tau) - hpi # center on pi/2 so that 0 and pi are easy to detect
+    ii = None if nln is None else np.where(np.isclose(x, 0,  rtol=rtol, atol=atol))
+    jj = None if nlp is None else np.where(np.isclose(x, pi, rtol=rtol, atol=atol))
+    x = np.sin(x)
+    if ii: x[ii] = 1.0
+    if jj: x[jj] = 1.0
+    x = 1.0/x
+    if ii: x[ii] = nln
+    if jj: x[jj] = nlp
+    return x
+def arcsine(x, null=(-np.inf, np.inf)):
+    '''
+    arcsine(x) is equivalent to asin(x) except that it also works on sparse arrays.
+
+    The optional argument null (default, (-numpy.inf, numpy.inf)) may be specified to indicate what
+    value(s) should be assigned when x < -1 or x > 1. If only one number is given, then it is used
+    for both values; otherwise the first value corresponds to <-1 and the second to >1.  If null is
+    None, then an error is raised when invalid values are encountered.
+    '''
+    if sps.issparse(x):
+        x = x.copy()
+        x.data = arcsine(x.data, null=null, rtol=rtol, atol=atol)
+        return x
+    else: x = np.asarray(x)
+    try:    (nln,nlp) = null
+    except Exception: (nln,nlp) = (null,null)
+    ii = None if nln is None else np.where(x < -1)
+    jj = None if nlp is None else np.where(x > 1)
+    if ii: x[ii] = 0
+    if jj: x[jj] = 0
+    x = np.arcsin(x)
+    if ii: x[ii] = nln
+    if jj: x[jj] = nlp
+    return x
+def arccosine(x, null=(-np.inf, np.inf)):
+    '''
+    arccosine(x) is equivalent to acos(x) except that it also works on sparse arrays.
+
+    The optional argument null (default, (-numpy.inf, numpy.inf)) may be specified to indicate what
+    value(s) should be assigned when x < -1 or x > 1. If only one number is given, then it is used
+    for both values; otherwise the first value corresponds to <-1 and the second to >1.  If null is
+    None, then an error is raised when invalid values are encountered.
+    '''
+    if sps.issparse(x): x = x.toarray()
+    else:               x = np.asarray(x)
+    try:    (nln,nlp) = null
+    except Exception: (nln,nlp) = (null,null)
+    ii = None if nln is None else np.where(x < -1)
+    jj = None if nlp is None else np.where(x > 1)
+    if ii: x[ii] = 0
+    if jj: x[jj] = 0
+    x = np.arccos(x)
+    if ii: x[ii] = nln
+    if jj: x[jj] = nlp
+    return x
+def arctangent(y, x=None, null=0, broadcast=False, rtol=default_rtol, atol=default_atol):
+    '''
+    arctangent(x) is equivalent to atan(x) except that it also works on sparse arrays.
+    arctangent(y,x) is equivalent to atan2(y,x) except that it also works on sparse arrays.
+
+    The optional argument null (default: 0) specifies the result found when y and x both equal 0. If
+    null is None, then an error is raised on this condition. Note that if null is not 0, then it is
+    more likely that sparse arrays will have to be reified. If null is set to None, then no attempt
+    is made to detect null values.
+
+    The optional argument broadcast (default: False) specifies whether numpy-like (True) or
+    Mathematica-like (False) broadcasting should be used. Broadcasting resolves ambiguous calls to
+    arctangent, such as artangent([a,b,c], [[d,e,f],[g,h,i],[j,k,l]]). If broadcasting is True, 
+    arctangent(y,x) behaves like numpy.arctan2(y,x), so [a,b,c] is interpreted like [[a,b,c],
+    [a,b,c], [a,b,c]]. If broadcasting is False, [a,b,c] is interpreted like [[a,a,a], [b,b,b],
+    [c,c,c]].
+    '''
+    if sps.issparse(y):
+        if x is None:
+            y = y.copy()
+            y.data = np.arctan(y.data)
+            return y
+        elif null is not None and null != 0:
+            # we need to reify anyway...
+            y = y.toarray()
+            if sps.issparse(x): x = x.toarray()
+        else:
+            # anywhere that y is zero must have an arctan of 0 or null (which is 0), so we only have
+            # to look at those values that are non-zero in y
+            (yr,yc,yv) = sps.find(y)
+            xv = np.asarray(x[rr,rc].flat)
+            res = y.copy()
+            res.data = arctangent(yv, xv, null=null)
+            res.eliminate_zeros()
+            return res
+    elif sps.issparse(x): x = x.toarray()
+    # we should start by broadcasting if need be...
+    if x is None: res = np.arctan(y)
+    else:
+        if not broadcast: (y,x) = unbroadcast(y,x)
+        res = np.arctan2(y, x)
+        # find the zeros, if need-be
+        if null is not None:
+            if rtol is None: rtol = default_rtol
+            if atol is None: atol = default_atol
+            # even if null is none, we do this because the rtol and atol may be more lenient than
+            # the tolerance used by arctan2.
+            z = np.isclose(y, 0, rtol=rtol, atol=atol) & np.isclose(x, 0, rtol=rtol, atol=atol)
+            res[z] = null
+    return res
+def flattest(x):
+    '''
+    flattest(x) yields a 1D numpy vector equivalent to a flattened version of x. Unline
+      np.asarray(x).flatten, flattest(x) works with sparse matrices. It does not, however, work with
+      ragged arrays.
+    '''
+    x = x.toarray().flat if sps.issparse(x) else np.asarray(x).flat
+    return np.array(x)
+def flatter(x, k=1):
+    '''
+    flatter(x) yields a numpy array equivalent to x but whose first dimension has been flattened.
+    flatter(x, k) yields a numpy array whose first k dimensions have been flattened; if k is
+      negative, the last k dimensions are flattened. If np.inf or -np.inf is passed, then this is
+      equivalent to flattest(x). Note that flatter(x) is equivalent to flatter(x,1).
+    flatter(x, 0) yields x.
+    '''
+    if k == 0: return x
+    x = x.toarray() if sps.issparse(x) else np.asarray(x)
+    if len(x.shape) - abs(k) < 2: return x.flatten()
+    k += np.sign(k)
+    if k > 0: return np.reshape(x, (-1,) + x.shape[k:])
+    else:     return np.reshape(x, x.shape[:k] + (-1,))
+def part(x, *args):
+    '''
+    part(x, ii, jj...) is equivalent to x[ii, jj...] if x is a sparse matrix or numpy array and is
+      equivalent to np.asarray(x)[ii][:, jj][...] if x is not. If only one argument is passed and
+      it is a tuple, then it is passed like x[ii] alone.
+
+    The part function is comparible with slices (though the must be entered using the slice(...)
+    rather than the : syntax) and Ellipsis.
+    '''
+    n = len(args)
+    sl = slice(None)
+    if sps.issparse(x):
+        if n == 1: return x[args[0]]
+        elif n > 2: raise ValueError('Too many indices for sparse matrix')
+        (ii,jj) = args
+        if   ii is Ellipsis: ii = sl
+        elif jj is Ellipsis: jj = sl
+        ni = pimms.is_number(ii)
+        nj = pimms.is_number(jj)
+        if   ni and nj: return x[ii,jj]
+        elif ni:        return x[ii,jj].toarray()[0]
+        elif nj:        return x[ii,jj].toarray()[:,0]
+        else:           return x[ii][:,jj]
+    else:
+        x = np.asarray(x)
+        if n == 1: return x[args[0]]
+        i0 = []
+        for (k,arg) in enumerate(args):
+            if arg is Ellipsis:
+                # special case...
+                #if Ellipsis in args[ii+1:]: raise ValueError('only one ellipsis allowed per part')
+                left = n - k - 1
+                i0 = [sl for _ in range(len(x.shape) - left)]
+            else:
+                x = x[tuple(i0 + [arg])]
+                if not pimms.is_number(arg): i0.append(sl)
+        return x
+def hstack(tup):
+    '''
+    hstack(x) is equivalent to numpy.hstack(x) or scipy.sparse.hstack(x) except that it works
+      correctly with both sparse and dense arrays (if any inputs are dense, it converts all inputs
+      to dense arrays).
+    '''
+    if all([sps.issparse(u) for u in tup]): return sps.hstack(tup, format=tup[0].format)
+    else: return np.hstack([u.toarray() if sps.issparse(u) else u for u in tup])
+def vstack(tup):
+    '''
+    vstack(x) is equivalent to numpy.vstack(x) or scipy.sparse.vstack(x) except that it works
+      correctly with both sparse and dense arrays (if any inputs are dense, it converts all inputs
+      to dense arrays).
+    '''
+    if all([sps.issparse(u) for u in tup]): return sps.vstack(tup, format=tup[0].format)
+    else: return np.vstack([u.toarray() if sps.issparse(u) else u for u in tup])
+def repmat(x, r, c):
+    '''
+    repmat(x, r, c) is equivalent to numpy.matlib.repmat(x, r, c) except that it works correctly for
+      sparse matrices.
+    '''
+    if sps.issparse(x):
+        row = sps.hstack([x for _ in range(c)])
+        return sps.vstack([row for _ in range(r)], format=x.format)
+    else: return np.matlib.repmat(x, r, c)
+    
+def replace_close(x, xhat, rtol=default_rtol, atol=default_atol, copy=True):
+    '''
+    replace_close(x, xhat) yields x if x is not close to xhat and xhat otherwise. Closeness is
+      determined by numpy's isclose(), and the atol and rtol options are passed along.
+
+    The x and xhat arguments may be lists/arrays.
+
+    The optional argument copy may also be set to False to chop x in-place.
+    '''
+    if rtol is None: rtol = default_rtol
+    if atol is None: atol = default_atol
+    x = np.array(x) if copy else np.asarray(x)
+    w = np.isclose(x, xhat, rtol=rtol, atol=atol)
+    x[w] = np.asarray(xhat)[w]
+    return x
+def chop(x, rtol=default_rtol, atol=default_atol, copy=True):
+    '''
+    chop(x) yields x if x is not close to round(x) and round(x) otherwise. Closeness is determined
+      by numpy's isclose(), and the atol and rtol options are passed along.
+
+    The x and xhat arguments may be lists/arrays.
+
+    The optional argument copy may also be set to False to chop x in-place.
+    '''
+    return replace_close(x, np.round(x), rtol=rtol, atol=atol, copy=copy)
+
+def nan_compare(f, x, y, nan_nan=False, nan_val=False, val_nan=False):
+    '''
+    nan_compare(f, x, y) is equivalent to f(x, y), which is assumed to be a boolean function that
+      broadcasts over x and y (such as numpy.less), except that NaN values in either x or y result
+      in a value of False instead of being run through f.
+
+    The argument f must be a numpy comparison function such as numpy.less that accepts the optional
+    arguments where and out.
+
+    The following optional arguments may be provided:
+      * nan_nan (default: False) specifies the return value (True or False) for comparisons
+        equivalent to f(nan, nan).
+      * nan_val (default: False) specifies the return value (True or False) for comparisons
+        equivalent to f(nan, non_nan).
+      * val_nan (default: False) specifies the return value (True or False) for comparisons
+        equivalent to f(non_nan, nan).
+    '''
+    #TODO: This should work with sparse matrices as well
+    x = np.asanyarray(x)
+    y = np.asanyarray(y)
+    xii = np.isnan(x)
+    yii = np.isnan(y)
+    if not xii.any() and not yii.any(): return f(x, y)
+    ii  = (~xii) & (~yii)
+    out = np.zeros(ii.shape, dtype=np.bool)
+    if nan_nan == nan_val and nan_val == val_nan:
+        # All the nan-result values are the same; we can simplify a little...
+        if nan_nan: out[~ii] = nan_nan
+    else:
+        if nan_nan: out[   xii &    yii] = nan_nan
+        if nan_val: out[   xii & (~yii)] = nan_val
+        if val_nan: out[(~xii) &    yii] = val_nan
+    return f(x, y, out=out, where=ii)
+def naneq(x, y, nan_nan=False, nan_val=False, val_nan=False):
+    '''
+    naneq(x, y) is equivalent to (x == y) except that NaN values in either x or y result in False.
+
+    The following optional arguments may be provided:
+      * nan_nan (default: False) specifies the return value (True or False) for comparisons
+        equivalent to naneq(nan, nan).
+      * nan_val (default: False) specifies the return value (True or False) for comparisons
+        equivalent to naneq(nan, 0).
+      * val_nan (default: False) specifies the return value (True or False) for comparisons
+        equivalent to naneq(nan, 0).
+    '''
+    return nan_compare(np.equal, x, y, nan_nan=nan_nan, nan_val=nan_val, val_nan=val_nan)
+def nanne(x, y, nan_nan=False, nan_val=False, val_nan=False):
+    '''
+    nanne(x, y) is equivalent to (x != y) except that NaN values in either x or y result in False.
+
+    The following optional arguments may be provided:
+      * nan_nan (default: False) specifies the return value (True or False) for comparisons
+        equivalent to nanne(nan, nan).
+      * nan_val (default: False) specifies the return value (True or False) for comparisons
+        equivalent to nanne(nan, 0).
+      * val_nan (default: False) specifies the return value (True or False) for comparisons
+        equivalent to nanne(nan, 0).
+    '''
+    return nan_compare(np.not_equal, x, y, nan_nan=nan_nan, nan_val=nan_val, val_nan=val_nan)
+def nanlt(x, y, nan_nan=False, nan_val=False, val_nan=False):
+    '''
+    nanlt(x, y) is equivalent to (x < y) except that NaN values in either x or y result in False.
+
+    The following optional arguments may be provided:
+      * nan_nan (default: False) specifies the return value (True or False) for comparisons
+        equivalent to nanlt(nan, nan).
+      * nan_val (default: False) specifies the return value (True or False) for comparisons
+        equivalent to nanlt(nan, 0).
+      * val_nan (default: False) specifies the return value (True or False) for comparisons
+        equivalent to nan;t(nan, 0).
+    '''
+    return nan_compare(np.less, x, y, nan_nan=nan_nan, nan_val=nan_val, val_nan=val_nan)
+def nanle(x, y, nan_nan=False, nan_val=False, val_nan=False):
+    '''
+    nanle(x, y) is equivalent to (x <= y) except that NaN values in either x or y result in False.
+
+    The following optional arguments may be provided:
+      * nan_nan (default: False) specifies the return value (True or False) for comparisons
+        equivalent to nanle(nan, nan).
+      * nan_val (default: False) specifies the return value (True or False) for comparisons
+        equivalent to nanle(nan, 0).
+      * val_nan (default: False) specifies the return value (True or False) for comparisons
+        equivalent to nanle(nan, 0).
+    '''
+    return nan_compare(np.less_equal, x, y, nan_nan=nan_nan, nan_val=nan_val, val_nan=val_nan)
+def nangt(x, y, nan_nan=False, nan_val=False, val_nan=False):
+    '''
+    nangt(x, y) is equivalent to (x > y) except that NaN values in either x or y result in False.
+
+    The following optional arguments may be provided:
+      * nan_nan (default: False) specifies the return value (True or False) for comparisons
+        equivalent to nangt(nan, nan).
+      * nan_val (default: False) specifies the return value (True or False) for comparisons
+        equivalent to nangt(nan, 0).
+      * val_nan (default: False) specifies the return value (True or False) for comparisons
+        equivalent to nangt(nan, 0).
+    '''
+    return nan_compare(np.greater, x, y, nan_nan=nan_nan, nan_val=nan_val, val_nan=val_nan)
+def nange(x, y, nan_nan=False, nan_val=False, val_nan=False):
+    '''
+    nange(x, y) is equivalent to (x >= y) except that NaN values in either x or y result in False.
+
+    The following optional arguments may be provided:
+      * nan_nan (default: False) specifies the return value (True or False) for comparisons
+        equivalent to nange(nan, nan).
+      * nan_val (default: False) specifies the return value (True or False) for comparisons
+        equivalent to nange(nan, 0).
+      * val_nan (default: False) specifies the return value (True or False) for comparisons
+        equivalent to nange(nan, 0).
+    '''
+    return nan_compare(np.greater_equal, x, y, nan_nan=nan_nan, nan_val=nan_val, val_nan=val_nan)
+def nanlog(x, null=np.nan):
+    '''
+    nanlog(x) is equivalent to numpy.log(x) except that it avoids calling log on 0 and non-finie
+      values; in place of these values, it returns the value null (which is nan by default).
+    '''
+    x = np.asarray(x)
+    ii0 = np.where(np.isfinite(x))
+    ii  = np.where(x[ii0] > 0)[0]
+    if len(ii) == numel(x): return np.log(x)
+    res = np.full(x.shape, null)
+    ii = tuple([u[ii] for u in ii0])
+    res[ii] = np.log(x[ii])
+    return res    
+
 
 # Helper Functions #################################################################################
 def fapply(f, x, tz=False):

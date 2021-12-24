@@ -147,7 +147,7 @@ def cifti_label_data(obj):
     axis is for scalar data rather than integer label data.
     '''
     import nibabel.cifti2 as cii
-    from neuropythy import label_index
+    from neuropythy import to_label_index
     if obj is None: return None
     elif isinstance(obj, cii.Cifti2Image):
         return cifti_label_data(obj.header)
@@ -168,7 +168,7 @@ def cifti_label_data(obj):
             lbls[lbl.key] = (lbl.label, lbl.rgba)
         if nmap.metadata is None or len(nmap.metadata) == 0: md = pyr.m()
         else: md = pimms.persist(nmap.metadata.data)
-        if len(lbls) > 0: lbls = label_index(lbls, meta_data=md)
+        if len(lbls) > 0: lbls = to_label_index(lbls, meta_data=md)
         else: lbls = None
         res[nmap.map_name] = lbls
     return res
@@ -184,7 +184,6 @@ def cifti_axis_spec(ax):
     various data relevant to each specific type.
     '''
     import nibabel.cifti2 as cii
-    from neuropythy import label_index
     if ax is None: return None
     elif isinstance(ax, cii.Cifti2Image):
         return cifti_axis_spec(ax.header)
