@@ -152,7 +152,7 @@ def normalize(data):
     elif is_set(data):
         # sets also have a special type:
         return {normalize.type_key: [None, 'set'], 'elements': normalize(list(data))}
-    elif pimms.is_scalar(data, ('string', 'unicode', 'bool', 'integer')):
+    elif any(pimms.is_scalar(data, k) for k in ('string', 'unicode', 'bool', 'integer')):
         # most scalars are already normalized
         return data
     elif pimms.is_scalar(data, 'number'):
@@ -171,7 +171,7 @@ def normalize(data):
                 raise ValueError('Only maps with strings for keys can be normalized')
             newdict[k] = normalize(v)
         return newdict
-    elif pimms.is_array(data, ('number', 'string', 'unicode', 'bool')):
+    elif any(pimms.is_array(data, k) for k in ('number', 'string', 'unicode', 'bool')):
         # numpy arrays just get turned into lists
         return np.asarray(data).tolist()
     elif data is Ellipsis:
@@ -219,12 +219,13 @@ def denormalize(data):
                 return cls.denormalize(d)
         else: return {k:denormalize(v) for (k,v) in six.iteritems(data)} # native map
     else:
+        # lists of primitives need not be changed
+        if pimms.is_scalar(data, ('number', 'bool', 'string', 'unicode')): return data
+        if pimms.is_array(data, ('number', 'bool', 'string', 'unicode')): return data
         # must be a list of some type
         if not hasattr(data, '__iter__'):
             msg = 'denormalize does not recognized object %s with type %s' % (data, type(data))
             raise ValueError(msg)
-        # lists of primitives need not be changed
-        if pimms.is_array(data, ('number', 'bool', 'string', 'unicode')): return data
         return [denormalize(x) for x in data]
 def to_affine(aff, dims=None):
     '''

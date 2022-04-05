@@ -737,7 +737,7 @@ class HCPLinesDataset(HCPMetaDataset):
         '''
         import neuropythy as ny
         if pseudo_path.find('normalized', 'logs', 'exclusions.json') is None: return frozenset([])
-        dat = ny.load(pseudo_path.local_path('normalized', 'logs', 'exclusions.json'))
+        dat = ny.load(pseudo_path.local_path('normalized', 'logs', 'exclusions.json'), to=None)
         dat = [(anat,int(sid),h) for (anat,sid,h) in dat]
         tmp = {}
         for (anat,sid,h) in dat:
