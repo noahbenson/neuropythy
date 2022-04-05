@@ -264,10 +264,24 @@ class BasicPath(object):
             if os.path.exists(cpath): return cpath
             return self.ensure_path(rp, cpath)
         else: return self.ensure_path(rp, None)
+    def ls(self, *path_parts):
+        (pp, rpath) = self._check_tarball(*path_parts)
+        # if pp is None, we are requesting a cached tarball path rpath
+        if pp is None:
+            # We want a listing of the tarball's root.
+            pp = self._cache_tarball(rpath)
+            rpath = ''
+        # Whether pp is or is not this object, we defer to it.
+        return pp.listdir(rpath)
+    def listdir(self, rpath):
+        raise TypeError("type %s does not implement listdir" % (type(self).__name__,))
+
 class OSPath(BasicPath):
     def __init__(self, base_path, cache_path=None):
         BasicPath.__init__(self, base_path, pathmod=os.path, cache_path=cache_path)
     def to_ospath(self, path): return path
+    def listdir(self, path):
+        return os.listdir(os.path.join(self.base_path, path))
 class URLPath(BasicPath):
     def __init__(self, base_path, cache_path=None):
         BasicPath.__init__(self, base_path, pathmod=posixpath, cache_path=cache_path)
@@ -312,6 +326,11 @@ class OSFPath(BasicPath):
             cdir = os.path.split(cpath)[0]
             if not os.path.isdir(cdir): os.makedirs(cdir, mode=0o755)
         return url_download(fl, cpath)
+    def listdir(self, path):
+        fl = self._find_url(path)
+        if fl is None: raise FileNotFoundError(path)
+        if pimms.is_str(fl): raise NotADirectoryError(path)
+        return list(fl.keys())
 class S3Path(BasicPath):
     def __init__(self, fs, base_path, cache_path=None):
         BasicPath.__init__(self, base_path, pathmod=posixpath, cache_path=cache_path)
@@ -326,6 +345,15 @@ class S3Path(BasicPath):
         if not os.path.isdir(cdir): os.makedirs(cdir, mode=0o755)
         self.s3fs.get(url, cpath)
         return cpath
+    def listdir(self, path):
+        fpath = self.join(self.base_path, path)
+        if fpath.lower().startswith('s3://'): fpath = fpath[5:]
+        fpath = fpath.strip('/')
+        lst = self.s3fs.ls(fpath)
+        if len(lst) == 0: raise FileNotFoundError(path)
+        elif len(lst) == 1 and lst[0] == fpath: raise NotADirectoryError(path)
+        n = len(fpath) + 1
+        return [fl[n:] for fl in lst]
 class TARPath(OSPath):
     def __init__(self, tarpath, basepath='', cache_path=None, tarball_name=None):
         OSPath.__init__(self, basepath, cache_path=cache_path)
@@ -386,6 +414,24 @@ class TARPath(OSPath):
         with tarfile.open(self.tarball_path, 'r') as tfl:
             tfl.extract(rpath, self.cache_path)
             return cpath
+    def listdir(self, path):
+        fpath = self.join(self.base_path, rpath)
+        fpath = fpath.strip('/') + '/'
+        fn = len(fpath)
+        with tarfile.open(self.tarball_path, 'r') as tfl:
+            allfiles = tfl.getmembers()
+        mems = []
+        isdir = None
+        for fl in allfiles:
+            if fl.name == fpath[:-1]:
+                if fl.isdir(): isdir = True
+                else: raise NotADirectoryError(fpath)
+            elif fl.name.startswith(fpath):
+                nm = fl.name[fn:]
+                if len(nm.split('/')) > 1: continue
+                mems.append(nm)
+        if len(mems) == 0 and not isdir: raise FileNotFoundError(path)
+        return mems
 
 @pimms.immutable
 class PseudoPath(ObjectWithMetaData):
@@ -535,6 +581,13 @@ class PseudoPath(ObjectWithMetaData):
         '''
         pmod = self._path_data['pathmod']
         return pmod.find(*args)
+    def listpath(self, *args):
+        '''
+        pdir.listpath(paths...) returns a list of the files that are part of the subdirectory
+           given by joining the paths. The pseudo-path pdir must support directory listing.
+        '''
+        pmod = self._path_data['pathmod']
+        return pmod.ls(*args)
     def local_path(self, *args):
         '''
         pdir.local_path(paths...) is similar to os.path.join(pdir, paths...) except that it
@@ -553,9 +606,22 @@ class PseudoPath(ObjectWithMetaData):
         '''
         # if the file exists in the pseudo-path, just return the local path
         if self.find(*args) is not None: return self.local_path(*args)
-        cp = self._path_data.get('cache', None)
+        cp = self._path_data.get('cache_path', None)
         if cp is None: cp = self.source_path
         return os.path.join(cp, *args)
+    def subpath(self, *args):
+        '''
+        pdir.subpath(paths...) returns a new pseudo-path object that points to the subdirectory
+          implied by the given paths, which are joined. The new pseudo-path uses the matching
+          subdirectory of pdir for its cache-path.
+        '''
+        cp = self.actual_cache_path
+        sp = self.source_path
+        if cp is not None:
+            cp = os.path.join(cp, *args)
+        sp = self.join(sp, *args)
+        return PseudoPath(sp, cache_path=cp, delete=False, credentials=self.credentials,
+                          meta_data={'superpath': self})
 def is_pseudo_path(pdir):
     '''
     is_pseudo_path(pdir) yields True if the given object pdir is a pseudo-path object and False
