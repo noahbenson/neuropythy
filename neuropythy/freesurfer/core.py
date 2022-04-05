@@ -657,7 +657,10 @@ def subject_from_filemap(fmap, name=None, meta_data=None, check_path=True):
     if check_path and not is_freesurfer_subject_path(fmap.pseudo_paths[None]):
         raise ValueError('given path does not appear to hold a freesurfer subject')
     # we need to go ahead and load the ribbon...
-    rib = fmap.data_tree.raw_image['ribbon']
+    rawims = fmap.data_tree.raw_image
+    rib = next(rawims[k]
+               for k in ['ribbon', 'brain', 'intensity_normalized', 'conformed']
+               if k in rawims and rawims[k] is not None)
     vox2nat = rib.affine
     vox2vtx = rib.header.get_vox2ras_tkr()
     vtx2nat = np.dot(vox2nat, np.linalg.inv(vox2vtx))
