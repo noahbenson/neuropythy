@@ -2019,7 +2019,7 @@ class Mesh(VertexSet):
             else: return tuple([_apply_interp(row) for row in data])
         elif pimms.is_set(data):
             return pyr.pmap({k:_apply_interp(k) for k in data})
-        elif pimms.is_vector(data, ('number','bool')) and len(data) == self.tess.vertex_count:
+        elif pimms.is_vector(data) and len(data) == self.tess.vertex_count:
             return _apply_interp(data)
         elif pimms.is_vector(data):
             return tuple([_apply_interp(d) for d in data])
@@ -4808,17 +4808,22 @@ def isolines(obj, prop, val,
     # more useful to have each face's full crossing in its own BC coordinates
     # at times, and the duplicates can be eliminated with just a slice
     addrs = []
-    for (lbl,(us,vs,ws)) in six.iteritems(lines):
-        (u0s,v0s,u1s,v1s) = (us[:-1],vs[:-1],us[1:],vs[1:])
-        qs = [np.setdiff1d([u1,v1], [u0,v0])[0] for (u0,v0,u1,v1) in zip(u0s,v0s,u1s,v1s)]
-        fs = np.asarray([u0s, qs, v0s], dtype=np.int)
-        fend = np.concatenate(([u1s[-1]], np.setdiff1d(fs[:,-1], (u1s[-1],v1s[-1])), [v1s[-1]]))
-        fs = np.hstack([fs, np.reshape(fend, (3,1))])
-        # convert faces back to labels
-        fs = np.asarray([obj.labels[f] for f in fs])
-        # make the weights
-        ws = np.asarray([ws, 0*ws])
-        addrs.append({'faces': fs, 'coordinates': ws})
+    for (isline, lndat) in zip([True, False], [lines, loops]):
+        for (lbl,(us,vs,ws)) in six.iteritems(lndat):
+            if isline:
+                (u0s,v0s,u1s,v1s) = (us[:-1], vs[:-1], us[1:], vs[1:])
+            else:
+                (u0s,v0s,u1s,v1s) = (us, vs, np.roll(us, -1), np.roll(vs, -1))
+            qs = [np.setdiff1d([u1,v1], [u0,v0])[0] for (u0,v0,u1,v1) in zip(u0s,v0s,u1s,v1s)]
+            fs = np.asarray([u0s, qs, v0s], dtype=np.int)
+            if isline:
+                fend = np.concatenate(([u1s[-1]], np.setdiff1d(fs[:,-1], (u1s[-1],v1s[-1])), [v1s[-1]]))
+                fs = np.hstack([fs, np.reshape(fend, (3,1))])
+            # convert faces back to labels
+            fs = np.asarray([obj.labels[f] for f in fs])
+            # make the weights
+            ws = np.asarray([ws, 0*ws])
+            addrs.append({'faces': fs, 'coordinates': ws})
     addrs = list(sorted(addrs, key=lambda a:a['faces'].shape[0]))
     # if obj is a topology or addresses were requested, return them now
     if yield_addresses or not is_mesh(obj): return addrs
