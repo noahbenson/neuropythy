@@ -152,8 +152,10 @@ def normalize(data):
     elif is_set(data):
         # sets also have a special type:
         return {normalize.type_key: [None, 'set'], 'elements': normalize(list(data))}
-    elif any(pimms.is_scalar(data, k) for k in ('string', 'unicode', 'bool', 'integer')):
+    elif any(pimms.is_npscalar(data, k) for k in ('string', 'unicode', 'bool', 'integer')):
         # most scalars are already normalized
+        return data
+    elif pimms.is_str(data) or isinstance(data, bool) or isinstance(data, int):
         return data
     elif pimms.is_scalar(data, 'number'):
         # make sure it's not a float32 object
@@ -171,7 +173,10 @@ def normalize(data):
                 raise ValueError('Only maps with strings for keys can be normalized')
             newdict[k] = normalize(v)
         return newdict
-    elif any(pimms.is_array(data, k) for k in ('number', 'string', 'unicode', 'bool')):
+    elif any(pimms.is_nparray(data, k) for k in ('number', 'string', 'unicode', 'bool')):
+        # numpy arrays just get turned into lists
+        return np.asarray(data).tolist()
+    elif pimms.is_array(data, 'number'):
         # numpy arrays just get turned into lists
         return np.asarray(data).tolist()
     elif data is Ellipsis:
