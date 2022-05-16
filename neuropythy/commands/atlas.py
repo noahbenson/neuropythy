@@ -290,7 +290,14 @@ def calc_images(subject, atlas_properties, image_template, worklog, volume_expor
         idat = (dat[lk] if lk is not None else None, dat[rk] if rk is not None else None)
         if np.array_equal(idat, (None, None)): return None
         aa = (addr.get(lk, None), addr.get(rk, None))
-        im = subject.cortex_to_image(idat, image_template, hemi=(lk, rk), address=aa)
+        # Check if we are dealing with a matrix:
+        lm = True
+        if len(np.shape(idat[0])) == 2:
+            nframe = np.shape(idat[0])[0]
+            if len(image_template.shape) < 4 or image_template.shape[-1] != nframe:
+                lm = False
+        im = subject.cortex_to_image(idat, image_template, hemi=(lk, rk), address=aa,
+                                     layered_matrix=lm)
         return im
     ims = {atl: {v: pimms.lmap({m: curry(_make_images, vd, m) for m in six.iterkeys(hd)})
                  for (v,vd) in six.iteritems(pps)

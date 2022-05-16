@@ -332,7 +332,8 @@ class Subject(ObjectWithMetaData):
                         # below are the property() args:
                         dtype=Ellipsis, outliers=None,    data_range=None,    clipped=np.inf,
                         weights=None,   weight_min=0,     null=np.nan,        transform=None,
-                        mask=None,      valid_range=None, weight_transform=Ellipsis):
+                        mask=None,      valid_range=None, weight_transform=Ellipsis,
+                        layered_matrix=True):
         '''
         sub.cortex_to_image(data, im) yields an MRImage object with the same image-spec as im but
           with the given data projected into the image. The argument im may be anything that can be
@@ -368,6 +369,9 @@ class Subject(ObjectWithMetaData):
             saved in the cortex objects. Note that this option overwrites these transforms if found.
           * address (default: None) may specify pre-calculated addresses for use in projecting the
             hemispheres into the image.
+          * layered_matrix (default: True) specifies whether the prop, if it is a matrix, should be
+            considered a matrix of evenly-spaced layers across cortical depths (True) or if it
+            should be considered a list of frames for the output.
         '''
         # get our image:
         if pimms.is_nparray(im) and len(im.shape) >= 3: im = ny.to_image(im)
@@ -396,11 +400,24 @@ class Subject(ObjectWithMetaData):
                 raise ValueError('hemi/property size mismatch')
             data = [None if h is None else data[0] for h in hemi]
         elif len(data) == 2:
-            if not (data[0] is None and hemi[0] is None or len(data[0]) == hemi[0].vertex_count):
-                raise ValueError('lh hemi/property size mismatch')
-            if not (data[1] is None and hemi[1] is None or len(data[1]) == hemi[1].vertex_count):
-                raise ValueError('rh hemi/property size mismatch')
-            data = np.asarray(data)
+            if data[0] is not None and hemi[0] is not None:
+                data = (np.asarray(data[0]), data[1])
+                if data[0].shape[-1] != hemi[0].vertex_count:
+                    if len(data[0].shape) > 1 and data[0].shape[0] == hemi[0].vertex_count:
+                        data = (np.transpose(data[0],
+                                             tuple(reversed(range(len(data[0].shape))))),
+                                data[1])
+                    else:
+                        raise ValueError('lh hemi/property size mismatch')
+            if data[1] is not None and hemi[1] is not None:
+                data = (data[0], np.asarray(data[1]))
+                if data[1].shape[-1] != hemi[1].vertex_count:
+                    if len(data[1].shape) > 1 and data[1].shape[0] == hemi[1].vertex_count:
+                        data = (data[0],
+                                np.transpose(data[1],
+                                             tuple(reversed(range(len(data[1].shape))))))
+                    else:
+                        raise ValueError('rh hemi/property size mismatch')
         else:
             data = np.asarray(data)
             sh = data.shape
@@ -411,7 +428,8 @@ class Subject(ObjectWithMetaData):
                   dtype=dtype,           null=null,          outliers=outliers,
                   data_range=data_range, clipped=clipped,    weights=weights,
                   weight_min=weight_min, mask=mask,          valid_range=valid_range,
-                  transform=transform,   weight_transform=weight_transform)
+                  transform=transform,   weight_transform=weight_transform,
+                  layered_matrix=layered_matrix)
         if address is None: address = (None, None)
         elif not pimms.is_vector(address):
             if nhems == 1: address = [None if h is None else address for h in hemi]
@@ -653,7 +671,8 @@ class Cortex(geo.Topology):
                  # the rest of the arguments are for property()
                  dtype=Ellipsis,   outliers=None,  data_range=None,           clipped=np.inf,
                  weights=None,     weight_min=0,   weight_transform=Ellipsis, mask=None,
-                 valid_range=None, null=np.nan,    transform=None):
+                 valid_range=None, null=np.nan,    transform=None,
+                 layered_matrix=True):
         '''
         cortex.to_image(property, ...) yields a 3D image of the given property.
         cortex.to_image(property, image) writes the data into the given image and returns it if the
@@ -675,6 +694,9 @@ class Cortex(geo.Topology):
             anything else (strings, integers, etc.).
           * address (default: None) may optionally be used to provide the pre-calculated addresses
             rather than using cortex.image_address() to find them.
+          * layered_matrix (default: True) specifies whether the prop, if it is a matrix, should be
+            considered a matrix of evenly-spaced layers across cortical depths (True) or if it
+            should be considered a list of frames for the output.
         '''
         # start by getting the propery:
         propkw = dict(dtype=dtype,           null=null,                         outliers=outliers,
@@ -688,7 +710,7 @@ class Cortex(geo.Topology):
             prop = self.property(prop, **propkw)
             # we assume these are linearly-spaced between 0 and 1
             if pimms.is_vector(prop): prop = {0:prop, 1:prop}
-            else: prop = {k:v for (k,v) in zip(np.linspace(0, 1, len(prop)), prop)}
+            elif layered_matrix: prop = {k:v for (k,v) in zip(np.linspace(0, 1, len(prop)), prop)}
         # next, figure out the image
         if   is_image_spec(image):   image = to_image(image,
                                                       fill=fill, image_type=image_type, dtype=dtype)
@@ -704,7 +726,19 @@ class Cortex(geo.Topology):
         # okay, now we get the projection of the cortex into the image:
         addr = self.image_address(image, affine=affine) if address is None else address
         # and use this to interpolate...
-        dat = address_interpolate(addr, prop, method=method, null=null)
+        if not layered_matrix and len(np.shape(prop)) == 2:
+            dat = [address_interpolate(addr, p, method=method, null=null)
+                   for p in prop]
+            dat = np.transpose(dat)
+            nrows = dat.shape[-1]
+            if len(image.shape) != 4 or image.shape[3] != dat.shape[-1]:
+                spec = to_image_spec(image)
+                sh = spec['image_shape']
+                sh = sh[:3] + (nrows,)
+                spec['image_shape'] = sh
+                image = to_image((np.zeros(sh, dtype=spec['voxel_type']), spec)) 
+        else:
+            dat = address_interpolate(addr, prop, method=method, null=null)
         # and put these into the image!
         image.dataobj[tuple(addr['voxel_indices'])] = dat
         return image
