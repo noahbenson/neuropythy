@@ -124,7 +124,7 @@ setup(
                       'nibabel>=2.0',
                       'pyrsistent>=0.11',
                       'pint>=0.7',
-                      'pimms>=0.3.16',
+                      'pimms>=0.3.20',
                       'py4j>=0.10',
                       'h5py>=2.8.0',
                       's3fs>=0.1.5'],
