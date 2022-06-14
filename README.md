@@ -10,7 +10,7 @@ For additional documentation, in particular usage documentation, see
 [Benson and Winawer, (2018)](https://doi.org/10.1101/325597).
 
 ## Author ##########################################################################################
-Noah C. Benson &lt;<nben@nyu.edu>&gt;
+Noah C. Benson &lt;<nben@uw.edu>&gt;
 
 ## Installation ####################################################################################
 
