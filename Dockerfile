@@ -7,8 +7,9 @@
 #   (but really, use docker-compose up instead).
 #
 
-# Start with the Ubuntu for now
-FROM jupyter/scipy-notebook
+# Start with the Jupyter scipy notebook docker-image.
+# We tag this to a specific version so that we're assured of future success.
+FROM jupyter/scipy-notebook:lab-3.4.3
 
 # Note the Maintainer.
 MAINTAINER Noah C. Benson <nben@uw.edu>
@@ -16,8 +17,14 @@ MAINTAINER Noah C. Benson <nben@uw.edu>
 # Install some stuff...
 RUN conda update --yes -n base conda && conda install --yes py4j nibabel s3fs
 RUN conda install --yes -c conda-forge ipywidgets
-RUN pip install --upgrade setuptools
-RUN pip install 'ipyvolume>=0.5.1'
+RUN conda install --yes pip
+RUN pip3 install --upgrade setuptools
+
+# We need additional stuff for ipyvolume to work in Jupyter Labs
+RUN conda install --yes -c conda-forge ipyvolume nodejs
+RUN jupyter labextension install @jupyter-widgets/jupyterlab-manager
+RUN jupyter labextension install ipyvolume
+RUN jupyter labextension install jupyter-threejs
 
 RUN mkdir /home/$NB_USER/neuropythy
 COPY ./setup.py ./setup.cfg ./MANIFEST.in ./LICENSE.txt ./README.md \
@@ -37,6 +44,7 @@ RUN conda install -c conda-forge jupyter_contrib_nbextensions
 RUN jupyter contrib nbextension install --user
 RUN jupyter nbextension enable collapsible_headings/main \
  && jupyter nbextension enable select_keymap/main
+ 
 
 
 # The root operations ...

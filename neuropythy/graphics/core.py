@@ -1131,6 +1131,9 @@ def _ipyvolume_load_error(*args, **kwargs):
 cortex_plot_3D = _ipyvolume_load_error
 try:
     import ipyvolume as ipv
+    # Check the ipv version; if it's before 0.6, we have a warning to issue.
+    _ipv_version = tuple([int(k) for k in ipv.__version__.split('.')[:2]])
+    _ipv_pre06 = _ipv_version[0] == 0 and _ipv_version[1] < 6
 
     def cortex_plot_3D(obj,
                        color=None, cmap=None, vmin=None, vmax=None, alpha=None,
@@ -1278,9 +1281,11 @@ try:
         f.camera.up = tuple(up)
         f.camera.fov = fov
         f.camera.lookAt(tuple(mid))
-        warnings.warn('neuropythy: NOTE: due to a bug in ipyvolume, camera views cannot currently' +
-                      ' be set by neuropythy; however, if you click the reset (home) button in' +
-                      ' the upper-left corner of the figure, the requested view will be fixed.')
+        if _ipv_pre06:
+            warnings.warn(
+                'neuropythy: NOTE: due to a bug in ipyvolume prior to v0.6, camera views' +
+                ' cannot currently be set by neuropythy; however, if you click the reset (home)' +
+                ' button in the upper-left corner of the figure, the requested view will be fixed.')
         return f
 except Exception: pass
 
