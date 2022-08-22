@@ -48,7 +48,10 @@ def serialize_numpy(m, t):
         header.byteswap()
         body.byteswap()
     # And return the result:
-    return bytearray(header.tostring() + body.tostring())
+    try:
+        return bytearray(header.tostring() + body.tostring())
+    except AttributeError:
+        return bytearray(header.tobytes() + body.tobytes())
 
 def to_java_doubles(m):
     '''
