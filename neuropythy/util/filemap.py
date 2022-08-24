@@ -92,10 +92,13 @@ def is_tarball_file(path):
     '''
     (tb,p) = split_tarball_path(path)
     return tb is not None and p == ''
-osf_basepath = 'https://api.osf.io/v2/nodes/%s/files/%s/'
-def _osf_tree(proj, path=None, base='osfstorage'):
-    if path is None: path = (osf_basepath % (proj, base))
-    else:            path = (osf_basepath % (proj, base)) + path.lstrip('/')
+osf_basepath_format = 'https://api.osf.io/v2/nodes/%s/files/%s/'
+osf_pagesize_format = '?page[size]=%d'
+def _osf_tree(proj, path=None, base='osfstorage', pagesize=100):
+    if path is None: path = ''
+    path = (osf_basepath_format % (proj, base)) + path.lstrip('/')
+    if pagesize is not None:
+        path = path + (osf_pagesize_format % (pagesize,))
     dat = json.loads(url_download(path, None))
     if 'data' not in dat: raise ValueError('Cannot detect kind of url for ' + path)
     res = {}
@@ -124,12 +127,13 @@ def osf_crawl(k, *pths, **kw):
     from six.moves import reduce
     base = kw.pop('base', 'osfstorage')
     root = kw.pop('root', None)
+    pagesize = kw.pop('pagesize', 100)
     if len(kw) > 0: raise ValueError('Unknown optional parameters: %s' % (list(kw.keys()),))
     if k.lower().startswith('osf:'): k = k[4:]
     k = k.lstrip('/')
     pths = [p.lstrip('/') for p in (k.split('/') + list(pths))]
     (bpth, pths) = (pths[0].strip('/'), [p for p in pths[1:] if p != ''])
-    if root is None: root = _osf_tree(bpth, base=base)
+    if root is None: root = _osf_tree(bpth, base=base, pagesize=pagesize)
     return reduce(lambda m,k: m[k], pths, root)
 
 class BasicPath(object):
