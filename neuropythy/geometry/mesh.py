@@ -3696,7 +3696,7 @@ class Path(ObjectWithMetaData):
         mm  = sps.csr_matrix((np.ones(m), (q, np.arange(m))), shape=(n, m))
         lbl = zdivide(mm.dot(wq), flattest(mm.sum(axis=1)))
         # we crawl across vertices by edges until we find all of them
-        nei  = np.asarray(tess.indexed_neighborhoods)
+        nei  = np.asarray(tess.indexed_neighborhoods, dtype=object)
         unk  = np.full(tess.vertex_count, True, dtype=np.bool)
         unk[q] = False
         q = np.unique(u[~np.isin(u, v)])
