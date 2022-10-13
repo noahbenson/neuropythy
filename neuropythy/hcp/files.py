@@ -434,6 +434,8 @@ def _prop_fssulc(name, hemibase, format='gifti', key='property', filt=None):
     return _prop(name, hemibase, suffix=['_FS', '_MSMSulc'], format=format, key=key)
 def _prop_msmall(name, hemibase, format='gifti', key='property', filt=None):
     return _prop(name, hemibase, suffix=['_MSMAll'], format=format, key=key)
+def _prop_all(name, hemibase, format='gifti', key='property', filt=None):
+    return _prop(name, hemibase, suffix=['_FS', '_MSMSulc', '_MSMAll'], format=format, key=key)
 def _prop_cifti(name, hemires, filt=None):
     return (_prop_msmall(name, 'lh_LR%dk' % hemires, format='cifti', filt=filt) + 
             _prop_msmall(name, 'rh_LR%dk' % hemires, format='cifti', filt=filt))
@@ -667,13 +669,13 @@ hcp_filemap_instructions = [
                                                                              'lh_native'),
             '{id}.L.ArealDistortion_MSMAll.native.shape.gii',  _prop_msmall('areal_distortion',
                                                                             'lh_native'),
-            '{id}.L.MyelinMap.native.func.gii', _prop_fssulc('myelin_uncorrected', 'lh_native'),
-            '{id}.L.MyelinMap_BC.native.func.gii', _prop_fssulc('myelin', 'lh_native'),
-            '{id}.L.SmoothedMyelinMap.native.func.gii', _prop_fssulc('myelin_smooth_uncorrected',
+            '{id}.L.MyelinMap.native.func.gii', _prop_all('myelin_uncorrected', 'lh_native'),
+            '{id}.L.MyelinMap_BC.native.func.gii', _prop_all('myelin', 'lh_native'),
+            '{id}.L.SmoothedMyelinMap.native.func.gii', _prop_all('myelin_smooth_uncorrected',
+                                                                  'lh_native'),
+            '{id}.L.SmoothedMyelinMap_BC.native.func.gii', _prop_all('myelin_smooth',
                                                                      'lh_native'),
-            '{id}.L.SmoothedMyelinMap_BC.native.func.gii', _prop_fssulc('myelin_smooth',
-                                                                        'lh_native'),
-            '{id}.L.RefMyelinMap.native.func.gii', _prop_fssulc('myelin_ref', 'lh_native'),
+            '{id}.L.RefMyelinMap.native.func.gii', _prop_all('myelin_ref', 'lh_native'),
             '{id}.L.BA.native.label.gii', _prop('brodmann_area', 'lh_native'),
             '{id}.L.aparc.native.label.gii',  _prop('Deskian06_parcellation', 'lh_native'),
             '{id}.L.aparc.a2009s.native.label.gii', (_prop('Destrieux09_parcellation', 'lh_native')
@@ -694,13 +696,13 @@ hcp_filemap_instructions = [
                                                                              'rh_native'),
             '{id}.R.ArealDistortion_MSMAll.native.shape.gii',  _prop_msmall('areal_distortion',
                                                                             'rh_native'),
-            '{id}.R.MyelinMap.native.func.gii', _prop_fssulc('myelin_uncorrected', 'rh_native'),
-            '{id}.R.MyelinMap_BC.native.func.gii', _prop_fssulc('myelin', 'rh_native'),
-            '{id}.R.SmoothedMyelinMap.native.func.gii', _prop_fssulc('myelin_smooth_uncorrected',
-                                                                      'rh_native'),
-            '{id}.R.SmoothedMyelinMap_BC.native.func.gii', _prop_fssulc('myelin_smooth',
-                                                                         'rh_native'),
-            '{id}.R.RefMyelinMap.native.func.gii', _prop_fssulc('myelin_ref', 'rh_native'),
+            '{id}.R.MyelinMap.native.func.gii', _prop_all('myelin_uncorrected', 'rh_native'),
+            '{id}.R.MyelinMap_BC.native.func.gii', _prop_all('myelin', 'rh_native'),
+            '{id}.R.SmoothedMyelinMap.native.func.gii', _prop_all('myelin_smooth_uncorrected',
+                                                                  'rh_native'),
+            '{id}.R.SmoothedMyelinMap_BC.native.func.gii', _prop_all('myelin_smooth',
+                                                                     'rh_native'),
+            '{id}.R.RefMyelinMap.native.func.gii', _prop_all('myelin_ref', 'rh_native'),
             '{id}.R.BA.native.label.gii', _prop('brodmann_area', 'rh_native'),
             '{id}.R.aparc.native.label.gii',  _prop('Deskian06_parcellation', 'rh_native'),
             '{id}.R.aparc.a2009s.native.label.gii', (_prop('Destrieux09_parcellation', 'rh_native')
