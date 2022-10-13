@@ -127,7 +127,7 @@ def point_on_line(ab, c, atol=1e-8):
     else:                                   (a,b,c) = abc
     vca = a - c
     vcb = b - c
-    uba = czdivide(vba, np.sqrt(np.sum(vba**2, axis=0)))
+    ucb = czdivide(vcb, np.sqrt(np.sum(vcb**2, axis=0)))
     uca = czdivide(vca, np.sqrt(np.sum(vca**2, axis=0)))
     return (np.isclose(np.sqrt(np.sum(vca**2, axis=0)), 0, atol=atol) |
             np.isclose(np.sqrt(np.sum(vcb**2, axis=0)), 0, atol=atol) |
@@ -248,7 +248,7 @@ def line_intersection_2D(abarg, cdarg, atol=1e-8):
         yi[unit] = np.nan
         return (xi, yi)
 
-def segment_intersection_2D(p12arg, p34arg, atol=1e-8):
+def segment_intersection_2D(p12arg, p34arg, atol=1e-8, inclusive=False):
     '''
     segment_intersection((a, b), (c, d)) yields the intersection point between the line segments
     that pass from point a to point b and from point c to point d. If there is no intersection
@@ -269,10 +269,16 @@ def segment_intersection_2D(p12arg, p34arg, atol=1e-8):
     sfn = lambda a,b:     ((a-b)                 if len(a.shape) == len(b.shape) else
                            (np.transpose([a])-b) if len(a.shape) <  len(b.shape) else
                            (a - np.transpose([b])))
-    fn  = lambda px,iis:  (1 - ((dfn(cfn(u12,iis), sfn(         px, cfn(p1,iis))) > 0) *
-                                (dfn(cfn(u34,iis), sfn(         px, cfn(p3,iis))) > 0) *
-                                (dfn(cfn(u12,iis), sfn(cfn(p2,iis),          px)) > 0) *
-                                (dfn(cfn(u34,iis), sfn(cfn(p4,iis),          px)) > 0)))
+    if inclusive:
+        fn  = lambda px,iis:  (1 - ((dfn(cfn(u12,iis), sfn(         px, cfn(p1,iis))) >= -atol) *
+                                    (dfn(cfn(u34,iis), sfn(         px, cfn(p3,iis))) >= -atol) *
+                                    (dfn(cfn(u12,iis), sfn(cfn(p2,iis),          px)) >= -atol) *
+                                    (dfn(cfn(u34,iis), sfn(cfn(p4,iis),          px)) >= -atol)))
+    else:
+        fn  = lambda px,iis:  (1 - ((dfn(cfn(u12,iis), sfn(         px, cfn(p1,iis))) > 0) *
+                                    (dfn(cfn(u34,iis), sfn(         px, cfn(p3,iis))) > 0) *
+                                    (dfn(cfn(u12,iis), sfn(cfn(p2,iis),          px)) > 0) *
+                                    (dfn(cfn(u34,iis), sfn(cfn(p4,iis),          px)) > 0)))
     if len(pi.shape) == 1:
         if not np.isfinite(pi[0]): return (np.nan, np.nan)
         bad = fn(pi, None)
