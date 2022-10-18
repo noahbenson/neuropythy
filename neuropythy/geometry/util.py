@@ -261,8 +261,8 @@ def segment_intersection_2D(p12arg, p34arg, atol=1e-8, inclusive=False):
     p2 = np.asarray(p2)
     p3 = np.asarray(p3)
     p4 = np.asarray(p4)
-    u12 = p2 - p1
-    u34 = p4 - p3
+    u12 = normalize(p2 - p1)
+    u34 = normalize(p4 - p3)
     cfn = lambda px,iis: (px if iis is None or len(px.shape) == 1 or px.shape[1] == len(iis) else
                           px[:,iis])
     dfn = lambda a,b:     a[0]*b[0] + a[1]*b[1]
@@ -270,15 +270,20 @@ def segment_intersection_2D(p12arg, p34arg, atol=1e-8, inclusive=False):
                            (np.transpose([a])-b) if len(a.shape) <  len(b.shape) else
                            (a - np.transpose([b])))
     if inclusive:
-        fn  = lambda px,iis:  (1 - ((dfn(cfn(u12,iis), sfn(         px, cfn(p1,iis))) >= -atol) *
-                                    (dfn(cfn(u34,iis), sfn(         px, cfn(p3,iis))) >= -atol) *
-                                    (dfn(cfn(u12,iis), sfn(cfn(p2,iis),          px)) >= -atol) *
-                                    (dfn(cfn(u34,iis), sfn(cfn(p4,iis),          px)) >= -atol)))
+        fn1 = lambda px,iis: (((dfn(cfn(u12,iis), sfn(         px, cfn(p1,iis))) >= -atol) *
+                               (dfn(cfn(u34,iis), sfn(         px, cfn(p3,iis))) >= -atol) *
+                               (dfn(cfn(u12,iis), sfn(cfn(p2,iis),          px)) >= -atol) *
+                               (dfn(cfn(u34,iis), sfn(cfn(p4,iis),          px)) >= -atol)))
     else:
-        fn  = lambda px,iis:  (1 - ((dfn(cfn(u12,iis), sfn(         px, cfn(p1,iis))) > 0) *
-                                    (dfn(cfn(u34,iis), sfn(         px, cfn(p3,iis))) > 0) *
-                                    (dfn(cfn(u12,iis), sfn(cfn(p2,iis),          px)) > 0) *
-                                    (dfn(cfn(u34,iis), sfn(cfn(p4,iis),          px)) > 0)))
+        fn1 = lambda px,iis: (((dfn(cfn(u12,iis), sfn(         px, cfn(p1,iis))) > 0) *
+                               (dfn(cfn(u34,iis), sfn(         px, cfn(p3,iis))) > 0) *
+                               (dfn(cfn(u12,iis), sfn(cfn(p2,iis),          px)) > 0) *
+                               (dfn(cfn(u34,iis), sfn(cfn(p4,iis),          px)) > 0)))
+    lenfn = lambda x: x[0]**2 + x[1]**2
+    lfn = lambda px,xii,pp,pii: lenfn(sfn(cfn(px,xii), cfn(pp,pii)))
+    fn2 = lambda px,iis: ((lfn(px,None,p1,iis) + lfn(px,None,p2,iis) - lfn(p1,iis,p2,iis) < atol) *
+                          (lfn(px,None,p3,iis) + lfn(px,None,p4,iis) - lfn(p3,iis,p4,iis) < atol))
+    fn = lambda px,iis: 1 - fn1(px,iis)*fn2(px,iis)
     if len(pi.shape) == 1:
         if not np.isfinite(pi[0]): return (np.nan, np.nan)
         bad = fn(pi, None)
