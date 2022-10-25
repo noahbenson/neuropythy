@@ -199,7 +199,7 @@ def subject(path, name=Ellipsis, meta_data=None, check_path=True, filter=None,
       * meta_data (default: None) may optionally be a map that contains meta-data to be passed along
         to the subject object (note that this meta-data will not be cached).
       * check_path (default: True) may optionally be set to False to ignore the requirement that a
-        directory contain at least the mri/, label/, and surf/ directories to be considered a valid
+        directory contain at least the T1w/, MNINonLinear/ directories to be considered a valid
         HCP subject directory. Subject objects returned when this argument is not True are not
         cached. Additionally, check_path may be set to None instead of False, indicating that no
         sanity checks or search should be performed whatsoever: the string name should be trusted 
