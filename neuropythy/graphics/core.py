@@ -986,7 +986,7 @@ def cortex_plot_colors(the_map,
       * vmax (default: None) specifies the maximum value for scaling the property when one is passed
         as the color option. None means to use the max value of the property.
       * underlay (default: 'curvature') specifies the default underlay color to plot for the
-        cortical surface; it may be None, 'curvature', or a color.
+        cortical surface; it may be None, 'curvature', a color, or an ndarray compatible to the map.
       * alpha (default None) specifies the alpha values to use for the color plot. If None, then
         leaves the alpha values from color unchanged. If a single number, then all alpha values in
         color are multiplied by that value. If a list of values, one per vertex, then this vector
@@ -1047,6 +1047,10 @@ def cortex_plot_colors(the_map,
     if underlay is not None:
         if pimms.is_str(underlay) and underlay.lower() in ['curvature', 'curv']:
             underlay = apply_cmap(the_map.prop('curvature'), cmap_curvature, vmin=-1, vmax=1)
+        elif  isinstance(underlay, np.ndarray):
+            if the_map.vertex_count == underlay.size:
+                 underlay = apply_cmap(underlay, cmap_curvature, vmin=-1, vmax=1)
+            else: raise ValueError('ndarray underlay should have the same vertices with flatmap')
         else:
             try: underlay = np.ones((the_map.vertex_count, 4)) * to_rgba(underlay)
             except Exception: raise ValueError('plot underlay failed: must be a color or curvature')
@@ -1091,7 +1095,7 @@ def cortex_plot_2D(the_map,
       * vmax (default: None) specifies the maximum value for scaling the property when one is passed
         as the color option. None means to use the max value of the property.
       * underlay (default: 'curvature') specifies the default underlay color to plot for the
-        cortical surface; it may be None, 'curvature', or a color.
+        cortical surface; it may be None, 'curvature', a color, or an ndarray compatible to the map.
       * alpha (default None) specifies the alpha values to use for the color plot. If None, then
         leaves the alpha values from color unchanged. If a single number, then all alpha values in
         color are multiplied by that value. If a list of values, one per vertex, then this vector
@@ -1311,7 +1315,7 @@ def cortex_plot(mesh, *args, **opts):
       * vmax (default: None) specifies the maximum value for scaling the property when one is passed
         as the color option. None means to use the max value of the property.
       * underlay (default: 'curvature') specifies the default underlay color to plot for the
-        cortical surface; it may be None, 'curvature', or a color.
+        cortical surface; it may be None, 'curvature', a color, or an ndarray compatible to the map.
       * alpha (default None) specifies the alpha values to use for the color plot. If None, then
         leaves the alpha values from color unchanged. If a single number, then all alpha values in
         color are multiplied by that value. If a list of values, one per vertex, then this vector
