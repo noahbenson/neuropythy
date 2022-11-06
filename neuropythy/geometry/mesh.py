@@ -618,26 +618,26 @@ class TesselationIndex(object):
         return fi
     @pimms.value
     def vertex_matrix(vertex_index):
-        ks = np.array(vertex_index.keys())
-        vs = np.array(vertex_index.values())
+        ks = np.array(list(vertex_index.keys()))
+        vs = np.array(list(vertex_index.values()))
         n = np.max(ks)
         return sps.csr_matrix((vs + 1, (np.ones(len(ks)), ks)), shape=(1, n), dtype=np.int)
     @pimms.value
     def vertex_matrix(vertex_index):
-        ls = np.array(vertex_index.keys())
-        ii = np.array(vertex_index.values())
+        ls = np.array(list(vertex_index.keys()))
+        ii = np.array(list(vertex_index.values()))
         n = np.max(ls) + 1
         return sps.csr_matrix((ii + 1, (np.zeros(len(ls)), ls)), shape=(1, n), dtype=np.int)
     @pimms.value
     def edge_matrix(edge_index):
-        (us,vs) = np.array(edge_index.keys()).T
-        ii = np.array(edge_index.values())
+        (us,vs) = np.array(list(edge_index.keys())).T
+        ii = np.array(list(edge_index.values()))
         n = np.max([us,vs]) + 1
         return sps.csr_matrix((ii + 1, (us, vs)), shape=(n, n), dtype=np.int)
     @pimms.value
     def face_matrix(face_index):
-        (a,b,c) = np.array(face_index.keys()).T
-        ii = np.array(face_index.values())
+        (a,b,c) = np.array(list(face_index.keys())).T
+        ii = np.array(list(face_index.values()))
         n = np.max([a,b,c]) + 1
         # we have to cheat with the last two
         bc = b*n + c
