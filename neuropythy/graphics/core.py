@@ -965,7 +965,9 @@ def cortex_rgba_plot_2D(the_map, rgba, axes=None, triangulation=None):
     return cortex_cmap_plot_2D(the_map, zs, cmap, axes=axes, triangulation=triangulation)
 def cortex_plot_colors(the_map,
                        color=None, cmap=None, vmin=None, vmax=None, alpha=None,
-                       underlay='curvature', mask=None):
+                       underlay='curvature', underlay_cmap='curvature',
+                       underlay_vmin=-1, underlay_vmax=1,
+                       mask=None):
     '''
     cortex_plot_colors(mesh, opts...) yields the cortex colors as a matrix of RGBA rows for the
       given mesh and options. 
@@ -987,6 +989,9 @@ def cortex_plot_colors(the_map,
         as the color option. None means to use the max value of the property.
       * underlay (default: 'curvature') specifies the default underlay color to plot for the
         cortical surface; it may be None, 'curvature', a color, or an ndarray compatible to the map.
+      * underlay_cmap (default: 'curvature') specifies the default underlay colormap.
+      * underlay_vmin (default: -1) specifies the default underlay minimum.
+      * underlay_vmax (default: 1) specifies the default underlay maximum.
       * alpha (default None) specifies the alpha values to use for the color plot. If None, then
         leaves the alpha values from color unchanged. If a single number, then all alpha values in
         color are multiplied by that value. If a list of values, one per vertex, then this vector
@@ -1011,7 +1016,9 @@ def cortex_plot_colors(the_map,
         the_map = the_map.with_prop({ktag:v})
         return cortex_plot_colors(the_map, color=ktag,
                                   cmap=cmap, vmin=vmin, vmax=vmax, alpha=alpha,
-                                  underlay=underlay, mask=mask)
+                                  underlay=underlay, underlay_cmap=underlay_cmap,
+                                  underlay_vmin=underlay_vmin, underlay_vmax=underlay_vmax,
+                                  mask=mask)
     try:
         clr = matplotlib.colors.to_rgba(color)
         # This is an rgb color to plot...
@@ -1045,15 +1052,27 @@ def cortex_plot_colors(the_map,
     if color.shape[1] != 4: color = np.hstack([color, np.ones([color.shape[0], 1])])
     # okay, and the underlay...
     if underlay is not None:
-        if pimms.is_str(underlay) and underlay.lower() in ['curvature', 'curv']:
-            underlay = apply_cmap(the_map.prop('curvature'), cmap_curvature, vmin=-1, vmax=1)
-        elif  isinstance(underlay, np.ndarray):
-            if the_map.vertex_count == underlay.size:
-                 underlay = apply_cmap(underlay, cmap_curvature, vmin=-1, vmax=1)
-            else: raise ValueError('ndarray underlay should have the same vertices with flatmap')
-        else:
-            try: underlay = np.ones((the_map.vertex_count, 4)) * to_rgba(underlay)
-            except Exception: raise ValueError('plot underlay failed: must be a color or curvature')
+        # First thing, try to convert it to an rgba
+        found = False
+        try:
+            underlay = to_rgba(underlay)
+            # Okay, it's a color.
+            underlay = np.ones((the_map.vertex_count, 4)) * to_rgba(underlay)
+            found = True
+        except Exception: pass
+        if not found:
+            if pimms.is_str(underlay):
+                underlay = apply_cmap(the_map.prop(underlay), underlay_cmap,
+                                      vmin=underlay_vmin, vmax=underlay_vmax)
+            elif isinstance(underlay, np.ndarray):
+                if the_map.vertex_count == underlay.size:
+                    underlay = apply_cmap(underlay, underlay_cmap,
+                                          vmin=underlay_vmin, vmax=underlay_vmax)
+                else:
+                    raise ValueError('ndarray underlay should have the same vertex count'
+                                     ' as the flatmap')
+            else:
+                raise ValueError('plot underlay failed: must be a color or a property')
     # okay, let's check on alpha...
     if alpha is not None:
         if pimms.is_number(alpha): alpha = np.full(color.shape[0], alpha)
@@ -1075,7 +1094,9 @@ def cortex_plot_colors(the_map,
 
 def cortex_plot_2D(the_map,
                    color=None, cmap=None, vmin=None, vmax=None, alpha=None,
-                   underlay='curvature', mask=None, axes=None, triangulation=None):
+                   underlay='curvature', underlay_cmap='curvature',
+                   underlay_vmin=-1, underlay_vmax=1,
+                   mask=None, axes=None, triangulation=None):
     '''
     cortex_plot_2D(map) yields a plot of the given 2D cortical mesh, map.
 
@@ -1096,6 +1117,9 @@ def cortex_plot_2D(the_map,
         as the color option. None means to use the max value of the property.
       * underlay (default: 'curvature') specifies the default underlay color to plot for the
         cortical surface; it may be None, 'curvature', a color, or an ndarray compatible to the map.
+      * underlay_cmap (default: 'curvature') specifies the default underlay colormap.
+      * underlay_vmin (default: -1) specifies the default underlay minimum.
+      * underlay_vmax (default: 1) specifies the default underlay maximum.
       * alpha (default None) specifies the alpha values to use for the color plot. If None, then
         leaves the alpha values from color unchanged. If a single number, then all alpha values in
         color are multiplied by that value. If a list of values, one per vertex, then this vector
@@ -1121,7 +1145,8 @@ def cortex_plot_2D(the_map,
     if axes is None: axes = matplotlib.pyplot.gca()
     # process the colors
     color = cortex_plot_colors(the_map, color=color, cmap=cmap, vmin=vmin, vmax=vmax, alpha=alpha,
-                               underlay=underlay, mask=mask)
+                               underlay=underlay, underlay_cmap=underlay_cmap,
+                               underlay_vmin=underlay_vmin, underlay_vmax=underlay_vmax, mask=mask)
     # finally, we can make the plot!
     return cortex_rgba_plot_2D(the_map, color, axes=axes, triangulation=triangulation)
 
@@ -1141,7 +1166,9 @@ try:
 
     def cortex_plot_3D(obj,
                        color=None, cmap=None, vmin=None, vmax=None, alpha=None,
-                       underlay='curvature', mask=None, hemi=None, surface='inflated',
+                       underlay='curvature', underlay_cmap='curvature',
+                       underlay_vmin=-1, underlay_vmax=1,
+                       mask=None, hemi=None, surface='inflated',
                        figure=Ellipsis, width=600, height=600, mesh_alpha=None,
                        view=None, camera_distance=100, camera_fov=None, camera_up=None):
         '''
@@ -1169,6 +1196,9 @@ try:
         as the color option. None means to use the max value of the property.
       * underlay (default: 'curvature') specifies the default underlay color to plot for the
         cortical surface; it may be None, 'curvature', or a color.
+      * underlay_cmap (default: 'curvature') specifies the default underlay colormap.
+      * underlay_vmin (default: -1) specifies the default underlay minimum.
+      * underlay_vmax (default: 1) specifies the default underlay maximum.
       * alpha (default None) specifies the alpha values to use for the color plot. If None, then
         leaves the alpha values from color unchanged. If a single number, then all alpha values in
         color are multiplied by that value. If a list of values, one per vertex, then this vector
@@ -1212,7 +1242,9 @@ try:
         # process the colors
         rgba = np.concatenate(
             [cortex_plot_colors(m, color=color, cmap=cmap, vmin=vmin, vmax=vmax,
-                                alpha=alpha, underlay=underlay, mask=mask)
+                                alpha=alpha, underlay=underlay, underlay_cmap=underlay_cmap,
+                                underlay_vmin=underlay_vmin, underlay_vmax=underlay_vmax,
+                                mask=mask)
              for m in mesh])
         n = len(rgba)
         # process the mesh_alpha parameter
