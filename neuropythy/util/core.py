@@ -570,7 +570,7 @@ def address_interpolate(addr, prop, method=None, surface='midgray', strict=False
       * tess (default: None) may specify a tesselation object that should be used to lookup the
         faces and convert them into face indices.
     '''
-    (faces, (a,b,h)) = address_data(addr, 3, surface=surface)
+    (faces, (a,b,h)) = address_data(addr, 3, surface=surface, strict=strict)
     if tess is not None: faces = tess.index(faces)
     bad = np.where(~np.isfinite(a))[0]
     if strict is True and len(bad) > 0: raise ValueError('non-finite coordinates found in address')
