@@ -3299,12 +3299,13 @@ class Topology(VertexSet):
         res = None
         errs = []
         for reg_name in reg_names:
-            if True:
+            try: #if True:
                 res = self.registrations[reg_name].interpolate(
                     topo.registrations[reg_name], data,
                     mask=mask, method=method, n_jobs=n_jobs);
                 break
-            #except Exception as e: errs.append(e)
+            except Exception as e:
+                errs.append(e)
         if res is None:
             raise ValueError('All shared topologies raised errors during interpolation!', errs)
         return res
