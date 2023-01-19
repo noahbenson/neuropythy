@@ -83,13 +83,18 @@ def cortex_from_filemap(fmap, name, affine=None):
     props = pimms.merge(hdat.property if hasattr(hdat, 'property') else {}, pimms.lazy_map(p))
     tess = geo.Tesselation(tris, properties=props)
     # if this is a subject that exists in the library, we may want to add some files:
-    if name is None:
-        pd = fmap.pseudo_paths[None]._path_data
-        name = pd['pathmod'].split(fmap.actual_path)[1]
     regs = hdat.registration if hasattr(hdat, 'registration') else {}
     # Okay, make the cortex object!
     md = {'file_map': fmap}
-    if name is not None: md['subject_id'] = name
+    # Annotate the subject ID
+    try:
+        pd = fmap.pseudo_paths[None]._path_data
+        sid = pd['pathmod'].split(fmap.actual_path)[1]
+        sid = int(sid)
+    except Exception:
+        sid = None
+        raise
+    md['subject_id'] = sid
     srfs = hdat.surface if hasattr(hdat, 'surface') else {}
     return mri.Cortex(chirality, tess, srfs, regs, affine=affine, meta_data=md).persist()
 def images_from_filemap(fmap):

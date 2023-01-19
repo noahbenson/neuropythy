@@ -873,7 +873,7 @@ class FileMap(ObjectWithMetaData):
         '''
         filemap.actual_path is always a string path (even when filemap.path is a pseudo-path).
         '''
-        if is_pseudo_path(path): return path.source_path
+        if is_pseudo_path(path): return path.actual_source_path
         else: return path
     @pimms.value
     def actual_cache_path(cache_path, cache_delete, actual_path, supplemental_paths):
