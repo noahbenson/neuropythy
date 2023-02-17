@@ -783,10 +783,10 @@ class Cortex(geo.Topology):
         i1 = np.cumsum(nvox[ii])
         i0 = np.concatenate([[0], i1[:-1]])
         n  = int(i1[-1])
-        idcs = np.zeros((3,n),   dtype=np.int)
-        wfxs = np.zeros((3,3,n), dtype=np.float)
-        pfxs = np.zeros((3,3,n), dtype=np.float)
-        iis  = np.zeros(n,       dtype=np.int)
+        idcs = np.zeros((3,n),   dtype=int)
+        wfxs = np.zeros((3,3,n), dtype=float)
+        pfxs = np.zeros((3,3,n), dtype=float)
+        iis  = np.zeros(n,       dtype=int)
         # we step along from i0 to i1 forgetting finished prisms along the way
         (kk, q, mn, nvox, dims) = (ii, 0, mn[:,ii], nvox[ii], dims[:,ii])
         while len(kk) > 0:
@@ -867,8 +867,8 @@ class Cortex(geo.Topology):
         # then used for trilinear interpolation of the points in the prism.
         (N, sofar) = (256, 0)
         # go ahead and make the results
-        res_fs = np.full((3, n),     -1, dtype=np.int)
-        res_xs = np.full((3, n), np.nan, dtype=np.float)
+        res_fs = np.full((3, n),     -1, dtype=int)
+        res_xs = np.full((3, n), np.nan, dtype=float)
         # points tha lie outside the pial surface entirely we can eliminate off the bat:
         ii = [(mn <= ix) & (ix <= mx)
               for (px,ix) in zip(psrf.coordinates, xyz.T)
@@ -987,7 +987,7 @@ def _vertex_to_voxel_linear_interpolation(hemi, gray_indices, image_shape, voxel
     N = 256
     sofar = 0
     # go ahead and make our interp matrix
-    interp = sps.lil_matrix((n, vcount), dtype=np.float)
+    interp = sps.lil_matrix((n, vcount), dtype=float)
     # Okay, we look for those isect's within the triangles
     ii = np.asarray(range(n)) # the subset not yet matched
     for i in range(N):
@@ -1055,9 +1055,9 @@ def _vertex_to_voxel_lines_interpolation(hemi, gray_indices, image_shape, vertex
     index = sps.csr_matrix(
         (range(1, 1+len(idcs)), (np.zeros(len(idcs)), idcs)),
         shape=(1,np.prod(image_shape)),
-        dtype=np.int)
+        dtype=int)
     # make the interpolation matrix...
-    interp = sps.lil_matrix((len(ijks[0]), n), dtype=np.float)
+    interp = sps.lil_matrix((len(ijks[0]), n), dtype=float)
     # ends are the voxels in which the lines end
     ends = usign * np.ceil(usign*maxs)
     # Okay, we are going to walk along each of the lines...
@@ -1080,7 +1080,7 @@ def _vertex_to_voxel_lines_interpolation(hemi, gray_indices, image_shape, vertex
         frac = d * inv_lens
         frac[inv_lens == 0] = 1
         # what is the start voxel?
-        start = np.asarray(usign * np.floor(usign * mins), dtype=np.int)
+        start = np.asarray(usign * np.floor(usign * mins), dtype=int)
         # we want to add these fractions into the interp matrix
         tmp = ijk_to_idx(start)
         oob = np.any(start < 0, axis=0) | (tmp >= index.shape[1])
@@ -1136,4 +1136,4 @@ def _vertex_to_voxel_nearest_interpolation(hemi, gray_indices, voxel_to_vertex_m
         wn = lwn
     return sps.csr_matrix((np.ones(len(wn)), (range(len(wn)), wn)),
                           shape=(len(gray_indices[0]), vcount),
-                          dtype=np.float)
+                          dtype=float)

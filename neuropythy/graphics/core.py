@@ -866,7 +866,7 @@ def colors_to_cmap(colors):
     if len(colors.shape) == 1: return colors_to_cmap([colors])[0]
     if colors.shape[1] == 3:
         colors = np.hstack((colors, np.ones((len(colors),1))))
-    steps = (0.5 + np.asarray(range(len(colors)-1), dtype=np.float))/(len(colors) - 1)
+    steps = (0.5 + np.asarray(range(len(colors)-1), dtype=float))/(len(colors) - 1)
     return matplotlib.colors.LinearSegmentedColormap(
         'auto_cmap',
         {clrname: ([(0, col[0], col[0])] +

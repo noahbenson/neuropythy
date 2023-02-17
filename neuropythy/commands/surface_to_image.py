@@ -167,12 +167,12 @@ def main(args):
         raise ValueError('Unsupported method: %s' % method)
     # and the datatype
     if opts['dtype'] is None: dtyp = None
-    elif opts['dtype'].lower() == 'float': dtyp = np.float
-    elif opts['dtype'].lower() == 'int': dtyp = np.int
+    elif opts['dtype'].lower() == 'float': dtyp = float
+    elif opts['dtype'].lower() == 'int': dtyp = int
     else: raise ValueError('Type argument must be float or int')
     if method == 'auto':
-      if dtyp is np.float: method = 'linear'
-      elif dtyp is np.int: method = 'nearest'
+      if dtyp is float: method = 'linear'
+      elif dtyp is int: method = 'nearest'
       else: method = 'linear'
     # and the input/sample image
     im = opts['image']

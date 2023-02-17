@@ -231,7 +231,7 @@ class RetinotopyMeshModel(RetinotopyModel):
     @pimms.param
     def faces(tris):
         'mdl.faces is the triangle matrix for the given retinotopy mesh model mdl.'
-        tris = np.asarray(tris, dtype=np.int)
+        tris = np.asarray(tris, dtype=int)
         if tris.shape[0] != 3: tris = tris.T
         if tris.shape[0] != 3: raise ValueError('triangle matrix must have 3 rows or columns')
         return pimms.imm_array(tris)
@@ -302,7 +302,7 @@ class RetinotopyMeshModel(RetinotopyModel):
             else:                 boundaryNeis[b] =  inside
         for (b,neis) in six.iteritems(boundaryNeis):
             area_ids[b] = np.argmax(np.bincount(area_ids[list(neis)]))
-        return pimms.imm_array(np.asarray(area_ids, dtype=np.int))
+        return pimms.imm_array(np.asarray(area_ids, dtype=int))
     @pimms.value
     def tess(faces, cortical_coordinates, visual_coordinates,
              polar_angles, eccentricities, cleaned_visual_areas):
@@ -585,7 +585,7 @@ def load_fmm_model(filename, radius=np.pi/3.0, sphere_radius=100.0):
          for row in lines[(n+l0):(n+m+l0)]])
     return RegisteredRetinotopyModel(
         RetinotopyMeshModel(tris, crds,
-                            90-180/np.pi*vals[:,0], vals[:,1], np.asarray(vals[:,2], dtype=np.int),
+                            90-180/np.pi*vals[:,0], vals[:,1], np.asarray(vals[:,2], dtype=int),
                             transform=tx,
                             area_name_to_id=area_names),
         geo.MapProjection(registration=reg,

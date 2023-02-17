@@ -824,7 +824,7 @@ def retinotopy_mesh_field(mesh, mdl,
                 ('polar_angle', polar_angle),
                 ('eccentricity', eccentricity),
                 ('weight', [weight for i in range(n)] \
-                           if isinstance(weight, Number) or np.issubdtype(type(weight), np.float) \
+                           if isinstance(weight, Number) or np.issubdtype(type(weight), np.floating) \
                            else weight)]]
     # Make sure they contain no None/invalid values
     (polar_angle, eccentricity, weight) = _retinotopy_vectors_to_float(
@@ -1099,7 +1099,7 @@ def retinotopy_anchors(mesh, mdl,
     # okay, we've partially parsed the data that was given; now we can construct the final list of
     # instructions:
     tmp =  (['anchor', shape,
-             np.asarray(idcs, dtype=np.int),
+             np.asarray(idcs, dtype=int),
              np.asarray(ancs, dtype=np.float64),
              'scale', np.asarray(wgts, dtype=np.float64)]
             + ([] if sigs is None else ['sigma', sigs])
@@ -1386,7 +1386,7 @@ def calc_prediction(registered_map, preregistration_mesh, native_mesh, model):
     d = model.cortex_to_angle(registered_map.coordinates)
     id2n = model.area_id_to_name
     (ang, ecc) = d[0:2]
-    lbl = np.asarray(d[2], dtype=np.int)
+    lbl = np.asarray(d[2], dtype=int)
     rad = np.asarray([predict_pRF_radius(e, id2n[l]) if l > 0 else 0 for (e,l) in zip(ecc,lbl)])
     d = {'polar_angle':ang, 'eccentricity':ecc, 'visual_area':lbl, 'radius':rad}
     # okay, put these on the mesh
@@ -1411,7 +1411,7 @@ def calc_prediction(registered_map, preregistration_mesh, native_mesh, model):
         natreg_mesh = native_mesh.copy(coordinates=rmesh.unaddress(addr))
         d = model.cortex_to_angle(natreg_mesh)
         (ang,ecc) = d[0:2]
-        lbl = np.asarray(d[2], dtype=np.int)
+        lbl = np.asarray(d[2], dtype=int)
         rad = np.asarray([predict_pRF_radius(e, id2n[l]) if l > 0 else 0 for (e,l) in zip(ecc,lbl)])
         pred = pyr.m(polar_angle=ang, eccentricity=ecc, radius=rad, visual_area=lbl)
         pmesh = natreg_mesh.with_prop(pred)
@@ -2598,7 +2598,7 @@ def sectors_to_labels(sectors, vertex_count):
       maps sector labels onto sector boundaries (i.e., keys in the sectors argument), and, second,
       a property vector that contains the relevant sector label for each vertex.
     '''    
-    p = np.zeros(vertex_count, dtype=np.int)
+    p = np.zeros(vertex_count, dtype=int)
     key = {}
     for (lblm1,(k,ii)) in enumerate(sectors.items()):
         lbl = lblm1 + 1
@@ -2671,7 +2671,7 @@ def _sector_boundary_distances(sctmesh, bounds):
         if len(ii) == 0:
             res[ae] = np.zeros(0)
         else:
-            faces = np.array([ii,ii,ii], dtype=np.int)
+            faces = np.array([ii,ii,ii], dtype=int)
             coords = np.zeros((2,len(ii)))
             coords[0,:] = 1.0
             addrs = {'faces':faces, 'coordinates':coords}
@@ -2763,12 +2763,12 @@ def refit_sectors(mesh, sectors, outangs, outeccs,
     # We need to know which vertices in each sector correspond to which boundary.
     bounds = sector_bounds(mesh, sectors)
     # We will collect results in this dictionary:
-    res = {(mnang,mxang,mnecc,mxecc): np.zeros(0, dtype=np.int)
+    res = {(mnang,mxang,mnecc,mxecc): np.zeros(0, dtype=int)
            for (mnang,mxang) in zip(outangs[1:], outangs[:-1])
            for (mnecc,mxecc) in zip(outeccs[1:], outeccs[:-1])}
     # Basically we just apply the same algorithm to each existing sector, joining up the
     # pieces we find along the way.
-    res = {(out_mn_ang,out_mx_ang,out_mn_ecc,out_mx_ecc): np.zeros(0, dtype=np.int)
+    res = {(out_mn_ang,out_mx_ang,out_mn_ecc,out_mx_ecc): np.zeros(0, dtype=int)
            for (out_mn_ang,out_mx_ang) in zip(outangs[:-1], outangs[1:])
            for (out_mn_ecc,out_mx_ecc) in zip(outeccs[:-1], outeccs[1:])}
     for (k, ii) in sectors.items():

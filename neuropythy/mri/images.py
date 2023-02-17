@@ -781,7 +781,7 @@ def image_interpolate(img, points, affine=None, method=None, fill=0, dtype=None,
     image = np.asarray(image)
     imsh = np.reshape(image.shape[:3], (3,1))
     if method == 'nearest':
-        ijk = np.asarray(np.round(xyz), dtype=np.int)
+        ijk = np.asarray(np.round(xyz), dtype=int)
         ok = np.all(ijk >= 0, axis=0) & np.all(ijk < imsh, axis=0)
         if weights is not None:
             ww = weights[tuple(ijk[:,ok])]
@@ -801,7 +801,7 @@ def image_interpolate(img, points, affine=None, method=None, fill=0, dtype=None,
                        [maxs[0], mins[1], maxs[2]],                           
                        [maxs[0], maxs[1], mins[2]],
                        maxs],
-                      dtype=np.int)
+                      dtype=int)
     vals = np.asarray([image[tuple(row)] for row in voxs])
     # trilinear weights
     wgts = np.asarray([np.prod(1 - np.abs(xyz - row), axis=0) for row in voxs])

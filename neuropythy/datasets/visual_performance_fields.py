@@ -248,7 +248,7 @@ class VisualPerformanceFieldsDataset(HCPMetaDataset):
         import numpy as np
         hem = hcp_data.subjects[sid].hemis[h]
         sct = sectors[sid][h]
-        lbls = np.zeros(hem.vertex_count, dtype=np.int)
+        lbls = np.zeros(hem.vertex_count, dtype=int)
         for (tup,k) in key.items():
             if not pimms.is_tuple(tup):
                 print(tup, k)
@@ -752,7 +752,7 @@ class VisualPerformanceFieldsDataset(HCPMetaDataset):
                 r = {}
                 for k in six.iterkeys(q[p][a]):
                     u = [u[p][a][k] for u in res if len(u[p][a][k]) > 0]
-                    if len(u) == 0: u = np.asarray([], dtype=np.float)
+                    if len(u) == 0: u = np.asarray([], dtype=float)
                     else: u = np.concatenate(u)
                     r[k] = u
                 return pyr.pmap(r)

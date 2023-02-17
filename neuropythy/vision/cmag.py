@@ -150,7 +150,7 @@ def mag_data(hemi, retinotopy='any', surface='midgray', mask=None,
     # if there's no visal area, we just use the mask as is
     if visual_area is None: return finish_mag_data(mask)
     # otherwise, we return a lazy map of the visual area mask values
-    visual_area = hemi.property(visual_area, mask=mask, null=0, dtype=np.int)
+    visual_area = hemi.property(visual_area, mask=mask, null=0, dtype=int)
     vam = (np.unique(visual_area)                    if visual_area_mask is None     else
            np.setdiff1d(np.unique(visual_area), [0]) if visual_area_mask is Ellipsis else
            np.unique(list(visual_area_mask)))
@@ -966,8 +966,8 @@ def isoline_vmag(hemi, isolines=None, surface='midgray', min_length=2, **kw):
 
 def _cmag_coord_idcs(coordinates):
     return [i for (i,(x,y)) in enumerate(zip(*coordinates))
-            if (np.issubdtype(type(x), np.float) or np.issubdtype(type(x), np.int))
-            if (np.issubdtype(type(y), np.float) or np.issubdtype(type(y), np.int))
+            if (np.issubdtype(type(x), np.floating) or np.issubdtype(type(x), np.integer))
+            if (np.issubdtype(type(y), np.floating) or np.issubdtype(type(y), np.integer))
             if not np.isnan(x) and not np.isnan(y)]
 def _cmag_fill_result(mesh, idcs, vals):
     idcs = {idx:i for (i,idx) in enumerate(idcs)}
@@ -1065,7 +1065,7 @@ def cmag(mesh, retinotopy='any', surface=None, to='vertices'):
         return {'radial': rad_mag, 'tangential': tan_mag, 'areal': arl_mag, 'field_sign': fsgn}
     # okay, we need to do some averaging!
     mtx = simplex_summation_matrix(mesh.tess.indexed_faces)
-    cols = np.asarray(mtx.sum(axis=1), dtype=np.float)[:,0]
+    cols = np.asarray(mtx.sum(axis=1), dtype=float)[:,0]
     cols_inv = zinv(cols)
     # for areal magnification, we want to do summation over the s and v areas then divide
     s_areas = mtx.dot(s_areas)
@@ -1087,9 +1087,9 @@ def neighborhood_cortical_magnification(mesh, coordinates):
     neis = mesh.tess.indexed_neighborhoods
     coords_vis = np.asarray(coordinates if len(coordinates) == 2 else coordinates.T)
     coords_srf = mesh.coordinates
-    res = np.full((mesh.vertex_count, 3), np.nan, dtype=np.float)
+    res = np.full((mesh.vertex_count, 3), np.nan, dtype=float)
     res = np.array([row for row in [(np.nan,np.nan,np.nan)] for _ in range(mesh.vertex_count)],
-                   dtype=np.float)
+                   dtype=float)
     for idx in idcs:
         nei = neis[idx]
         pts_vis = coords_vis[:,nei]

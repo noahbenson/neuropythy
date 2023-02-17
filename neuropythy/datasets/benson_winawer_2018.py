@@ -255,7 +255,7 @@ class BensonWinawer2018Dataset(Dataset):
         sub = freesurfer_subject(os.path.join(cache_directory, 'freesurfer_subjects', sid))
         # okay, we need functions that will lazily extract a hemisphere then load the retinotopy,
         # analyses, and atlas data onto it (also lazily)
-        def _load_ints(flnm):  return np.asarray(nyio.load(flnm), dtype=np.int)
+        def _load_ints(flnm):  return np.asarray(nyio.load(flnm), dtype=int)
         def _load_angle(flnm):
             dat = nyio.load(flnm)
             (d,n) = os.path.split(flnm)

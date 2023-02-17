@@ -259,7 +259,7 @@ def to_affine(aff, dims=None):
             dims = off.shape[0]
             if mtx.shape[0] != dims or mtx.shape[1] != dims:
                 raise ValueError('with offset size=%d, matrix must be %d x %d' % (dims,dims,dims))
-        aff = np.zeros((dims+1,dims+1), dtype=np.float)
+        aff = np.zeros((dims+1,dims+1), dtype=float)
         aff[dims,dims] = 1
         aff[0:dims,0:dims] = mtx
         aff[0:dims,dims] = off
@@ -435,20 +435,20 @@ def simplex_summation_matrix(simplices, weight=None, inverse=False):
         if weight is None: f = sps.csr_matrix
         else:
             nrng = range(n)
-            ww = sps.csr_matrix((weight, (nrng, nrng)), shape=(n,n), dtype=np.float)
+            ww = sps.csr_matrix((weight, (nrng, nrng)), shape=(n,n), dtype=float)
             f = lambda *args,**kwargs: ww.dot(sps.csc_matrix(*args,**kwargs))
-        s = f((np.ones(d*m, dtype=np.int),
+        s = f((np.ones(d*m, dtype=int),
                (np.concatenate([rng for _ in range(d)]), np.concatenate(simplices))),
               shape=(m,n),
-              dtype=np.int)
+              dtype=int)
     else:
         s = sps.csr_matrix(
-            (np.ones(d*m, dtype=np.int),
+            (np.ones(d*m, dtype=int),
              (np.concatenate(simplices), np.concatenate([rng for _ in range(d)]))),
             shape=(n,m),
-            dtype=np.int)
+            dtype=int)
         if weight is not None:
-            s = s.dot(sps.csc_matrix((weight, (rng, rng)), shape=(m,m), dtype=np.float))
+            s = s.dot(sps.csc_matrix((weight, (rng, rng)), shape=(m,m), dtype=float))
     return s
 def simplex_averaging_matrix(simplices, weight=None, inverse=False):
     '''
@@ -459,11 +459,11 @@ def simplex_averaging_matrix(simplices, weight=None, inverse=False):
     (of vertices onto simplices) should be returned.
     '''
     m = simplex_summation_matrix(simplices, weight=weight, inverse=inverse)
-    rs = np.asarray(m.sum(axis=1), dtype=np.float)[:,0]
+    rs = np.asarray(m.sum(axis=1), dtype=float)[:,0]
     invrs = zinv(rs)
     rng = range(m.shape[0])
-    diag = sps.csr_matrix((invrs, (rng, rng)), dtype=np.float)
-    return diag.dot(sps.csc_matrix(m, dtype=np.float))
+    diag = sps.csr_matrix((invrs, (rng, rng)), dtype=float)
+    return diag.dot(sps.csc_matrix(m, dtype=float))
 
 def is_image(image):
     '''
@@ -686,8 +686,8 @@ def unbroadcast(a, b):
     b = np.asarray(b)
     da = len(a.shape)
     db = len(b.shape)
-    if   da > db: return (a, np.reshape(b, b.shape + tuple(np.ones(da-db, dtype=np.int))))
-    elif da < db: return (np.reshape(a, a.shape + tuple(np.ones(db-da, dtype=np.int))), b)
+    if   da > db: return (a, np.reshape(b, b.shape + tuple(np.ones(da-db, dtype=int))))
+    elif da < db: return (np.reshape(a, a.shape + tuple(np.ones(db-da, dtype=int))), b)
     else:         return (a, b)
 def cplus(*args):
     '''

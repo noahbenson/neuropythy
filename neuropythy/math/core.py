@@ -150,7 +150,7 @@ def integers_to_indices(shape, ii):
     '''
     tr = np.roll(np.cumprod(shape), 1)
     tr[0] = 1
-    rr = np.zeros((len(shape), len(ii)), dtype=np.int)
+    rr = np.zeros((len(shape), len(ii)), dtype=int)
     for (rrrow,shval) in zip(reversed(rr), reversed(tr)):
         rrrow[:] = np.floor_divide(ii, shval)
         ii = np.mod(ii, shval)
@@ -161,7 +161,7 @@ def find_indices(ii, k):
       (integer) values of k occur in the (integer) array ii.
     '''
     n = len(ii)
-    zs = np.zeros(n, dtype=np.int)
+    zs = np.zeros(n, dtype=int)
     ri = sps.csr_matrix((np.arange(n), [k, zs]))
     return np.asarray(ri[ii, zs]).flatten()
 def dense_cmp_dense(f, a, b, nannan=False, nanval=False):
@@ -308,8 +308,8 @@ def sparse_cmp_sparse(f, ij1, dat1, ij2, dat2, shape,
     k1 = np.dot(tr, ij1)
     k2 = np.dot(tr, ij2)
     # We also need two sparse matrices that reverse these indices.
-    ri1 = sps.csr_matrix((np.arange(len(k1)), [k1, np.zeros(len(k1), dtype=np.int)]))
-    ri2 = sps.csr_matrix((np.arange(len(k2)), [k2, np.zeros(len(k2), dtype=np.int)]))
+    ri1 = sps.csr_matrix((np.arange(len(k1)), [k1, np.zeros(len(k1), dtype=int)]))
+    ri2 = sps.csr_matrix((np.arange(len(k2)), [k2, np.zeros(len(k2), dtype=int)]))
     # Figure out which keys get compared with each other versus with 0.
     k_cmp12 = np.intersect1d(k1, k2)
     k_cmp10 = np.setdiff1d(k1, k_cmp12)
@@ -317,25 +317,25 @@ def sparse_cmp_sparse(f, ij1, dat1, ij2, dat2, shape,
     # Make the comparisons; regarding NaNs: we pass these values down to the dense_cmp_dense
     # function, so it handles the NaNs for us.
     if len(k_cmp12) > 0:
-        zs = np.zeros(len(k_cmp12), dtype=np.int)
+        zs = np.zeros(len(k_cmp12), dtype=int)
         ii1 = np.asarray(ri1[k_cmp12, zs]).flatten()
         ii2 = np.asarray(ri2[k_cmp12, zs]).flatten()
         r_cmp12 = dense_cmp_dense(f, dat1[ii1], dat2[ii2], nannan=nannan, nanval=nanval)
     else:
         r_cmp12 = []
     if len(k_cmp10) > 0:
-        ii1 = np.asarray(ri1[k_cmp10, np.zeros(len(k_cmp10), dtype=np.int)]).flatten()
+        ii1 = np.asarray(ri1[k_cmp10, np.zeros(len(k_cmp10), dtype=int)]).flatten()
         r_cmp10 = dense_cmp_dense(f, dat1[ii1], 0, nannan=nannan, nanval=nanval)
     else:
         r_cmp10 = []
     if len(k_cmp02) > 0:
-        ii2 = np.asarray(ri2[k_cmp02, np.zeros(len(k_cmp02), dtype=np.int)]).flatten()
+        ii2 = np.asarray(ri2[k_cmp02, np.zeros(len(k_cmp02), dtype=int)]).flatten()
         r_cmp02 = dense_cmp_dense(f, 0, dat2[ii2], nannan=nannan, nanval=nanval)
     else:
         r_cmp02 = []
     # Create the output values.
     k = np.concatenate([k_cmp12, k_cmp10, k_cmp02])
-    ij = np.zeros((len(shape), len(k)), dtype=np.int)
+    ij = np.zeros((len(shape), len(k)), dtype=int)
     for (ijrow,shval) in zip(reversed(ij), reversed(tr)):
         ijrow[:] = np.floor_divide(k, shval)
         k = np.mod(k, shval)

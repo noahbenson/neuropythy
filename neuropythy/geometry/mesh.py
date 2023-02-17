@@ -70,7 +70,7 @@ class VertexSet(ObjectWithMetaData):
         '''
         vset.indices is the list of vertex indices for the given vertex-set vset.
         '''
-        idcs = np.arange(0, vertex_count, 1, dtype=np.int)
+        idcs = np.arange(0, vertex_count, 1, dtype=int)
         idcs.setflags(write=False)
         return idcs
     #@pimms.require
@@ -384,11 +384,11 @@ def to_mask(obj, m=None, indices=None):
         obj = obj.properties
     else:
         obj = pimms.itable(obj)
-        lbls = np.arange(0, obj.row_count, 1, dtype=np.int)
+        lbls = np.arange(0, obj.row_count, 1, dtype=int)
         idcs = lbls
     if m is None: return idcs if indices else lbls
     if is_tuple(m):
-        if len(m) == 0: return np.asarray([], dtype=np.int)
+        if len(m) == 0: return np.asarray([], dtype=int)
         p = to_property(obj, m[0])
         if len(m) == 2 and hasattr(m[1], '__iter__'):
             m = reduce(lambda q,u: np.logical_or(q, naneq(p, u)),
@@ -525,26 +525,26 @@ def to_property(obj, prop=None,
         if obj is None: raise ValueError('a weight name but no data object given to to_property')
         else: weights = obj[weights]
     weights_orig = weights
-    if weights is None or weight_min is None: low_weight = np.asarray([], dtype=np.int)
+    if weights is None or weight_min is None: low_weight = np.asarray([], dtype=int)
     else:
         if weight_transform is Ellipsis:
-            weights = np.array(weights, dtype=np.float)
+            weights = np.array(weights, dtype=float)
             weights[~np.isfinite(weights)] = 0
             weights[weights < 0] = 0
         elif weight_transform is not None:
             weight = weight_transform(np.asarray(weights))
         if not pimms.is_vector(weights, 'real'):
             raise ValueError('weights must be a real-valued vector or property name for such')
-        low_weight = (np.asarray([], dtype=np.int) if weight_min is None else
+        low_weight = (np.asarray([], dtype=int) if weight_min is None else
                       np.where(nanlt(weights, weight_min, nan_val=True))[0])
     # we can also process the outliers
-    outliers = np.asarray([], dtype=np.int) if outliers is None else np.arange(len(prop))[outliers]
+    outliers = np.asarray([], dtype=int) if outliers is None else np.arange(len(prop))[outliers]
     outliers = np.union1d(outliers, low_weight) # low-weight vertices are treated as outliers
     # make sure we interpret mask correctly...
     mask = to_mask(obj, mask, indices=True)
     # Now process the property depending on whether the type is numeric or not
     if pimms.is_array(prop, 'number'):
-        if pimms.is_array(prop, 'int'): prop = np.array(prop, dtype=np.float)
+        if pimms.is_array(prop, 'int'): prop = np.array(prop, dtype=float)
         else: prop = np.array(prop) # complex or reals can support nan
         if not np.isnan(null): prop[prop == null] = np.nan
         mask_nan = np.isnan(prop)
@@ -553,7 +553,7 @@ def to_property(obj, prop=None,
         where_inf = np.where(mask_inf)[0]
         where_ok  = np.where(np.logical_not(mask_nan | mask_inf))[0]
         # look at the valid_range...
-        if valid_range is None: where_inv = np.asarray([], dtype=np.int)
+        if valid_range is None: where_inv = np.asarray([], dtype=int)
         else: where_inv = where_ok[(prop[where_ok] < valid_range[0]) |
                                    (prop[where_ok] > valid_range[1])]
         where_nan = np.union1d(where_nan, where_inv)
@@ -568,7 +568,7 @@ def to_property(obj, prop=None,
         # no matter what, trim out the infinite values (even if inf was in the data range)
         outliers = np.union1d(outliers, mask[np.isinf(prop[mask])])
         # Okay, mark everything in the prop:
-        unmask = np.setdiff1d(np.arange(len(prop), dtype=np.int), mask)
+        unmask = np.setdiff1d(np.arange(len(prop), dtype=int), mask)
         if len(outliers) > 0:  prop[outliers]  = clipped
         if len(unmask) > 0: prop[unmask] = null
         prop = prop.astype(dtype)
@@ -579,7 +579,7 @@ def to_property(obj, prop=None,
         if len(outliers) > 0: tmp[outliers] = clipped
     if yield_weight:
         if weights is None or not pimms.is_vector(weights): weights = np.ones(len(prop))
-        else: weights = np.array(weights, dtype=np.float)
+        else: weights = np.array(weights, dtype=float)
         weights[where_nan] = 0
         weights[outliers] = 0
     # transform?
@@ -621,19 +621,19 @@ class TesselationIndex(object):
         ks = np.array(list(vertex_index.keys()))
         vs = np.array(list(vertex_index.values()))
         n = np.max(ks)
-        return sps.csr_matrix((vs + 1, (np.ones(len(ks)), ks)), shape=(1, n), dtype=np.int)
+        return sps.csr_matrix((vs + 1, (np.ones(len(ks)), ks)), shape=(1, n), dtype=int)
     @pimms.value
     def vertex_matrix(vertex_index):
         ls = np.array(list(vertex_index.keys()))
         ii = np.array(list(vertex_index.values()))
         n = np.max(ls) + 1
-        return sps.csr_matrix((ii + 1, (np.zeros(len(ls)), ls)), shape=(1, n), dtype=np.int)
+        return sps.csr_matrix((ii + 1, (np.zeros(len(ls)), ls)), shape=(1, n), dtype=int)
     @pimms.value
     def edge_matrix(edge_index):
         (us,vs) = np.array(list(edge_index.keys())).T
         ii = np.array(list(edge_index.values()))
         n = np.max([us,vs]) + 1
-        return sps.csr_matrix((ii + 1, (us, vs)), shape=(n, n), dtype=np.int)
+        return sps.csr_matrix((ii + 1, (us, vs)), shape=(n, n), dtype=int)
     @pimms.value
     def face_matrix(face_index):
         (a,b,c) = np.array(list(face_index.keys())).T
@@ -641,7 +641,7 @@ class TesselationIndex(object):
         n = np.max([a,b,c]) + 1
         # we have to cheat with the last two
         bc = b*n + c
-        return sps.csr_matrix((ii + 1, (a,bc)), shape=(n, n*n), dtype=np.int)
+        return sps.csr_matrix((ii + 1, (a,bc)), shape=(n, n*n), dtype=int)
     
     def __repr__(self):
             return "TesselationIndex(<%d vertices>)" % len(self.vertex_index)
@@ -717,7 +717,7 @@ class Tesselation(VertexSet):
           given tesselation object; the matrix is (3 x m) where m is the number of triangles, and
           the cells are valid indices into the rows of the coordinates matrix.
         '''
-        tris = np.asarray(tris, dtype=np.int)
+        tris = np.asarray(tris, dtype=int)
         if tris.shape[0] != 3:
             tris = tris.T
             if tris.shape[0] != 3:
@@ -957,7 +957,7 @@ class Tesselation(VertexSet):
         nnei = np.array([len(uu) for uu in indexed_neighborhoods])
         emax = np.max(nnei)
         whs  = tuple([np.where(nnei > k)[0] for k in range(emax)])
-        neis = np.array([u + (-1,)*(emax - len(u)) for u in indexed_neighborhoods], dtype=np.int)
+        neis = np.array([u + (-1,)*(emax - len(u)) for u in indexed_neighborhoods], dtype=int)
         # Prep the triangle orderings.
         neifaces = []
         for (k,a) in enumerate(whs):
@@ -965,7 +965,7 @@ class Tesselation(VertexSet):
             c = neis[a, np.mod(k+1, nnei[a])]
             fs = index[[labels[a],labels[b],labels[c]]]
             ii = ~(fs == None)
-            if not np.all(ii): (a,b,c,fs) = [u[ii].astype(np.int) for u in (a,b,c,fs)]
+            if not np.all(ii): (a,b,c,fs) = [u[ii].astype(int) for u in (a,b,c,fs)]
             abc = indexed_faces[:, fs]
             aii = np.argmax(abc == (a,a,a), axis=0)
             allfs = np.arange(len(a))*3
@@ -1416,7 +1416,7 @@ class Mesh(VertexSet):
         if not split_edges:
             # each face becomes 3 faces:
             faces = np.hstack([(a,b,f), (b,c,f), (c,a,f)])
-            fvtcs = np.arange(n, n+m, dtype=np.int)
+            fvtcs = np.arange(n, n+m, dtype=int)
             mtx = None
             evtcs = None
         else:
@@ -1434,8 +1434,8 @@ class Mesh(VertexSet):
             faces = np.hstack([(a,ab,f), (ab,b,f),
                                (b,bc,f), (bc,c,f),
                                (c,ca,f), (ca,a,f)])
-            fvtcs = np.arange(n, n+m, dtype=np.int)
-            evtcs = np.arange(n+m, n+m+o, dtype=np.int)
+            fvtcs = np.arange(n, n+m, dtype=int)
+            evtcs = np.arange(n+m, n+m+o, dtype=int)
             coords = np.hstack([xy, xy_e])
             rr = np.concatenate([a,b,b,c,c,a])
             mtx = sps.csr_matrix(
@@ -1596,7 +1596,7 @@ class Mesh(VertexSet):
             pt = npml.repmat(pt, len(tri_no), 1).T
         else:
             pt = pt.T if pt.shape[0] != self.coordinates.shape[0] else pt
-            tri_no = np.full(pt.shape[1], tri_no, dtype=np.int)
+            tri_no = np.full(pt.shape[1], tri_no, dtype=int)
         tx0 = self.coordinates[:,  self.tess.faces[0,tri_no]]
         n   = self.face_normals[:, tri_no]
         d   = np.sum(n * (pt - tx0), axis=0)
@@ -1756,9 +1756,9 @@ class Mesh(VertexSet):
         if weights is None and mask is None: return interp
         (m,n) = interp.shape # n: no. of vertices in mesh; m: no. points being interpolated
         # setup the weights:
-        if weights is None:           weights = np.ones(n, dtype=np.float)
-        elif np.shape(weights) == (): weights = np.full(n, weights, dtype=np.float)
-        else:                         weights = np.array(weights, dtype=np.float)
+        if weights is None:           weights = np.ones(n, dtype=float)
+        elif np.shape(weights) == (): weights = np.full(n, weights, dtype=float)
+        else:                         weights = np.array(weights, dtype=float)
         # figure out the mask
         if mask is not None:
             mask = self.mask(mask, indices=True)
@@ -1780,7 +1780,7 @@ class Mesh(VertexSet):
         rsums = flattest(interp.sum(axis=1))
         if not np.isclose(rsums, 1).all(): interp = sps.diag(zinv(rsums)).dot(interp)
         # Then put the nans back where they're needed
-        if len(whnan) > 0: interp[(np.zeros(len(whnan), dtype=np.int), whnan)] = np.nan
+        if len(whnan) > 0: interp[(np.zeros(len(whnan), dtype=int), whnan)] = np.nan
         interp.eliminate_zeros()
         return interp
     def nearest_interpolation(self, coords, n_jobs=-1):
@@ -1803,9 +1803,9 @@ class Mesh(VertexSet):
             ii = np.arange(len(nv))
         n = self.vertex_count
         m = len(ii)
-        return sps.csr_matrix((np.ones(m, dtype=np.int), (np.arange(m)[ii], nv)),
+        return sps.csr_matrix((np.ones(m, dtype=int), (np.arange(m)[ii], nv)),
                               shape=(m,n),
-                              dtype=np.int)
+                              dtype=int)
     def linear_interpolation(self, coords, n_jobs=-1):
         '''
         mesh.linear_interpolation(x) yields an interpolation matrix for the given coordinate or 
@@ -1837,7 +1837,7 @@ class Mesh(VertexSet):
         mx = flattest(li.argmax(axis=1))
         wh = np.where(~np.isclose(flattest(li.sum(axis=1)), 0))[0]
         mx = mx[wh]
-        return sps.csr_matrix((np.ones(len(mx)), (wh, mx)), shape=li.shape, dtype=np.int)
+        return sps.csr_matrix((np.ones(len(mx)), (wh, mx)), shape=li.shape, dtype=int)
     def apply_interpolation(self, interp, data):
         '''
         mesh.apply_interpolation(interp, data) yields the result of applying the given interpolation
@@ -2057,7 +2057,7 @@ class Mesh(VertexSet):
             tx[:,:,oks] = np.transpose(
                 np.reshape(coords[:,idxfs[:,okfids].flatten()], (dims, 3, oks.shape[0])),
                 (1,0,2))
-            faces = np.full((3, n), 0, dtype=np.int)
+            faces = np.full((3, n), 0, dtype=int)
             faces[:,oks] = self.tess.faces[:,okfids]
         bc = cartesian_to_barycentric_3D(tx, data) if dims == 3 else \
              cartesian_to_barycentric_2D(tx, data)
@@ -2181,7 +2181,7 @@ class Mesh(VertexSet):
         '''
         # Do some argument processing ##############################################################
         n = self.tess.vertex_count
-        all_vertices = np.asarray(range(n), dtype=np.int)
+        all_vertices = np.asarray(range(n), dtype=int)
         # Parse the property data and the weights...
         (prop,weights) = self.property(prop, outliers=outliers, data_range=data_range,
                                        mask=mask, valid_range=valid_range,
@@ -2206,11 +2206,11 @@ class Mesh(VertexSet):
         # no matter what, trim out the infinite values (even if inf was in the data range)
         outliers = np.union1d(outliers, mask[np.where(np.isinf(prop[mask]))[0]])
         outliers = np.union1d(outliers, mask[np.where(np.isclose(weights[mask], 0))[0]])
-        outliers = np.asarray(outliers, dtype=np.int)
+        outliers = np.asarray(outliers, dtype=int)
         # here are the vertex sets we will use below
         tethered = np.setdiff1d(mask, outliers)
-        tethered = np.asarray(tethered, dtype=np.int)
-        mask = np.asarray(mask, dtype=np.int)
+        tethered = np.asarray(tethered, dtype=int)
+        mask = np.asarray(mask, dtype=int)
         maskset  = frozenset(mask)
         # Do the minimization ######################################################################
         # start by looking at the edges
@@ -2228,7 +2228,7 @@ class Mesh(VertexSet):
         (ks, ke) = (smoothness, 1.0 - smoothness)
         (zs, ix) = (np.ones(len(el)), np.arange(len(el)))
         e2v = sps.csr_matrix((np.concatenate([zs,-zs]), (el.T.flatten(),np.concatenate([ix, ix]))),
-                             shape=(len(x0), len(el)), dtype=np.int)
+                             shape=(len(x0), len(el)), dtype=int)
         (us, vs) = el.T
         weights_tth = weights[tethered]
         # build the optimization
@@ -2252,7 +2252,7 @@ class Mesh(VertexSet):
                 sm_prop = map(match_distribution, percentiles / 100.0)
             else:
                 raise ValueError('Invalid match_distribution argument')
-        result = np.full(len(prop), null, dtype=np.float)
+        result = np.full(len(prop), null, dtype=float)
         result[mask] = sm_prop
         return result
 def is_mesh(m):
@@ -3642,7 +3642,7 @@ class Path(ObjectWithMetaData):
         for (uu,vv) in zip(ii[k], jj[k]):
             wu[u == uu] = 0.25
             wv[v == vv] = 0.25
-        fs = np.roll(fs, -1, axis=0) if len(fs) > 0 else np.zeros((0,3), dtype=np.int)
+        fs = np.roll(fs, -1, axis=0) if len(fs) > 0 else np.zeros((0,3), dtype=int)
         ps = np.roll(ps, -1, axis=0) if len(ps) > 0 else np.array([],    dtype=np.object)
         if not closed: (wu,wv) = [np.asarray(w) * 0.5 for w in (wu,wv)]
         return tuple(map(pimms.imm_array, (u,v,wu,wv,fs,ps)))
@@ -3918,14 +3918,14 @@ class Path(ObjectWithMetaData):
         # okay, we've validated and prepped the paths; now sort everything on each edges so that we
         # can make them into segment lists
         segs     = np.zeros((2,2,n*n))
-        seg_idcs = np.zeros((2,n*n), dtype=np.int)
+        seg_idcs = np.zeros((2,n*n), dtype=int)
         m = 0 # number of segs so far
         # (segs[i][j][k] is the j'th coordinates (j=0:x, j=1:y) of the start (i=0) or end (i=1)
         #  of the k'th segment; this way segs can be passed straight to segments_intersection_2D)
         eidx = [None,None,None]
         for (ii,oes) in enumerate(on_edges):
             # first sort this edge's intersection points by distance
-            idcs = np.asarray([u[0] for u in sorted(oes, key=lambda u:u[1])], dtype=np.int)
+            idcs = np.asarray([u[0] for u in sorted(oes, key=lambda u:u[1])], dtype=int)
             eidx[ii] = idcs
             xs = coords[idcs]
             l = len(xs)
@@ -3993,7 +3993,7 @@ class Path(ObjectWithMetaData):
         # That's the set of triangles--we can detect which are on the RHS/LHS of the the path by
         # looking at the edges that make-up the path; we can be clever about this and use a sparse
         # matrix where (u,v) and (v,u) are different
-        mtx = sps.lil_matrix((n,n), dtype=np.int)
+        mtx = sps.lil_matrix((n,n), dtype=int)
         for pii in pidcs:
             for (u,v) in zip(pii[:-1],pii[1:]):
                 mtx[u,v] = 1
@@ -4194,7 +4194,7 @@ class Path(ObjectWithMetaData):
         distance estimates are upper bounds on the actual distance but are not exact.
         '''
         fs = surface.tess.index(np.unique(contained_faces))
-        mlt = np.ones(surface.vertex_count, dtype=np.int)
+        mlt = np.ones(surface.vertex_count, dtype=int)
         mlt[fs] = -1
         if is_topo(surface):
             return pimms.lazy_map(
@@ -4816,7 +4816,7 @@ def isolines(obj, prop, val,
             else:
                 (u0s,v0s,u1s,v1s) = (us, vs, np.roll(us, -1), np.roll(vs, -1))
             qs = [np.setdiff1d([u1,v1], [u0,v0])[0] for (u0,v0,u1,v1) in zip(u0s,v0s,u1s,v1s)]
-            fs = np.asarray([u0s, qs, v0s], dtype=np.int)
+            fs = np.asarray([u0s, qs, v0s], dtype=int)
             if isline:
                 fend = np.concatenate(([u1s[-1]], np.setdiff1d(fs[:,-1], (u1s[-1],v1s[-1])), [v1s[-1]]))
                 fs = np.hstack([fs, np.reshape(fend, (3,1))])
