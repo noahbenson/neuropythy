@@ -861,7 +861,7 @@ def czdivide(a, b, null=0):
         r = a.multiply(zi).tocsr()
     else:
         r = np.asarray(a) * zi
-    r[np.ones(a.shape, dtype=np.bool)*z] = null
+    r[np.ones(a.shape, dtype=bool)*z] = null
     return r
 def zdivide(a, b, null=0):
     '''
@@ -1277,7 +1277,7 @@ def nan_compare(f, x, y, nan_nan=False, nan_val=False, val_nan=False):
     yii = np.isnan(y)
     if not xii.any() and not yii.any(): return f(x, y)
     ii  = (~xii) & (~yii)
-    out = np.zeros(ii.shape, dtype=np.bool)
+    out = np.zeros(ii.shape, dtype=bool)
     if nan_nan == nan_val and nan_val == val_nan:
         # All the nan-result values are the same; we can simplify a little...
         if nan_nan: out[~ii] = nan_nan

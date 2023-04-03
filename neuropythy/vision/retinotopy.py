@@ -2756,7 +2756,7 @@ def refit_sectors(mesh, sectors, outangs, outeccs,
     # Prepare the mask if there is one.
     if mask is not None:
         tmp = mesh.mask(mask, indices=True)
-        mask = np.zeros(mesh.vertex_count, dtype=np.bool)
+        mask = np.zeros(mesh.vertex_count, dtype=bool)
         mask[tmp] = True
     # Sort the output angles and eccens
     (outangs, outeccs) = (np.sort(outangs), np.sort(outeccs))

@@ -392,13 +392,13 @@ def to_mask(obj, m=None, indices=None):
         p = to_property(obj, m[0])
         if len(m) == 2 and hasattr(m[1], '__iter__'):
             m = reduce(lambda q,u: np.logical_or(q, naneq(p, u)),
-                       m[1], np.zeros(len(p), dtype=np.bool))
+                       m[1], np.zeros(len(p), dtype=bool))
         elif len(m) == 2:
             m = naneq(p, m[1])
         elif len(m) == 3:
             m = np.logical_and(nanlt(m[1], p), nanle(p, m[2]))
     elif pimms.is_str(m):
-        m = np.asarray(obj[m], dtype=np.bool)
+        m = np.asarray(obj[m], dtype=bool)
     elif pimms.is_map(m):
         if len(m) != 1: raise ValueError('Dicts used as masks must contain 1 item')
         (k,v) = next(six.iteritems(m))
@@ -1680,7 +1680,7 @@ class Mesh(VertexSet):
             max_k = 256 if tcount > 256 else tcount
             if k > tcount: k = tcount
             def try_nearest(sub_pts, cur_k=k, top_i=0, near=None):
-                res = np.full(len(sub_pts), None, dtype=np.object)
+                res = np.full(len(sub_pts), None, dtype=object)
                 if k != cur_k and cur_k > max_k: return res
                 if near is None:
                     try:              near = self.face_hash.query(sub_pts, k=cur_k, n_jobs=n_jobs)
@@ -1699,7 +1699,7 @@ class Mesh(VertexSet):
                                   if top_i == cur_k else
                                   try_nearest(sub_pts, cur_k, top_i, near[out_tri_q]))
                 return res
-            res = np.full(len(pt), None, dtype=np.object)
+            res = np.full(len(pt), None, dtype=object)
             # filter out points that aren't close enough to be in a triangle:
             (dmins, dmaxs) = [[f(x[np.isfinite(x)]) for x in self.coordinates]
                               for f in [np.min, np.max]]
@@ -1709,9 +1709,9 @@ class Mesh(VertexSet):
                     inside_q = reduce(np.logical_and,
                                       [(x >= mn)&(x <= mx) for (x,mn,mx) in zip(pt.T,dmins,dmaxs)])
                 else:
-                    inside_q = np.full(len(pt), True, dtype=np.bool)
+                    inside_q = np.full(len(pt), True, dtype=bool)
             else:
-                inside_q = np.full(len(pt), False, dtype=np.bool)
+                inside_q = np.full(len(pt), False, dtype=bool)
                 if pt.shape[1] == 2:
                     inside_q[finpts] = reduce(
                         np.logical_and,
@@ -1895,7 +1895,7 @@ class Mesh(VertexSet):
                 bads |= np.isclose(0, interp[(np.arange(m),maxs)])[:,0]
                 bads = np.where(bads)[0]
                 if len(bads) > 0:
-                    res = np.array(res, dtype=np.object)
+                    res = np.array(res, dtype=object)
                     res[bads] = np.nan
             return res
     def interpolation_matrix(self, x, mask=None, weights=None, method='linear', n_jobs=-1):
@@ -2624,10 +2624,10 @@ class MapProjection(ObjectWithMetaData):
           proj.in_domain(x.coordinates).
         '''
         x = x.coordinates if isinstance(x, Mesh) else np.asarray(x)
-        if pimms.is_vector(x): return np.asarray(self.in_domain([x])[0], dtype=np.bool)
+        if pimms.is_vector(x): return np.asarray(self.in_domain([x])[0], dtype=bool)
         if x.shape[0] != 3: x = x.T
         # no radius means we don't actually do any trimming
-        if self.radius is None: return np.ones(x.shape[1], dtype=np.bool)
+        if self.radius is None: return np.ones(x.shape[1], dtype=bool)
         # put the coordinates through the initial transformation:
         x = self.alignment_matrix.dot(np.concatenate((x, np.ones((1,x.shape[1])))))
         x = np.clip(x[2] / self._sphere_radius, -1, 1)
@@ -3643,7 +3643,7 @@ class Path(ObjectWithMetaData):
             wu[u == uu] = 0.25
             wv[v == vv] = 0.25
         fs = np.roll(fs, -1, axis=0) if len(fs) > 0 else np.zeros((0,3), dtype=int)
-        ps = np.roll(ps, -1, axis=0) if len(ps) > 0 else np.array([],    dtype=np.object)
+        ps = np.roll(ps, -1, axis=0) if len(ps) > 0 else np.array([],    dtype=object)
         if not closed: (wu,wv) = [np.asarray(w) * 0.5 for w in (wu,wv)]
         return tuple(map(pimms.imm_array, (u,v,wu,wv,fs,ps)))
     @pimms.value
@@ -3692,13 +3692,13 @@ class Path(ObjectWithMetaData):
         same  = np.union1d(u,v)
         (q,wq) = [np.concatenate([a,b]) for (a,b) in [(u,v),(wu,wv)]]
         m = len(q)
-        if m == 0: return np.zeros(n, dtype=np.bool)
+        if m == 0: return np.zeros(n, dtype=bool)
         # for the labels, the u and v have repeats, so we want to average their values
         mm  = sps.csr_matrix((np.ones(m), (q, np.arange(m))), shape=(n, m))
         lbl = zdivide(mm.dot(wq), flattest(mm.sum(axis=1)))
         # we crawl across vertices by edges until we find all of them
         nei  = np.asarray(tess.indexed_neighborhoods, dtype=object)
-        unk  = np.full(tess.vertex_count, True, dtype=np.bool)
+        unk  = np.full(tess.vertex_count, True, dtype=bool)
         unk[q] = False
         q = np.unique(u[~np.isin(u, v)])
         while len(q) > 0:

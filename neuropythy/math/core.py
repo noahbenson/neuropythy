@@ -185,7 +185,7 @@ def dense_cmp_dense(f, a, b, nannan=False, nanval=False):
     a = np.asarray(a)
     b = np.asarray(b)
     # This is pretty straightforward!
-    r = np.asarray(f(a, b), dtype=np.bool)
+    r = np.asarray(f(a, b), dtype=bool)
     # Check for NaNs
     if nannan or nanval:
         iia = np.isnan(a)
@@ -344,7 +344,7 @@ def sparse_cmp_sparse(f, ij1, dat1, ij2, dat2, shape,
     if bool(f(0, 0)):
         # We need to return a bunch of ones with the tallied indices set.
         if backend is sps:
-            r = np.ones(shape, dtype=np.bool)
+            r = np.ones(shape, dtype=bool)
             r[tuple(ij)] = v
         else:
             r = torch.ones(shape, dtype=torch.bool)
@@ -354,7 +354,7 @@ def sparse_cmp_sparse(f, ij1, dat1, ij2, dat2, shape,
         # We return a sparse array of the appropriate type; we can ignore False values (recall that
         # v is a boolean mask already).
         if backend is sps:
-            return sps.csr_matrix((v[v], ij[:,v]), shape=shape, dtype=np.bool)
+            return sps.csr_matrix((v[v], ij[:,v]), shape=shape, dtype=bool)
         else:
             return backend.sparse_coo_tensor(ik[:,v], v[v], shape, dtype=backend.bool)
 def cmp(f, a, b, nannan=False, nanval=False):

@@ -361,7 +361,7 @@ class RetinotopyMeshModel(RetinotopyModel):
         rho = np.asarray(rho)
         zs = np.asarray(
             rho * np.exp([np.complex(z) for z in 1j * ((90.0 - theta)/180.0*np.pi)]),
-            dtype=np.complex)
+            dtype=complex)
         coords = np.asarray([zs.real, zs.imag]).T
         if coords.shape[0] == 0: return np.zeros((0, len(self.visual_meshes), 2))
         # we step through each area in the forward model and return the appropriate values
