@@ -989,7 +989,7 @@ def to_mgh(obj, like=None, header=None, affine=None, extra=Ellipsis):
             affine = obj.affine
         else:
             affine = np.eye(4)
-    if extra is None: extra = {}
+    if extra is None or extra is Ellipsis: extra = {}
     # Figure out what the data is
     if isinstance(obj, nib.analyze.SpatialImage):
         obj = obj.dataobj
