@@ -3643,7 +3643,11 @@ class Path(ObjectWithMetaData):
             wu[u == uu] = 0.25
             wv[v == vv] = 0.25
         fs = np.roll(fs, -1, axis=0) if len(fs) > 0 else np.zeros((0,3), dtype=int)
-        ps = np.roll(ps, -1, axis=0) if len(ps) > 0 else np.array([],    dtype=object)
+        if len(ps) > 0:
+            ps = list(ps)
+            ps = np.array(ps[1:] + [ps[0]], dtype=object)
+        else:
+            ps = np.array([], dtype=object)
         if not closed: (wu,wv) = [np.asarray(w) * 0.5 for w in (wu,wv)]
         return tuple(map(pimms.imm_array, (u,v,wu,wv,fs,ps)))
     @pimms.value
