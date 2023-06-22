@@ -54,8 +54,13 @@ def to_torchdtype(dtype):
         return dtype
     elif pimms.is_str(dtype):
         return getattr(torch, dtype)
-    elif np.issubdtype(dtype, np.generic):
+    elif isinstance(dtype, np.dtype):
         return getattr(torch, dtype.__name__)
+    elif issubclass(dtype, np.generic):
+        nm = pimms.util.numpy_best_type(dtype).__name__
+        if nm.endswith('_'): nm = nm[:-1]
+        if nm == 'complex': nm = 'complex128'
+        return getattr(torch, nm)
     else:
         raise ValueError("Cannot convert to pytorch dtype: %s" % (dtype,))
 def torchdtype_to_numpydtype(dtype):
@@ -73,7 +78,7 @@ def torchdtype_to_numpydtype(dtype):
             np.float16    if dtype == torch.float16    else
             np.int16      if dtype == torch.int16      else
             np.int8       if dtype == torch.int8       else
-            np.bool       if dtype == torch.bool       else
+            np.bool_      if dtype == torch.bool       else
             np.uint8      if dtype == torch.uint8      else
             np.complex64  if dtype == torch.complex64  else
             np.complex128 if dtype == torch.complex128 else

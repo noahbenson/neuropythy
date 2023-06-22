@@ -23,7 +23,7 @@ class TestNeuropythyMath(unittest.TestCase):
                'int64': (torch.int64, np.int64),
                'float64': (torch.float64, np.float64),
                'complex128': (torch.complex128, np.complex128),
-               'bool': (torch.bool, np.bool)}
+               'bool': (torch.bool, np.bool_)}
         for (k, (vt,vn)) in six.iteritems(dts):
             self.assertEqual(to_torchdtype(k), vt)
             self.assertEqual(to_torchdtype(vt), vt)
