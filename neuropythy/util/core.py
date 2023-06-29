@@ -38,13 +38,13 @@ def to_hemi_str(s):
       * otherwise, raises an error
     '''
     if s is None or s is Ellipsis: return 'lr'
-    if not pimms.is_str(s): raise ValueError('to_hemi_str(%s): not a string or ... or None' % s)
+    if not pimms.is_str(s): raise ValueError('to_hemi_str(%s): not a string or ... or None' % (s,))
     s = s.lower()
     if   s in ('lh',    'rh',  'lr'): return s
     elif s in ('left',  'l',   'sh'): return 'lh'
     elif s in ('right', 'r',   'dh'): return 'rh'
     elif s in ('both',  'all', 'xh'): return 'lr'
-    else: raise ValueError('Could not understand to_hemi_str argument: %s' % s)
+    else: raise ValueError('Could not understand to_hemi_str argument: %s' % (s,))
 
 @pimms.immutable
 class ObjectWithMetaData(object):
@@ -186,7 +186,8 @@ def normalize(data):
         try:              m = data.normalize()
         except Exception: m = None
         if m is None: raise ValueError('could not run obj.normalize() on obj: %s' % (data,))
-        if not pimms.is_map(m): raise ValueError('obj.normalize() returned non-map; obj: %s' % data)
+        if not pimms.is_map(m):
+            raise ValueError('obj.normalize() returned non-map; obj: %s' % (data,))
         m = dict(m)
         tt = type(data)
         m[normalize.type_key] = [tt.__module__, tt.__name__]
@@ -217,7 +218,7 @@ def denormalize(data):
                 elif cls == 'sparse_matrix':
                     return sps.csr_matrix((data['vals'], (data['rows'],data['cols'])),
                                           shape=data['shape'])
-                else: raise ValueError('unrecognized builtin denormalize class: %s' % cls)
+                else: raise ValueError('unrecognized builtin denormalize class: %s' % (cls,))
             else:
                 cls = getattr(importlib.import_module(mdl), cls)
                 d = {k:denormalize(v) for (k,v) in six.iteritems(data) if k != normalize.type_key}
@@ -326,7 +327,7 @@ def to_dataframe(d, **kw):
     except Exception: pass
     try: return pandas.DataFrame.from_dict(d, **kw)
     except Exception: pass
-    raise ValueError('Coersion to dataframe failed for object %s' % d)
+    raise ValueError('Coersion to dataframe failed for object %s' % (d,))
 def dataframe_select(df, *cols, **filters):
     '''
     dataframe_select(df, k1=v1, k2=v2...) yields df after selecting all the columns in which the
@@ -528,7 +529,7 @@ def address_data(data, dims=None, surface=0.5, strict=True):
                 if surface == 'pial': surface = 1
                 elif surface == 'white': surface = 0
                 elif surface in ('midgray', 'mid', 'middle'): surface = 0.5
-                else: raise ValueError('unrecognized surface name: %s' % surface)
+                else: raise ValueError('unrecognized surface name: %s' % (surface,))
             if not pimms.is_real(surface) or surface < 0 or surface > 1:
                 raise ValueError('surface must be a real number in [0,1]')
             coords = np.vstack((coords, np.full((1, coords.shape[1]), surface)))
@@ -578,7 +579,7 @@ def address_interpolate(addr, prop, method=None, surface='midgray', strict=False
     # parse the properties:
     if pimms.is_vector(prop): prop = {0:prop, 1:prop}
     elif pimms.is_matrix(prop): prop = {k:v for (k,v) in zip(np.linspace(0,1,len(prop)), prop)}
-    elif not pimms.is_map(prop): raise ValueError('bad property arg of type %s' % type(prop))
+    elif not pimms.is_map(prop): raise ValueError('bad property arg of type %s' % (type(prop),))
     # start by making the upper and lower property values for each indexed voxel:
     ks = np.argsort(list(prop.keys()))
     vs = np.asarray([prop[ks[0]]] + [prop[k] for k in ks] + [prop[ks[-1]]])
@@ -592,7 +593,7 @@ def address_interpolate(addr, prop, method=None, surface='midgray', strict=False
         if method in ['lin','trilinear','barycentric','bc']: method = 'linear'
         elif method in ['near', 'nn', 'nearest-neighbor', 'nearest_neighbor']: method = 'nearest'
         if method != 'nearest' and method != 'linear':
-            raise ValueError('cannot understand method: %s' % method)
+            raise ValueError('cannot understand method: %s' % (method,))
     # where in each column is the 
     q = (h > np.reshape(ks, (-1,1)))
     # qs[0] is always True, qs[-1] is always False; the first False indicates h's layer
@@ -1665,7 +1666,7 @@ def close_curves(*crvs, **kw):
       * meta_data (None) an optional map of meta-data to give the spline representation.
     '''
     for k in six.iterkeys(kw):
-        if k not in close_curves.default_options: raise ValueError('Unrecognized option: %s' % k)
+        if k not in close_curves.default_options: raise ValueError('Unrecognized option: %s' % (k,))
     kw = {k:(kw[k] if k in kw else v) for (k,v) in six.iteritems(close_curves.default_options)}
     (grid, order) = (kw['grid'], kw['order'])
     crvs = [(crv if is_curve_spline(crv) else to_curve_spline(crv)).even_out() for crv in crvs]
