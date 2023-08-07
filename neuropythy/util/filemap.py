@@ -35,7 +35,7 @@ def url_download(url, topath=None, create_dirs=True):
     if topath: topath = os.path.expanduser(os.path.expandvars(topath))
     if create_dirs and topath:
         dnm = os.path.dirname(topath)
-        if not os.path.isdir(dnm): os.makedirs(os.path.abspath(dnm), 0o755)
+        if not os.path.isdir(dnm): os.makedirs(os.path.abspath(dnm), 0o775)
     if six.PY2:
         response = urllib.request.urlopen(url)
         if topath is None: topath = response.read()
@@ -295,7 +295,7 @@ class URLPath(BasicPath):
     def ensure_path(self, rpath, cpath):
         url = self.join(self.base_path, rpath)
         cdir = os.path.split(cpath)[0]
-        if not os.path.isdir(cdir): os.makedirs(cdir, mode=0o755)
+        if not os.path.isdir(cdir): os.makedirs(cdir, mode=0o775)
         return url_download(url, cpath)
 class OSFPath(BasicPath):
     def __init__(self, base_path, cache_path=None):
@@ -324,11 +324,11 @@ class OSFPath(BasicPath):
     def ensure_path(self, rpath, cpath):
         fl = self._find_url(rpath)
         if not pimms.is_str(fl):
-            if not os.path.isdir(cpath): os.makedirs(cpath, mode=0o755)
+            if not os.path.isdir(cpath): os.makedirs(cpath, mode=0o775)
             return cpath
         else:
             cdir = os.path.split(cpath)[0]
-            if not os.path.isdir(cdir): os.makedirs(cdir, mode=0o755)
+            if not os.path.isdir(cdir): os.makedirs(cdir, mode=0o775)
         return url_download(fl, cpath)
     def listdir(self, path):
         fl = self._find_url(path)
@@ -346,7 +346,7 @@ class S3Path(BasicPath):
     def ensure_path(self, rpath, cpath):
         url = self.join(self.base_path, rpath)
         cdir = os.path.split(cpath)[0]
-        if not os.path.isdir(cdir): os.makedirs(cdir, mode=0o755)
+        if not os.path.isdir(cdir): os.makedirs(cdir, mode=0o775)
         self.s3fs.get(url, cpath)
         return cpath
     def listdir(self, path):
@@ -373,7 +373,7 @@ class TARPath(OSPath):
                 td = tmpdir(delete=True)
                 tmpfl = os.path.join(td,tarfl)
                 shutil.move(cache_path, tmpfl)
-                if not os.path.isdir(cpath): os.makedirs(cpath, mode=0o755)
+                if not os.path.isdir(cpath): os.makedirs(cpath, mode=0o775)
                 shutil.move(tmpfl, tarpath)
             object.__setattr__(self, 'tarball_path', tarpath)
             object.__setattr__(self, 'cache_path', cpath)
