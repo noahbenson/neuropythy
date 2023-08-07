@@ -428,16 +428,11 @@ def detect_credentials(config_name, extra_environ=None, filenames=None,
         raise ValueError('Invalid aws_profile_name value: %s' % aws_profile_name)
     if aws_profile_name is not None:
         try:
-            cc = confparse.ConfigParser()
-            cc.read([os.expanduser(os.path.join('~', '.aws', 'credentials')),
-                     os.expanduser(os.path.join('~', '.amazon', 'credentials')),
-                     os.expanduser(os.path.join('~', '.credentials'))])
+            import boto3
             for awsprof in aws_profile_names:
-                try:
-                    aws_access_key_id     = cc.get(awsprof, 'aws_access_key_id')
-                    aws_secret_access_key = cc.get(awsprof, 'aws_secret_access_key')
-                    return (aws_access_key_id, aws_secret_access_key)
-                except Exception: pass
+                creds = boto3.Session(profile_name=awsprof).get_credentials()
+                assert isinstance(creds.access_key, str) and isinstance(creds.secret_key, str)
+                return (creds.access_key, creds.secret_key)
         except Exception: pass
     # no match!
     if default_value is None:
