@@ -161,11 +161,11 @@ class config(object):
                              ' declare_credentials() method.')
         def _check_creds(creds):
             if creds is None:
-                return detect_credentials(None,
+                return detect_credentials(config_name=name,
                                           extra_environ=extra_environ,
                                           filenames=filenames,
                                           aws_profile_name=aws_profile_name,
-                                          default=default_value)
+                                          default_value=default_value)
             else: return to_credentials(creds)
         return config.declare(name,
                               rc_name=rc_name,
@@ -388,7 +388,7 @@ def detect_credentials(config_name, extra_environ=None, filenames=None,
       * next, if the environment contains both the variables key_name and secret_name (from the 
         optional argument key_secret_environ), then these values are used;
       * next, if the filenames argument is given, then all files it refers to are checked for
-        credentials; these files are expanded with both os.expanduser and os.expandvars.
+        credentials; these files are expanded with both os.path.expanduser and os.path.expandvars.
       * finally, if no credentials were detected, an error is raised.
     '''
     # Check the config first:
@@ -417,7 +417,7 @@ def detect_credentials(config_name, extra_environ=None, filenames=None,
     if filenames is None: filenames = []
     elif pimms.is_str(filenames): filenames = [filenames]
     for flnm in filenames:
-        flnm = os.expanduser(os.expandvars(flnm))
+        flnm = os.path.expanduser(os.path.expandvars(flnm))
         if os.path.isfile(flnm):
             try:              return to_credentials(flnm)
             except Exception: pass
@@ -429,11 +429,15 @@ def detect_credentials(config_name, extra_environ=None, filenames=None,
     if aws_profile_name is not None:
         try:
             import boto3
-            for awsprof in aws_profile_names:
-                creds = boto3.Session(profile_name=awsprof).get_credentials()
-                assert isinstance(creds.access_key, str) and isinstance(creds.secret_key, str)
-                return (creds.access_key, creds.secret_key)
-        except Exception: pass
+            for awsprof in aws_profile_name:
+                try:
+                    creds = boto3.Session(profile_name=awsprof).get_credentials()
+                    assert isinstance(creds.access_key, str) and isinstance(creds.secret_key, str)
+                    return (creds.access_key, creds.secret_key)
+                except Exception as e:
+                    pass
+        except Exception as e:
+            pass
     # no match!
     if default_value is None:
         return None
