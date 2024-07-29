@@ -326,9 +326,9 @@ try:
         def regcmap(name, cmap):
             return register_cmap(name=name, cmap=cmap)
     except Exception:
-        from matplotlib import colormaps
+        from matplotlib import colormaps as mplcmaps
         def regcmap(name, cmap):
-            return colormaps.register(name=name, cmap=cmap)
+            return mplcmaps.register(name=name, cmap=cmap)
     for (k,cmdat) in six.iteritems(colormaps):
         regcmap(k, cmdat[0])
 
