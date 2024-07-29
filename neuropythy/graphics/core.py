@@ -320,7 +320,17 @@ try:
         'greenish_dark':    (cmap_greenish_dark,    (0,1)),
         'bluish':           (cmap_bluish,           (0,1)),
         'bluish_dark':      (cmap_bluish_dark,      (0,1))}
-    for (k,cmdat) in six.iteritems(colormaps): matplotlib.cm.register_cmap(k, cmdat[0])
+    # There are a couple ways to do this now depending on MPL version:
+    try:
+        from matplotlib.cm import register_cmap
+        def regcmap(name, cmap):
+            return register_cmap(name=name, cmap=cmap)
+    except Exception:
+        from matplotlib import colormaps
+        def regcmap(name, cmap):
+            return colormaps.register(name=name, cmap=cmap)
+    for (k,cmdat) in six.iteritems(colormaps):
+        regcmap(k, cmdat[0])
 
     def _diff_order(n):
         u0 = np.arange(n)
