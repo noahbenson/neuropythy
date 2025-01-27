@@ -54,11 +54,10 @@ RUN eval "$(command conda shell.bash hook)" \
  && conda install --yes -c conda-forge ipywidgets widgetsnbextension \
                                        ipyvolume nodejs \
                                        jupyter_contrib_nbextensions \
- && conda install --yes -c pytorch     pytorch torchvision \
- && conda update --yes --all
+ && conda install --yes -c pytorch     pytorch torchvision
 RUN eval "$(command conda shell.bash hook)" \
  && conda activate \
- && pip install --upgrade setuptools
+ && pip install 'setuptools == 69.0.0'
 
 # We need to do some extra work for ipyvolume to work in jupyter-labs
 # and with nbextensions.
