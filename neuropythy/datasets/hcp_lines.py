@@ -170,10 +170,11 @@ class HCPLinesDataset(HCPMetaDataset):
                  metadata_path=None, genetic_path=None, behavioral_path=None, meta_data=None,
                  trust_exclusions=True, anat_distances=False):
         cdir = cache_directory
+        self.cls=self.__class__
         if cdir is Ellipsis: cdir = config['hcp_lines_path']
         # If we're configured for auto-downloading, do it!
         if config['hcp_lines_auto_download']:
-            self.source_path = HCPLinesDataset.osf_path
+            self.source_path = self.cls.osf_path
         elif cdir is None:
             raise ValueError('No HCP lines path given and auto-download is disabled')
         elif not os.path.exists(cdir):
@@ -193,9 +194,9 @@ class HCPLinesDataset(HCPMetaDataset):
                                 create_mode=create_mode,
                                 meta_data=meta_data,
                                 cache_required=True)
-    
+
     osf_path = 'osf://gqnp8/'
-        
+
     subject_list = (100610, 118225, 140117, 158136, 172130, 182436, 197348, 214524,
                     346137, 412528, 573249, 724446, 825048, 905147, 102311, 125525,
                     144226, 159239, 173334, 182739, 198653, 221319, 352738, 429040,
@@ -229,7 +230,8 @@ class HCPLinesDataset(HCPMetaDataset):
     raw_eccen_list = ('0.5', '1', '2', '4', '7')
     mean_sampling_resolution = 500
     normalized_directory_name = 'normalized'
-    
+
+
     @pimms.param
     def source_path(sp):
         '''
@@ -237,7 +239,7 @@ class HCPLinesDataset(HCPMetaDataset):
         '''
         return sp
     @pimms.value
-    def pseudo_path(source_path, cache_directory):
+    def pseudo_path(cls,source_path, cache_directory):
         '''
         hcplines.pseudo_path is the pseudo-path object that handles the loading and caching of the
         HCP-lines raw data.
@@ -245,7 +247,7 @@ class HCPLinesDataset(HCPMetaDataset):
         pp = pseudo_path(source_path, cache_path=cache_directory)
         # If the source path is the known OSF path, we can drastically speed things up by manually
         # loading in the OSF tree.
-        if source_path == HCPLinesDataset.osf_path:
+        if source_path == cls.osf_path:
             import neuropythy as ny
             try:
                 tree = ny.load(os.path.join(ny.library_path(), 'data', 'hcp_lines_osftree.json.gz'))
@@ -300,8 +302,8 @@ class HCPLinesDataset(HCPMetaDataset):
             for (k,v) in fl.items():
                 recur(k, v, res)
         return res
-    @staticmethod
-    def cache_path(pseudo_path, *drs, **kw):
+    @classmethod
+    def cache_path(cls,pseudo_path, *drs, **kw):
         '''
         cache_path(pd, dirparts...) is like os.path.join(dirparts...) except that it finds the given
           cache path inside the pseudo_path directory given by pd.
@@ -327,7 +329,7 @@ class HCPLinesDataset(HCPMetaDataset):
             k += 1
         else: prepend_cache_directory = True
         if k != len(kw): raise ValueError('Unrecognized keyword arguments given to cache_path')
-        if prepend_cache_directory: drs = (HCPLinesDataset.normalized_directory_name,) + drs
+        if prepend_cache_directory: drs = (cls.normalized_directory_name,) + drs
         drs = [str(dd) for dd in drs]
         try: pth = pseudo_path.local_path(*drs)
         except Exception: pth = None
@@ -337,8 +339,8 @@ class HCPLinesDataset(HCPMetaDataset):
                 pdir = os.path.dirname(pth)
                 if not os.path.isdir(pdir): os.makedirs(pdir, mode=create_mode)
         return pth
-    @staticmethod
-    def find_path(pseudo_path, *drs, **kw):
+    @classmethod
+    def find_path(cls,pseudo_path, *drs, **kw):
         '''
         HCPLinesDataset.find_path(...) is like HCPLinesDataset.cache_path(...) except that it does
           not create the directory and only returns either None (if the directory does not exist)
@@ -348,28 +350,28 @@ class HCPLinesDataset(HCPMetaDataset):
             prepend_cache_directory = kw.pop('prepend_cache_directory')
         else: prepend_cache_directory = True
         if 0 != len(kw): raise ValueError('Unrecognized keyword arguments given to find_path')
-        if prepend_cache_directory: drs = (HCPLinesDataset.normalized_directory_name,) + drs
+        if prepend_cache_directory: drs = (cls.normalized_directory_name,) + drs
         drs = [str(dd) for dd in drs]
         tmp = pseudo_path.find(*drs)
         if tmp is None: return None
         try: return pseudo_path.local_path(*drs)
         except Exception: return None
-    @staticmethod
-    def save_paths_file(filename, paths):
+    @classmethod
+    def save_paths_file(cls,filename, paths):
         '''
         Saves the address path data to an hdf5-formatted file for a single subject.
         '''
         struct = mapsmap(lambda p:p.addresses, paths)
-        HCPLinesDataset.save_hdf5(filename, struct)
+        cls.save_hdf5(filename, struct)
         return filename
-    @staticmethod
-    def load_paths_file(filename, sid):
+    @classmethod
+    def load_paths_file(cls,filename, sid):
         '''
         Loads the address path data from an hdf5-formatted file for a single subject.
         '''
         from neuropythy.geometry import Path
         sub = hcp_subject(sid)
-        struct = HCPLinesDataset.load_hdf5(filename)
+        struct = cls.load_hdf5(filename)
         # first level of map is always hemi:
         m = {h: mapswalk(lambda q: (Path(sub.hemis[h], q) if 'faces' in q else q), None, hdat)
              for (h,hdat) in six.iteritems(struct)}
@@ -395,14 +397,14 @@ class HCPLinesDataset(HCPMetaDataset):
         # make sure the anat/subject exist...
         data = data.get(anat, {}).get(sid)
         if data is None: return None
-        pp = HCPLinesDataset.cache_path(self.pseudo_path, anat, '%s.%s_paths.hdf5' % (str(sid),name),
+        pp = self.cache_path(self.pseudo_path, anat, '%s.%s_paths.hdf5' % (str(sid),name),
                                         create_directories=create_directories,
                                         create_mode=create_mode)
         if not overwrite and os.path.isfile(pp): return pp
         self.save_paths_file(pp, data)
         return pp
-    @staticmethod
-    def load_paths(pseudo_path, anat, sid, name):
+    @classmethod
+    def load_paths(cls,pseudo_path, anat, sid, name):
         '''
         load_paths(pd, anat, sid, name) loads the cache for the given anatomist, subject, and data
           name; the name must be one of 'raw', 'native', 'fsaverage', 'area', or 'sector'. The data
@@ -413,10 +415,10 @@ class HCPLinesDataset(HCPMetaDataset):
         name = name.lower()
         if name not in ['raw', 'native', 'fsaverage', 'area', 'sector']:
             raise ValueError('Unknown path type: %s' % name)
-        pp = HCPLinesDataset.cache_path(pseudo_path, anat, '%s.%s_paths.hdf5' % (sid, name),
+        pp = cls.cache_path(pseudo_path, anat, '%s.%s_paths.hdf5' % (sid, name),
                                         create_directories=False)
         if pp is None or not os.path.isfile(pp): return None
-        else: return HCPLinesDataset.load_paths_file(pp, sid)
+        else: return cls.load_paths_file(pp, sid)
     def save_traces(self, anat, sid, name, overwrite=False,
                     create_directories=True, create_mode=0o755):
         '''
@@ -440,14 +442,14 @@ class HCPLinesDataset(HCPMetaDataset):
         # make sure the anat/subject exist...
         data = data.get(anat, {}).get(sid)
         if data is None: return None
-        pp = HCPLinesDataset.cache_path(self.pseudo_path, anat,
+        pp = self.cache_path(self.pseudo_path, anat,
                                         '%s.%s_traces.json.gz' % (str(sid), name),
                                         create_directories=create_directories,
                                         create_mode=create_mode)
         if not overwrite and os.path.isfile(pp): return pp
         return save(pp, data, 'json')
-    @staticmethod
-    def load_traces(pseudo_path, anat, sid, name):
+    @classmethod
+    def load_traces(cls,pseudo_path, anat, sid, name):
         '''
         load_traces(pd, anat, sid, name) loads the cache for the given anatomist, subject, and data
           name; the name must be one of 'raw', 'native', 'fsaverage', 'fsaverage500', 'area', or
@@ -459,7 +461,7 @@ class HCPLinesDataset(HCPMetaDataset):
         name = name.lower()
         if name not in ['raw', 'native', 'fsaverage', 'fsaverage500', 'area', 'sector']:
             raise ValueError('Unknown path type: %s' % name)
-        pp = HCPLinesDataset.cache_path(pseudo_path, anat, '%s.%s_traces.json.gz' % (sid, name),
+        pp = cls.cache_path(pseudo_path, anat, '%s.%s_traces.json.gz' % (sid, name),
                                         create_directories=False)
         if pp is None or not os.path.isfile(pp): return None
         else: return load(pp, 'json')
@@ -487,7 +489,7 @@ class HCPLinesDataset(HCPMetaDataset):
         data = data.get(anat, {})
         data = None if data is None else data.get(sid)
         if data is None: return None
-        pp = HCPLinesDataset.cache_path(self.pseudo_path, anat,
+        pp = self.cache_path(self.pseudo_path, anat,
                                         '%s.%s_traces.json.gz' % (str(sid), name),
                                         create_directories=create_directories,
                                         create_mode=create_mode)
@@ -513,7 +515,7 @@ class HCPLinesDataset(HCPMetaDataset):
         if name != 'lbl': data = data.get(anat, None)
         data = None if data is None else data.get(sid)
         if data is None: return None
-        pp = HCPLinesDataset.cache_path(self.pseudo_path, anat,
+        pp = self.cache_path(self.pseudo_path, anat,
                                         '%s.%s_sareas.json.gz' % (str(sid), name),
                                         create_directories=create_directories,
                                         create_mode=create_mode)
@@ -540,14 +542,14 @@ class HCPLinesDataset(HCPMetaDataset):
         if data is None: return None
         data = data.get(sid)
         if data is None: return None
-        pp = HCPLinesDataset.cache_path(self.pseudo_path, anat, '%s.%s.hdf5' % (str(sid), name),
+        pp = self.cache_path(self.pseudo_path, anat, '%s.%s.hdf5' % (str(sid), name),
                                         create_directories=create_directories,
                                         create_mode=create_mode)
         if not overwrite and os.path.isfile(pp): return pp
-        HCPLinesDataset.save_hdf5(pp, data)
+        self.save_hdf5(pp, data)
         return pp
-    @staticmethod
-    def load_properties(pseudo_path, anat, sid, name):
+    @classmethod
+    def load_properties(cls,pseudo_path, anat, sid, name):
         '''
         load_properties(pd, anat, sid, name) loads the properties cache for the given anatomist,
           subject, and data-name, which must be either 'labels' or 'distances'. If no cache data for
@@ -557,12 +559,12 @@ class HCPLinesDataset(HCPMetaDataset):
         name = name.lower()
         if name not in ['labels', 'distances', 'clean', 'cmag']:
             raise ValueError('Property name must be "labels", "distances", "cmag", or "clean"')
-        pp = HCPLinesDataset.cache_path(pseudo_path, anat, '%s.%s.hdf5' % (sid, name),
+        pp = cls.cache_path(pseudo_path, anat, '%s.%s.hdf5' % (sid, name),
                                         create_directories=False)
         if pp is None or not os.path.isfile(pp): return None
-        return HCPLinesDataset.load_hdf5(pp)
-    @staticmethod
-    def load_dataframe(pseudo_path, *paths):
+        return cls.load_hdf5(pp)
+    @classmethod
+    def load_dataframe(cls,pseudo_path, *paths):
         '''
         load_dataframe(pd, paths...) loads the dataframe hdf5 cache, if it exists, and returns it
           as a pandas dataframe object. The path of the dataframe object is given by the pseudo-path
@@ -572,14 +574,14 @@ class HCPLinesDataset(HCPMetaDataset):
         Note that the 'normalized' directory is automatically prepended.
         '''
         import pandas
-        p = HCPLinesDataset.find_path(pseudo_path, *paths)
+        p = cls.find_path(pseudo_path, *paths)
         if p is None: return None
         try: return pandas.read_hdf(p, 'dataframe')
         except Exception:
             warnings.warn('hcp-lines: Failed to read dataframe file: %s' % p)
             return None
-    @staticmethod
-    def load_surface_areas(pseudo_path, anat, sid, name):
+    @classmethod
+    def load_surface_areas(cls,pseudo_path, anat, sid, name):
         '''
         load_surface_areas(pd, anat, sid, name) loads either the 'roi' or 'sct' surface area data
           for the given anatomist and subject id.
@@ -590,15 +592,15 @@ class HCPLinesDataset(HCPMetaDataset):
             raise ValueError('Unknown surface area type: %s' % name)
         if name == 'lbl':
             # no anatomist in this case!
-            pp = HCPLinesDataset.cache_path(pseudo_path, 'mean', '%s.lbl_sareas.json.gz' % sid,
+            pp = cls.cache_path(pseudo_path, 'mean', '%s.lbl_sareas.json.gz' % sid,
                                             create_directories=False)
         else:
-            pp = HCPLinesDataset.cache_path(pseudo_path, anat, '%s.%s_sareas.json.gz' % (sid,name),
+            pp = cls.cache_path(pseudo_path, anat, '%s.%s_sareas.json.gz' % (sid,name),
                                             create_directories=False)
         if pp is None or not os.path.isfile(pp): return None
         else: return load(pp, 'json')
     @pimms.value
-    def _cached_data(pseudo_path):
+    def _cached_data(cls,pseudo_path):
         '''
         _cached_data is a pimms lazy-map of all the cached data that is found in the HCP-lines
         dataset. Any cached data that is not found is automatically generated and saved when
@@ -607,12 +609,12 @@ class HCPLinesDataset(HCPMetaDataset):
         import h5py
         from neuropythy import load
         # see what anatomist directories are there
-        anatomists = HCPLinesDataset.full_anatomist_list
-        subjects   = HCPLinesDataset.subject_list
+        anatomists = cls.full_anatomist_list
+        subjects   = cls.subject_list
         anatomists = tuple([anat for anat in anatomists
                             if pseudo_path.find('normalized', anat) is not None])
         pd         = pseudo_path
-        hh         = HCPLinesDataset
+        hh         = cls
         # we just build up lazy-maps that load in the content as requested
         lmap = pimms.lazy_map
         c = [{(name + '_path_traces'): {a: lmap({s: curry(hh.load_traces, pd, a, s, name)
@@ -668,7 +670,7 @@ class HCPLinesDataset(HCPMetaDataset):
         return pimms.persist({'affines': affs, 'traces': traces, 'comment': comment,
                               'confidence': conf})
     @pimms.value
-    def raw_data(pseudo_path):
+    def raw_data(cls,pseudo_path):
         '''
         hcplines.raw_data is a persistent map of the raw data in the HCP-lines dataset. It is a
         nested mapping data-structure in which the raw_data[a] for an anatomist a is itself a
@@ -676,14 +678,14 @@ class HCPLinesDataset(HCPMetaDataset):
         each of which contains a key for each hemisphere. The data are loaded lazily at the
         subject level.
         '''
-        anatomists = HCPLinesDataset.anatomist_list
-        subjects   = HCPLinesDataset.subject_list
-        loadfn     = HCPLinesDataset.load_raw_data
+        anatomists = cls.anatomist_list
+        subjects   = cls.subject_list
+        loadfn     = cls.load_raw_data
         return pyr.pmap({anat: pimms.lazy_map({sid: curry(loadfn, pseudo_path, anat, sid)
                                                for sid in subjects})
                          for anat in anatomists})
     @pimms.value
-    def anatomist_comments(raw_data):
+    def anatomist_comments(cls,raw_data):
         '''
         hcplines.anatomist_comments is a nested pimms lazy-map structure whose keys are the
         anatomists then subject IDs. The values of these nested maps are the general comments
@@ -694,10 +696,10 @@ class HCPLinesDataset(HCPMetaDataset):
         '''
         return pyr.pmap(
             {anat: pimms.lazy_map({sid: curry(lambda a,s: raw_data[a][s]['comment'], anat, sid)
-                                   for sid in HCPLinesDataset.subject_list})
-             for anat in HCPLinesDataset.anatomist_list})
+                                   for sid in cls.subject_list})
+             for anat in cls.anatomist_list})
     @pimms.value
-    def anatomist_confidence(raw_data):
+    def anatomist_confidence(cls,raw_data):
         '''
         hcplines.anatomist_confidence is a nested pimms lazy-map structure whose keys are the
         anatomists -> subject IDs -> hemispheres -> 'iso_angle' or 'iso_eccen' -> raw-line-name;
@@ -709,8 +711,8 @@ class HCPLinesDataset(HCPMetaDataset):
         '''
         return pyr.pmap(
             {anat: pimms.lazy_map({sid: curry(lambda a,s: raw_data[a][s]['confidence'], anat, sid)
-                                   for sid in HCPLinesDataset.subject_list})
-             for anat in HCPLinesDataset.anatomist_list})
+                                   for sid in cls.subject_list})
+             for anat in cls.anatomist_list})
     @pimms.value
     def subject_errors(pseudo_path):
         '''
@@ -749,7 +751,7 @@ class HCPLinesDataset(HCPMetaDataset):
             if v > 1: dat.add(('mean',) + k)
         return frozenset(dat)
     @pimms.value
-    def subject_affines(raw_data):
+    def subject_affines(cls,raw_data):
         '''
         subject_affines is a pimms lazy-map whose keys are subject IDs and whose values are each
         maps of {'lh': lh_affine, 'rh': rh_affine}. The affines themselves align the subjects'
@@ -764,7 +766,7 @@ class HCPLinesDataset(HCPMetaDataset):
             (affine row/col 1) corresponds to rows; this is reflected in the raw data itself, which
             encodes (cols,rows) as (x,y).
         '''
-        sids = HCPLinesDataset.subject_list
+        sids = cls.subject_list
         def affs(sid):
             d = next((a[sid] for a in six.itervalues(raw_data) if sid in a), None)
             if d is None or d.get('affines') is None:
@@ -772,14 +774,14 @@ class HCPLinesDataset(HCPMetaDataset):
             return d['affines']
         return pimms.lazy_map({sid:curry(affs, sid) for sid in sids})
     @pimms.value
-    def subject_map_projections(subject_affines, _cached_data):
+    def subject_map_projections(cls,subject_affines, _cached_data):
         '''
         subject_map_projections is a pimms lazy-map whose keys are the subject IDs and whose values
         are each maps of {'lh': lh_map_proj, 'rh': rh_map_proj}. The map projections given are those
         used to construct the maps that match up to the raw line data drawn by anatomists.
         '''
         from neuropythy import map_projection
-        sids = HCPLinesDataset.subject_list
+        sids = cls.subject_list
         def mps_from_cache(sid):
             dat = _cached_data.get('raw_path_traces')
             if dat is None: return (None,None)
@@ -837,22 +839,23 @@ class HCPLinesDataset(HCPMetaDataset):
             if len(rr) > 0: r[h] = pyr.pmap(rr)
         return pyr.pmap(r) if len(r) > 0 else None
     @pimms.value
-    def raw_path_traces(raw_data, _cached_data):
+    def raw_path_traces(cls, raw_data, _cached_data):
+
         '''
         raw_path_traces is a nested lazy-map structure of path-trace objects; the first layer of the
         map is the anatomist; the second layer is the subject ID; the third layer is the hemisphere;
         and the final layers are 'iso_angle' or iso_eccen' and finally the line value (e.g.,
         'V1_ventral' or '2' (for eccen = 2).
         '''
-        anatomists = HCPLinesDataset.anatomist_list
-        subjects   = HCPLinesDataset.subject_list
+        anatomists = cls.anatomist_list
+        subjects   = cls.subject_list
         m = pyr.pmap(
-            {anat:pimms.lazy_map({sid: curry(HCPLinesDataset._calc_raw_traces, raw_data, anat, sid)
+            {anat:pimms.lazy_map({sid: curry(cls._calc_raw_traces, raw_data, anat, sid)
                                   for sid in subjects})
              for anat in anatomists})
         return mapsmerge(_cached_data.get('raw_path_traces', {}), m)
-    @staticmethod
-    def _clean_raw_traces(raw_path_traces, anat, sid, exclusions, trust_exclusions):
+    @classmethod
+    def _clean_raw_traces(cls,raw_path_traces, anat, sid, exclusions, trust_exclusions):
         '''
         _clean_raw_traces(raw_path_traces, anat, sid, e, te) yields a cleand ('native') set of path
           traces for the given anatomist and subject using the given raw_path_traces data. The final
@@ -888,9 +891,9 @@ class HCPLinesDataset(HCPMetaDataset):
             # note that if this function is called with non-raw data we will have extra keys; go
             # ahead and clean them out here:
             angptrs = {k:v for (k,v) in six.iteritems(angptrs)
-                       if k in HCPLinesDataset.raw_angle_list}
+                       if k in cls.raw_angle_list}
             eccptrs = {k:v for (k,v) in six.iteritems(eccptrs)
-                       if k in HCPLinesDataset.raw_eccen_list}
+                       if k in cls.raw_eccen_list}
             # start by processing the eccentricity lines into halves; for this, we need the v3 outer
             # lines and the v1 midline; but the v3 outer lines need to be processed using the foveal
             # eccentricity line, so start there...
@@ -1071,15 +1074,15 @@ class HCPLinesDataset(HCPMetaDataset):
             if len(recc) > 0: rr['iso_eccen'] = pyr.pmap(recc)
             if len(rr) > 0: r[h] = rr
         return pyr.pmap(r) if len(r) > 0 else None
-    @staticmethod
-    def _calc_mean_subject_lines(data0, sid, excls):
+    @classmethod
+    def _calc_mean_subject_lines(cls,data0, sid, excls):
         '''
         _calc_mean_subject_lines(data, sid, excls) calculates the mean set of trace lines across the
           anatomists represented in the given dataset of lines for the subject with the given id.
           The argument excls must give the set of exclusions, and is used to prevent inclusion of
           anatomist data that should not be used.
         '''
-        res  = HCPLinesDataset.mean_sampling_resolution
+        res  = cls.mean_sampling_resolution
         r = {}
         for (anat,adat) in six.iteritems(data0):
             if adat is None: continue
@@ -1104,8 +1107,8 @@ class HCPLinesDataset(HCPMetaDataset):
                    for (ang,angdat) in six.iteritems(hdat)}
                 for (h,hdat) in six.iteritems(r)}
         # pass these through cleanup
-        tmp = {HCPLinesDataset.mean_anatomist_name: {sid: ptrs}}
-        return HCPLinesDataset._clean_raw_traces(tmp, 'mean', sid, frozenset([]), False)
+        tmp = {cls.mean_anatomist_name: {sid: ptrs}}
+        return cls._clean_raw_traces(tmp, 'mean', sid, frozenset([]), False)
     @pimms.param
     def trust_exclusions(te):
         '''
@@ -1116,7 +1119,7 @@ class HCPLinesDataset(HCPMetaDataset):
         '''
         return bool(te)
     @pimms.value
-    def native_path_traces(raw_path_traces, _cached_data, exclusions, trust_exclusions):
+    def native_path_traces(cls,raw_path_traces, _cached_data, exclusions, trust_exclusions):
         '''
         native_path_traces is a lazy-map structure identical to raw_path_traces with the exception
         that the path traces have been extended or shortened such that they start and end at the
@@ -1127,18 +1130,18 @@ class HCPLinesDataset(HCPMetaDataset):
         # That function does all the actual work; we now just process it into a lazy map:
         data0 = pyr.pmap(
             {anat:pimms.lazy_map(
-                {sid:curry(HCPLinesDataset._clean_raw_traces,
+                {sid:curry(cls._clean_raw_traces,
                            raw_path_traces, anat, sid, exclusions, trust_exclusions)
                  for sid in six.iterkeys(adat)})
              for (anat,adat) in six.iteritems(raw_path_traces)})
         data = mapsmerge(_cached_data.get('native_path_traces', {}),
                          data0)
-        def f(dat, sid, excl): return HCPLinesDataset._calc_mean_subject_lines(dat, sid, excl)
+        def f(dat, sid, excl): return cls._calc_mean_subject_lines(dat, sid, excl)
         # okay, the one thing we want to add is a mean anatomist
         excl = exclusions if trust_exclusions else frozenset([])
         mnlns = pimms.lazy_map({sid:curry(f, data, sid, excl)
-                                for sid in HCPLinesDataset.subject_list})
-        return mapsmerge(data, {HCPLinesDataset.mean_anatomist_name:mnlns})
+                                for sid in cls.subject_list})
+        return mapsmerge(data, {cls.mean_anatomist_name:mnlns})
     @staticmethod
     def _traces_to_paths(traces, name, anat, sid):
         '''
@@ -1180,32 +1183,32 @@ class HCPLinesDataset(HCPMetaDataset):
                 if len(rrr) > 0: rr[ang] = pyr.pmap(rrr)
             if len(rr) > 0: r[h] = pyr.pmap(rr)
         return pyr.pmap(r) if len(r) > 0 else None
-    @staticmethod
-    def _all_traces_to_paths(dat, name):
+    @classmethod
+    def _all_traces_to_paths(cls,dat, name):
         '''
         Converts all anatomists and subjects using the above function, but in a lazy map at the
         subject-level.
         '''
         return pyr.pmap(
-            {anat: pimms.lmap({s: curry(HCPLinesDataset._traces_to_paths, dat, name, anat, s)
+            {anat: pimms.lmap({s: curry(cls._traces_to_paths, dat, name, anat, s)
                                for s in six.iterkeys(adat)})
              for (anat,adat) in six.iteritems(dat)})
     @pimms.value
-    def raw_paths(_cached_data, raw_path_traces):
+    def raw_paths(cls,_cached_data, raw_path_traces):
         '''
         raw_paths is identical to raw_path_traces except that it represents the raw paths on the
         HCP subject's native cortical surface.
         '''
         return mapsmerge(_cached_data.get('raw_paths', {}),
-                         HCPLinesDataset._all_traces_to_paths(raw_path_traces, 'raw'))
+                         cls._all_traces_to_paths(raw_path_traces, 'raw'))
     @pimms.value
-    def native_paths(_cached_data, native_path_traces):
+    def native_paths(cls,_cached_data, native_path_traces):
         '''
         native_paths is identical to native_path_traces except that it represents the raw paths on
         the HCP subject's native cortical surface.
         '''
         return mapsmerge(_cached_data.get('native_paths', {}),
-                         HCPLinesDataset._all_traces_to_paths(native_path_traces, 'native'))
+                         cls._all_traces_to_paths(native_path_traces, 'native'))
     @staticmethod
     def _native_paths_to_fsaverage_traces(native_paths, anat, sid):
         '''
@@ -1233,20 +1236,20 @@ class HCPLinesDataset(HCPMetaDataset):
             if len(rr) > 0: r[h] = pyr.pmap(rr)
         return pyr.pmap(r) if len(r) > 0 else None
     @pimms.value
-    def fsaverage_path_traces(native_paths, _cached_data):
+    def fsaverage_path_traces(cls,native_paths, _cached_data):
         '''
         fsaverage_path_traces are roughly equivalent to native_path_traces, except that they have
         been projected onto the fsaverage cortical surface.
         '''
         # we use the native paths to generate these so that we have all the line/edge intersects
-        f = HCPLinesDataset._native_paths_to_fsaverage_traces
+        f = cls._native_paths_to_fsaverage_traces
         return mapsmerge(
             _cached_data.get('fsaverage_path_traces', {}),
             pyr.pmap({a: pimms.lazy_map({sid: curry(f, native_paths, a, sid)
                                          for sid in six.iterkeys(d)})
                       for (a,d) in six.iteritems(native_paths)}))
     @staticmethod
-    def average_anatomist_traces(fsaverage500_path_traces, anat=None):
+    def average_anatomist_traces(cls,fsaverage500_path_traces, anat=None):
         '''
         average_anatomist_traces(trs) yields a set of average lines across all subjects drawn by all
           anatomists using the given fsaverage500_path_traces data trs.
@@ -1255,7 +1258,7 @@ class HCPLinesDataset(HCPMetaDataset):
         import neuropythy as ny
         res = {h:{'iso_angle':ny.auto_dict(None,[]), 'iso_eccen':ny.auto_dict(None,[])}
                for h in ['lh','rh']}
-        anat = (HCPLinesDataset.anatomist_list if anat is None          else
+        anat = (cls.anatomist_list if anat is None          else
                 anat                           if pimms.is_vector(anat) else
                 [anat])
         mp = {}
@@ -1307,33 +1310,33 @@ class HCPLinesDataset(HCPMetaDataset):
             if len(rr) > 0: r[h] = pyr.pmap(rr)
         return pyr.pmap(r) if len(r) > 0 else None
     @pimms.value
-    def fsaverage500_path_traces(fsaverage_path_traces, _cached_data):
+    def fsaverage500_path_traces(cls,fsaverage_path_traces, _cached_data):
         '''
         fsaverage500_path_traces are roughly equivalent to native_path_traces, except that they have
         been projected onto the fsaverage cortical surface and resampled to consist of  exactly 500
         points in the trace to enable easy averaging and comparison.
         '''
         # we use the native paths to generate these so that we have all the line/edge intersects
-        f = HCPLinesDataset._fsaverage_to_fsaverage500_traces
+        f = cls._fsaverage_to_fsaverage500_traces
         res = {}
-        mnan = HCPLinesDataset.mean_anatomist_name
-        mnsb = HCPLinesDataset.mean_subject_name
+        mnan = cls.mean_anatomist_name
+        mnsb = cls.mean_subject_name
         for (a,adat) in six.iteritems(fsaverage_path_traces):
             lm = {s: safe_curry(f, fsaverage_path_traces, a, s) for s in six.iterkeys(adat)}
             res[a] = pimms.lazy_map(lm)
         trs0 = pyr.pmap(res)
         # each anatomist gets a mean subject:
-        trs = {a: adat.set(mnsb, safe_curry(HCPLinesDataset.average_anatomist_traces, trs0, a))
+        trs = {a: adat.set(mnsb, safe_curry(cls.average_anatomist_traces, trs0, a))
                for (a,adat) in six.iteritems(trs0)}
         return mapsmerge(_cached_data.get('fsaverage500_path_traces', {}), trs)
     @pimms.value
-    def fsaverage_paths(fsaverage_path_traces, _cached_data):
+    def fsaverage_paths(cls,fsaverage_path_traces, _cached_data):
         '''
         fsaverage_paths is identical to fsaverage_path_traces except that it represents the raw
         paths on FreeSurfer's fsaverage cortical surface.
         '''
         return mapsmerge(_cached_data.get('fsaverage_paths', {}),
-                         HCPLinesDataset._all_traces_to_paths(fsaverage_path_traces, 'fsaverage'))
+                         cls._all_traces_to_paths(fsaverage_path_traces, 'fsaverage'))
     # Sectors and ROIs
     sector_paths = pyr.pmap(
         # These are specified for a map that's not mirror reversed
@@ -1381,8 +1384,8 @@ class HCPLinesDataset(HCPMetaDataset):
          'foveal': ('V3_outer',  '0.5_ventral', '0.5_dorsal')})
     area_labels = (None,'V1','V2','V3')
     area_label_index = pyr.pmap({lbl:k for (k,lbl) in enumerate(area_labels)})
-    @staticmethod
-    def _calculate_sectors(path_traces, anat, sid):
+    @classmethod
+    def _calculate_sectors(cls,path_traces, anat, sid):
         '''
         _calculate_sectors(path_traces, anat, sid) calculates the set of sectors for the given path
           traces, anatomist, and subject, and yeilds these data as a nested map structure.
@@ -1395,7 +1398,7 @@ class HCPLinesDataset(HCPMetaDataset):
         for h in six.iterkeys(dat):
             hdat = pimms.merge(dat[h]['iso_angle'], dat[h]['iso_eccen'])
             rr = {}
-            for (snm, sparts) in six.iteritems(HCPLinesDataset.sector_paths):
+            for (snm, sparts) in six.iteritems(cls.sector_paths):
                 parts = [hdat.get(sp) for sp in sparts]
                 if any(x is None for x in parts): continue
                 if h == 'rh': parts = list(reversed(parts))
@@ -1406,17 +1409,17 @@ class HCPLinesDataset(HCPMetaDataset):
             if len(rr) > 0: r[h] = pyr.pmap(rr)
         return pyr.pmap(r)
     @pimms.value
-    def native_sector_traces(native_path_traces, _cached_data):
+    def native_sector_traces(cls,native_path_traces, _cached_data):
         '''
         native_sector_traces is a mapping of the sectors for each anatomist and subject.
         '''
-        f = HCPLinesDataset._calculate_sectors
+        f = cls._calculate_sectors
         return mapsmerge(_cached_data.get('native_sector_traces',{}),
                          pyr.pmap({a: pimms.lazy_map({s: curry(f, native_path_traces, a, s)
                                                       for s in six.iterkeys(adat)})
                                    for (a,adat) in six.iteritems(native_path_traces)}))
-    @staticmethod
-    def _calculate_areas(path_traces, anat, sid):
+    @classmethod
+    def _calculate_areas(cls,path_traces, anat, sid):
         '''
         _calculate_areas(path_traces, anat, sid) calculates the set of visual areas for the given
           traces, anatomist, and subject, and yeilds these data as a nested map structure.
@@ -1429,7 +1432,7 @@ class HCPLinesDataset(HCPMetaDataset):
         for h in six.iterkeys(dat):
             hdat = pimms.merge(dat[h]['iso_angle'], dat[h]['iso_eccen'])
             rr = {}
-            for (snm, sparts) in six.iteritems(HCPLinesDataset.area_paths):
+            for (snm, sparts) in six.iteritems(cls.area_paths):
                 parts = [hdat.get(sp) for sp in sparts]
                 if any(x is None for x in parts): continue
                 if h == 'rh': parts = list(reversed(parts))
@@ -1440,11 +1443,11 @@ class HCPLinesDataset(HCPMetaDataset):
             if len(rr) > 0: r[h] = pyr.pmap(rr)
         return pyr.pmap(r)
     @pimms.value
-    def native_area_traces(native_path_traces, _cached_data):
+    def native_area_traces(cls,native_path_traces, _cached_data):
         '''
         native_area_traces is a mapping of the visual areas (V1/2/3) for each anatomist and subject.
         '''
-        f = HCPLinesDataset._calculate_areas
+        f = cls._calculate_areas
         return mapsmerge(_cached_data.get('area_path_traces',{}),
                          pyr.pmap({a: pimms.lazy_map({s: curry(f, native_path_traces, a, s)
                                                       for s in six.iterkeys(adat)})
@@ -1472,35 +1475,35 @@ class HCPLinesDataset(HCPMetaDataset):
                                   % (name, anat, sid, h, k, str(e)))
             if len(rr) > 0: r[h] = pyr.pmap(rr)
         return pyr.pmap(r) if len(r) > 0 else None
-    @staticmethod
-    def _all_loop_traces_to_paths(name, dat):
+    @classmethod
+    def _all_loop_traces_to_paths(cls,name, dat):
         '''
         Converts all anatomists and subjects using the function above, but in a lazy map at the
         subject-level.
         '''
-        f = HCPLinesDataset._loop_traces_to_paths
+        f = cls._loop_traces_to_paths
         return pyr.pmap(
             {anat: pimms.lazy_map({sid: curry(f, name, anat, adat, sid)
                                    for sid in six.iterkeys(adat)})
              for (anat,adat) in six.iteritems(dat)})
     @pimms.value
-    def native_sectors(native_sector_traces, _cached_data):
+    def native_sectors(cls,native_sector_traces, _cached_data):
         '''
         native_sectors represents the same data as native_sector_traces but after conversion to
         path objects by combination with the appropriate subject hemisphere.
         '''
         return mapsmerge(_cached_data.get('sector_paths', {}),
-                         HCPLinesDataset._all_loop_traces_to_paths('sectors', native_sector_traces))
+                         cls._all_loop_traces_to_paths('sectors', native_sector_traces))
     @pimms.value
-    def native_areas(native_area_traces, _cached_data):
+    def native_areas(cls,native_area_traces, _cached_data):
         '''
         native_areas represents the same data as native_area_traces but after conversion to
         path objects by combination with the appropriate subject hemisphere.
         '''
         return mapsmerge(_cached_data.get('area_paths', {}),
-                         HCPLinesDataset._all_loop_traces_to_paths('areas', native_area_traces))
-    @staticmethod
-    def _calculate_subject_labels(areas, sectors, anat, sid):
+                         cls._all_loop_traces_to_paths('areas', native_area_traces))
+    @classmethod
+    def _calculate_subject_labels(cls,areas, sectors, anat, sid):
         '''
         _calculate_subject_labels(areas, sectors, anat, sid) calculates the labels for the given
           anatomist and subject using the given areas and sectors data; these data are yielded in 
@@ -1518,7 +1521,7 @@ class HCPLinesDataset(HCPMetaDataset):
             # areas first
             hdat = areadat.get(h, {})
             rrr = np.zeros(hemi.vertex_count, dtype=np.int32)
-            for (k,lbl) in six.iteritems(HCPLinesDataset.area_label_index):
+            for (k,lbl) in six.iteritems(cls.area_label_index):
                 if k is None: continue
                 p = hdat.get(k)
                 if p is None: continue
@@ -1531,7 +1534,7 @@ class HCPLinesDataset(HCPMetaDataset):
             # then sectors
             hdat = sectdat.get(h, {})
             rrr = np.zeros(hemi.vertex_count, dtype=np.int32)
-            for (k,lbl) in six.iteritems(HCPLinesDataset.sector_label_index):
+            for (k,lbl) in six.iteritems(cls.sector_label_index):
                 if k is None: continue
                 p = hdat.get(k)
                 if p is None: continue
@@ -1544,18 +1547,18 @@ class HCPLinesDataset(HCPMetaDataset):
             if len(rr) > 0: r[h] = rr
         return None if len(r) == 0 else pimms.persist(r)
     @pimms.value
-    def subject_labels(native_areas, native_sectors, _cached_data):
+    def subject_labels(cls,native_areas, native_sectors, _cached_data):
         '''
         subject_labels is a dict-structure of the labels granted to each subject; for visual areas,
         this is <anatomist>_visal_area or just visual_area for the mean, with 1, 2, and 3 labeled.
         For sectors, this is according the HCPLinesDataset.sector_labels and sector_label_index.
         '''
-        anatomists = HCPLinesDataset.full_anatomist_list
-        f = HCPLinesDataset._calculate_subject_labels
+        anatomists = cls.full_anatomist_list
+        f = cls._calculate_subject_labels
         return mapsmerge(
             _cached_data.get('labels', {}),
             pyr.pmap({anat: pimms.lazy_map({sid:curry(f, native_areas, native_sectors, anat, sid)
-                                            for sid in HCPLinesDataset.subject_list})
+                                            for sid in cls.subject_list})
                       for anat in anatomists}))
     @staticmethod
     def _calculate_subject_distances(paths, anat, sid):
@@ -1579,18 +1582,18 @@ class HCPLinesDataset(HCPMetaDataset):
             if len(rr) > 0: r[h] = pyr.pmap(rr)
         return pyr.pmap(r) if len(r) > 0 else None
     @pimms.value
-    def subject_boundary_distances(native_paths, anat_distances, _cached_data):
+    def subject_boundary_distances(cls,native_paths, anat_distances, _cached_data):
         '''
         subject_boundary_distances is a measurement at each vertex of the distance to the nearest
         polar angle boundary; these distances are an estiate based on the neuropythy path distance
         estimates.
         '''
-        f = HCPLinesDataset._calculate_subject_distances
-        anats = native_paths.keys() if anat_distances else (HCPLinesDataset.mean_anatomist_name,)
+        f = cls._calculate_subject_distances
+        anats = native_paths.keys() if anat_distances else (cls.mean_anatomist_name,)
         return mapsmerge(
             _cached_data.get('distances', {}),
             pyr.pmap({anat: pimms.lazy_map({sid:curry(f, native_paths, anat, sid)
-                                            for sid in HCPLinesDataset.subject_list})
+                                            for sid in cls.subject_list})
                       for anat in anats}))
     @staticmethod
     def calculate_clean_retinotopy(hemi, labels):
@@ -1603,7 +1606,7 @@ class HCPLinesDataset(HCPMetaDataset):
         if ang is None: return None
         return pimms.persist({'polar_angle':ang, 'eccentricity':ecc})
     @pimms.value
-    def clean_retinotopic_maps(subject_labels, _cached_data):
+    def clean_retinotopic_maps(cls, subject_labels, _cached_data):
         '''
         clean_retinotopic_maps is a map of the cleaned retinotopic maps for each of the HCP subjects
         in the HCP-lines dataset. The first level of the clean_retinotopic_maps map-structure is the
@@ -1621,7 +1624,7 @@ class HCPLinesDataset(HCPMetaDataset):
                 ps = sdat.get(h)
                 if ps is None: continue
                 hemi = sub.hemis[h]
-                rmap = HCPLinesDataset.calculate_clean_retinotopy(hemi, ps['visual_area'])
+                rmap = cls.calculate_clean_retinotopy(hemi, ps['visual_area'])
                 (ang,ecc) = [rmap[k] for k in ['polar_angle', 'eccentricity']]
                 if ang is None or ecc is None: continue
                 ps = dict(clean_polar_angle=ang, clean_eccentricity=ecc)
@@ -1631,8 +1634,8 @@ class HCPLinesDataset(HCPMetaDataset):
         return mapsmerge(
             _cached_data.get('clean', {}),
             pyr.pmap({anat: pimms.lazy_map({sid:curry(clean_rmap, anat, sid)
-                                            for sid in HCPLinesDataset.subject_list})
-                      for anat in HCPLinesDataset.full_anatomist_list}))
+                                            for sid in cls.subject_list})
+                      for anat in cls.full_anatomist_list}))
     @staticmethod
     def calculate_cortical_magnification(anat,sid, hemi, rdat, labels):
         '''
@@ -1655,7 +1658,7 @@ class HCPLinesDataset(HCPMetaDataset):
         #return pimms.quant(cm, 'mm*mm / degree*degree')
         return cm
     @pimms.value
-    def subject_cortical_magnifications(subject_labels, clean_retinotopic_maps, _cached_data):
+    def subject_cortical_magnifications(cls,subject_labels, clean_retinotopic_maps, _cached_data):
         '''
         subject_cortical_magnifications is a map of the cortical magnification estimates at each
         vertex in the V1-V3 region, as defined by each particular anatomist.
@@ -1676,17 +1679,17 @@ class HCPLinesDataset(HCPMetaDataset):
                 try: ve = hemi.prop('prf_variance_explained')
                 except Exception: ve = hemi.prop('lowres-prf_variance_explained')
                 cmr['variance_explained'] = ve
-                cm = HCPLinesDataset.calculate_cortical_magnification(anat, sid, hemi, cmr, lbl)
+                cm = cls.calculate_cortical_magnification(anat, sid, hemi, cmr, lbl)
                 r[h] = cm
             if len(r) == 0: return None
             else: return pimms.persist(r)
         return mapsmerge(
             _cached_data.get('cmag', {}),
             pyr.pmap({anat: pimms.lazy_map({sid:curry(calc_cmag, anat, sid)
-                                            for sid in HCPLinesDataset.subject_list})
-                      for anat in HCPLinesDataset.full_anatomist_list}))
+                                            for sid in cls.subject_list})
+                      for anat in cls.full_anatomist_list}))
     @pimms.value
-    def subjects(subject_labels, subject_boundary_distances, clean_retinotopic_maps,
+    def subjects(cls,subject_labels, subject_boundary_distances, clean_retinotopic_maps,
                  subject_cortical_magnifications):
         '''
         subjects is a map of the HCP subjects that are part of the HCP-lines dataset; The
@@ -1697,7 +1700,7 @@ class HCPLinesDataset(HCPMetaDataset):
         from functools import reduce
         mapfind = lambda m,k: None if m is None or k not in m else m[k]
         lookup = lambda m,*ks: reduce(mapfind, ks, m)
-        meananat = HCPLinesDataset.mean_anatomist_name
+        meananat = cls.mean_anatomist_name
         def makesub(sid):
             sdat = lookup(subject_labels, meananat, sid)
             if sdat is None: return None
@@ -1721,9 +1724,9 @@ class HCPLinesDataset(HCPMetaDataset):
                 r[h] = hemi
             if len(r) == 0: return None
             else: return sub.with_hemi(**r)
-        return pimms.lazy_map({sid: curry(makesub, sid) for sid in HCPLinesDataset.subject_list})
+        return pimms.lazy_map({sid: curry(makesub, sid) for sid in cls.subject_list})
     @pimms.value
-    def subject_tables(subjects, exclusions, _cached_data):
+    def subject_tables(cls,subjects, exclusions, _cached_data):
         '''
         subject_tables is a map of the HCP subjects in the HCP-lines projects to PANDAS dataframe
         objects of the relevant retinotopy data. The subject_tables track the mean data (of the
@@ -1759,9 +1762,9 @@ class HCPLinesDataset(HCPMetaDataset):
             return to_dataframe({k:np.concatenate(v) for (k,v) in six.iteritems(tbl)})
         return mapsmerge(
             _cached_data.get('subject_tables', {}),
-            pimms.lazy_map({sid:curry(maketbl,sid) for sid in HCPLinesDataset.subject_list}))
+            pimms.lazy_map({sid:curry(maketbl,sid) for sid in cls.subject_list}))
     @pimms.value
-    def dataframe(subject_tables, exclusions, _cached_data):
+    def dataframe(cls,subject_tables, exclusions, _cached_data):
         '''
         dataframe is a PANDAS dataframe of all the relevant pRF data.
         '''
@@ -1770,7 +1773,7 @@ class HCPLinesDataset(HCPMetaDataset):
         table = _cached_data.get('dataframe')
         if table is not None: return table
         tables = []
-        for sid in HCPLinesDataset.subject_list:
+        for sid in cls.subject_list:
             #print(sid)
             # if either hemi is bad, skip this subject
             df = subject_tables.get(sid)
@@ -1857,8 +1860,8 @@ class HCPLinesDataset(HCPMetaDataset):
             r[h] = rh
         # That should be all; just return.
         return pyr.pmap(r)
-    @staticmethod
-    def _calc_label_surface_areas(sid, visual_sulcus_label):
+    @classmethod
+    def _calc_label_surface_areas(cls,sid, visual_sulcus_label):
         '''
         _calc_label_surface_areas(sid, vissulc) yields the surface area data for "label" ROIs for 
         the given subject. Label ROIs include the whole cortex, the visual sulcus label, and any
@@ -1890,7 +1893,7 @@ class HCPLinesDataset(HCPMetaDataset):
             # Cortex ROI first:
             lbls[h]['H'] = pimms.lazy_map({k: curry(_cortex_sarea, h, k) for k in saprops})
             # Calcarine sulcus:
-            lbls[h]['Calc'] = HCPLinesDataset._calc_visual_sulcus_area(sid, h, visual_sulcus_label)
+            lbls[h]['Calc'] = cls._calc_visual_sulcus_area(sid, h, visual_sulcus_label)
             # The Brodmann areas and FreeSurfer labels:
             for ll in ['V1', 'V2', 'MT', 'BA44', 'BA45', 'BA3b']:
                 lbls[h][ll] = pimms.lazy_map({k: curry(_fslbl_sarea, h, ll, k) for k in saprops})
@@ -1920,43 +1923,43 @@ class HCPLinesDataset(HCPMetaDataset):
             r[h] = lbl
         return pyr.pmap(r)
     @pimms.value
-    def area_surface_areas(native_areas, exclusions, visual_sulcus_label, _cached_data):
+    def area_surface_areas(cls,native_areas, exclusions, visual_sulcus_label, _cached_data):
         '''
         area_surface_areas is a data-structure of the cortical surface area for each anatomist,
         subject, hemisphere, and visual area ROI.
         '''
         vsl = visual_sulcus_label
-        f = HCPLinesDataset._calc_surface_areas
+        f = cls._calc_surface_areas
         r = pyr.pmap({anat: pimms.lazy_map({sid: curry(f, native_areas, exclusions, anat, sid)
                                             for sid in six.iterkeys(anatdat)})
                       for (anat,anatdat) in six.iteritems(native_areas)})
         # we want to add the visual sulc data also
         return mapsmerge(_cached_data.get('area_surface_areas', {}), r)
     @pimms.value
-    def sector_surface_areas(native_sectors, exclusions, _cached_data):
+    def sector_surface_areas(cls,native_sectors, exclusions, _cached_data):
         '''
         sector_surface_areas is a data-structure of the cortical surface area for each anatomist,
         subject, hemisphere, and visual sector ROI.
         '''
-        f = HCPLinesDataset._calc_surface_areas
+        f = cls._calc_surface_areas
         r = pyr.pmap({anat: pimms.lazy_map({sid: curry(f, native_sectors, exclusions, anat, sid)
                                             for sid in six.iterkeys(anatdat)})
                       for (anat,anatdat) in six.iteritems(native_sectors)})
         return mapsmerge(_cached_data.get('sector_surface_areas', {}), r)
     @pimms.value
-    def label_surface_areas(visual_sulcus_label, _cached_data):
+    def label_surface_areas(cls,visual_sulcus_label, _cached_data):
         '''
         label_surface_areas is a data-structure of the cortical surface areas for each subject and
         hemisphere and a variety of anatomically-defined labels. These labels include  the whole
         cortex, the visual sulcus label, and any FreeSurfer- or anatomically-defined labels such as
         Brodmann areas or Benson14 maps.
         '''
-        f = HCPLinesDataset._calc_label_surface_areas
+        f = cls._calc_label_surface_areas
         r = pimms.lazy_map({sid: curry(f, sid, visual_sulcus_label)
-                            for sid in HCPLinesDataset.full_subject_list})
+                            for sid in cls.full_subject_list})
         return mapsmerge(_cached_data.get('label_surface_areas', {}), r)
     @pimms.value
-    def surface_area_dataframe(area_surface_areas, sector_surface_areas, label_surface_areas,
+    def surface_area_dataframe(cls,area_surface_areas, sector_surface_areas, label_surface_areas,
                                exclusions, trust_exclusions, _cached_data):
         '''
         surface_area_dataframe is a dataframe object containing the various data about surface areas
@@ -1987,17 +1990,17 @@ class HCPLinesDataset(HCPMetaDataset):
         c = _cached_data.get('surface_area_dataframe', None)
         if c is not None: return c
         df = ny.auto_dict(None, [])
-        roi_keys = list(HCPLinesDataset.area_paths.keys()) + ['V1nonfov', 'V2nonfov', 'V3nonfov']
-        sct_keys = list(HCPLinesDataset.sector_paths.keys())
+        roi_keys = list(cls.area_paths.keys()) + ['V1nonfov', 'V2nonfov', 'V3nonfov']
+        sct_keys = list(cls.sector_paths.keys())
         lbl_keys = ['H', 'Calc', 'V1','V2','MT', 'BA44','BA45', 'B14V1','B14V2','B14V3']
         kk = (['anatomist','sid'] +
               ['lbl%s%s' % (h,k) for h in ['L','R'] for k in lbl_keys] +
               ['roi%s%s' % (h,k) for h in ['L','R'] for k in roi_keys] +
               ['sct%s%s' % (h,k) for h in ['L','R'] for k in sct_keys])
-        meananat = HCPLinesDataset.mean_anatomist_name
-        for sid in HCPLinesDataset.subject_list:
+        meananat = cls.mean_anatomist_name
+        for sid in cls.subject_list:
             #print(sid)
-            for anat in HCPLinesDataset.full_anatomist_list:
+            for anat in cls.full_anatomist_list:
                 #print('  - ', anat)
                 df['sid'].append(sid)
                 df['anatomist'].append(anat)
@@ -2043,12 +2046,12 @@ class HCPLinesDataset(HCPMetaDataset):
         '''
         from neuropythy import save
         from neuropythy.hcp import forget_subject
-        sids = (HCPLinesDataset.full_subject_list if subject_list is Ellipsis else
+        sids = (self.full_subject_list if subject_list is Ellipsis else
                 []                                if subject_list is None     else
                 subject_list)
-        anatomists = HCPLinesDataset.full_anatomist_list
-        meananat = HCPLinesDataset.mean_anatomist_name
-        meansub = HCPLinesDataset.mean_subject_name
+        anatomists = self.full_anatomist_list
+        meananat = self.mean_anatomist_name
+        meansub = self.mean_subject_name
         if logger is None: logger = lambda s:None
         if pimms.is_int(sids): sids = [sids]
         # We want to organize this whole set of exports around the subject so that we can forget
@@ -2099,12 +2102,12 @@ class HCPLinesDataset(HCPMetaDataset):
                             logger('       - ' + msg)
                 # (4) The Subject Dataframe
                 if save_dataframe and sid != meansub:
-                    fp = HCPLinesDataset.find_path(self.pseudo_path,'mean','%d.dataframe.hdf5'%sid)
+                    fp = self.find_path(self.pseudo_path,'mean','%d.dataframe.hdf5'%sid)
                     if not fp or overwrite:
                         logger('       * Saving dataframe...')
                         tbl = self.subject_tables[sid]
                         if tbl is not None:
-                            flnm = HCPLinesDataset.cache_path(self.pseudo_path,
+                            flnm = self.cache_path(self.pseudo_path,
                                                               'mean','%d.dataframe.hdf5' % sid,
                                                               create_directories=create_directories,
                                                               create_mode=create_mode)
@@ -2128,13 +2131,13 @@ class HCPLinesDataset(HCPMetaDataset):
         # Finally, the dataframe
         if save_dataframe and (len(sids) == 0 or subject_list is Ellipsis):
             logger('* Saving Dataframe...')
-            flnm = HCPLinesDataset.cache_path(self.pseudo_path, 'dataframe.hdf5',
+            flnm = self.cache_path(self.pseudo_path, 'dataframe.hdf5',
                                               create_directories=create_directories,
                                               create_mode=create_mode)
             if overwrite or not os.path.isfile(flnm): self.dataframe.to_hdf(flnm, 'dataframe')
         if save_surface_areas and (len(sids) == 0 or subject_list is Ellipsis):
             logger('* Saving surface_areas Dataframe...')
-            flnm = HCPLinesDataset.cache_path(self.pseudo_path, 'surface_areas.hdf5',
+            flnm = self.cache_path(self.pseudo_path, 'surface_areas.hdf5',
                                               create_directories=create_directories,
                                               create_mode=create_mode)
             if overwrite or not os.path.isfile(flnm):
@@ -2196,7 +2199,7 @@ class HCPLinesDataset(HCPMetaDataset):
             except Exception: mesh = hem.registrations[mesh]
             reproj = True
         else: reproj = True
-        styles0 = HCPLinesDataset.default_line_styles
+        styles0 = self.default_line_styles
         if pimms.is_tuple(styles) or pimms.is_list(styles):
             iimx = 0
             for (ii,sty) in enumerate(styles):
