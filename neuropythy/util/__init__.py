@@ -8,7 +8,7 @@ from .core     import (ObjectWithMetaData, normalize, denormalize,
                        is_image, is_image_header, curry,
                        numel, rows, part, hstack, vstack, repmat, replace_close, chop,
                        flatter, flattest, is_tuple, is_list, is_set,
-                       plus, cplus, minus, cminus, times, ctimes, 
+                       plus, cplus, minus, cminus, times, ctimes,
                        inv, zinv, divide, cdivide, zdivide, czdivide, power, cpower, inner,
                        sine, cosine, tangent, cotangent, secant, cosecant,
                        arcsine, arccosine, arctangent,
@@ -16,7 +16,7 @@ from .core     import (ObjectWithMetaData, normalize, denormalize,
                        library_path, address_data, is_address, address_interpolate,
                        AutoDict, auto_dict, curve_spline, curve_intersection, close_curves,
                        is_curve_spline, to_curve_spline, CurveSpline,
-                       DataStruct, data_struct, tmpdir, dirpath_to_list, apply_affine, try_until)
+                       DataStruct, data_struct, tmpdir, dirpath_to_list, apply_affine, try_until,CachedData,DualLazyMap,DualLazyObject)
 from .conf     import (config, to_credentials, detect_credentials, load_credentials)
 from .filemap  import (FileMap, file_map, is_file_map, pseudo_path, is_pseudo_path, to_pseudo_path,
                        osf_crawl, url_download)

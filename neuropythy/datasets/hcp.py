@@ -12,7 +12,7 @@ from six.moves import urllib
 if six.PY3: from functools import reduce
 
 from .core        import (Dataset, add_dataset)
-from ..util       import (config, curry, auto_dict, to_credentials, pseudo_path)
+from ..util       import (config, curry, auto_dict, to_credentials, pseudo_path,CachedData,DualLazyMap,CachedData,DualLazyMap)
 from ..vision     import as_retinotopy
 from ..           import io      as nyio
 from .. import hcp
@@ -25,6 +25,7 @@ config.declare_credentials('hcp_credentials',
                            filenames=['~/.hcp-passwd', '~/.passwd-hcp',
                                       '~/.s3fs-passwd', '~/.passwd-s3fs'],
                            aws_profile_name=['HCP', 'hcp', 'S3FS', 's3fs'])
+
 def to_nonempty(s):
     '''
     to_nonempty(s) yields s if s is a nonempty string and otherwise raises an exception.
@@ -554,10 +555,12 @@ class HCPDataset(HCPMetaDataset):
             subdirs = hcp.subject_ids
         creds = s3_path.credentials
         # okay, we will make a loader for each of these:
-        ss = {sid: curry(HCPDataset._load_subject,
-                         s3_path, url, creds, cache_directory, default_alignment, sid)
-              for sid in subdirs}
-        return pimms.lazy_map(ss)
+        def reset_func():
+            ss = {sid: curry(HCPDataset._load_subject,
+                             s3_path, url, creds, cache_directory, default_alignment, sid)
+                  for sid in subdirs}
+            return pimms.lazy_map(ss)
+        return CachedData(reset_func)
     @pimms.value
     def subject_ids(_subjects):
         '''
@@ -582,7 +585,10 @@ class HCPDataset(HCPMetaDataset):
         def _add_retino(sid):
             if sid in subs: return subs[sid]
             else:           return _subjects[sid]
-        return pimms.lazy_map({sid: curry(_add_retino, sid) for sid in six.iterkeys(_subjects)})
+
+        def reset_func():
+            return pimms.lazy_map({sid: curry(_add_retino, sid) for sid in six.iterkeys(_subjects)})
+        return CachedData(reset_func)
     def download(self, sid):
         '''
         ny.data['hcp'].download(sid) downloads all the data understood by neuropythy for the given
@@ -840,10 +846,12 @@ class HCPRetinotopyDataset(HCPMetaDataset):
                           prf_x                  = dat[:,1]*np.cos(np.pi/180*dat[:,0]),
                           prf_y                  = dat[:,1]*np.sin(np.pi/180*dat[:,0]))
                  for (h,dat) in zip(['lh','rh','subcortical'], tmp)})
-        splits = [pimms.lazy_map({res: curry(_load, res, split)
-                                  for res in six.iterkeys(HCPRetinotopyDataset.retinotopy_files)})
-                  for split in [0,1,2]]
-        return tuple(splits)
+        def reset_func():
+            splits = [pimms.lazy_map({res: curry(_load, res, split)
+                                      for res in six.iterkeys(HCPRetinotopyDataset.retinotopy_files)})
+                      for split in [0,1,2]]
+            return tuple(splits)
+        return CachedData(reset_func)
     @pimms.value
     def subject_order(pseudo_path):
         '''
@@ -871,6 +879,7 @@ class HCPRetinotopyDataset(HCPMetaDataset):
         '''
         rpfx = HCPRetinotopyDataset.retinotopy_prefix
         sids = HCPRetinotopyDataset.subject_ids
+        trs  = HCPRetinotopyDataset._retinotopy_cache_tr
         # how we load data:
         def _load_LR(split, sid, h, res, prop, flpatt):
             pth = os.path.join(cache_directory, str(sid), 'retinotopy')
@@ -902,16 +911,6 @@ class HCPRetinotopyDataset(HCPMetaDataset):
                 except Exception as e:
                     warnings.warn("Error when trying to save cache file: %s" % (type(e),))
             return dat
-        # okay, the base properties for the 32k and 59k meshes:
-        trs = HCPRetinotopyDataset._retinotopy_cache_tr
-        base_props = {
-            sid: {h: {split: {res: pimms.lazy_map({p: curry(_load_LR, split, sid, h, res, p, flp)
-                                                   for (p,flp) in six.iteritems(trs['LR%dk'%res])})
-                              for res in [32, 59]}
-                      for split in [0,1,2]}
-                  for h in ['lh','rh']}
-            for sid in sids}
-        # okay, now we build on top of these: we add in the x/y properties
         def _add_xy(dat):
             k = next(six.iterkeys(dat))
             prefix = k.split('_')[0] + '_'
@@ -919,13 +918,6 @@ class HCPRetinotopyDataset(HCPMetaDataset):
             tht = np.pi/180 * (90 - ang)
             (x,y) = [ecc*np.cos(tht), ecc*np.sin(tht)]
             return pimms.assoc(dat, prefix + 'x', x, prefix + 'y', y)
-        xy_props = {
-            sid: {h: {split: pimms.lazy_map({res: curry(_add_xy, rdat)
-                                             for (res,rdat) in six.iteritems(spdat)})
-                      for (split,spdat) in six.iteritems(hdat)}
-                  for (h,hdat) in six.iteritems(sdat)}
-            for (sid,sdat) in six.iteritems(base_props)}
-        # okay, that's it; just organize it into the desired shape
         def _reorg(hdat, res, ks):
             pfx = ks[0].split('_')[0] + '_'
             ks = ks + [pfx + 'x', pfx + 'y']
@@ -934,11 +926,29 @@ class HCPRetinotopyDataset(HCPMetaDataset):
                 {(pre+k): curry(f, s, k)
                  for k in ks
                  for (s,pre) in zip([hdat[0],hdat[1],hdat[2]], ['', 'split1-', 'split2-'])})
-        r = {sid: {('%s_LR%dk'%(h,res)): _reorg(hdat, res, list(base_props[sid][h][0][res].keys()))
-                   for (h,hdat) in six.iteritems(sdat)
-                   for res in [32,59]}
-             for (sid,sdat) in six.iteritems(xy_props)}
-        return pimms.persist(r)
+        def reset_func():
+            # okay, the base properties for the 32k and 59k meshes:
+            base_props = {
+                sid: {h: {split: {res: pimms.lazy_map({p: curry(_load_LR, split, sid, h, res, p, flp)
+                                                       for (p,flp) in six.iteritems(trs['LR%dk'%res])})
+                                  for res in [32, 59]}
+                          for split in [0,1,2]}
+                      for h in ['lh','rh']}
+                for sid in sids}
+            # okay, now we build on top of these: we add in the x/y properties
+            xy_props = {
+                sid: {h: {split: pimms.lazy_map({res: curry(_add_xy, rdat)
+                                                 for (res,rdat) in six.iteritems(spdat)})
+                          for (split,spdat) in six.iteritems(hdat)}
+                      for (h,hdat) in six.iteritems(sdat)}
+                for (sid,sdat) in six.iteritems(base_props)}
+            # okay, that's it; just organize it into the desired shape
+            r = {sid: {('%s_LR%dk'%(h,res)): _reorg(hdat, res, list(base_props[sid][h][0][res].keys()))
+                       for (h,hdat) in six.iteritems(sdat)
+                       for res in [32,59]}
+                 for (sid,sdat) in six.iteritems(xy_props)}
+            return pimms.persist(r)
+        return CachedData(reset_func)
     @pimms.value
     def subjects(retinotopy_data, cache_directory, create_mode, create_directories,
                  interpolation_method):
@@ -1028,5 +1038,8 @@ class HCPRetinotopyDataset(HCPMetaDataset):
             hems = hems.set('rh', lambda:hems2['rh_native_' + default_alignment])
             return sub.copy(hemis=hems)
         # we just need to call down to this prep function lazily:
-        return pimms.lazy_map({sid: curry(_prep, sid) for sid in six.iterkeys(retinotopy_data)})
+
+        def reset_func():
+            return pimms.lazy_map({sid: curry(_prep, sid) for sid in six.iterkeys(retinotopy_data)})
+        return CachedData(reset_func)
 add_dataset('hcp_retinotopy', lambda:HCPRetinotopyDataset().persist())

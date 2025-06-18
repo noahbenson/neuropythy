@@ -12,7 +12,7 @@ import scipy.io   as spio
 
 # Import neuropythy items.
 from .core        import (Dataset, add_dataset)
-from ..util       import (config, curry, auto_dict, address_data, pseudo_path)
+from ..util       import (config, curry, auto_dict, address_data, pseudo_path,CachedData,DualLazyMap)
 from ..vision     import as_retinotopy
 from .hcp         import (HCPMetaDataset, to_boolean)
 from ..hcp        import subject as hcp_subject
@@ -22,6 +22,8 @@ config.declare_dir('hcp_lines_path',
                    environ_name='HCP_LINES_PATH', default_value=None)
 config.declare('hcp_lines_auto_download', environ_name='HCP_LINES_AUTO_DOWNLOAD',
                filter=to_boolean, default_value=True)
+
+
 # useful function for currying something that needs to be try'ed/catch'ed
 def try_curry(f, failval, *args, **kw):
     '''
@@ -231,6 +233,23 @@ class HCPLinesDataset(HCPMetaDataset):
     mean_sampling_resolution = 500
     normalized_directory_name = 'normalized'
 
+    def reset(self):
+        self._cached_data.reset()
+        # native sectors, native areaas
+        self.raw_data.reset()
+        self.raw_path_traces.reset()
+        self.native_path_traces.reset()
+        # exclusions, trust_exclusions
+        self.native_sector_traces.reset()
+        self.native_sectors.reset()
+        self.native_area_traces.reset()
+        self.native_areas.reset()
+        self.subject_labels.reset()
+        self.clean_retinotopic_maps.reset()
+        self.subject_cortical_magnifications.reset()
+        self.subject_boundary_distances.reset()
+        # anat_distances
+        self.subjects.reset()
 
     @pimms.param
     def source_path(sp):
@@ -599,6 +618,9 @@ class HCPLinesDataset(HCPMetaDataset):
                                             create_directories=False)
         if pp is None or not os.path.isfile(pp): return None
         else: return load(pp, 'json')
+
+
+
     @pimms.value
     def _cached_data(cls,pseudo_path):
         '''
@@ -606,45 +628,48 @@ class HCPLinesDataset(HCPMetaDataset):
         dataset. Any cached data that is not found is automatically generated and saved when
         requested.
         '''
-        import h5py
-        from neuropythy import load
-        # see what anatomist directories are there
-        anatomists = cls.full_anatomist_list
-        subjects   = cls.subject_list
-        anatomists = tuple([anat for anat in anatomists
-                            if pseudo_path.find('normalized', anat) is not None])
-        pd         = pseudo_path
-        hh         = cls
-        # we just build up lazy-maps that load in the content as requested
-        lmap = pimms.lazy_map
-        c = [{(name + '_path_traces'): {a: lmap({s: curry(hh.load_traces, pd, a, s, name)
-                                                 for s in subjects})
-                                        for a in anatomists}
-              for name in ('raw','native','fsaverage','fsaverage500','area','sector')},
-             {(name + '_paths'): {a: lmap({s: curry(hh.load_paths, pd, a, s, name)
-                                           for s in subjects})
-                                  for a in anatomists}
-              for name in ('raw','native','fsaverage','area','sector')},
-             {name: {a: lmap({s: curry(hh.load_properties, pd, a, s, name)
-                              for s in subjects})
-                     for a in anatomists}
-              for name in ('labels', 'distances', 'clean', 'cmag')}]
-        c = {k:pyr.pmap(v) for m in c for (k,v) in six.iteritems(m)}
-        c['subject_dataframes'] = lmap(
-            {s: curry(hh.load_dataframe, pseudo_path, 'mean', str(s), 'dataframe.hdf5')
-             for s in subjects})
-        c['dataframe'] = curry(hh.load_dataframe, pseudo_path, 'dataframe.hdf5')
-        # surface area data...
-        c['area_surface_areas'] = {a: lmap({s: curry(hh.load_surface_areas, pd, a, s, 'roi')
-                                            for s in subjects})
-                                   for a in anatomists}
-        c['sector_surface_areas'] = {a: lmap({s: curry(hh.load_surface_areas, pd, a, s, 'sct')
-                                              for s in subjects})
-                                     for a in anatomists}
-        c['label_surface_areas'] = lmap({s: curry(hh.load_surface_areas, pd, 'mean', s, 'lbl')
-                                         for s in subjects})
-        c['surface_area_dataframe'] = curry(hh.load_dataframe, pd, 'surface_areas.hdf5')
-        return pimms.lazy_map(c)
+
+        def reset_func(cls,pseudo_path):
+
+            # see what anatomist directories are there
+            anatomists = cls.full_anatomist_list
+            subjects   = cls.subject_list
+            anatomists = tuple([anat for anat in anatomists
+                                if pseudo_path.find('normalized', anat) is not None])
+            pd         = pseudo_path
+            hh         = cls
+            # we just build up lazy-maps that load in the content as requested
+            lmap = pimms.lazy_map
+            c = [{(name + '_path_traces'): {a: lmap({s: curry(hh.load_traces, pd, a, s, name)
+                                                     for s in subjects})
+                                            for a in anatomists}
+                  for name in ('raw','native','fsaverage','fsaverage500','area','sector')},
+                 {(name + '_paths'): {a: lmap({s: curry(hh.load_paths, pd, a, s, name)
+                                               for s in subjects})
+                                      for a in anatomists}
+                  for name in ('raw','native','fsaverage','area','sector')},
+                 {name: {a: lmap({s: curry(hh.load_properties, pd, a, s, name)
+                                  for s in subjects})
+                         for a in anatomists}
+                  for name in ('labels', 'distances', 'clean', 'cmag')}]
+            c = {k:pyr.pmap(v) for m in c for (k,v) in six.iteritems(m)}
+            c['subject_dataframes'] = lmap(
+                {s: curry(hh.load_dataframe, pseudo_path, 'mean', str(s), 'dataframe.hdf5')
+                 for s in subjects})
+            c['dataframe'] = curry(hh.load_dataframe, pseudo_path, 'dataframe.hdf5')
+            # surface area data...
+            c['area_surface_areas'] = {a: lmap({s: curry(hh.load_surface_areas, pd, a, s, 'roi')
+                                                for s in subjects})
+                                       for a in anatomists}
+            c['sector_surface_areas'] = {a: lmap({s: curry(hh.load_surface_areas, pd, a, s, 'sct')
+                                                  for s in subjects})
+                                         for a in anatomists}
+            c['label_surface_areas'] = lmap({s: curry(hh.load_surface_areas, pd, 'mean', s, 'lbl')
+                                             for s in subjects})
+            c['surface_area_dataframe'] = curry(hh.load_dataframe, pd, 'surface_areas.hdf5')
+            return pimms.lazy_map(c)
+
+        return CachedData(reset_func,cls,pseudo_path)
     @staticmethod
     def load_raw_data(pseudo_path, anat, sid):
         '''
@@ -681,9 +706,11 @@ class HCPLinesDataset(HCPMetaDataset):
         anatomists = cls.anatomist_list
         subjects   = cls.subject_list
         loadfn     = cls.load_raw_data
-        return pyr.pmap({anat: pimms.lazy_map({sid: curry(loadfn, pseudo_path, anat, sid)
-                                               for sid in subjects})
-                         for anat in anatomists})
+        def reset_func():
+            return pyr.pmap({anat: pimms.lazy_map({sid: curry(loadfn, pseudo_path, anat, sid)
+                                                   for sid in subjects})
+                             for anat in anatomists})
+        return CachedData(reset_func)
     @pimms.value
     def anatomist_comments(cls,raw_data):
         '''
@@ -849,11 +876,13 @@ class HCPLinesDataset(HCPMetaDataset):
         '''
         anatomists = cls.anatomist_list
         subjects   = cls.subject_list
-        m = pyr.pmap(
-            {anat:pimms.lazy_map({sid: curry(cls._calc_raw_traces, raw_data, anat, sid)
-                                  for sid in subjects})
-             for anat in anatomists})
-        return mapsmerge(_cached_data.get('raw_path_traces', {}), m)
+        def reset_func():
+            m = pyr.pmap(
+                {anat:pimms.lazy_map({sid: curry(cls._calc_raw_traces, raw_data, anat, sid)
+                                      for sid in subjects})
+                 for anat in anatomists})
+            return mapsmerge(_cached_data.get('raw_path_traces', {}), m)
+        return CachedData(reset_func)
     @classmethod
     def _clean_raw_traces(cls,raw_path_traces, anat, sid, exclusions, trust_exclusions):
         '''
@@ -1139,9 +1168,11 @@ class HCPLinesDataset(HCPMetaDataset):
         def f(dat, sid, excl): return cls._calc_mean_subject_lines(dat, sid, excl)
         # okay, the one thing we want to add is a mean anatomist
         excl = exclusions if trust_exclusions else frozenset([])
-        mnlns = pimms.lazy_map({sid:curry(f, data, sid, excl)
-                                for sid in cls.subject_list})
-        return mapsmerge(data, {cls.mean_anatomist_name:mnlns})
+        def reset_func(cls):
+            mnlns = pimms.lazy_map({sid:curry(f, data, sid, excl)
+                                    for sid in cls.subject_list})
+            return mapsmerge(data, {cls.mean_anatomist_name:mnlns})
+        return CachedData(reset_func,cls)
     @staticmethod
     def _traces_to_paths(traces, name, anat, sid):
         '''
@@ -1414,10 +1445,12 @@ class HCPLinesDataset(HCPMetaDataset):
         native_sector_traces is a mapping of the sectors for each anatomist and subject.
         '''
         f = cls._calculate_sectors
-        return mapsmerge(_cached_data.get('native_sector_traces',{}),
-                         pyr.pmap({a: pimms.lazy_map({s: curry(f, native_path_traces, a, s)
-                                                      for s in six.iterkeys(adat)})
-                                   for (a,adat) in six.iteritems(native_path_traces)}))
+        def reset_func():
+            return mapsmerge(_cached_data.get('native_sector_traces',{}),
+                             pyr.pmap({a: pimms.lazy_map({s: curry(f, native_path_traces, a, s)
+                                                          for s in six.iterkeys(adat)})
+                                       for (a,adat) in six.iteritems(native_path_traces)}))
+        return CachedData(reset_func)
     @classmethod
     def _calculate_areas(cls,path_traces, anat, sid):
         '''
@@ -1448,10 +1481,13 @@ class HCPLinesDataset(HCPMetaDataset):
         native_area_traces is a mapping of the visual areas (V1/2/3) for each anatomist and subject.
         '''
         f = cls._calculate_areas
-        return mapsmerge(_cached_data.get('area_path_traces',{}),
-                         pyr.pmap({a: pimms.lazy_map({s: curry(f, native_path_traces, a, s)
-                                                      for s in six.iterkeys(adat)})
-                                   for (a,adat) in six.iteritems(native_path_traces)}))
+        def reset_func():
+            return mapsmerge(_cached_data.get('area_path_traces',{}),
+                             pyr.pmap({a: pimms.lazy_map({s: curry(f, native_path_traces, a, s)
+                                                          for s in six.iterkeys(adat)})
+                                       for (a,adat) in six.iteritems(native_path_traces)}))
+
+        return CachedData(reset_func)
     @staticmethod
     def _loop_traces_to_paths(name, anat, sdat, sid):
         '''
@@ -1492,16 +1528,22 @@ class HCPLinesDataset(HCPMetaDataset):
         native_sectors represents the same data as native_sector_traces but after conversion to
         path objects by combination with the appropriate subject hemisphere.
         '''
-        return mapsmerge(_cached_data.get('sector_paths', {}),
-                         cls._all_loop_traces_to_paths('sectors', native_sector_traces))
+        def reset_func():
+            return mapsmerge(_cached_data.get('sector_paths', {}),
+                             cls._all_loop_traces_to_paths('sectors', native_sector_traces))
+
+        return CachedData(reset_func)
     @pimms.value
     def native_areas(cls,native_area_traces, _cached_data):
         '''
         native_areas represents the same data as native_area_traces but after conversion to
         path objects by combination with the appropriate subject hemisphere.
         '''
-        return mapsmerge(_cached_data.get('area_paths', {}),
-                         cls._all_loop_traces_to_paths('areas', native_area_traces))
+        def reset_func():
+            return mapsmerge(_cached_data.get('area_paths', {}),
+                             cls._all_loop_traces_to_paths('areas', native_area_traces))
+
+        return CachedData(reset_func)
     @classmethod
     def _calculate_subject_labels(cls,areas, sectors, anat, sid):
         '''
@@ -1555,11 +1597,13 @@ class HCPLinesDataset(HCPMetaDataset):
         '''
         anatomists = cls.full_anatomist_list
         f = cls._calculate_subject_labels
-        return mapsmerge(
-            _cached_data.get('labels', {}),
-            pyr.pmap({anat: pimms.lazy_map({sid:curry(f, native_areas, native_sectors, anat, sid)
-                                            for sid in cls.subject_list})
-                      for anat in anatomists}))
+        def reset_func(cls):
+            return mapsmerge(
+                _cached_data.get('labels', {}),
+                pyr.pmap({anat: pimms.lazy_map({sid:curry(f, native_areas, native_sectors, anat, sid)
+                                                for sid in cls.subject_list})
+                          for anat in anatomists}))
+        return CachedData(reset_func,cls)
     @staticmethod
     def _calculate_subject_distances(paths, anat, sid):
         '''
@@ -1590,11 +1634,14 @@ class HCPLinesDataset(HCPMetaDataset):
         '''
         f = cls._calculate_subject_distances
         anats = native_paths.keys() if anat_distances else (cls.mean_anatomist_name,)
-        return mapsmerge(
-            _cached_data.get('distances', {}),
-            pyr.pmap({anat: pimms.lazy_map({sid:curry(f, native_paths, anat, sid)
-                                            for sid in cls.subject_list})
-                      for anat in anats}))
+        def reset_func(cls):
+            return mapsmerge(
+                _cached_data.get('distances', {}),
+                pyr.pmap({anat: pimms.lazy_map({sid:curry(f, native_paths, anat, sid)
+                                                for sid in cls.subject_list})
+                          for anat in anats}))
+
+        return CachedData(reset_func,cls)
     @staticmethod
     def calculate_clean_retinotopy(hemi, labels):
         '''
@@ -1631,11 +1678,14 @@ class HCPLinesDataset(HCPMetaDataset):
                 r[h] = ps
             if len(r) == 0: return None
             else: return pimms.persist(r)
-        return mapsmerge(
-            _cached_data.get('clean', {}),
-            pyr.pmap({anat: pimms.lazy_map({sid:curry(clean_rmap, anat, sid)
-                                            for sid in cls.subject_list})
-                      for anat in cls.full_anatomist_list}))
+        def reset_func(cls):
+            return mapsmerge(
+                _cached_data.get('clean', {}),
+                pyr.pmap({anat: pimms.lazy_map({sid:curry(clean_rmap, anat, sid)
+                                                for sid in cls.subject_list})
+                          for anat in cls.full_anatomist_list}))
+
+        return CachedData(reset_func,cls)
     @staticmethod
     def calculate_cortical_magnification(anat,sid, hemi, rdat, labels):
         '''
@@ -1683,11 +1733,15 @@ class HCPLinesDataset(HCPMetaDataset):
                 r[h] = cm
             if len(r) == 0: return None
             else: return pimms.persist(r)
-        return mapsmerge(
-            _cached_data.get('cmag', {}),
-            pyr.pmap({anat: pimms.lazy_map({sid:curry(calc_cmag, anat, sid)
-                                            for sid in cls.subject_list})
-                      for anat in cls.full_anatomist_list}))
+
+        def reset_func(cls):
+            return mapsmerge(
+                _cached_data.get('cmag', {}),
+                pyr.pmap({anat: pimms.lazy_map({sid:curry(calc_cmag, anat, sid)
+                                                for sid in cls.subject_list})
+                          for anat in cls.full_anatomist_list}))
+
+        return CachedData(reset_func,cls)
     @pimms.value
     def subjects(cls,subject_labels, subject_boundary_distances, clean_retinotopic_maps,
                  subject_cortical_magnifications):
@@ -1724,7 +1778,9 @@ class HCPLinesDataset(HCPMetaDataset):
                 r[h] = hemi
             if len(r) == 0: return None
             else: return sub.with_hemi(**r)
-        return pimms.lazy_map({sid: curry(makesub, sid) for sid in cls.subject_list})
+        def reset_func(cls):
+            return pimms.lazy_map({sid: curry(makesub, sid) for sid in cls.subject_list})
+        return CachedData(reset_func,cls)
     @pimms.value
     def subject_tables(cls,subjects, exclusions, _cached_data):
         '''

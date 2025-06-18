@@ -1776,3 +1776,123 @@ def try_until(*args, **kw):
             if check is None or check(rval): return rval
         except Exception: raise
     raise ValueError('try_until failed to find a successful function return')
+
+# XXX MOVE below to pimms?
+import weakref as wr
+class CachedData:
+    """
+    A lazy pmap whose values can be unmemoized (all or none).
+    XXX Does this add any better use-case functionality than DualLazyMap?
+    """
+    def __init__(self,reset_func,*args,weakref=True,**kwargs):
+        """
+        reset_func - function used to set and reset data
+        weakref - whether values are returned as weakrefs
+        """
+        self.args=args
+        self.kwargs=kwargs
+        self.reset_func=reset_func
+        self.weakref=weakref
+        self.reset()
+    def __getitem__(self,prop):
+        if self.weakref:
+            return wr.proxy(self.data[prop])
+        else:
+            return self.data[prop]
+    def __getattr__(self,name):
+        return getattr(self.data,name)
+    def __setitem__(self, key, value):
+        self.data[key] = value
+    def __iter__(self):
+        return iter(self.data)
+    def __contains__(self, item):
+        return item in self.data
+    def __str__(self):
+        return str(self.data)
+    def __repr__(self):
+        return f"{repr(self.data)}"
+    def reset(self):
+        self.data=self.reset_func(*self.args,**self.kwargs)
+from copy import copy
+class DualLazyMap():
+    """
+    A lazy pmap whose values can be unmemoized 
+    """
+    def __init__(self,map,weakref=False):
+        """
+        map - map that would normally be input as lazy_map(map)
+        weakref - whether values are returned as weakrefs
+        """
+        self._weakref=weakref
+        self._functions=pimms.lazy_map(map)
+        self._cache=copy(self._functions)
+    def reset(self,keys=None):
+        """
+        keys - keys to reset
+            if None, resets all keys
+        """
+        if keys is None:
+            self.reset_all()
+            return
+        elif isinstance(keys,(list,tuple)) and len(keys)==0:
+            return
+        self._cache.update({k:self._functions.lazyfn(k) for k in keys if self._functions.islazy(k)})
+    def reset_all(self,exclude=None):
+        """
+        resets all keys except those in 'exclude'
+        """
+        if exclude is not None:
+            retain={k:self._functions[k] for k in exclude if not self._functions.islazy(k)}
+            self._cache=copy(self._functions)
+            self._cache.update(retain)
+        else:
+            self._cache=copy(self._functions)
+    def __getattr__(self, name):
+        return getattr(self.cache,name)
+    def __getitem__(self,k):
+        if self.weakref:
+            return wr.proxy(self._cache[k])
+        else:
+            return self._cache[k]
+    def __repr__(self):
+        return 'dual_'+self._cache.__repr__()
+class DualLazyObject:
+    """
+    An object that is not evaluated until called, otherwise behaves like the object
+    """
+    def __init__(self,reset_func,*args,weakref=False,**kwargs):
+        self._args=args
+        self._kwargs=kwargs
+        self._reset_func=reset_func
+        self._is_lazy=True
+        self.__data=None
+        self._weakref=weakref
+
+    @property
+    def __gdata(self):
+        if self._is_lazy:
+            self._eval()
+        if self._weakref:
+            return wr.proxy(self.__data)
+        else:
+            return self.__data
+    def _eval(self):
+        self.__data=self._reset_func(*self._args,**self._kwargs)
+        self._is_lazy=False
+    def reset(self):
+        self.__data=None
+        self._is_lazy=True
+    def __getitem__(self,prop):
+        return self._data[prop]
+    def __getattr__(self,name):
+        return getattr(self.__gdata,name)
+    def __setitem__(self, key, value):
+        self.__gdata[key] = value
+    def __iter__(self):
+        return iter(self.__gdata)
+    def __contains__(self, item):
+        return item in self.__gdata
+    def __str__(self):
+        return str(self.__gdata)
+    def __repr__(self):
+        return f"{repr(self.__gdata)}"
