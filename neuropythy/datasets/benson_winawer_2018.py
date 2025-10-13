@@ -106,10 +106,10 @@ class BensonWinawer2018Dataset(Dataset):
     #=>  'dataset_id': 10, 'dataset_name': 'prf10', 'variance_explained': 0.054989286,
     #=>  'white_surface_area': 0.75872976}
     '''
-    dataset_urls = {'analyses':              'https://osf.io/cpfa8/download',
-                    'retinotopy':            'https://osf.io/m4k8q/download',
-                    #'wang2015':              'https://osf.io/rx9ca/download',
-                    'freesurfer_subjects':   'https://osf.io/pu9js/download'}
+    dataset_urls = {'analyses':              'https://osf.io/download/cpfa8',
+                    'retinotopy':            'https://osf.io/download/m4k8q',
+                    #'wang2015':              'https://osf.io/download/rx9ca',
+                    'freesurfer_subjects':   'https://osf.io/download/pu9js'}
     prf_meta_data = pyr.m(prf00=pyr.m(id=0,  name='validation', scans=6,  scan_seconds=192*6),
                           prf01=pyr.m(id=1,  name='training01', scans=1,  scan_seconds=192),
                           prf02=pyr.m(id=2,  name='training02', scans=1,  scan_seconds=192),
