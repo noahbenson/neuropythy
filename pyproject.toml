@@ -1,3 +1,101 @@
+[project]
+name = "neuropythy"
+dynamic = ["version"]
+
+description = "Toolbox for flexible cortical mesh analysis and registration"
+readme = "README.md"
+license = {file = "LICENSE.txt"}
+
+authors = [
+    {name = "Noah C. Benson", email = "nben@uw.edu"},
+]
+maintainers = [
+    {name = "Noah C. Benson", email = "nben@uw.edu"},
+]
+
+keywords = [
+    "neuroscience",
+    "mesh",
+    "cortex",
+    "registration",
+]
+
+requires-python = ">=3.6"
+
+dependencies = [
+    "numpy>=1.13",
+    "scipy>=1.1",
+    "six>=1.13",
+    "nibabel>=2.0",
+    "pyrsistent>=0.11",
+    "pint>=0.7",
+    "pimms>=0.3.24",
+    "py4j>=0.10",
+    "h5py>=2.8",
+    "s3fs>=0.1.5",
+]
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.6",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+
+    "Topic :: Software Development",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX",
+    "Operating System :: Unix",
+    "Operating System :: MacOS",
+]
+
+[project.urls]
+Homepage = "https://github.com/noahbenson/neuropythy"
+Repository = "https://github.com/noahbenson/neuropythy"
+
+
+[project.optional-dependencies]
+graphics2D = [
+    "matplotlib>=1.5.3",
+]
+graphics3D = [
+    "matplotlib>=1.5.3",
+    "k3d>=2.17.0",
+]
+torch = [
+    "torch>=1.6.0",
+]
+all = [
+    "matplotlib>=1.5.3",
+    "k3d>=2.17.0",
+    "torch>=1.6.0",
+]
+
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+version = {attr = "neuropythy.__version__"}
+
+
 [build-system]
-requires = ["setuptools>=42", "wheel", "setuptools_scm[toml]>=3.4"]
+requires = ["setuptools>=61,<76"]
 build-backend = "setuptools.build_meta"
