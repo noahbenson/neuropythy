@@ -102,5 +102,5 @@ jobs:
       # Run the actual tests.
       - name: Run Tests
         run: |
-          python -m neuropythy.test
+          python -m unittest neuropythy.test
         shell: bash -el {0}
