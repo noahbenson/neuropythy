@@ -1265,7 +1265,6 @@ try:
         mns = np.full(3, np.inf)
         mxs = np.full(3, -np.inf)
         ms = ()
-        #here
         if figure is None or figure is Ellipsis:
             fig = k3d.plot(
                 height=height,
