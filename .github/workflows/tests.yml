@@ -93,6 +93,12 @@ jobs:
           curl -o ~/freesurfer_subjects/fsa.tgz -L https://github.com/noahbenson/neuropythy/wiki/files/fsaverage.tar.gz
           curl -o ~/freesurfer_subjects/fsasym.tgz -L https://github.com/noahbenson/neuropythy/wiki/files/fsaverage_sym.tar.gz
           cd ~/freesurfer_subjects && tar zxf fsa.tgz && tar zxf fsasym.tgz && rm *.tgz
+      - name: Prepopulate Test Data
+        shell: bash -el {0}
+        run: |
+          mkdir -p ~/bw2018
+          curl -o ~/bw2018/analyses.tar.gz -L https://osf.io/download/cpfa8
+          cd ~/bw2018 && tar zxf analyses.tar.gz && rm *.tar.gz
       # Log the Python Version
       - name: Display Python version
         shell: bash -el {0}
@@ -113,3 +119,4 @@ jobs:
         shell: bash -el {0}
         env:
           SUBJECTS_DIR: "~/freesurfer_subjects"
+          NYPTHY_BENSON_WINOWER_2018_PATH: "~/bw2018"
