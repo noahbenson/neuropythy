@@ -81,6 +81,7 @@ jobs:
       - name: Setup Miniconda
         uses: conda-incubator/setup-miniconda@v3
         with:
+          auto-update-conda: true
           python-version: ${{ matrix.version }}
       - name: Install Library
         shell: bash -el {0}
