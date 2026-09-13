@@ -86,6 +86,13 @@ jobs:
         shell: bash -el {0}
         run: |
           pip install -e .[all]
+      - name: Download FSAverage
+        shell: bash -el {0}
+        run: |
+          mkdir -p ~/freesurfer_subjects
+          curl -o ~/freesurfer_subjects/fsa.tgz -L https://github.com/noahbenson/neuropythy/wiki/files/fsaverage.tar.gz
+          curl -o ~/freesurfer_subjects/fsasym.tgz -L https://github.com/noahbenson/neuropythy/wiki/files/fsaverage_sym.tar.gz
+          cd ~/freesurfer_subjects && tar zxf fsa.tgz fsasym.tgz && rm *.tgz
       # Log the Python Version
       - name: Display Python version
         shell: bash -el {0}
@@ -104,3 +111,5 @@ jobs:
         run: |
           python -m unittest neuropythy.test
         shell: bash -el {0}
+        env:
+          SUBJECTS_DIR: "~/freesurfer_subjects"
