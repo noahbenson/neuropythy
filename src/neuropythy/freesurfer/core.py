@@ -9,7 +9,7 @@ import nibabel.freesurfer.io        as fsio
 import nibabel.freesurfer.mghformat as fsmgh
 import pyrsistent                   as pyr
 from   six.moves                import collections_abc as collections
-import os, warnings, six, pimms
+import os, warnings, six, pimms, weakref
 
 from .. import geometry as geo
 from .. import mri      as mri
@@ -725,8 +725,11 @@ def subject(path, name=Ellipsis, meta_data=None, check_path=True, filter=None):
     if pdir is None: raise ValueError('could not find freesurfer subject: %s' % path)
     path = pdir.source_path
     # okay, before we continue, lets check the cache...
-    if path in subject._cache: sub = subject._cache[path]
-    else:
+    sub = None
+    if path in subject._cache:
+        # We use a weak ref so it might get garbage collected.
+        sub = subject._cache[path]()
+    if sub is None:
         # make the filemap
         fmap = subject_file_map(pdir)
         # extract the name if need-be
@@ -742,19 +745,17 @@ def subject(path, name=Ellipsis, meta_data=None, check_path=True, filter=None):
         if mri.is_subject(sub):
             sub.persist()
             sub = sub.with_meta(file_map=fmap)
-            subject._cache[path] = sub
+            subject._cache[path] = weakref.ref(sub)
     # okay, we have the initial subject; let's organize the filters
     if pimms.is_list(subject.filter) or pimms.is_tuple(subject.filter): filts = list(subject.filter)
     else: filts = []
     if pimms.is_list(filter) or pimms.is_tuple(filter): filter = list(filter)
     else: filter = []
     filts = filts + filter
-    if len(filts) == 0: return sub
-    fids = tuple([id(f) for f in filts])
-    tup = fids + (path,)
-    if tup in subject._cache: return subject._cache[tup]
-    for f in filts: sub = f(sub)
-    if mri.is_subject(sub): subject._cache[tup] = sub
+    if len(filts) == 0:
+        return sub
+    for f in filts:
+        sub = f(sub)
     return sub
 subject._cache = {}
 subject.filter = None
@@ -771,9 +772,6 @@ def forget_subject(sid):
     sub = subject(sid)
     if sub.path in subject._cache:
         del subject._cache[sub.path]
-    for (k,v) in six.iteritems(subject._cache):
-        if pimms.is_tuple(k) and k[-1] == sub.path:
-            del subject._cache[k]
     return None
 def forget_all():
     '''

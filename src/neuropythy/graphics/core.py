@@ -925,7 +925,7 @@ def apply_cmap(zs, cmap, vmin=None, vmax=None, unit=None, logrescale=False):
     '''
     zs = pimms.mag(zs) if unit is None else pimms.mag(zs, unit)
     zs = np.asarray(zs, dtype='float')
-    if pimms.is_str(cmap): cmap = matplotlib.cm.get_cmap(cmap)
+    if pimms.is_str(cmap): cmap = matplotlib.colormaps.get_cmap(cmap)
     if logrescale:
         if vmin is None: vmin = np.log(np.nanmin(zs))
         if vmax is None: vmax = np.log(np.nanmax(zs))
@@ -1163,24 +1163,19 @@ def cortex_plot_2D(the_map,
 
 # 3D Graphics ######################################################################################
 
-# If we're using Python 2, we're compatible with pysurfer:
-def _ipyvolume_load_error(*args, **kwargs):
+def _k3d_load_error(*args, **kwargs):
     raise RuntimeError('load failure: the requested object could not be loaded, probably ' +
-                       'because you do not have ipyvolume installed correctly')
-cortex_plot_3D = _ipyvolume_load_error
+                       'because you do not have k3d installed correctly')
+cortex_plot_3D = _k3d_load_error
 try:
-    import ipyvolume as ipv
-    # Check the ipv version; if it's before 0.6, we have a warning to issue.
-    _ipv_version = tuple([int(k) for k in ipv.__version__.split('.')[:2]])
-    _ipv_pre06 = _ipv_version[0] == 0 and _ipv_version[1] < 6
-
+    import k3d
     def cortex_plot_3D(obj,
                        color=None, cmap=None, vmin=None, vmax=None, alpha=None,
                        underlay='curvature', underlay_cmap='curvature',
                        underlay_vmin=-1, underlay_vmax=1,
                        mask=None, hemi=None, surface='inflated',
                        figure=Ellipsis, width=600, height=600, mesh_alpha=None,
-                       view=None, camera_distance=100, camera_fov=None, camera_up=None):
+                       view=None, camera_distance=10000, camera_fov=None, camera_up=None):
         '''
     cortex_plot_3D(hemi) plots the inflated surface of the given cortex object hemi and returns the
       ipyvolume figure object.
@@ -1270,24 +1265,32 @@ try:
         mns = np.full(3, np.inf)
         mxs = np.full(3, -np.inf)
         ms = ()
-        if figure is None: f = ipv.gcf()
-        elif figure is Ellipsis: f = ipv.figure(width=width, height=height)
-        else: f = figure
+        #here
+        if figure is None or figure is Ellipsis:
+            fig = k3d.plot(
+                height=height,
+                camera_auto_fit=False,
+                grid_visible=False,
+                axes_helper=False)
+        else:
+            fig = figure
         i0 = 0
         for (m,ma) in zip(mesh, mesh_alpha):
-            (x,y,z) = m.coordinates
             ii = slice(i0, i0 + m.vertex_count)
             i0 += m.vertex_count
-            ipvm = ipv.plot_trisurf(x,y,z, m.tess.indexed_faces.T, color=rgba[ii,:3])
-            mns = np.nanmin([mns, np.nanmin([x,y,z], axis=1)], axis=0)
-            mxs = np.nanmax([mxs, np.nanmax([x,y,z], axis=1)], axis=0)
-            ms = ms + (ipvm,)
-            # handle mesh alpha, if given
-            if ma is not None:
-                if pimms.is_scalar(ma): ma = np.full([m.vertex_count, 1], ma)
-                else: ma = np.reshape(ma, [m.vertex_count, 1])
-                ipvm.color = np.hstack([ipvm.color, ma])
-                ipvm.material.transparent = True
+            (r,g,b) = (255*rgba[ii,:3].T).astype(np.uint32)
+            clrs = (r << 16) | (g << 8) | b
+            ma = 1.0 if ma is None else ma
+            k3dm = k3d.mesh(
+                m.coordinates.T.astype(np.float32),
+                m.tess.indexed_faces.T.astype(np.uint32),
+                flat_shading=False,
+                colors=clrs,
+                opacity=ma)
+            fig += k3dm
+            mns = np.nanmin([mns, np.nanmin(m.coordinates, axis=1)], axis=0)
+            mxs = np.nanmax([mxs, np.nanmax(m.coordinates, axis=1)], axis=0)
+            ms = ms + (k3dm,)
         # Figure out the bounding box...
         szs = mxs - mns
         mid = 0.5*(mxs + mns)
@@ -1295,21 +1298,11 @@ try:
         # okay, set the plot limits
         mxs = mid + 0.5*bsz
         mns = mid - 0.5*bsz
-        ipv.pylab.xlim(mns[0],mxs[0])
-        ipv.pylab.ylim(mns[1],mxs[1])
-        ipv.pylab.zlim(mns[2],mxs[2])
-        # few other styling things
-        ipv.pylab.xlabel('')
-        ipv.pylab.ylabel('')
-        ipv.pylab.zlabel('')
-        ipv.style.box_off()
-        ipv.style.axes_off()
         # figure out the view
-        d = camera_distance
+        d = 100 if camera_distance is None else camera_distance
         up = None
         if view is None: view = 'back'
         if pimms.is_str(view):
-            if camera_distance is None: d = 10
             view = view.lower()
             (view, up) = (((0,-d,0), (0,0, 1)) if view in ['back','rear','posterior','p','-y'] else
                           ((0, d,0), (0,0, 1)) if view in ['front','anterior','a','+y','y']    else
@@ -1320,19 +1313,12 @@ try:
                           (view, None))
             if pimms.is_str(view): raise ValueError('Unknown view: %s' % view)
         if camera_up is not None: up = camera_up
-        if d is None: d = np.sqrt(np.sum(np.asarray(d)**2))
         fov = camera_fov
-        if fov is None: fov = 180.0/np.pi * 2 * np.arctan(1.125/(2*d))
-        f.camera.position = tuple(view)
-        f.camera.up = tuple(up)
-        f.camera.fov = fov
-        f.camera.lookAt(tuple(mid))
-        if _ipv_pre06:
-            warnings.warn(
-                'neuropythy: NOTE: due to a bug in ipyvolume prior to v0.6, camera views' +
-                ' cannot currently be set by neuropythy; however, if you click the reset (home)' +
-                ' button in the upper-left corner of the figure, the requested view will be fixed.')
-        return f
+        if fov is None:
+            fov = 180.0/np.pi * 2 * np.arctan(bsz/(2*d))
+        fig.camera_fov = fov
+        fig.camera = list(view) + list(mid) + list(up)
+        return fig
 except Exception: pass
 
 def cortex_plot(mesh, *args, **opts):

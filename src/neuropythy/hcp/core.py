@@ -9,7 +9,7 @@ import nibabel.freesurfer.io        as fsio
 import nibabel.freesurfer.mghformat as fsmgh
 import pyrsistent                   as pyr
 from   six.moves                import collections_abc as collections
-import os, warnings, six, pimms
+import os, warnings, six, pimms, weakref
 
 from ..        import geometry      as geo
 from ..        import mri           as mri
@@ -251,8 +251,10 @@ def subject(path, name=Ellipsis, meta_data=None, check_path=True, filter=None,
     path = pdir.actual_source_path
     # okay, before we continue, lets check the cache...
     tup = (path, default_alignment)
-    if tup in subject._cache: sub = subject._cache[tup]
-    else:
+    sub = None
+    if tup in subject._cache:
+        sub = subject._cache[tup]()
+    if sub is None:
         # extract the name if need-be
         if name is Ellipsis:
             import re
@@ -269,24 +271,23 @@ def subject(path, name=Ellipsis, meta_data=None, check_path=True, filter=None,
         if mri.is_subject(sub):
             sub = sub.persist()
             sub = sub.with_meta(file_map=fmap)
-            subject._cache[(path, default_alignment)] = sub
+            subject._cache[(path, default_alignment)] = weakref.ref(sub)
     # okay, we have the initial subject; let's organize the filters
     if pimms.is_list(subject.filter) or pimms.is_tuple(subject.filter): filts = list(subject.filter)
     else: filts = []
     if pimms.is_list(filter) or pimms.is_tuple(filter): filter = list(filter)
     else: filter = []
     filts = filts + filter
-    if len(filts) == 0: return sub
+    if len(filts) == 0:
+        return sub
     fids = tuple([id(f) for f in filts])
-    tup = fids + (path, default_alignment)
-    if tup in subject._cache: return subject._cache[tup]
-    for f in filts: sub = f(sub)
-    if mri.is_subject(sub): subject._cache[tup] = sub
+    for f in filts:
+        sub = f(sub)
     return sub.persist()
 subject._cache = {}
 subject.filter = None
 
-def forget_subject(sid):
+def forget_subject(sid, default_alignment=Ellipsis):
     '''
     forget_subject(sid) causes neuropythy's hcp module to forget about cached data for the subject
       with subject id sid. The sid may be any sid that can be passed to the subject() function.
@@ -295,14 +296,17 @@ def forget_subject(sid):
     if you run out of memory while processing hcp subjects it is possibly because neuropythy is
     caching all of their data instead of freeing it.
     '''
-    sub = subject(sid)
-    if sub.path in subject._cache:
-        del subject._cache[sub.path]
+    if mri.is_subject(sid):
+        sub = sid
+        align = sub.meta_data.get('default_alignment')
+        if align is None:
+            raise ValueError("given subject lacks the default_alignment meta-data")
     else:
-        for (k,v) in six.iteritems(subject._cache):
-            if v is sub:
-                del subject._cache[k]
-                break
+        sub = subject(sid, default_alignment=default_alignment)
+        align = sub.meta_data['default_alignment']
+    tup = (sub.path, align)
+    if tup in subject._cache:
+        del subject._cache[tup]
     return None
 def forget_all():
     '''
