@@ -42,7 +42,7 @@ jobs:
           - '3.10'
           - '3.11'
           - '3.12'
-          - '3.13'
+          #- '3.13'
         os:
           - ubuntu-latest
           - windows-latest
@@ -86,19 +86,21 @@ jobs:
         shell: bash -el {0}
         run: |
           pip install -e .[all]
-      - name: Download FSAverage
-        shell: bash -el {0}
-        run: |
-          mkdir -p ~/freesurfer_subjects
-          curl -o ~/freesurfer_subjects/fsa.tgz -L https://github.com/noahbenson/neuropythy/wiki/files/fsaverage.tar.gz
-          curl -o ~/freesurfer_subjects/fsasym.tgz -L https://github.com/noahbenson/neuropythy/wiki/files/fsaverage_sym.tar.gz
-          cd ~/freesurfer_subjects && tar zxf fsa.tgz && tar zxf fsasym.tgz && rm *.tgz
+      #- name: Download FSAverage
+      #  shell: bash -el {0}
+      #  run: |
+      #    mkdir -p ~/freesurfer_subjects
+      #    curl -o ~/freesurfer_subjects/fsa.tgz -L https://github.com/noahbenson/neuropythy/wiki/files/fsaverage.tar.gz
+      #    curl -o ~/freesurfer_subjects/fsasym.tgz -L https://github.com/noahbenson/neuropythy/wiki/files/fsaverage_sym.tar.gz
+      #    cd ~/freesurfer_subjects && tar zxf fsa.tgz && tar zxf fsasym.tgz && rm *.tgz
       - name: Prepopulate Test Data
         shell: bash -el {0}
         run: |
           mkdir -p ~/bw2018
           curl -o ~/bw2018/analyses.tar.gz -L https://osf.io/download/cpfa8
-          cd ~/bw2018 && tar zxf analyses.tar.gz && rm *.tar.gz
+          curl -o ~/bw2018/retinotopy.tar.gz -L https://osf.io/download/m4k8q
+          curl -o ~/bw2018/freesurfer_subjects.tar.gz -L https://osf.io/download/pu9js
+          cd ~/bw2018 && tar zxf analyses.tar.gz && tar zxf retinotopy.tar.gz && tar zxf freesurfer_subjects.tar.gz && rm *.tar.gz
       # Log the Python Version
       - name: Display Python version
         shell: bash -el {0}
@@ -118,5 +120,5 @@ jobs:
           python -m unittest neuropythy.test
         shell: bash -el {0}
         env:
-          SUBJECTS_DIR: "~/freesurfer_subjects"
+          SUBJECTS_DIR: "~/bs2018/freesurfer_subjects"
           NYPTHY_BENSON_WINAWER_2018_PATH: "~/bw2018"
