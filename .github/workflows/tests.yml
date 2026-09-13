@@ -86,7 +86,7 @@ jobs:
       - name: Install Library
         shell: bash -el {0}
         run: |
-          conda install -c pytorch --yes numpy "pytorch=2.14" torchvision torchaudio "mkl<2024.1"
+          conda install -c pytorch --yes numpy pytorch torchvision torchaudio "mkl<2024.1"
           pip install -e .[all]
       #- name: Download FSAverage
       #  shell: bash -el {0}
