@@ -1,0 +1,106 @@
+################################################################################
+# tests.yml
+#
+# GitHub Actions Workflow for running the tests for the immlib library.
+#
+# by Noah C. Benson
+
+name: CI
+
+# We run on either pushes or pulls into main or dev branches
+on:
+  push:
+    branches:
+      - main
+      - dev
+      - "main/**"
+      - "dev/**"
+    paths-ignore:
+      - '**/README.md'
+      - '**/.gitignore'
+  pull_request:
+    branches: [ main, dev ]
+    paths-ignore:
+      - '**/README.md'
+      - '**/.gitignore'
+  # We sometimes want to run this manually.
+  workflow_dispatch:
+  # We also sometimes want to run this from another workflow.
+  workflow_call:
+
+# Our only job in this case is to test the code.
+jobs:
+  test:
+    name: ${{matrix.version}}/${{matrix.os}}/${{matrix.arch}} - ${{github.event_name}}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - '3.8'
+          - '3.9'
+          - '3.10'
+          - '3.11'
+          - '3.12'
+          - '3.13'
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-26-intel
+        arch:
+          - 'x64'
+        include:
+          - {"os": "windows-latest", "arch": "x86", "version": "3.8"}
+          - {"os": "windows-latest", "arch": "x86", "version": "3.9"}
+          - {"os": "windows-latest", "arch": "x86", "version": "3.10"}
+          - {"os": "windows-latest", "arch": "x86", "version": "3.11"}
+          - {"os": "windows-latest", "arch": "x86", "version": "3.12"}
+          - {"os": "windows-latest", "arch": "x86", "version": "3.13"}
+          - {"os": "macos-latest", "arch": "arm64", "version": "3.10"}
+          - {"os": "macos-latest", "arch": "arm64", "version": "3.11"}
+          - {"os": "macos-latest", "arch": "arm64", "version": "3.12"}
+          - {"os": "macos-latest", "arch": "arm64", "version": "3.13"}
+    # The job environment.
+    env:
+      OS: ${{ matrix.os }}
+      ARCH: ${{ matrix.arch }}
+      PYTHON: ${{ matrix.version }}
+    # The steps in the job.
+    steps:
+      # Check out the repository (goes to $GITHUB_WORKSPACE)
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: '2'
+      # Setup the Python Environment.
+      - name: Setup Python Environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.version }}
+          architecture: ${{ matrix.arch }}
+      - name: Setup Miniconda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          python-version: ${{ matrix.version }}
+      - name: Install Library
+        shell: bash -el {0}
+        run: |
+          pip install -e .[all]
+      # Log the Python Version
+      - name: Display Python version
+        shell: bash -el {0}
+        run: |
+          PYVER=$(python --version)
+          TORCHVER=$(python -c 'import torch; print(torch.__version__)')
+          NUMPYVER=$(python -c 'import numpy; print(numpy.__version__)')
+          SCIPYVER=$(python -c 'import scipy; print(scipy.__version__)')
+          echo "Versions:"
+          echo "  - Python:  ${PYVER}"
+          echo "  - PyTorch: ${TORCHVER}"
+          echo "  - NumPy:   ${NUMPYVER}"
+          echo "  - SciPy:   ${SCIPYVER}"
+      # Run the actual tests.
+      - name: Run Tests
+        run: |
+          python -m neuropythy.test
+        shell: bash -el {0}
