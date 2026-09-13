@@ -117,8 +117,8 @@ jobs:
       # Run the actual tests.
       - name: Run Tests
         run: |
-          export SUBJECTS_DIR="${HOME}/bs2018/freesurfer_subjects"
-          export NYPTHY_BENSON_WINAWER_2018_PATH="${HOME}/bw2018"
+          export SUBJECTS_DIR="${HOME}/bw2018/freesurfer_subjects"
+          export NPYTHY_BENSON_WINAWER_2018_PATH="${HOME}/bw2018"
           python -m unittest neuropythy.test
         shell: bash -el {0}
 
